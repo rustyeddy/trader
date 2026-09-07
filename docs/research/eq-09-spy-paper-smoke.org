@@ -1,0 +1,198 @@
+#+TITLE: EQ-09: End-to-End SPY Equity Paper-Trading Smoke Test
+#+STARTUP: overview indent
+
+* Status
+
+Records issue #302 (EQ-09) — the capstone of the Equities Phase 1
+milestone: proving Trader can resolve a US equity instrument, read its
+canonical market data through =marketdata.Manager=, and carry a real
+trading decision through the normal execution/risk/pipeline path to a
+real Alpaca paper account. This is a results/procedure record, not a
+durable architecture decision — it carries no ADR number, matching
+=eq-07-backtest-pipeline-note.org='s own convention.
+
+* What was built
+
+New package =examples/eq09/=:
+
+- =doc.go=: package scope, and the two deliberate scope boundaries this
+  smoke test does not cross — no live-session/guard/reconciliation
+  machinery (the future =live= package's own job, ADR-014), and no
+  =strategy.Strategy=/bar-replay runner (also future =live=-package
+  scope; the normal decision path exercised here is =order.Intent ->
+  pipeline.Pipeline=, the same path
+  =service/execution/vertical_slice_test.go= already exercises against
+  the simulator).
+- =helpers_test.go=/=helpers_unit_test.go= (no build tag — compiled and
+  tested on every ordinary =go test ./...=): the pure, network-free
+  logic (=isFlatSPY=, =waitForFill=) the live test depends on, with its
+  own fake-=broker.EventReader=-backed unit tests. This is deliberate:
+  keeping this logic testable without a live credential means it gets
+  real, always-run CI coverage rather than living entirely behind an
+  opt-in tag that (correctly) almost never runs.
+- =smoke_test.go= (=//go:build alpacasmoke=, reusing the tag already
+  established by issue #297's Market Data provider and issue #301's
+  broker adapter — not a fourth tag for the same "real Alpaca
+  credentials, never committed" purpose): the actual end-to-end run,
+  =TestSmokeSPYPaperRoundTrip=.
+
+** Composition
+
+One =instrument.Listing= for SPY (=service/marketdata.RegisterETFInstrument=,
+provider ="alpaca"=, exchange ="ARCA"=), registered once and reused
+identically for both the market-data read and the broker leg — not two
+separately built Listings that happen to look alike. The broker
+(=adapters/broker/alpaca.Broker=), execution planner
+(=execution.NewPlanner=), risk engine (a real, configured
+=risk.MaxPositionQuantityRule= capping the smoke position at 2 shares —
+not a synthetic always-allow double), and =pipeline.Pipeline= are
+composed via each package's own public constructor, the same way a real
+composition root would — mirroring
+=runExecutionVerticalSliceScenario='s own construction shape exactly,
+with =adapters/broker/sim.NewBroker= swapped for =alpaca.NewBroker=.
+=service/execution.Service= wraps broker+pipeline; the test never calls
+=pipeline.Pipeline= or the broker directly for the actual trading
+decision, only for setup (client construction) and for observing
+results (=Account.Events=, =Account.Snapshot=).
+
+=marketdata.Manager= is used to fetch and verify real, recent SPY D1
+bars through the same Alpaca credential pair (Alpaca's Trading API and
+Market Data API share one key/secret pair) — proving instrument/session
+identity and the canonical data path end to end. Whether the market is
+open *right now* is answered separately, directly against
+=marketdata.USEquityCalendar.Status=, independent of whatever historical
+bars happen to be on hand: a live market order submitted while the
+market is closed would queue rather than fail, which would make this
+test hang waiting for a fill that will not arrive within its own
+timeout. The test skips (does not fail) outside real NYSE regular
+hours — a genuine, unavoidable operational constraint of a *live*
+paper-trading smoke test, unlike EQ-07's backtest, which runs
+anytime against historical data.
+
+** Flatten, not a manual opposite order
+
+Step 6 ("close/cancel/flatten") uses a plain =order.IntentExit= through
+the same =pipeline.Pipeline= the enter order used —
+=execution.planExit= already derives side and quantity from the
+account's current position automatically, so the test itself never
+computes or submits a manual opposite-side order. The test also
+flattens defensively at its own start (=flattenSPYIfOpen=, in
+=helpers_test.go=), so a position left over from an interrupted prior
+manual run is cleaned up before the run's own scenario begins, rather
+than silently accumulating real paper exposure across repeated
+invocations against the one fixed, hardcoded test =AccountID=.
+
+** Cancel-if-slow safety net
+
+Mirrors =adapters/broker/alpaca/smoke_test.go='s own pattern exactly:
+if a submitted order does not reach =StatusFilled= within 30 seconds
+(observed via =Account.Events=, not a raw =Snapshot= poll loop), the
+test cancels it. A slow *enter* fill skips the test (an
+environment/timing condition, not an architecture failure); a slow
+*exit* fill fails loudly, since a real SPY position could be left open
+on the paper account and needs manual review.
+
+** No live/production endpoint
+
+Verified structurally, not only by convention: the test constructs its
+=alpaca.Client= from the =alpaca.DefaultPaperBaseURL= constant
+literally (never a configurable/overridable flag), and asserts that
+constant's literal value equals
+="https://paper-api.alpaca.markets"= — a sanity pin against the
+constant itself silently changing.
+
+* Manual prerequisites (never commit credentials)
+
+1. An Alpaca account with paper trading enabled — the default; no
+   funding step, the paper balance is synthetic and pre-seeded.
+2. A paper-account API key ID/secret key pair, generated from Alpaca's
+   dashboard. The same pair authenticates both the Trading API
+   (orders/account, used by the broker leg) and the Market Data API
+   (bars, used by the =marketdata.Manager= leg).
+3. Edit =alpacaEQ09KeyID=/=alpacaEQ09SecretKey= in
+   =examples/eq09/smoke_test.go= locally — never commit the edit, the
+   identical discipline every other =alpacasmoke= file in this
+   repository already establishes.
+4. Run during a real NYSE regular trading session
+   (9:30-16:00 America/New_York, a trading day):
+
+   #+BEGIN_SRC sh
+   go test -tags alpacasmoke ./examples/eq09/... \
+       -run TestSmokeSPYPaperRoundTrip -v
+   #+END_SRC
+
+* Recorded result
+
+*Not yet run against a real account as of this note's initial commit* —
+this section records the architecture/plumbing implementation and its
+own unit-tested logic; the live run itself requires a real credential
+pair an operator supplies locally, per the prerequisites above, and its
+result (real fill price, timing, and final account state) should be
+appended here as a live, non-deterministic observation once run, the
+same way =eq-07='s note records its own hand-computed backtest numbers
+— but explicitly labeled as observed evidence from one specific run,
+not a repeatable assertion the way EQ-07's exact-arithmetic backtest
+checks are.
+
+* Per-acceptance-criterion findings
+
+** "Runs against a paper account without bypassing normal domain/service boundaries"
+
+*By construction.* The composition mirrors
+=runExecutionVerticalSliceScenario= exactly — =service/execution.Service=
+over a real =broker.Broker= and =*pipeline.Pipeline=, both built from
+each package's own public constructor. Nothing in this test reaches
+into any package's unexported internals, and nothing bypasses
+=pipeline.Pipeline= to call =broker.Account.Submit= directly for the
+actual trading decision.
+
+** "SPY market data, instrument identity, session semantics, order quantity, order state, fill state, and account/position state are all verified"
+
+- *Market data*: =marketdata.Manager.Bars= (via =service/marketdata=)
+  returns real SPY D1 bars; asserted non-empty with midnight-UTC-aligned
+  =Time= and non-zero OHLC.
+- *Instrument identity*: one =instrument.ID=, resolved once, used for
+  both the data read and the broker leg.
+- *Session semantics*: =USEquityCalendar.Status= gates the live trading
+  steps; the test explicitly skips outside real market hours rather
+  than assuming a session state.
+- *Order quantity*: asserted positive, whole-share (falls out of the
+  existing =instrument.NewSpec= quantity-increment enforcement — no new
+  handling needed, per ADR-047), and within the configured
+  =risk.MaxPositionQuantityRule= cap.
+- *Order/fill state*: observed via =Account.Events=, asserting the
+  order reaches =order.StatusFilled= (or, on the safety-net path, a
+  legal =StatusCanceled= after an explicit =Cancel=) — a real ADR-018
+  status transition, not an assumed one.
+- *Account/position state*: =Account.Snapshot= asserted USD-denominated
+  throughout, and the final snapshot asserted flat for SPY after the
+  exit fill.
+
+** "No production/live order endpoint is required or enabled"
+
+Verified structurally (see "No live/production endpoint" above), not
+merely by not having written one.
+
+** "Any manual prerequisites/credentials are documented without committing secrets"
+
+This note, plus =smoke_test.go='s own doc comment.
+
+** "Existing FX paths remain operational"
+
+Structural: this package is new, standalone, and imported by nothing
+else, so it cannot regress any existing FX path. The full repository
+test suite (=go test ./... -race -count=1=) was re-run and remains
+green.
+
+* Conclusion
+
+No new domain or pipeline capability was needed to reach a real Alpaca
+paper account with a real equity instrument: EQ-07 already proved the
+M4/M5 pipeline is instrument-generic for backtesting, and EQ-08 already
+proved a real broker adapter implements the same =broker.Broker=/
+=broker.Account= ports the simulator does. EQ-09's own contribution is
+purely compositional — wiring the already-proven pieces together for a
+live paper account — plus the one genuinely new operational concern a
+*live* (not backtest) smoke test introduces: deciding whether the
+market is open right now, answered directly against
+=USEquityCalendar= rather than inferred from data availability.
