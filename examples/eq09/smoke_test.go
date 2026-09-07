@@ -344,5 +344,19 @@ func flattenSPYIfOpen(t *testing.T, ctx context.Context, svc *svcexecution.Servi
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
-	require.True(t, waitForFill(t, ctx, reader, resp.Order.Request.OrderID, 30*time.Second), "failed to flatten a pre-existing SPY position before starting the smoke test")
+	if waitForFill(t, ctx, reader, resp.Order.Request.OrderID, 30*time.Second) {
+		return
+	}
+
+	// Mirrors the main scenario's own cancel-on-timeout safety net (PR
+	// #314 review): failing this test without first attempting to
+	// cancel the slow flatten order would leave exactly the kind of
+	// lingering working order/open position this helper exists to
+	// prevent across repeated manual runs.
+	cancelResult, cancelErr := acc.Cancel(ctx, order.CancelRequest{
+		OrderID:  resp.Order.Request.OrderID,
+		Metadata: id.Metadata{EventID: mustFreshEventID(t, ids)},
+	})
+	require.NoError(t, cancelErr)
+	t.Fatalf("failed to flatten a pre-existing SPY position before starting the smoke test (canceled, resulting status %s); the paper account needs manual review", cancelResult.Status)
 }
