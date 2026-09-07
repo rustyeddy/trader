@@ -265,15 +265,24 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	t.Logf("submitted enter order %s for %s shares of SPY, status %s", enterResp.Order.BrokerOrderID, enterResp.Order.AcceptedQuantity, enterResp.Order.Status)
 
 	// --- Step 5: observe canonical order/fill state via Account.Events,
-	// with a cancel-if-still-open safety net mirroring
-	// adapters/broker/alpaca/smoke_test.go's own pattern ---
+	// with a cancel-and-reconcile safety net mirroring
+	// adapters/broker/alpaca/smoke_test.go's own pattern (cancel), but
+	// never trusting the synchronous CancelResult alone (PR #314
+	// review): Alpaca cancels asynchronously, so the order can still
+	// race to a fill after cancellation is requested. ---
 	if !waitForFill(t, ctx, reader, enterOrderID, 30*time.Second) {
-		cancelResult, cancelErr := acc.Cancel(ctx, order.CancelRequest{
-			OrderID:  enterOrderID,
-			Metadata: id.Metadata{EventID: mustFreshEventID(t, ids)},
-		})
-		require.NoError(t, cancelErr)
-		t.Skipf("enter order did not fill within the smoke test's timeout (canceled, resulting status %s); this is an environment/timing skip, not an architecture failure", cancelResult.Status)
+		finalStatus := cancelAndAwaitTerminal(t, ctx, acc, reader, ids, enterOrderID, 30*time.Second)
+		if finalStatus == order.StatusFilled {
+			// The cancel raced with a real fill: a position now exists.
+			// Flatten it through the same normal pipeline before this
+			// run ends, so the paper account is never left with
+			// unexpected exposure merely because the enter happened to
+			// be slow.
+			t.Log("enter order filled despite the cancel race; flattening the resulting position before skipping")
+			flattenSPYIfOpen(t, ctx, svc, acc, spyID, spyListing)
+			t.Skip("enter order was slow to fill and raced with cancellation; the resulting position was reconciled and flattened. This is an environment/timing skip, not an architecture failure.")
+		}
+		t.Skipf("enter order did not fill within the smoke test's timeout (final status %s after cancel); this is an environment/timing skip, not an architecture failure", finalStatus)
 	}
 
 	midSnap, err := acc.Snapshot(ctx)
@@ -295,12 +304,14 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	t.Logf("submitted exit order %s, status %s", exitResp.Order.BrokerOrderID, exitResp.Order.Status)
 
 	if !waitForFill(t, ctx, reader, exitOrderID, 30*time.Second) {
-		cancelResult, cancelErr := acc.Cancel(ctx, order.CancelRequest{
-			OrderID:  exitOrderID,
-			Metadata: id.Metadata{EventID: mustFreshEventID(t, ids)},
-		})
-		require.NoError(t, cancelErr)
-		t.Fatalf("exit order did not fill within the smoke test's timeout (canceled, resulting status %s); a real SPY position may remain open on the paper account and needs manual review", cancelResult.Status)
+		finalStatus := cancelAndAwaitTerminal(t, ctx, acc, reader, ids, exitOrderID, 30*time.Second)
+		if finalStatus != order.StatusFilled {
+			t.Fatalf("exit order did not fill within the smoke test's timeout (final status %s after cancel); a real SPY position may remain open on the paper account and needs manual review", finalStatus)
+		}
+		// The cancel raced with a real fill: the flatten still
+		// succeeded despite the timeout, so the run can proceed to its
+		// own final flat-position assertion normally.
+		t.Log("exit order filled despite the cancel race; the position was still successfully flattened")
 	}
 
 	finalSnap, err := acc.Snapshot(ctx)
@@ -348,15 +359,15 @@ func flattenSPYIfOpen(t *testing.T, ctx context.Context, svc *svcexecution.Servi
 		return
 	}
 
-	// Mirrors the main scenario's own cancel-on-timeout safety net (PR
-	// #314 review): failing this test without first attempting to
-	// cancel the slow flatten order would leave exactly the kind of
-	// lingering working order/open position this helper exists to
-	// prevent across repeated manual runs.
-	cancelResult, cancelErr := acc.Cancel(ctx, order.CancelRequest{
-		OrderID:  resp.Order.Request.OrderID,
-		Metadata: id.Metadata{EventID: mustFreshEventID(t, ids)},
-	})
-	require.NoError(t, cancelErr)
-	t.Fatalf("failed to flatten a pre-existing SPY position before starting the smoke test (canceled, resulting status %s); the paper account needs manual review", cancelResult.Status)
+	// Mirrors the main scenario's own cancel-and-reconcile safety net
+	// (PR #314 review): never trust the synchronous CancelResult alone
+	// — Alpaca cancels asynchronously, so the order can still race to a
+	// fill after cancellation is requested, and failing this test
+	// without checking that first would misreport a successful flatten
+	// as a failure.
+	finalStatus := cancelAndAwaitTerminal(t, ctx, acc, reader, ids, resp.Order.Request.OrderID, 30*time.Second)
+	if finalStatus != order.StatusFilled {
+		t.Fatalf("failed to flatten a pre-existing SPY position before starting the smoke test (final status %s after cancel); the paper account needs manual review", finalStatus)
+	}
+	t.Log("flatten order filled despite the cancel race; the pre-existing position was still successfully closed")
 }

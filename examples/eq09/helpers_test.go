@@ -40,45 +40,73 @@ func assertFlatSPYPosition(t *testing.T, snap account.Snapshot, spyListing instr
 	assert.True(t, isFlatSPY(snap, spyListing), "expected no open SPY position after flattening, got positions: %+v", snap.Positions())
 }
 
-// waitForFill drains reader until it observes orderID transition to
-// order.StatusFilled, or the overall timeout elapses first — returning
-// false in the latter case so the caller can run its own
-// cancel-safety-net path rather than treating a slow fill as an
-// architecture failure. The timeout bounds total wait time across every
-// intervening event (including other orders' events replayed from the
-// same correlator, and this adapter's own poll-interval cadence) via
-// one shared context, not a fresh full-length allowance per Next call.
+// awaitFillEvidence drains reader until it has observed BOTH orderID
+// transitioning to order.StatusFilled AND a canonical EventKindFill
+// event naming orderID, or the overall timeout elapses first — issue
+// #302 asks to verify order state AND fill state, and Order.Status
+// alone is not that proof: an adapter could (in principle) report a
+// status without ever having emitted the corresponding Fill event, or
+// vice versa, and this smoke test's own job is to demonstrate both are
+// observable through the canonical broker.Event stream, not just one
+// (PR #314 review). It returns early, before the timeout, once orderID
+// reaches a terminal non-fill status (StatusRejected/Canceled/Expired)
+// — no further event for this order can ever supply the missing
+// evidence at that point. The timeout bounds total wait time across
+// every intervening event (including other orders' events replayed
+// from the same correlator, and this adapter's own poll-interval
+// cadence) via one shared context, not a fresh full-length allowance
+// per Next call.
 //
 // Only waitCtx's own deadline expiring is treated as "still working,
-// just slow" (returns false). Any other error — broker.EventReader's
-// own io.EOF once its producer has ended (Broker.Close), or any other
-// failure — is a real stream/broker failure, not a benign timeout, and
-// is reported via t.Fatalf so it cannot be silently masked as an
-// environment/timing skip (PR #314 review).
-func waitForFill(t *testing.T, ctx context.Context, reader brokerpkg.EventReader, orderID id.OrderID, timeout time.Duration) bool {
+// just slow." Any other error — broker.EventReader's own io.EOF once
+// its producer has ended (Broker.Close), or any other failure — is a
+// real stream/broker failure, not a benign timeout, and is reported
+// via t.Fatalf so it cannot be silently masked as an environment/timing
+// skip (PR #314 review).
+func awaitFillEvidence(t *testing.T, ctx context.Context, reader brokerpkg.EventReader, orderID id.OrderID, timeout time.Duration) (statusFilled, fillObserved bool) {
 	t.Helper()
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
+		if statusFilled && fillObserved {
+			return true, true
+		}
 		ev, err := reader.Next(waitCtx)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return false
+				return statusFilled, fillObserved
 			}
 			t.Fatalf("event reader failed while waiting for order %s: %v", orderID, err)
-			return false
+			return false, false
 		}
-		if ev.Kind != brokerpkg.EventKindOrder || ev.Order == nil || ev.Order.Request.OrderID != orderID {
-			continue
-		}
-		t.Logf("observed order %s transition to status %s", orderID, ev.Order.Status)
-		switch ev.Order.Status {
-		case order.StatusFilled:
-			return true
-		case order.StatusRejected, order.StatusCanceled, order.StatusExpired:
-			return false
+		switch ev.Kind {
+		case brokerpkg.EventKindOrder:
+			if ev.Order == nil || ev.Order.Request.OrderID != orderID {
+				continue
+			}
+			t.Logf("observed order %s transition to status %s", orderID, ev.Order.Status)
+			switch ev.Order.Status {
+			case order.StatusFilled:
+				statusFilled = true
+			case order.StatusRejected, order.StatusCanceled, order.StatusExpired:
+				return false, fillObserved
+			}
+		case brokerpkg.EventKindFill:
+			if ev.Fill != nil && ev.Fill.OrderID == orderID {
+				t.Logf("observed fill event for order %s: %s shares @ %s", orderID, ev.Fill.Quantity, ev.Fill.Price)
+				fillObserved = true
+			}
 		}
 	}
+}
+
+// waitForFill reports whether order orderID reached order.StatusFilled
+// with a corresponding EventKindFill event observed, within timeout.
+// See awaitFillEvidence for the full contract.
+func waitForFill(t *testing.T, ctx context.Context, reader brokerpkg.EventReader, orderID id.OrderID, timeout time.Duration) bool {
+	t.Helper()
+	statusFilled, fillObserved := awaitFillEvidence(t, ctx, reader, orderID, timeout)
+	return statusFilled && fillObserved
 }
 
 func mustFreshEventID(t *testing.T, ids *id.Generator) id.EventID {
@@ -86,4 +114,39 @@ func mustFreshEventID(t *testing.T, ids *id.Generator) id.EventID {
 	eventID, err := id.GenerateEventID(ids)
 	require.NoError(t, err)
 	return eventID
+}
+
+// cancelAndAwaitTerminal cancels orderID and waits, via reader, for it
+// to actually reach a terminal ADR-018 status — never assuming the
+// synchronous CancelResult.Status (typically StatusPendingCancel) is
+// the order's final state. Alpaca cancels asynchronously, so the order
+// can still race to a fill after the cancel request is accepted; this
+// function determines what genuinely happened rather than letting a
+// caller act on a stale assumption (PR #314 review). It fails the test
+// loudly if reconciliation itself cannot complete within timeout — an
+// order this adapter can no longer classify needs manual review, not a
+// silent guess.
+func cancelAndAwaitTerminal(t *testing.T, ctx context.Context, acc brokerpkg.Account, reader brokerpkg.EventReader, ids *id.Generator, orderID id.OrderID, timeout time.Duration) order.Status {
+	t.Helper()
+	_, err := acc.Cancel(ctx, order.CancelRequest{
+		OrderID:  orderID,
+		Metadata: id.Metadata{EventID: mustFreshEventID(t, ids)},
+	})
+	require.NoError(t, err)
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		ev, err := reader.Next(waitCtx)
+		if err != nil {
+			t.Fatalf("could not reconcile order %s to a terminal status after cancel (%v); the paper account needs manual review", orderID, err)
+		}
+		if ev.Kind != brokerpkg.EventKindOrder || ev.Order == nil || ev.Order.Request.OrderID != orderID {
+			continue
+		}
+		t.Logf("observed order %s transition to status %s while reconciling after cancel", orderID, ev.Order.Status)
+		if ev.Order.Status.Terminal() {
+			return ev.Order.Status
+		}
+	}
 }
