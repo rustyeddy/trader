@@ -40,8 +40,14 @@ Precisely:
   pullbacks" (short-term extension) structure.
 - *Predicted effect*: conditional on Regime[t] = Positive, lower
   RSI(2) buckets (deeper short-term oversold) predict higher forward
-  returns over the horizons below, on average, with the effect
-  strengthening monotonically as RSI(2) decreases.
+  returns over the horizons below, on average, with a clear ordered
+  tendency toward higher forward returns as RSI(2) decreases,
+  particularly pronounced at the extreme oversold buckets (B1, B2).
+  This is deliberately not a claim that every bucket must outperform
+  every less-extreme bucket in strict pairwise order — see the
+  Continue/Reject gate's own note on why strict monotonicity across
+  all six buckets is a stronger, and less appropriate, bar than the
+  hypothesis itself requires.
 
 This hypothesis does *not* claim that RSI(2), EMA(200), or any
 particular bucket boundary or threshold is profitable, optimal, or
@@ -63,10 +69,14 @@ protocol's own evidence bar, if any of the following hold across the
 development and validation partitions:
 
 - forward returns conditional on Regime = Positive do not show higher
-  mean/median return in lower (more oversold) RSI(2) buckets than in
-  higher buckets, at economically/statistically meaningful horizons;
-- the relationship is not monotonic across buckets (a lower bucket
-  does not, on average, out-perform every higher bucket);
+  mean/median return in the extreme oversold buckets (B1, B2) than in
+  the non-extreme buckets (B5, B6), at economically/statistically
+  meaningful horizons;
+- there is no clear ordered tendency toward higher forward returns as
+  RSI(2) decreases — for example, a non-extreme bucket outperforms a
+  more extreme one by a wide, consistent margin, rather than the
+  ordinary noise a middle bucket (B3/B4) may show without contradicting
+  an otherwise-real extreme-pullback effect;
 - the effect appears in only one of the two partitions (development
   without validation, or vice versa);
 - the effect is not distinguishable from zero once dispersion/
@@ -139,11 +149,22 @@ not silently treated as total return.
 
 "Trading day" and forward-return horizons measured in trading days use
 Trader's =marketdata.USEquityCalendar= (ADR-049) as the sole authority
-for which calendar dates are real NYSE/Nasdaq trading sessions —
-including its real, dated US holiday list (=StandardUSEquityHolidays=)
-and half-day handling. A forward-return horizon of "5 trading days"
-means 5 real session-labeled D1 bars forward, per
-=USEquityCalendar.Bar=/=Session=, never 5 calendar days or a naive
+for which calendar dates are real NYSE/Nasdaq trading sessions.
+=USEquityCalendar= itself carries no built-in holiday data (ADR-049's
+own doc comment) — it must be explicitly configured with
+=StandardUSEquityHolidays= for the full set of calendar years this
+protocol's partitions span (2005 through the frozen holdout end year),
+including that function's own half-day set (currently the day after
+Thanksgiving), for a reproducible result. Any later EQR-01 issue that
+constructs a =USEquityCalendar= for this protocol must record that it
+used =StandardUSEquityHolidays= with that exact year range as part of
+its own run provenance — a differently configured calendar (a narrower
+year range, or a bare unconfigured =USEquityCalendar{}= with no
+holiday data at all) would misclassify real NYSE holidays as trading
+days and is not an equivalent, reproducible substitute. A forward-return
+horizon of "5 trading days" means 5 real session-labeled D1 bars
+forward, per =USEquityCalendar.Bar=/=Session=, never 5 calendar days or
+a naive
 weekday count.
 
 * Holdout Access Policy
@@ -226,8 +247,9 @@ results.
 
 ** RSI(2) buckets
 
-Six predeclared, half-open buckets (closed on the top boundary only,
-since RSI is bounded to [0, 100]):
+Six predeclared buckets, each inclusive at its lower bound and
+exclusive at its upper bound, except B6, which additionally includes
+100 (RSI is bounded to [0, 100], so 100 must belong to some bucket):
 
 | Bucket | Range         |
 |--------+---------------|
@@ -240,10 +262,10 @@ since RSI is bounded to [0, 100]):
 
 The issue's own bucket list ("0-5, 5-10, ...") did not state whether
 edges are inclusive or exclusive. This protocol resolves that
-explicitly, half-open at the lower bound, matching MR-01's own
-explicit-inequality precedent (=-2.0 <= Z < -1.0=, etc.) rather than
-leaving an ambiguous edge case to be decided ad hoc during
-implementation.
+explicitly — inclusive lower bound, exclusive upper bound, B6 closed
+at 100 — matching MR-01's own explicit-inequality precedent
+(=-2.0 <= Z < -1.0=, etc.) rather than leaving an ambiguous edge case
+to be decided ad hoc during implementation.
 
 Bucket boundaries are frozen. They may be changed later only as a
 documented new experiment with its own frozen specification — never
@@ -292,8 +314,10 @@ after it is opened per the access policy above), record at least:
   examined;
 - enough provenance to reproduce the calculation: instrument, provider
   ("stooq"), adjustment mode ("split-adjusted"), calendar
-  (=USEquityCalendar= + its holiday/half-day parameter set), interval
-  (D1), partition name and exact date range, RSI/EMA parameters, and
+  (=USEquityCalendar= configured with the specific
+  =StandardUSEquityHolidays= year range used — see Trading-day and
+  session provenance, above), interval (D1), partition name and exact
+  date range, RSI/EMA parameters, and
   bucket/horizon definitions — mirroring the provenance discipline
   =analysis.EventStudyConfig= already established for MR-01
   (instrument/interval/parameters as required, validated fields, not
@@ -318,17 +342,39 @@ table rather than omitted.
 This gate must be evaluated after validation-partition results exist
 and before any final holdout access is even considered.
 
+** Why an ordered tendency, not strict pairwise monotonicity
+
+An earlier draft of this gate required mean/median forward return to
+be monotonically higher in every lower RSI(2) bucket than in every
+higher bucket — B1 > B2 > B3 > B4 > B5 > B6, strictly, pairwise. That
+bar is stronger than the hypothesis itself needs and could reject a
+genuine, economically meaningful extreme-pullback effect for the wrong
+reason: a real effect concentrated in the most extreme buckets (B1,
+B2) is still meaningful evidence for short-term mean reversion after
+sharp pullbacks even if the middle buckets (B3/B4/B5, which by
+construction capture progressively milder, less "unusually sharp"
+pullbacks the hypothesis is not centrally about) are noisy or
+unordered among themselves. This decision is recorded here, before any
+SPY measurement has been produced or examined, precisely so it cannot
+be read as loosening the bar after seeing a result.
+
 ** Continue (proceed to backtestable strategy design, and only then consider a final holdout test)
 
 All of the following:
 
-- under Regime = Positive, mean and median forward return are
-  monotonically higher in lower (more oversold) RSI(2) buckets than in
-  higher buckets, at least at one or more of the 1/2/3-trading-day
-  horizons, in *both* the development and validation partitions
-  independently;
-- the relevant low-RSI(2) buckets meet the minimum observation-count
-  threshold in both partitions;
+- under Regime = Positive, mean and median forward return are clearly
+  higher in the extreme oversold buckets (B1 and B2) than in the
+  non-extreme buckets (B5 and B6), at least at one or more of the
+  1/2/3-trading-day horizons, in *both* the development and validation
+  partitions independently — an ordered tendency toward higher forward
+  returns as RSI(2) decreases, not a requirement that every bucket
+  strictly outperform every less-extreme bucket in pairwise order (see
+  above); ordinary noise among the middle buckets (B3/B4) does not by
+  itself defeat this criterion, but a middle or high bucket
+  substantially and consistently outperforming a more extreme bucket
+  does;
+- the relevant extreme-oversold buckets (B1, B2) meet the minimum
+  observation-count threshold in both partitions;
 - the effect's bootstrap/confidence interval excludes zero for at
   least the most extreme bucket (B1) at the horizon(s) showing the
   effect, in both partitions;
@@ -340,7 +386,9 @@ All of the following:
 
 Any of:
 
-- no monotonic pattern in either partition;
+- no ordered tendency toward higher forward returns as RSI(2)
+  decreases in either partition (in particular, the extreme oversold
+  buckets do not outperform the non-extreme buckets);
 - a pattern present in one partition but absent or reversed in the
   other;
 - effect sizes statistically indistinguishable from zero at the
@@ -361,8 +409,9 @@ Mirroring MR-01/MR-04's own three-way classification:
 
 - *Supported*: meets the Continue bar above.
 - *Weak / Inconclusive*: some expected behavior present but
-  inconsistent across partitions, horizons, or bucket monotonicity, or
-  sample counts too small in some cells — treated as Reject for the
+  inconsistent across partitions, horizons, or the extreme-bucket
+  ordering above, or sample counts too small in some cells — treated
+  as Reject for the
   purpose of proceeding to strategy work, but recorded distinctly from
   a clean Reject.
 - *Not Supported*: no consistent tendency, or a pattern with the wrong
