@@ -293,8 +293,7 @@ func TestEmitFillIfIncreased_MissingAvgPriceErrors(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	reader := &eventReader{account: h}
-	err = reader.emitFillIfIncreased(observedOrderState{filledQty: "0"}, observedOrderState{filledQty: "1"}, o)
+	err = emitFillIfIncreased(h.broker, observedOrderState{filledQty: "0"}, observedOrderState{filledQty: "1"}, o)
 	require.Error(t, err)
 }
 

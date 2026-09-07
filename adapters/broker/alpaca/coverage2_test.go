@@ -278,7 +278,6 @@ func TestEmitFillIfIncreased_NoOpWhenQuantityDidNotIncrease(t *testing.T) {
 	acc, err := broker.OpenAccount(context.Background(), broker.ref.AccountID)
 	require.NoError(t, err)
 	h := acc.(*accountHandle)
-	reader := &eventReader{account: h}
 
 	o, err := order.NewOrder(order.Order{
 		Request:          mustRequest(t, listing, broker.ref.AccountID),
@@ -287,7 +286,7 @@ func TestEmitFillIfIncreased_NoOpWhenQuantityDidNotIncrease(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = reader.emitFillIfIncreased(observedOrderState{filledQty: "1"}, observedOrderState{filledQty: "1"}, o)
+	err = emitFillIfIncreased(h.broker, observedOrderState{filledQty: "1"}, observedOrderState{filledQty: "1"}, o)
 	require.NoError(t, err)
 
 	// No event should have been recorded.

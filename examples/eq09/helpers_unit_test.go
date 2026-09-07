@@ -285,6 +285,25 @@ func TestCancelAndAwaitTerminal_DetectsRaceFill(t *testing.T) {
 	assert.Equal(t, order.StatusFilled, got)
 }
 
+// TestCancelAndAwaitTerminal_TrustsAlreadyTerminalCancelResult is the
+// second scenario PR #314 review flagged: when Cancel's own
+// synchronous CancelResult.Status already reports a terminal status
+// (Alpaca declined the cancel because the order had already reached a
+// terminal state), cancelAndAwaitTerminal must trust and return it
+// directly rather than waiting for another status-change event on
+// reader — one may never arrive, for example because an earlier
+// awaitFillEvidence call already consumed the order's only terminal
+// event from this same reader instance before cancelAndAwaitTerminal
+// was ever called. The reader here has zero buffered events precisely
+// to prove no further Next call is needed.
+func TestCancelAndAwaitTerminal_TrustsAlreadyTerminalCancelResult(t *testing.T) {
+	orderID := mustOrderID(t)
+	acc := &fakeAccount{cancelResult: order.CancelResult{OrderID: orderID, Status: order.StatusFilled}}
+	reader := &fakeEventReader{} // deliberately empty: must not be consulted
+	got := cancelAndAwaitTerminal(t, context.Background(), acc, reader, testGenerator(), orderID, 50*time.Millisecond)
+	assert.Equal(t, order.StatusFilled, got)
+}
+
 func testGenerator() *id.Generator {
 	return id.NewGenerator(clock.Real{}, id.Random{})
 }

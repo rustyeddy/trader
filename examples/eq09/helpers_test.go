@@ -116,23 +116,39 @@ func mustFreshEventID(t *testing.T, ids *id.Generator) id.EventID {
 	return eventID
 }
 
-// cancelAndAwaitTerminal cancels orderID and waits, via reader, for it
-// to actually reach a terminal ADR-018 status — never assuming the
-// synchronous CancelResult.Status (typically StatusPendingCancel) is
-// the order's final state. Alpaca cancels asynchronously, so the order
-// can still race to a fill after the cancel request is accepted; this
-// function determines what genuinely happened rather than letting a
-// caller act on a stale assumption (PR #314 review). It fails the test
-// loudly if reconciliation itself cannot complete within timeout — an
-// order this adapter can no longer classify needs manual review, not a
-// silent guess.
+// cancelAndAwaitTerminal cancels orderID and determines its true
+// terminal ADR-018 status — never assuming the synchronous
+// CancelResult.Status is automatically that final state, but also
+// never ignoring it when it already is one. Alpaca cancels
+// asynchronously, so the order can still race to a fill after the
+// cancel request is accepted; this function determines what genuinely
+// happened rather than letting a caller act on a stale assumption
+// (PR #314 review).
+//
+// If result.Status is itself already terminal — most commonly because
+// Alpaca declined the cancel outright and reported the order's real
+// current state (see Cancel's own doc comment in cancel_replace.go:
+// "CancelResult.Status reflects the order's actual state" on a
+// decline) — that is trusted directly, without waiting for a further
+// status-change event. This matters beyond avoiding a redundant wait:
+// the terminal transition may already have been consumed from reader
+// by an earlier awaitFillEvidence call on this same reader instance
+// (whose own internal loop keeps draining until ITS timeout, past
+// whatever terminal order event arrives), in which case waiting here
+// for a "new" terminal event would hang until this function's own
+// timeout for an event that will never be redelivered (PR #314
+// review, second finding).
 func cancelAndAwaitTerminal(t *testing.T, ctx context.Context, acc brokerpkg.Account, reader brokerpkg.EventReader, ids *id.Generator, orderID id.OrderID, timeout time.Duration) order.Status {
 	t.Helper()
-	_, err := acc.Cancel(ctx, order.CancelRequest{
+	result, err := acc.Cancel(ctx, order.CancelRequest{
 		OrderID:  orderID,
 		Metadata: id.Metadata{EventID: mustFreshEventID(t, ids)},
 	})
 	require.NoError(t, err)
+	if result.Status.Terminal() {
+		t.Logf("cancel reported order %s already in terminal status %s", orderID, result.Status)
+		return result.Status
+	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

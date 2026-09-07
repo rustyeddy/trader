@@ -207,7 +207,7 @@ func (r *eventReader) poll(ctx context.Context) error {
 			return fmt.Errorf("alpaca: poll orders: record order event: %w", err)
 		}
 
-		if err := r.emitFillIfIncreased(prev, newState, o); err != nil {
+		if err := emitFillIfIncreased(r.account.broker, prev, newState, o); err != nil {
 			return err
 		}
 	}
@@ -219,8 +219,19 @@ func (r *eventReader) poll(ctx context.Context) error {
 // package doc comment for why this uses the order's cumulative
 // filled_avg_price as the increment's price, an approximation that is
 // exact for a single-execution fill and only approximate across
-// multiple partial executions observed between two polls.
-func (r *eventReader) emitFillIfIncreased(prev, newState observedOrderState, o order.Order) error {
+// multiple partial executions observed between two polls. Shared by
+// the polling EventReader (a filled-quantity increase observed between
+// two polls) and Submit (a market order Alpaca reports as already
+// filled synchronously, in its POST /v2/orders response, before any
+// poll ever runs — prev is the zero observedOrderState in that case,
+// so a synchronous full fill is exactly "an increase from zero,"
+// requiring no special-cased duplicate logic — see accountHandle.Submit
+// and PR #314 review, which found that Submit was recording the
+// synchronously-filled quantity into the correlator's own de-dup state
+// without ever calling this function, silently poisoning the very
+// baseline the next poll diffs against and permanently suppressing the
+// Fill event a synchronously-filled order should have produced).
+func emitFillIfIncreased(b *Broker, prev, newState observedOrderState, o order.Order) error {
 	prevQty, err := num.ParseQuantity(orDefault(prev.filledQty, "0"))
 	if err != nil {
 		return fmt.Errorf("alpaca: parse previous filled qty: %w", err)
@@ -240,7 +251,7 @@ func (r *eventReader) emitFillIfIncreased(prev, newState observedOrderState, o o
 		return fmt.Errorf("alpaca: order %s reports increased filled quantity with no fill price", o.BrokerOrderID)
 	}
 
-	fillID, err := id.GenerateFillID(r.account.broker.deps.IDs)
+	fillID, err := id.GenerateFillID(b.deps.IDs)
 	if err != nil {
 		return err
 	}
@@ -253,18 +264,18 @@ func (r *eventReader) emitFillIfIncreased(prev, newState observedOrderState, o o
 		Side:          o.Request.Side,
 		Price:         *o.AvgFillPrice,
 		Quantity:      delta,
-		Timestamp:     r.account.broker.deps.Clock.Now(),
+		Timestamp:     b.deps.Clock.Now(),
 	})
 	if err != nil {
 		return fmt.Errorf("alpaca: build synthesized fill: %w", err)
 	}
 
-	_, err = r.account.broker.corr.appendEvent(func(sequence uint64) (brokerpkg.Event, error) {
-		eventID, err := id.GenerateEventID(r.account.broker.deps.IDs)
+	_, err = b.corr.appendEvent(func(sequence uint64) (brokerpkg.Event, error) {
+		eventID, err := id.GenerateEventID(b.deps.IDs)
 		if err != nil {
 			return brokerpkg.Event{}, err
 		}
-		now := r.account.broker.deps.Clock.Now()
+		now := b.deps.Clock.Now()
 		fill.Metadata = id.Metadata{EventID: eventID, Timestamp: now}
 		return brokerpkg.NewEvent(brokerpkg.Event{
 			Metadata:   id.Metadata{EventID: eventID, Timestamp: now},
