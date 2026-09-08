@@ -395,6 +395,89 @@ func (f failingCredential) Credentials(context.Context) (string, string, error) 
 	return "", "", f.err
 }
 
+// contextCapturingCredential records the ctx it was called with, so a
+// test can assert FetchBars' own ctx reaches Credentials rather than
+// context.Background() (PR #327 review).
+type contextCapturingCredential struct {
+	mu   sync.Mutex
+	last context.Context
+}
+
+func (c *contextCapturingCredential) Credentials(ctx context.Context) (string, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last = ctx
+	return testKeyID, testSecretKey, nil
+}
+
+func (c *contextCapturingCredential) lastContext() context.Context {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.last
+}
+
+// TestFetchBars_PassesCallerContextToCredentials proves
+// fetchAllPages/Credentials receives FetchBars' own ctx (a distinctly
+// valued one, via context.WithValue) rather than context.Background()
+// — a caller-supplied deadline or value must reach a credential
+// provider that may itself block (for example on a remote secret
+// store), even though the SDK's own GetBars call is uncancelable.
+func TestFetchBars_PassesCallerContextToCredentials(t *testing.T) {
+	transport := &fakeTransport{responses: []fakeResponse{{status: 200, body: barsJSON("SPY", nil, "")}}}
+	cred := &contextCapturingCredential{}
+	c, err := NewClient(ClientConfig{
+		BaseURL:        "https://fake.example.com",
+		Credential:     cred,
+		RetryBaseDelay: time.Millisecond,
+		HTTPClient:     &http.Client{Transport: transport},
+	})
+	require.NoError(t, err)
+
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "marker")
+	_, err = c.FetchBars(ctx, BarRequest{Symbol: "SPY", From: testFrom, To: testTo})
+	require.NoError(t, err)
+
+	require.NotNil(t, cred.lastContext())
+	assert.Equal(t, "marker", cred.lastContext().Value(ctxKey{}))
+}
+
+// TestNewClient_AppliesRequestTimeoutToInjectedClientWithoutOne proves
+// RequestTimeout is no longer silently ignored whenever a caller
+// supplies their own HTTPClient (PR #327 review): an injected
+// *http.Client left at its zero Timeout is cloned with the
+// configured/default RequestTimeout applied, and the caller's own
+// client value is never mutated in place.
+func TestNewClient_AppliesRequestTimeoutToInjectedClientWithoutOne(t *testing.T) {
+	injected := &http.Client{Transport: &fakeTransport{}}
+	c, err := NewClient(ClientConfig{
+		BaseURL:        "https://fake.example.com",
+		Credential:     StaticCredential{KeyID: "k", SecretKey: "s"},
+		HTTPClient:     injected,
+		RequestTimeout: 7 * time.Second,
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, c.httpClient)
+	assert.Equal(t, 7*time.Second, c.httpClient.Timeout)
+	assert.Zero(t, injected.Timeout, "the caller's own *http.Client value must never be mutated in place")
+}
+
+// TestNewClient_RespectsInjectedClientsOwnPositiveTimeout proves a
+// caller's explicit, positive Timeout is left untouched rather than
+// overridden by RequestTimeout.
+func TestNewClient_RespectsInjectedClientsOwnPositiveTimeout(t *testing.T) {
+	injected := &http.Client{Transport: &fakeTransport{}, Timeout: 3 * time.Second}
+	c, err := NewClient(ClientConfig{
+		BaseURL:        "https://fake.example.com",
+		Credential:     StaticCredential{KeyID: "k", SecretKey: "s"},
+		HTTPClient:     injected,
+		RequestTimeout: 30 * time.Second,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 3*time.Second, c.httpClient.Timeout)
+}
+
 // TestClassifyStatus_TruncatesLongBody proves an oversized diagnostic
 // body excerpt is bounded to 4KB rather than growing an error message
 // without limit.

@@ -111,24 +111,45 @@ unconfigurable — ADR-050's cross-provider-comparability reasoning for
 that specific choice is unaffected by this ADR and is not revisited
 here.
 
-** Price quantization: a new consequence of the SDK's own Bar type
+** Price precision: a new consequence of the SDK's own Bar type — preserved, not quantized to the tick size
 
 ADR-050 did not need to address this because its hand-written decoder
 preserved the API's original decimal price text via =json.Number=,
 letting =num.ParsePrice= parse the exact wire text with no rounding
 step. The SDK's =sdkmarketdata.Bar= decodes prices directly into
 =float64= fields; by the time this package receives a =Bar=, that
-original text no longer exists to recover. =wireshape.go='s
-=quantizedPriceFromFloat= rounds each price to the cent tick size
-(ADR-047's Phase 1 equity default) before constructing =num.Price= via
-its own checked constructor — the "round to the listing's tick size,
-then construct via the type's own constructor" reconstruction path
-ADR-045 explicitly permits for an analytical =float64= becoming
-authoritative again. This is a real, one-time rounding pass with no
-alternative once the SDK's own =Bar= type is used; it is not a general
-license to skip quantization elsewhere, and ADR-004/045's own
-prohibition on unquantized float64 propagation elsewhere is otherwise
-untouched by this decision.
+original text no longer exists to recover.
+
+An earlier version of this ADR, and of =wireshape.go='s
+=quantizedPriceFromFloat=, rounded each price to the cent tick size
+(ADR-047's Phase 1 equity default) before constructing =num.Price=.
+Review correctly rejected this: historical split-adjusted equity
+series can legitimately carry genuine sub-cent prices (a stock with a
+large historical split ratio produces adjusted closes with real
+fractional-cent precision), and rounding those to $0.01 during
+ingestion silently discards real history rather than applying an
+execution-time convenience — tick-size quantization is a property of
+an *executable order*, not of a *historical observation*, and belongs
+at the order/execution boundary those two ADRs actually govern, not
+here.
+
+The corrected =quantizedPriceFromFloat= instead renders each float64
+via its shortest round-tripping decimal text
+(=strconv.FormatFloat(v, 'f', -1, 64)=: the smallest decimal string
+that parses back to the exact same float64) and constructs =num.Price=
+from that text directly, preserving every real digit the SDK's own
+float64 carries. Only when that text exceeds =num.Price='s 8-decimal
+scale (ADR-004) — signaled by =num.ErrPrecision= — does it fall back to
+8 decimal places, the maximum precision available, rather than to 2.
+This is still the same "construct via the type's own checked
+constructor" reconstruction path ADR-045 permits for an analytical
+=float64= becoming authoritative again; what changed is only how much
+of the float64's real precision is preserved before that construction,
+not whether reconstruction through the checked constructor itself is
+appropriate. ADR-004/045's own prohibition on *unquantized*,
+uncontrolled float64 propagation elsewhere is unaffected: every value
+here still passes through =num.ParsePrice='s own validated parsing,
+never a raw float64 written directly into a =num.Price= field.
 
 * Consequences
 

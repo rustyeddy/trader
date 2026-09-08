@@ -191,18 +191,19 @@ const (
 // "delegate that protocol work... instead of duplicating it inside
 // Trader" goal) — not an oversight.
 //
-// # Price quantization
+// # Price precision
 //
 // The SDK's Bar type decodes prices directly into float64 fields, so
 // unlike this package's previous hand-written JSON decoding (which
 // preserved the API's original decimal text via json.Number), the
 // original wire text no longer exists by the time this package
-// receives a value. recordsFromSDKBars (wireshape.go) quantizes each
-// float64 to the cent tick size (ADR-047's Phase 1 equity default)
-// before constructing num.Price — the checked, quantized construction
-// path ADR-045 explicitly permits for a float64 becoming authoritative
-// again, applied here because the SDK leaves no other choice, not
-// because it is casually safe to skip quantization in general.
+// receives a value. recordsFromSDKBars (wireshape.go) reconstructs
+// each float64's shortest round-tripping decimal text before
+// constructing num.Price, preserving real sub-cent precision that a
+// split-adjusted historical series can legitimately carry — not the
+// cent tick size, which is an execution-time concept and would
+// silently discard real history if applied during ingestion (PR #327
+// review; see quantizedPriceFromFloat's own doc comment).
 //
 // Client is safe for concurrent use: FetchBars may be called from
 // multiple goroutines against the same Client, and the rate limiter
@@ -247,9 +248,23 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if requestTimeout <= 0 {
 		requestTimeout = defaultRequestTimeout
 	}
+	// RequestTimeout applies even to a caller-supplied HTTPClient, as
+	// long as that client left its own Timeout unset (<=0): an
+	// injected *http.Client is cloned (never mutated in place, so a
+	// caller holding their own reference to it is unaffected) with
+	// requestTimeout applied, unless the caller explicitly configured
+	// a positive Timeout of their own, which is respected as-is (PR
+	// #327 review — RequestTimeout previously did nothing whenever
+	// HTTPClient was non-nil, silently defeating its own documented
+	// purpose as the backstop for the SDK's uncancelable requests).
 	httpClient := cfg.HTTPClient
-	if httpClient == nil {
+	switch {
+	case httpClient == nil:
 		httpClient = &http.Client{Timeout: requestTimeout}
+	case httpClient.Timeout <= 0:
+		clone := *httpClient
+		clone.Timeout = requestTimeout
+		httpClient = &clone
 	}
 	var limiter rateLimiter = noopRateLimiter{}
 	if cfg.MinRequestInterval > 0 {
@@ -334,7 +349,7 @@ func (c *Client) FetchBars(ctx context.Context, req BarRequest) ([]Record, error
 			return nil, err
 		}
 
-		records, err := c.fetchAllPages(symbol, req.From, req.To)
+		records, err := c.fetchAllPages(ctx, symbol, req.From, req.To)
 		if err == nil {
 			return records, nil
 		}
@@ -365,13 +380,18 @@ var errNetwork = errors.New("alpaca: network error")
 // re-resolves on every retried attempt), constructs a short-lived SDK
 // client with them, and calls GetBars.
 //
+// ctx bounds only credential resolution (CredentialProvider itself
+// accepts ctx and may block, for example on a remote secret store) —
+// the SDK's own GetBars call accepts no context.Context at all and
+// cannot be interrupted once issued (see Client's own doc comment).
+//
 // The SDK's own internal retry (ClientOpts.RetryLimit) is disabled
 // (-1): Client.FetchBars is the sole owner of retry/backoff policy, so
 // a transient failure here is retried by the caller (FetchBars),
 // exactly once per outer attempt, not compounded by a second retry
 // layer inside the SDK.
-func (c *Client) fetchAllPages(symbol string, from, to time.Time) ([]Record, error) {
-	keyID, secretKey, err := c.credential.Credentials(context.Background())
+func (c *Client) fetchAllPages(ctx context.Context, symbol string, from, to time.Time) ([]Record, error) {
+	keyID, secretKey, err := c.credential.Credentials(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("alpaca: resolve credentials: %w", err)
 	}
@@ -393,9 +413,15 @@ func (c *Client) fetchAllPages(symbol string, from, to time.Time) ([]Record, err
 		// marketdata.Manager expects throughout this codebase, so the
 		// one-nanosecond subtraction converts between the two
 		// conventions without changing BarRequest's own public
-		// contract.
-		Start:     from,
-		End:       to.Add(-time.Nanosecond),
+		// contract. Both bounds are forced to UTC explicitly — BarRequest
+		// documents From/To as UTC, but a caller-supplied time.Time could
+		// carry a different Location with the same instant, which would
+		// still format to a different, wrong wall-clock string on the
+		// wire (PR #327 review) — the previous hand-written client
+		// always called .UTC() before formatting for the identical
+		// reason.
+		Start:     from.UTC(),
+		End:       to.UTC().Add(-time.Nanosecond),
 		PageLimit: c.pageLimit,
 		Feed:      string(c.feed),
 		Sort:      sdkmarketdata.SortAsc,

@@ -62,28 +62,40 @@ func TestRecordsFromSDKBars_RejectsVolumeOverflow(t *testing.T) {
 	assert.ErrorIs(t, err, ErrBadRequest)
 }
 
-// TestQuantizedPriceFromFloat_RoundsToCentTickSize proves the
-// deliberate quantization wireshape.go's own doc comment describes:
-// adopting the official SDK (issue #323) means prices arrive as
-// float64 with no original decimal text to recover, so this package
-// rounds to the cent tick size (ADR-047's Phase 1 equity default)
-// before constructing num.Price.
-func TestQuantizedPriceFromFloat_RoundsToCentTickSize(t *testing.T) {
+// TestQuantizedPriceFromFloat_PreservesRealPrecision proves this
+// package no longer rounds to the cent tick size during ingestion (PR
+// #327 review corrected an earlier version that did): a value with
+// genuine sub-cent precision — the kind a split-adjusted historical
+// series can legitimately carry — round-trips through num.Price
+// exactly, not rounded to two decimals.
+func TestQuantizedPriceFromFloat_PreservesRealPrecision(t *testing.T) {
 	tests := []struct {
 		in   float64
 		want string
 	}{
 		{100, "100"},
 		{100.5, "100.5"},
-		{100.567, "100.57"},
-		{100.564, "100.56"},
-		{0.005, "0.01"}, // rounds half up at the cent boundary
+		{100.567, "100.567"},
+		{100.564, "100.564"},
+		{0.005, "0.005"},
+		{93.6948, "93.6948"}, // a real spot check value from ADR-048's own Stooq comparison
 	}
 	for _, tt := range tests {
 		got, err := quantizedPriceFromFloat("c", tt.in)
 		require.NoError(t, err, "input %v", tt.in)
 		assert.Equal(t, tt.want, got.String(), "input %v", tt.in)
 	}
+}
+
+// TestQuantizedPriceFromFloat_FallsBackToEightDecimalsWhenTooPrecise
+// proves that a float64 whose shortest round-tripping decimal text
+// exceeds num.Price's own 8-decimal scale (ADR-004) falls back to 8
+// decimal places — the maximum precision available — rather than
+// erroring outright or over-rounding to the cent tick size.
+func TestQuantizedPriceFromFloat_FallsBackToEightDecimalsWhenTooPrecise(t *testing.T) {
+	got, err := quantizedPriceFromFloat("c", 1.0/3.0)
+	require.NoError(t, err)
+	assert.Equal(t, "0.33333333", got.String())
 }
 
 func TestQuantizedPriceFromFloat_RejectsNonFinite(t *testing.T) {

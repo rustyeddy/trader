@@ -1,6 +1,7 @@
 package alpaca
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -39,17 +40,43 @@ import (
 // license to skip quantization elsewhere; it exists here only because
 // adopting the official SDK (issue #323) leaves no alternative.
 
-// quantizedPriceFromFloat rounds v to two decimal places (the cent
-// tick size, ADR-047's Phase 1 equity default) and constructs a
-// num.Price from the resulting decimal text. It rejects a non-finite
-// v (NaN/Inf) with ErrBadRequest — a value that should never occur in
-// a real Alpaca bar, but one this package must not silently propagate
-// into an accounting type if it ever does.
+// quantizedPriceFromFloat constructs a num.Price from v, preserving as
+// much of v's real decimal precision as num.Price's own 8-decimal
+// scale (ADR-004) supports, rather than rounding to the cent tick
+// size. Historical split-adjusted equity series can legitimately carry
+// genuine sub-cent prices — a stock with a large historical split
+// ratio produces adjusted prices with real fractional-cent precision —
+// and rounding those to $0.01 during ingestion would silently discard
+// real history rather than an execution-time convenience. Tick-size
+// quantization belongs at an executable order/tick-size boundary, not
+// here (PR #327 review; an earlier version of this function, and of
+// ADR-052's own rationale, rounded to the cent tick size, which was
+// wrong for exactly this reason).
+//
+// v is first rendered via strconv.FormatFloat's shortest round-tripping
+// decimal text (precision -1): the smallest decimal string that
+// parses back to the exact same float64, preserving every real digit
+// the SDK's own float64 carries. If that text exceeds num.Price's
+// 8-decimal scale (num.ErrPrecision), this falls back to 8 decimal
+// places — the maximum precision available — rather than 2, so as
+// little real information as possible is discarded even in that rare
+// case.
+//
+// It rejects a non-finite v (NaN/Inf) with ErrBadRequest — a value
+// that should never occur in a real Alpaca bar, but one this package
+// must not silently propagate into an accounting type if it ever does.
 func quantizedPriceFromFloat(name string, v float64) (num.Price, error) {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return num.Price{}, fmt.Errorf("alpaca: %w: %s: non-finite price %v", ErrBadRequest, name, v)
 	}
-	price, err := num.ParsePrice(strconv.FormatFloat(v, 'f', 2, 64))
+	price, err := num.ParsePrice(strconv.FormatFloat(v, 'f', -1, 64))
+	if err == nil {
+		return price, nil
+	}
+	if !errors.Is(err, num.ErrPrecision) {
+		return num.Price{}, fmt.Errorf("alpaca: %w: %s: %v", ErrBadRequest, name, err)
+	}
+	price, err = num.ParsePrice(strconv.FormatFloat(v, 'f', 8, 64))
 	if err != nil {
 		return num.Price{}, fmt.Errorf("alpaca: %w: %s: %v", ErrBadRequest, name, err)
 	}
