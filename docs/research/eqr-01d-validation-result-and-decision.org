@@ -1,0 +1,456 @@
+#+TITLE: EQR-01D: SPY RSI(2)/Regime Validation Result and Continue/Reject Decision
+#+STARTUP: overview indent
+
+* Purpose
+
+This document records the second real run of the frozen EQR-01
+phenomenon experiment (issue #320, EQR-01D) — the identical,
+unmodified protocol EQR-01C (#319) already ran against development
+data, now run against the SPY D1 validation partition — and then
+evaluates the frozen Continue/Reject gate from
+=docs/research/eqr-01-research-protocol.org= using both the
+development and validation results together, exactly as the protocol
+requires.
+
+Referenced documents:
+
+- =docs/research/eqr-01-research-protocol.org= — the frozen EQR-01A
+  protocol and Continue/Reject gate.
+- =docs/research/eqr-01c-development-result.org= — the EQR-01C
+  development-partition result this document reuses without
+  re-deriving.
+
+No frozen parameter (RSI period, EMA period, bucket boundaries,
+horizons, minimum observation count, bootstrap method) was changed
+between EQR-01C and this run.
+
+** Revision note
+
+An earlier version of this document (first commit on PR #322) fed only
+validation-partition bars (2019-01-01 onward) into the event study,
+which restarted RSI(2)/EMA(200) from a cold state at the partition
+boundary and discarded validation's own first ~199 sessions to
+indicator warmup. Review on PR #322 correctly identified this as
+methodologically wrong: partitions separate *evidence*, not
+*information* — historical closes before 2019 are legitimate inputs to
+=EMA(200)[t]=/=RSI(2)[t]= for an early-2019 observation, and using them
+only as indicator context is not validation leakage (no forward-return
+label crosses a partition boundary either way). This revision adds an
+explicit =ObservationStart= boundary to
+=analysis.RSIRegimeEventStudyConfig= (warmup bars still feed the
+indicators; only bars at or after =ObservationStart= become
+observations) and re-runs validation with development bars supplied as
+warmup context. The corrected counts are modestly larger than the
+original (development-only-boundary) numbers for the extreme buckets
+(B1: 20 -> 26, B2: 15 -> 22) but the substantive finding is unchanged
+— see Classification and Decision below.
+
+* Reproduction
+
+** Runner
+
+=marketdata/eqr01d_validationrun_test.go=, a =//go:build fullarchive=-
+gated test in the =marketdata_test= external test package, mirroring
+=eqr01c_devrun_test.go='s own structure (same reasons for that package
+placement apply identically here — see that file's doc comment). It:
+
+1. Filters the source Stooq CSV to rows strictly before 2023-01-01
+   (the frozen final-holdout start), stopping the scan entirely at the
+   first out-of-range row — the same structural stop-scan mechanism
+   PR #321's re-review required for EQR-01C's development boundary. The
+   one line straddling the boundary is necessarily read into the
+   scanner's buffer to determine its Date, but its OHLCV fields are
+   never parsed or used, and no further line is buffered at all.
+2. Imports that filtered copy (development + validation rows, 2005-
+   02-25 through 2022-12-30) via =stooq.Import=.
+3. Registers SPY and builds a =*marketdata.Manager= with
+   =USEquityCalendar= + =StandardUSEquityHolidays(2005..2026)= — the
+   same full frozen protocol span EQR-01C uses.
+4. Queries from the *development* partition's own start
+   (2005-02-25) through the validation end (2023-01-01, exclusive) —
+   development bars are supplied purely as indicator warmup/context.
+   Final holdout remains structurally unreachable: the query's own End
+   is still 2023-01-01, and final-holdout rows were never even
+   ingested (step 1).
+5. Runs =analysis.RunRSIRegimeEventStudy= (the exact, unmodified
+   EQR-01C capability, extended only by the new, additive
+   =ObservationStart= field) with =ObservationStart= set to
+   2019-01-01: RSI(2)/EMA(200) are warmed up on the full development
+   history, but only bars at or after 2019-01-01 become observations or
+   contribute forward-return evidence. The test asserts directly that
+   no reported =Observation= predates =ObservationStart=.
+6. Uses a bootstrap seed distinct from EQR-01C's own (=Seed1=320,
+   Seed2=2000=, following the same "issue number, resample count"
+   mnemonic convention) so the two partitions' resampling draws are
+   independent.
+
+Invocation used to produce the numbers below (after temporarily
+setting =fullArchiveEQR01DSPYCSVPath= to the real local archive path,
+then reverting that edit before committing):
+
+#+BEGIN_SRC sh
+go test -tags fullarchive ./marketdata/... -run TestEQR01D_ValidationPartition -v
+#+END_SRC
+
+Re-running the identical command a second time reproduced every
+reported statistic, including every bootstrap confidence interval,
+bit-for-bit.
+
+** Configuration
+
+Identical to EQR-01C (=docs/research/eqr-01c-development-result.org=)
+except the queried range, the new =ObservationStart=, and the
+bootstrap seed:
+
+| Parameter                | Value                                                          |
+|--------------------------+-----------------------------------------------------------------|
+| Instrument                | SPY (ARCA)                                                      |
+| Interval                  | D1                                                               |
+| Provider                  | stooq                                                            |
+| Adjustment                | split-adjusted (=AdjustmentSplitAdjusted=, ADR-048)              |
+| Calendar                  | =USEquityCalendar= + =StandardUSEquityHolidays(2005..2026)=      |
+| Queried bars              | 2005-02-25 through 2022-12-31 (development bars are warmup only) |
+| ObservationStart          | 2019-01-01 (validation partition's own start)                    |
+| Evidence partition         | validation: 2019-01-01 through 2022-12-31 (end 2023-01-01, exclusive) |
+| Regime                    | =Close[t] > EMA(200)[t]=                                         |
+| Pullback observable       | RSI(2)                                                           |
+| RSI buckets               | B1 [0,5) B2 [5,10) B3 [10,20) B4 [20,30) B5 [30,50) B6 [50,100]  |
+| Forward horizons          | 1, 2, 3, 5, 10 trading days                                      |
+| Minimum observation count | 30                                                                |
+| Bootstrap method          | nonparametric, 2000 resamples, 95% percentile interval           |
+| Bootstrap seed            | Seed1=320, Seed2=2000 (distinct from EQR-01C's Seed1=319)        |
+
+The query returned 4,493 D1 bars (2005-02-25 through 2022-12-30). Of
+those, 1,008 fall within the validation partition
+(=[2019-01-01, 2023-01-01)=), and all 1,008 qualify as observations
+(=ObservationStart= is the only filter, and by the time validation
+begins both RSI(2) and EMA(200) have been warmed up continuously since
+2005 — no validation-partition warmup loss this time, unlike the
+revised-away original run). 5,019 forward returns were computed across
+all five horizons from those 1,008 observations.
+
+No implementation or provenance ambiguity was encountered while
+running this experiment.
+
+* Results
+
+** Primary: Regime = Positive (Close > EMA(200))
+
+| Bucket | Horizon | Count | Mean      | Median    | Positive % | StdDev   | 95% CI (mean)           | Insufficient |
+|--------+---------+-------+-----------+-----------+------------+----------+--------------------------+--------------|
+| B1     | 1d      |    26 | -0.000860 |  0.003246 |      57.7% | 0.015195 | [-0.007267,  0.004789]  | true         |
+| B1     | 2d      |    26 | -0.002586 |  0.002961 |      53.8% | 0.021674 | [-0.011122,  0.005975]  | true         |
+| B1     | 3d      |    26 | -0.001628 |  0.001978 |      50.0% | 0.025279 | [-0.011883,  0.007946]  | true         |
+| B1     | 5d      |    26 |  0.001891 |  0.001048 |      53.8% | 0.023486 | [-0.006949,  0.011346]  | true         |
+| B1     | 10d     |    26 | -0.008106 | -0.000785 |      42.3% | 0.052283 | [-0.029268,  0.010693]  | true         |
+| B2     | 1d      |    22 |  0.002390 |  0.003941 |      59.1% | 0.009529 | [-0.001497,  0.006300]  | true         |
+| B2     | 2d      |    22 | -0.000615 | -0.001155 |      36.4% | 0.012038 | [-0.005393,  0.004499]  | true         |
+| B2     | 3d      |    22 |  0.000085 |  0.003220 |      54.5% | 0.020105 | [-0.008002,  0.008152]  | true         |
+| B2     | 5d      |    22 |  0.006686 |  0.012276 |      72.7% | 0.018672 | [-0.001352,  0.014048]  | true         |
+| B2     | 10d     |    22 |  0.000999 |  0.013129 |      54.5% | 0.033039 | [-0.012926,  0.013960]  | true         |
+| B3     | 1d      |    56 | -0.000273 |  0.000811 |      53.6% | 0.012402 | [-0.003614,  0.002903]  | false        |
+| B3     | 2d      |    56 |  0.000535 |  0.001360 |      57.1% | 0.016402 | [-0.003779,  0.004790]  | false        |
+| B3     | 3d      |    56 |  0.001834 |  0.001997 |      60.7% | 0.019368 | [-0.003289,  0.006747]  | false        |
+| B3     | 5d      |    56 |  0.002217 |  0.002905 |      51.8% | 0.027859 | [-0.005451,  0.009429]  | false        |
+| B3     | 10d     |    56 |  0.009806 |  0.016125 |      62.5% | 0.034148 | [ 0.000698,  0.018617]  | false        |
+| B4     | 1d      |    56 |  0.001964 |  0.002756 |      64.3% | 0.009432 | [-0.000425,  0.004391]  | false        |
+| B4     | 2d      |    56 |  0.004961 |  0.005886 |      73.2% | 0.013626 | [ 0.001476,  0.008461]  | false        |
+| B4     | 3d      |    56 |  0.004544 |  0.005614 |      64.3% | 0.017433 | [ 0.000193,  0.009050]  | false        |
+| B4     | 5d      |    56 |  0.005496 |  0.010096 |      67.9% | 0.023209 | [-0.000458,  0.011662]  | false        |
+| B4     | 10d     |    56 |  0.009429 |  0.010520 |      66.1% | 0.030470 | [ 0.001275,  0.016979]  | false        |
+| B5     | 1d      |    91 |  0.000882 |  0.002911 |      59.3% | 0.011443 | [-0.001553,  0.003168]  | false        |
+| B5     | 2d      |    91 |  0.001955 |  0.003300 |      63.7% | 0.014868 | [-0.001183,  0.005018]  | false        |
+| B5     | 3d      |    91 |  0.002945 |  0.006393 |      63.7% | 0.016631 | [-0.000493,  0.006217]  | false        |
+| B5     | 5d      |    91 |  0.003315 |  0.009906 |      65.9% | 0.025320 | [-0.001800,  0.008287]  | false        |
+| B5     | 10d     |    91 |  0.004064 |  0.013569 |      65.9% | 0.032986 | [-0.002672,  0.010699]  | false        |
+| B6     | 1d      |   508 |  0.000159 |  0.000624 |      54.9% | 0.008550 | [-0.000580,  0.000866]  | false        |
+| B6     | 2d      |   508 |  0.000332 |  0.002057 |      60.2% | 0.012469 | [-0.000792,  0.001436]  | false        |
+| B6     | 3d      |   508 |  0.000485 |  0.002581 |      59.8% | 0.016538 | [-0.001027,  0.001877]  | false        |
+| B6     | 5d      |   508 |  0.001570 |  0.004625 |      62.2% | 0.020416 | [-0.000246,  0.003219]  | false        |
+| B6     | 10d     |   508 |  0.003686 |  0.009435 |      67.1% | 0.030445 | [ 0.001090,  0.006244]  | false        |
+
+** Secondary / exploratory: all regimes (unconditional)
+
+| Bucket | Horizon | Count | Mean      | Median    | Positive % | StdDev   | 95% CI (mean)           |
+|--------+---------+-------+-----------+-----------+------------+----------+--------------------------|
+| B1     | 1d      |    39 |  0.001008 |  0.002518 |      56.4% | 0.016705 | [-0.004460,  0.005863]  |
+| B1     | 2d      |    39 |  0.001393 |  0.007850 |      59.0% | 0.022909 | [-0.005680,  0.008501]  |
+| B1     | 3d      |    39 |  0.000685 |  0.001840 |      51.3% | 0.025836 | [-0.007274,  0.008413]  |
+| B1     | 5d      |    39 |  0.001455 |  0.004057 |      59.0% | 0.025346 | [-0.006542,  0.009487]  |
+| B1     | 10d     |    38 | -0.013206 | -0.005484 |      42.1% | 0.053702 | [-0.030963,  0.003431]  |
+| B2     | 1d      |    51 |  0.007444 |  0.002810 |      56.9% | 0.020779 | [ 0.002365,  0.013383]  |
+| B2     | 2d      |    51 |  0.004887 |  0.000485 |      52.9% | 0.021449 | [-0.000668,  0.011327]  |
+| B2     | 3d      |    51 |  0.007813 |  0.007717 |      60.8% | 0.034799 | [-0.001179,  0.018010]  |
+| B2     | 5d      |    51 |  0.012423 |  0.012916 |      68.6% | 0.038492 | [ 0.002110,  0.023875]  |
+| B2     | 10d     |    50 |  0.014100 |  0.018126 |      56.0% | 0.053506 | [-0.000703,  0.029664]  |
+| B3     | 1d      |    87 |  0.001295 |  0.000440 |      52.9% | 0.014302 | [-0.001716,  0.004220]  |
+| B3     | 2d      |    87 |  0.003000 |  0.002008 |      58.6% | 0.021134 | [-0.001383,  0.007421]  |
+| B3     | 3d      |    86 |  0.005928 |  0.005413 |      62.8% | 0.025755 | [ 0.000440,  0.011277]  |
+| B3     | 5d      |    86 |  0.007951 |  0.007881 |      57.0% | 0.034837 | [ 0.000578,  0.015253]  |
+| B3     | 10d     |    85 |  0.012440 |  0.014823 |      63.5% | 0.039486 | [ 0.004103,  0.020587]  |
+| B4     | 1d      |    82 | -0.000450 |  0.002293 |      57.3% | 0.019851 | [-0.004965,  0.003449]  |
+| B4     | 2d      |    82 |  0.001828 |  0.003597 |      63.4% | 0.017613 | [-0.001893,  0.005657]  |
+| B4     | 3d      |    82 |  0.001273 |  0.003798 |      61.0% | 0.026972 | [-0.004866,  0.006911]  |
+| B4     | 5d      |    82 |  0.001830 |  0.008973 |      61.0% | 0.033340 | [-0.005600,  0.008772]  |
+| B4     | 10d     |    82 |  0.005327 |  0.008795 |      59.8% | 0.045993 | [-0.005322,  0.014423]  |
+| B5     | 1d      |   127 |  0.001081 |  0.003041 |      59.8% | 0.015705 | [-0.001575,  0.003878]  |
+| B5     | 2d      |   127 |  0.001883 |  0.003619 |      65.4% | 0.021812 | [-0.002179,  0.005551]  |
+| B5     | 3d      |   127 |  0.003018 |  0.006393 |      63.0% | 0.023967 | [-0.001324,  0.006906]  |
+| B5     | 5d      |   126 |  0.001959 |  0.009290 |      65.1% | 0.034950 | [-0.004757,  0.007689]  |
+| B5     | 10d     |   125 |  0.003671 |  0.015325 |      65.6% | 0.045940 | [-0.005194,  0.011529]  |
+| B6     | 1d      |   621 | -0.000062 |  0.000502 |      53.1% | 0.011743 | [-0.001021,  0.000833]  |
+| B6     | 2d      |   620 |  0.000359 |  0.002148 |      60.0% | 0.016070 | [-0.000891,  0.001630]  |
+| B6     | 3d      |   620 |  0.000503 |  0.002791 |      59.2% | 0.019241 | [-0.000985,  0.002034]  |
+| B6     | 5d      |   619 |  0.001715 |  0.004652 |      60.7% | 0.024130 | [-0.000148,  0.003500]  |
+| B6     | 10d     |   618 |  0.005454 |  0.010187 |      68.4% | 0.034519 | [ 0.002740,  0.008063]  |
+
+** Development vs. validation, extreme buckets (Regime = Positive)
+
+Side-by-side comparison against EQR-01C's own reported development
+numbers (=docs/research/eqr-01c-development-result.org=):
+
+| Bucket | Horizon | Dev count | Dev mean | Val count | Val mean  | Val CI excludes zero? |
+|--------+---------+-----------+----------+-----------+-----------+------------------------|
+| B1     | 1d      |        88 | 0.001832 |        26 | -0.000860 | no                     |
+| B1     | 2d      |        88 | 0.003987 |        26 | -0.002586 | no                     |
+| B1     | 3d      |        88 | 0.002635 |        26 | -0.001628 | no                     |
+| B1     | 5d      |        88 | 0.002948 |        26 |  0.001891 | no                     |
+| B1     | 10d     |        88 | 0.003768 |        26 | -0.008106 | no                     |
+| B2     | 1d      |        91 | 0.000902 |        22 |  0.002390 | no                     |
+| B2     | 2d      |        91 | 0.001516 |        22 | -0.000615 | no                     |
+| B2     | 3d      |        91 | 0.002473 |        22 |  0.000085 | no                     |
+| B2     | 5d      |        91 | 0.002961 |        22 |  0.006686 | no                     |
+| B2     | 10d     |        91 | 0.005744 |        22 |  0.000999 | no                     |
+
+* Adversarial Review Against the Frozen Continue/Reject Criteria
+
+This section evaluates =docs/research/eqr-01-research-protocol.org='s
+own frozen gate, criterion by criterion, using development and
+validation together. No criterion or evidence bar is invented or
+adjusted after seeing these results.
+
+** Ordered tendency toward higher forward returns as RSI(2) decreases (both partitions independently)
+
+*Development*: B1 and B2 mean returns exceed B5 and B6 at every one of
+the five horizons (=docs/research/eqr-01c-development-result.org='s
+own "Observed Pattern" section) — a genuine ordered tendency in the
+predicted direction.
+
+*Validation*: this does *not* hold for B1. At four of five horizons
+(1d, 2d, 3d, 10d) B1's mean return is negative, and at every one of the
+five horizons B1's mean return is lower than B5's mean return (for
+example 1d: B1 -0.000860 vs. B5 0.000882; 10d: B1 -0.008106 vs. B5
+0.004064). B1 is lower than B6 at four of five horizons as well (all
+except 5d, where B1 0.001891 narrowly exceeds B6 0.001570). B2 is mixed
+— positive at four of five horizons (all except 2d) but exceeding B5's
+mean at only two of five horizons (1d, 5d), never clearing B5 or B6 by
+a margin distinguishable from noise, and its own confidence intervals
+are wide and always include zero.
+
+*Finding*: the required ordered tendency is present in development but
+*reversed* at the single most extreme bucket (B1) in validation, at
+nearly every horizon. This is exactly the Reject condition the protocol
+names explicitly: "a pattern present in one partition but absent or
+reversed in the other."
+
+** Extreme buckets (B1/B2) meaningfully stronger than non-extreme (B5/B6), both partitions
+
+Fails in validation for B1 specifically (see above: B1 underperforms
+B5 at every horizon and B6 at four of five horizons in validation, the
+opposite of "meaningfully stronger"). B2 does not clearly outperform
+B5/B6 in validation either — it exceeds B5's mean at only two of five
+horizons (1d, 5d) and its confidence intervals never exclude zero.
+
+** Minimum observation-count adequacy (B1/B2 in both partitions)
+
+*Development*: B1 (88) and B2 (91) both comfortably exceed the 30-
+observation minimum.
+
+*Validation*: B1 (26) and B2 (22) both remain *below* the 30-
+observation minimum and are explicitly marked =Insufficient=true= in
+the table above, even after correctly supplying development bars as
+indicator warmup (this revision's fix improved the counts from the
+original development-only-boundary run's 20/15, but not enough to
+clear the threshold). This is a second, independent Reject condition
+the protocol names explicitly: "insufficient observation counts
+throughout the relevant buckets in either partition." SPY's 2019-2022
+window simply produced far fewer extreme-oversold (RSI(2)<10) days
+than the 14-year development window did, on a per-observation basis —
+a real property of the instrument/period, not an artifact of indicator
+warmup.
+
+** Confidence-interval width and distinguishability from zero
+
+Every B1 and B2 confidence interval in validation includes zero — none
+show a mean return distinguishable from zero at the 95% level, at any
+horizon. This is the opposite of the Continue criterion ("bootstrap CI
+excludes zero for at least B1 at the horizon(s) showing the effect, in
+both partitions"): development had exactly one horizon (2d) where B1's
+CI excluded zero; validation has none, at any bucket among B1/B2, at
+any horizon.
+
+** Mean vs. median consistency (outlier sensitivity)
+
+In validation, B1's mean and median diverge substantially and even
+disagree in sign at several horizons (for example 1d: mean -0.000860,
+median +0.003246; 3d: mean -0.001628, median +0.001978; 10d: mean
+-0.008106, median -0.000785 — same sign but very different magnitude).
+With only 26 observations, this is consistent with a small sample where
+a handful of large negative outliers pull the mean well below the
+median — exactly the outlier sensitivity the protocol's own review
+checklist asks to be examined rather than accepted at face value. This
+makes B1's negative mean in validation *less*, not more, interpretable
+as a reliably reversed effect on its own; it does not rescue it as
+supporting evidence either — the sample is too small and the mean/median
+disagreement too pronounced to draw any conclusion in either direction,
+consistent with the independent "insufficient count" finding above.
+
+** Positive-return-rate consistency
+
+B1's positive-return percentage in validation ranges 42.3%-57.7% across
+horizons — not clearly above 50% the way development's B1 was
+(56.8%-65.9% across horizons). No consistent signal here either.
+
+** Horizon consistency vs. isolated-horizon effect
+
+Development's own effect was concentrated at short-to-medium horizons
+(clearest CI-excludes-zero result at 2d). Validation shows no horizon
+at which B1 or B2 clears the bar — this is not a case of "the effect
+moved to a different horizon"; it is absent at every horizon tested.
+
+** Does positive-regime conditioning add evidence consistent with the hypothesis?
+
+In validation, the primary (positive-regime) and secondary (all-
+regime) B1 numbers are not clearly more supportive of the hypothesis
+under regime conditioning — for example validation B1 10d is negative
+in both views (primary -0.008106, secondary -0.013206), and 1d/2d/3d
+are all more positive in the secondary (unconditional) view than in
+the primary (positive-regime) view, which is backwards from what the
+hypothesis's regime-conditioning rationale would predict. Regime
+conditioning does not rescue the extreme-bucket result in validation,
+unlike its modest effect in development.
+
+** Secondary (all-regime) comparison
+
+Reported above and not promoted to confirmatory evidence, per the
+protocol's own requirement. Its B2 numbers are more consistently
+positive than the primary view's (for example 1d: secondary 0.007444
+vs. primary 0.002390), which if anything argues the positive-regime
+condition is doing *less* work in validation than the protocol's
+Continue criterion would want to see, not more.
+
+** Implementation, provenance, calendar, adjustment, and partition-boundary check
+
+- Frozen parameters unchanged from EQR-01C: confirmed by direct
+  comparison of =eqr01d_validationrun_test.go='s configuration
+  constants against =eqr01c_devrun_test.go='s (same RSI period, EMA
+  period, horizons via the same =analysis.EQR01Horizons()= call, same
+  minimum observation count, same bootstrap resample count and
+  method).
+- Calendar: identical =StandardUSEquityHolidays(2005..2026)= full-span
+  configuration EQR-01C uses (PR #321's own fix), not a narrower range.
+- Adjustment/provider: identical (stooq, split-adjusted).
+- Indicator warmup: development bars (2005-02-25 onward) feed
+  RSI(2)/EMA(200) continuously through validation, via the new,
+  additive =ObservationStart= config field — added specifically by
+  this issue's own review, not a pre-existing capability silently
+  reused. =ObservationStart= only filters which bars become
+  observations; it does not change how bars feed the indicators, and
+  it defaults to the zero value (no restriction) everywhere EQR-01C's
+  own development run uses the type, so development's already-reported
+  result is unaffected by this addition (verified: EQR-01C's config
+  never sets the field).
+- Partition boundary: every reported =Observation= falls within
+  =[2019-01-01, 2023-01-01)= (asserted directly in the test); no
+  forward-return label extends past 2022-12-30 (the last queried bar),
+  since =RunRSIRegimeEventStudy= never computes a return whose future
+  index falls outside the supplied bars, regardless of
+  =ObservationStart=. The raw-partition archive this run built never
+  had a final-holdout byte read into it at all (structural stop-scan,
+  mirroring EQR-01C's own PR #321 re-review fix).
+- No leakage, parameter mining, or protocol drift was found: no
+  threshold, bucket, horizon, or period was changed between the
+  development and validation runs; the only change from the first
+  version of this document is fixing an indicator-warmup bug the
+  review process itself caught before acceptance.
+
+** No accidental holdout access
+
+Confirmed structurally, not merely by convention:
+=filterCSVBeforeFinalHoldout= stops scanning the source CSV the moment
+it reaches the first row on or after 2023-01-01. That one boundary
+row's line is necessarily read (into the scanner's buffer) to determine
+its Date, but no OHLCV value from it — or from any row after it — is
+ever parsed or written to the filtered copy, and no further line of the
+source file is even buffered. The raw-partition archive this test
+built therefore contains no final-holdout row, and the query itself
+additionally never requested anything at or after 2023-01-01. Final
+holdout was not accessed in the production of this document.
+
+* Classification and Decision
+
+** Classification: Not Supported
+
+Per the frozen protocol's three-way scheme
+(=docs/research/eqr-01-research-protocol.org=, Interpretation classes):
+this is not "Weak / Inconclusive" — it is a clean failure of multiple
+independent, explicitly-named Reject conditions simultaneously, not a
+borderline or inconsistent-but-suggestive result:
+
+- the required ordered tendency is reversed at the most extreme bucket
+  (B1) in validation at nearly every horizon;
+- both extreme buckets (B1, B2) fall below the minimum observation
+  count in validation, even after correcting the indicator-warmup
+  methodology to give them every fair chance to clear it;
+- no B1 or B2 confidence interval excludes zero in validation, at any
+  horizon.
+
+Any one of these is independently sufficient to fail the frozen
+Continue bar; all three hold at once here.
+
+** Decision: Reject
+
+The frozen EQR-01 hypothesis — "large-cap US equities in a positive
+long-term trend exhibit short-term mean reversion after unusually
+sharp pullbacks," as operationalized by RSI(2)/EMA(200)/the six frozen
+buckets/the five frozen horizons — is *not supported* by the
+combination of development and validation evidence, per the protocol's
+own predeclared, un-adjusted criteria.
+
+This is recorded here as the computed application of the frozen,
+objective Continue/Reject criteria to the measured evidence. Per this
+issue's own AI/agent workflow section, Rusty makes/accepts the final
+decision; this document's role is to present that application plainly
+enough to be accepted, overridden, or further scrutinized without
+relying on chat history.
+
+** What Reject means here
+
+Per the frozen protocol and issue #320's own Reject semantics:
+
+- The negative evidence is recorded above in full, including the
+  specific numbers and the specific criteria that failed.
+- No rescue is made within this issue: RSI period, EMA period, bucket
+  boundaries, horizons, and instrument remain exactly as frozen by
+  EQR-01A/EQR-01B/EQR-01C. The one code change this issue makes
+  (=ObservationStart=) is a methodology correction demanded by review,
+  applied identically regardless of which way it would have pushed the
+  result — not a parameter tuned toward a preferred outcome.
+- Final holdout is not, and will not be, accessed as a consequence of
+  this Reject.
+- Any future investigation of a related but different hypothesis (for
+  example: a longer or shorter RSI period, a different EMA period, a
+  narrower or wider bucket scheme, or a different instrument set) must
+  be its own new, separately frozen research specification — not a
+  silent revision of EQR-01.
+
+** EQR-01 status
+
+EQR-01 stops here. The milestone's outcome is a recorded negative
+result: SPY's development-partition evidence for short-term RSI(2)
+mean reversion in a positive EMA(200) regime does not replicate on the
+validation partition, both in direction (the extreme-bucket effect
+reverses at nearly every horizon) and in evidentiary adequacy
+(extreme-bucket sample sizes remain below the frozen minimum even after
+correcting for indicator warmup). No further EQR-01 issue should
+proceed on this hypothesis's current operationalization.

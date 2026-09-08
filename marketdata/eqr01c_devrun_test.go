@@ -121,9 +121,12 @@ func eqr01CUSEquityCalendarYears() []int {
 // assumed), so once one row is on/after the boundary every remaining
 // row must be too. This makes the development boundary structural —
 // no OHLCV value from any validation or final-holdout row is ever
-// parsed, and no byte of the file past the single boundary-crossing
-// row's Date field is ever read — rather than "read everything, keep
-// only what's in range" (PR #321 re-review).
+// parsed or written to the filtered copy, and no line of the file
+// after the single boundary-crossing row is even buffered — rather
+// than "read everything, keep only what's in range" (PR #321
+// re-review). The boundary-crossing row's own line is necessarily
+// read into bufio.Scanner's buffer to determine its Date, but its
+// OHLCV fields are never parsed or used.
 func filterCSVBeforeDevelopmentEnd(t *testing.T, srcPath string) string {
 	t.Helper()
 

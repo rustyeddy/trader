@@ -58,9 +58,11 @@ against the real local Stooq archive (=/srv/trading/data/raw/stooq/spy_us_d.csv=
    asserting) Stooq's chronologically ascending export order — rather
    than reading the whole file and discarding out-of-range rows
    afterward, so no OHLCV value from any validation or final-holdout
-   row is ever parsed by this test, and no byte of the file past that
-   one boundary-crossing row's own Date field is ever read (PR #321
-   review, tightened further on re-review).
+   row is ever parsed or written to the filtered copy, and no line of
+   the file after that one boundary-crossing row is even buffered (PR
+   #321 review, tightened further on re-review). The boundary-crossing
+   row's own line is necessarily read into the scanner's buffer to
+   determine its Date, but its OHLCV fields are never parsed or used.
 2. Registers SPY as an ETF Listing (=ARCA=, ticker =SPY=, provider
    =stooq=) via =service/marketdata.RegisterETFInstrument=.
 3. Builds a =*marketdata.Manager= with a =USEquityCalendar= configured

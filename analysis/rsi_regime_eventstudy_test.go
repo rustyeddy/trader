@@ -353,6 +353,79 @@ func TestRSIRegimeEventStudyResult_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRunRSIRegimeEventStudy_ObservationStart_ExcludesWarmupBarsFromEvidence
+// proves ObservationStart filters which bars become Observations
+// without disturbing indicator state: every Observation's Time must
+// be at or after the configured ObservationStart, using the exact
+// hand-calculated fixture already established in
+// TestRunRSIRegimeEventStudy_ObservationsMatchHandCalculation.
+func TestRunRSIRegimeEventStudy_ObservationStart_ExcludesWarmupBarsFromEvidence(t *testing.T) {
+	bars := rsiBarsFromCloses(t, []string{"100", "102", "101", "105", "103", "103", "108"})
+	cfg := baseRSIRegimeConfig(t, day(1))
+	cfg.ObservationStart = bars[4].Time // excludes indices 2 and 3 from evidence
+
+	result, err := RunRSIRegimeEventStudy(bars, cfg)
+	require.NoError(t, err)
+
+	require.Len(t, result.Observations, 3, "indices 4, 5, 6 only; 2 and 3 are warmup-only")
+	for _, obs := range result.Observations {
+		assert.False(t, obs.Time.Before(cfg.ObservationStart), "observation at index %d predates ObservationStart", obs.Index)
+	}
+	assert.Equal(t, 4, result.Observations[0].Index)
+}
+
+// TestRunRSIRegimeEventStudy_ObservationStart_WarmupBarsStillFeedIndicators
+// proves bars before ObservationStart genuinely warm up the RSI/EMA
+// indicators rather than being skipped entirely: an identical run
+// truncated to start exactly at the boundary (discarding the earlier
+// bars outright, the "cold start" a partition-boundary reset would
+// produce) must compute a different value at the shared boundary bar,
+// since it has fewer real price deltas behind it.
+//
+// Reuses the period-2 RSI hand calculation from
+// TestRunRSIRegimeEventStudy_ObservationsMatchHandCalculation: at
+// index 6 (close=108), the full-history run's RSI is 1000/11 (~90.91).
+// A cold run starting fresh at index 4 (closes 103, 103, 108 only) has
+// just two deltas available (0, +5): avgGain=(0+5)/2=2.5, avgLoss=0/2=0
+// -> RSI=100 (the avgLoss==0 boundary). It never saw the earlier loss
+// delta (105 -> 103) that is baked into the warm run's seed average,
+// so the two runs land on different values at the same shared bar.
+func TestRunRSIRegimeEventStudy_ObservationStart_WarmupBarsStillFeedIndicators(t *testing.T) {
+	const tol = 1e-9
+	bars := rsiBarsFromCloses(t, []string{"100", "102", "101", "105", "103", "103", "108"})
+
+	warmCfg := baseRSIRegimeConfig(t, day(1))
+	warmCfg.ObservationStart = bars[6].Time
+	warmResult, err := RunRSIRegimeEventStudy(bars, warmCfg)
+	require.NoError(t, err)
+	require.Len(t, warmResult.Observations, 1)
+	assert.InDelta(t, 1000.0/11, warmResult.Observations[0].RSI, tol, "warm run must match the full-history hand calculation")
+
+	coldBars := bars[4:] // closes 103, 103, 108 only — no earlier context
+	coldCfg := baseRSIRegimeConfig(t, day(1))
+	coldResult, err := RunRSIRegimeEventStudy(coldBars, coldCfg)
+	require.NoError(t, err)
+	require.Len(t, coldResult.Observations, 1)
+	assert.Equal(t, 100.0, coldResult.Observations[0].RSI, "cold run has no loss delta in its own short history, so avgLoss=0 -> RSI=100")
+
+	assert.NotEqual(t, warmResult.Observations[0].RSI, coldResult.Observations[0].RSI,
+		"warmup context from earlier bars must change the computed RSI at the shared boundary bar")
+}
+
+// TestRunRSIRegimeEventStudy_ObservationStart_ZeroValueIsUnrestricted
+// proves the zero value (the default every existing EQR-01C call site
+// uses) imposes no restriction at all — every ready bar becomes an
+// Observation, exactly as before this field existed.
+func TestRunRSIRegimeEventStudy_ObservationStart_ZeroValueIsUnrestricted(t *testing.T) {
+	bars := rsiBarsFromCloses(t, []string{"100", "102", "101", "105", "103", "103", "108"})
+	cfg := baseRSIRegimeConfig(t, day(1))
+	require.True(t, cfg.ObservationStart.IsZero())
+
+	result, err := RunRSIRegimeEventStudy(bars, cfg)
+	require.NoError(t, err)
+	assert.Len(t, result.Observations, 5, "indices 2-6, unchanged from the no-ObservationStart baseline")
+}
+
 func TestNewDayHorizon(t *testing.T) {
 	h, err := NewDayHorizon(5)
 	require.NoError(t, err)
