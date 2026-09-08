@@ -52,6 +52,10 @@ func New() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.oandaBaseURL, "oanda-base-url", "",
 		"OANDA API base URL (required for sync/update; the token itself is "+
 			"never a flag -- set TRADER_OANDA_TOKEN instead)")
+	cmd.PersistentFlags().StringVar(&flags.alpacaBaseURL, "alpaca-base-url", "",
+		"Alpaca Market Data API base URL (defaults to https://data.alpaca.markets; "+
+			"the key ID/secret key are never flags -- set "+
+			"TRADER_ALPACA_KEY_ID/TRADER_ALPACA_SECRET_KEY instead)")
 
 	cmd.AddCommand(newBarsCmd())
 	cmd.AddCommand(newCoverageCmd())

@@ -21,10 +21,11 @@ import (
 // datasetConfig's own field names, the same split root.go's rootFlags/
 // buildLoggingConfig already established for logging.
 type datasetFlags struct {
-	storeRoot    string
-	rawRoot      string
-	provider     string
-	oandaBaseURL string
+	storeRoot     string
+	rawRoot       string
+	provider      string
+	oandaBaseURL  string
+	alpacaBaseURL string
 }
 
 // datasetConfig is the typed configuration a *marketdata.Manager is
@@ -55,23 +56,51 @@ type datasetFlags struct {
 // today; a credential-file or keyring mechanism is a reasonable
 // future addition if that ever proves insufficient, but is not
 // invented speculatively here.
+//
+// AlpacaKeyID/AlpacaSecretKey follow OANDAToken's identical reasoning
+// and pattern (issue #331): no CLI flag, secret:"true", supplied only
+// via TRADER_ALPACA_KEY_ID/TRADER_ALPACA_SECRET_KEY (or a Trader-owned
+// --config YAML file using this same dotted config-key naming — see
+// config.Options.FilePath). This is deliberately the one and only
+// credential source, for consistency with OANDA's own CLI story: this
+// package does not additionally read a third-party tool's own profile
+// file format (for example a local Alpaca CLI's own
+// ~/.config/alpaca/profiles/*.yaml, api_key/secret_key keys) — that
+// would give Alpaca a second, bespoke credential-sourcing mechanism
+// no other provider has, coupling this repository's CLI to another
+// tool's file schema as an implicit contract. An operator who already
+// has such a file can export its two values as
+// TRADER_ALPACA_KEY_ID/TRADER_ALPACA_SECRET_KEY in their shell profile.
+// (The marketdata package's own opt-in "alpacasmoke" smoke tests read
+// that file directly — see marketdata/alpaca_smoke_test.go — but only
+// because they cannot use environment variables at all,
+// config/arch_test.go's TestDomainPackagesDoNotReadEnvOrFlags
+// forbidding os.Getenv outside config/cmd/test; this package has no
+// such restriction and uses the standard, already-established config
+// mechanism instead.)
 type datasetConfig struct {
-	StoreRoot    string `config:"store_root" flag:"store-root"`
-	RawRoot      string `config:"raw_root" flag:"raw-root"`
-	Provider     string `config:"provider" flag:"provider" default:"oanda"`
-	OANDAToken   string `config:"oanda_token" secret:"true"`
-	OANDABaseURL string `config:"oanda_base_url" flag:"oanda-base-url"`
+	StoreRoot       string `config:"store_root" flag:"store-root"`
+	RawRoot         string `config:"raw_root" flag:"raw-root"`
+	Provider        string `config:"provider" flag:"provider" default:"oanda"`
+	OANDAToken      string `config:"oanda_token" secret:"true"`
+	OANDABaseURL    string `config:"oanda_base_url" flag:"oanda-base-url"`
+	AlpacaKeyID     string `config:"alpaca_key_id" secret:"true"`
+	AlpacaSecretKey string `config:"alpaca_secret_key" secret:"true"`
+	AlpacaBaseURL   string `config:"alpaca_base_url" flag:"alpaca-base-url" default:"https://data.alpaca.markets"`
 }
 
 // buildDatasetConfig resolves a datasetConfig from flags actually set
 // on cmd, layered under the TRADER_STORE_ROOT/TRADER_RAW_ROOT/
-// TRADER_PROVIDER/TRADER_OANDA_TOKEN/TRADER_OANDA_BASE_URL environment
-// variables, via the same config.Load every Trader composition root
-// uses (see root.go's buildLoggingConfig for the identical pattern
-// this mirrors, including why only Changed flags are ever placed in
-// Overrides). OANDAToken has no flag to check Changed against — see
-// datasetConfig's own doc comment — so it is resolved from the
-// environment/config source only, never from Overrides.
+// TRADER_PROVIDER/TRADER_OANDA_TOKEN/TRADER_OANDA_BASE_URL/
+// TRADER_ALPACA_KEY_ID/TRADER_ALPACA_SECRET_KEY/TRADER_ALPACA_BASE_URL
+// environment variables, via the same config.Load every Trader
+// composition root uses (see root.go's buildLoggingConfig for the
+// identical pattern this mirrors, including why only Changed flags
+// are ever placed in Overrides). AlpacaKeyID/AlpacaSecretKey have no
+// flag to check Changed against, for the identical reason OANDAToken
+// does not — see datasetConfig's own doc comment — so both are
+// resolved from the environment/config source only, never from
+// Overrides.
 func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, error) {
 	overrides := map[string]string{}
 	if cmd.Flags().Changed("store-root") {
@@ -85,6 +114,9 @@ func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, 
 	}
 	if cmd.Flags().Changed("oanda-base-url") {
 		overrides["oanda-base-url"] = flags.oandaBaseURL
+	}
+	if cmd.Flags().Changed("alpaca-base-url") {
+		overrides["alpaca-base-url"] = flags.alpacaBaseURL
 	}
 
 	return config.Load[datasetConfig](config.Options{
@@ -130,6 +162,55 @@ func (c oandaTokenCredential) Token(context.Context) (string, error) {
 	return string(c), nil
 }
 
+// alpacaKeyIDSecretCredential satisfies
+// marketdata.Config.AlpacaCredential's alpaca.CredentialProvider
+// interface structurally (Credentials(ctx) (string, string, error))
+// without importing marketdata/internal — the identical technique
+// oandaTokenCredential uses above, and marketdata/alpaca_smoke_test.go's
+// own alpacaSmokeCredential test seam uses independently (issue #331).
+type alpacaKeyIDSecretCredential struct {
+	keyID, secretKey string
+}
+
+func (c alpacaKeyIDSecretCredential) Credentials(context.Context) (string, string, error) {
+	return c.keyID, c.secretKey, nil
+}
+
+// alpacaCalendarYears returns a generous, forward-and-backward year
+// range for marketdata.StandardUSEquityHolidays, computed from the
+// real wall clock. This file is a composition root — exactly where
+// the architecture document says time.Now belongs, unlike marketdata's
+// own deterministic core — so calling it once here, to size a holiday
+// table, is not the "hidden time.Now deep in domain code" problem that
+// rule guards against. A wide window (30 years back, 5 forward) means
+// the CLI does not need to be redeployed merely because a calendar
+// year rolled over.
+func alpacaCalendarYears() []int {
+	now := clock.Real{}.Now().UTC().Year()
+	years := make([]int, 0, 36)
+	for y := now - 30; y <= now+5; y++ {
+		years = append(years, y)
+	}
+	return years
+}
+
+// calendarForProvider selects the marketdata.Calendar implementation
+// syncOneAlpaca/syncOneOANDA each actually require (issue #331):
+// leaving it nil for an FX provider lets Manager apply its own correct
+// default (NewFXCalendar(FXCalendarParams{})), but "alpaca" (and any
+// future non-FX provider — see fxProviders' identical two-way split in
+// args.go) needs a *USEquityCalendar specifically, or Sync fails with
+// Manager's own "requires Config.Calendar to be a *USEquityCalendar"
+// ErrInvalidConfig every time (a real gap found and fixed while
+// developing this issue: buildDataContext never set Calendar at all
+// before).
+func calendarForProvider(provider string) marketdata.Calendar {
+	if fxProviders[provider] {
+		return nil
+	}
+	return marketdata.NewUSEquityCalendar(marketdata.StandardUSEquityHolidays(alpacaCalendarYears()...))
+}
+
 // buildDataContext constructs the *marketdata.Manager and Service a
 // data subcommand invocation needs. The Manager's Resolver starts
 // empty: nothing is registered into it until a leaf command parses its
@@ -161,6 +242,7 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 		RawRoot:      cfg.RawRoot,
 		Resolver:     resolver,
 		ProviderName: cfg.Provider,
+		Calendar:     calendarForProvider(cfg.Provider),
 	}
 	// OANDACredential must stay a genuinely nil interface when no token
 	// was supplied: oandaTokenCredential("") is a *non-nil* interface
@@ -172,6 +254,25 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 		managerCfg.OANDACredential = oandaTokenCredential(cfg.OANDAToken)
 	}
 	managerCfg.OANDABaseURL = cfg.OANDABaseURL
+
+	// AlpacaCredential and AlpacaBaseURL are set together, only when
+	// both AlpacaKeyID and AlpacaSecretKey are supplied — unlike
+	// OANDABaseURL above, AlpacaBaseURL carries a non-empty default
+	// (datasetConfig's own "https://data.alpaca.markets" tag), so
+	// forwarding it unconditionally would leave managerCfg.AlpacaBaseURL
+	// non-empty even when no Alpaca credential was ever configured,
+	// which would trip Manager's own "credential and base URL must be
+	// supplied together" check for every command run against a
+	// different provider (a real regression caught by
+	// vertical_slice_test.go's OANDA-only scenarios while developing
+	// this). Both fields are therefore gated behind the identical
+	// condition, so an incomplete pair still correctly leaves Manager
+	// to report its own ErrInvalidConfig, not silently authenticate
+	// with an empty secret.
+	if cfg.AlpacaKeyID != "" && cfg.AlpacaSecretKey != "" {
+		managerCfg.AlpacaCredential = alpacaKeyIDSecretCredential{keyID: cfg.AlpacaKeyID, secretKey: cfg.AlpacaSecretKey}
+		managerCfg.AlpacaBaseURL = cfg.AlpacaBaseURL
+	}
 
 	manager, err := marketdata.New(managerCfg)
 	if err != nil {
