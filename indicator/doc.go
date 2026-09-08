@@ -4,9 +4,12 @@
 // general indicator framework; issue #279 (MR-02) added SMA,
 // RollingStdDev, and ZScore as the analytical primitives
 // docs/research/mr-01-experiment-definition.org needs to construct its
-// rolling mean/standard-deviation/normalized-deviation observation.
-// Each addition remains scoped to what a concrete milestone actually
-// needs — this is still not a general indicator framework.
+// rolling mean/standard-deviation/normalized-deviation observation;
+// issue #317 (EQR-01B) added RSI, the Wilder Relative Strength Index
+// docs/research/eqr-01-research-protocol.org's frozen EQR-01 hypothesis
+// needs as its primary short-term oversold observable. Each addition
+// remains scoped to what a concrete milestone actually needs — this is
+// still not a general indicator framework.
 //
 // # Architectural boundary
 //
@@ -39,8 +42,9 @@
 // reproducible for a given, fixed sequence of operations, so replaying
 // an identical input sequence through a freshly constructed EMA always
 // produces bit-identical output (issue #248's own acceptance
-// criterion). SMA, RollingStdDev, and ZScore share this same
-// determinism property, verified by their own replay tests.
+// criterion). SMA, RollingStdDev, ZScore, and RSI share this same
+// determinism property, verified by their own replay/hand-calculated
+// tests.
 //
 // # SMA, RollingStdDev, and ZScore rolling-window semantics
 //
