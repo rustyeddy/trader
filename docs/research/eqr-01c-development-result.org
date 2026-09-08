@@ -53,11 +53,14 @@ against the real local Stooq archive (=/srv/trading/data/raw/stooq/spy_us_d.csv=
 1. Filters the source CSV down to development-partition rows only
    (=Date < 2019-01-01=) before it ever reaches the importer, then runs
    =stooq.Import= over that filtered copy into a temporary raw-
-   partition root. This bounds the *ingestion* path itself, not merely
-   the later query: the raw-partition archive this test builds never
-   contains a validation or final-holdout row in the first place, so
-   there is no local copy of that data sitting on disk for a later,
-   different query to accidentally read (PR #321 review).
+   partition root. The filter stops scanning the source file entirely
+   at the first row on or after the boundary — relying on (and
+   asserting) Stooq's chronologically ascending export order — rather
+   than reading the whole file and discarding out-of-range rows
+   afterward, so no OHLCV value from any validation or final-holdout
+   row is ever parsed by this test, and no byte of the file past that
+   one boundary-crossing row's own Date field is ever read (PR #321
+   review, tightened further on re-review).
 2. Registers SPY as an ETF Listing (=ARCA=, ticker =SPY=, provider
    =stooq=) via =service/marketdata.RegisterETFInstrument=.
 3. Builds a =*marketdata.Manager= with a =USEquityCalendar= configured
@@ -111,14 +114,16 @@ requirement.
 | Bootstrap method          | nonparametric, 2000 resamples, 95% percentile interval           |
 | Bootstrap seed            | Seed1=319, Seed2=2000 (=math/rand/v2= =PCG=, fixed and recorded) |
 
-Raw import: the local Stooq export (5,415 total rows, spanning
-2005-02-25 through 2026-09-04) was filtered to development-partition
-rows only (=Date < 2019-01-01=) before import — 3,485 rows kept, 1,930
-dropped — so =stooq.Import= itself ingested only 3,485 rows (2005-02-25
-through 2018-12-31); no validation or final-holdout row was ever
-written to the raw-partition archive this run built. The subsequent
-development-partition query returned those same 3,485 D1 bars. Of
-those, 3,286 qualify as observations (both RSI(2) and
+Raw import: the source Stooq export (5,415 total rows, spanning
+2005-02-25 through 2026-09-04) was filtered before import by scanning
+only as far as the first row on or after 2019-01-01 and stopping —
+3,485 rows kept, and no row at or after the boundary was ever parsed
+beyond confirming that single row's own out-of-range date. So
+=stooq.Import= itself ingested only 3,485 rows (2005-02-25 through
+2018-12-31); no validation or final-holdout row's OHLCV data was ever
+read by this test, let alone written to the raw-partition archive it
+built. The subsequent development-partition query returned those same
+3,485 D1 bars. Of those, 3,286 qualify as observations (both RSI(2) and
 EMA(200) Ready — EMA(200)'s own 200-bar warmup consumes the partition's
 first 199 bars, which is expected and not an ambiguity: the
 development partition begins at the archive's own true first day, so

@@ -112,10 +112,18 @@ func eqr01CUSEquityCalendarYears() []int {
 // "Date,Open,High,Low,Close,Volume" daily CSV export — and writes a
 // copy under t.TempDir() containing only the header plus rows whose
 // Date is strictly before eqr01CDevelopmentEnd (2019-01-01), returning
-// the copy's path. This is what keeps validation/final-holdout rows
-// out of the raw-partition archive stooq.Import builds, rather than
-// relying solely on the later Manager query Range to keep them unread
-// (see the caller's own comment).
+// the copy's path.
+//
+// This stops scanning srcPath entirely the moment it reaches the first
+// row on or after eqr01CDevelopmentEnd, rather than reading the whole
+// file and discarding out-of-range rows afterward: Stooq's native
+// export is chronologically ascending (asserted below, not merely
+// assumed), so once one row is on/after the boundary every remaining
+// row must be too. This makes the development boundary structural —
+// no OHLCV value from any validation or final-holdout row is ever
+// parsed, and no byte of the file past the single boundary-crossing
+// row's Date field is ever read — rather than "read everything, keep
+// only what's in range" (PR #321 re-review).
 func filterCSVBeforeDevelopmentEnd(t *testing.T, srcPath string) string {
 	t.Helper()
 
@@ -141,20 +149,29 @@ func filterCSVBeforeDevelopmentEnd(t *testing.T, srcPath string) string {
 		t.Fatalf("filterCSVBeforeDevelopmentEnd: write header: %v", err)
 	}
 
-	var kept, dropped int
+	var kept int
+	var lastDate time.Time
 	for scanner.Scan() {
 		row := strings.TrimSpace(scanner.Text())
 		if row == "" {
 			continue
 		}
+		// Only the Date field (fields[0]) is ever inspected — OHLCV
+		// values (fields[1]) are never parsed here at all, in range or
+		// not.
 		fields := strings.SplitN(row, ",", 2)
 		date, err := time.Parse("2006-01-02", fields[0])
 		if err != nil {
 			t.Fatalf("filterCSVBeforeDevelopmentEnd: parse date %q: %v", fields[0], err)
 		}
+		if !lastDate.IsZero() && date.Before(lastDate) {
+			t.Fatalf("filterCSVBeforeDevelopmentEnd: %s is not chronologically ascending (row date %s precedes previous %s) — the stop-at-first-boundary-row strategy this helper relies on requires ascending order",
+				srcPath, date.Format("2006-01-02"), lastDate.Format("2006-01-02"))
+		}
+		lastDate = date
+
 		if !date.Before(eqr01CDevelopmentEnd) {
-			dropped++
-			continue
+			break
 		}
 		if _, err := fmt.Fprintln(dst, row); err != nil {
 			t.Fatalf("filterCSVBeforeDevelopmentEnd: write row: %v", err)
@@ -164,8 +181,8 @@ func filterCSVBeforeDevelopmentEnd(t *testing.T, srcPath string) string {
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("filterCSVBeforeDevelopmentEnd: scan %s: %v", srcPath, err)
 	}
-	t.Logf("filtered source CSV to development-partition rows only: kept %d, dropped %d (at/after %s)",
-		kept, dropped, eqr01CDevelopmentEnd.Format("2006-01-02"))
+	t.Logf("filtered source CSV to development-partition rows only: kept %d rows, stopped scanning at the first row on/after %s",
+		kept, eqr01CDevelopmentEnd.Format("2006-01-02"))
 	return dstPath
 }
 
