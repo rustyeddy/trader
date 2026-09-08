@@ -27,7 +27,7 @@ deterministically offline.
 New file =marketdata/alpaca_smoke_test.go= (=//go:build alpacasmoke=,
 reusing the tag already established by #297/#301/#302, not a fourth
 tag for the identical "real Alpaca credentials, never committed"
-purpose). Three tests:
+purpose). Four tests:
 
 - =TestSmokeAlpacaEndToEndSPY=: retrieve -> canonicalize -> persist ->
   =Manager= read for a real, recent SPY D1 range; asserts chronological
@@ -39,8 +39,23 @@ purpose). Three tests:
   rather than replaces); logs provider/feed/adjustment/calendar and
   =Coverage=.
 - =TestSmokeAlpacaEndToEndAAPL=: the same retrieve/canonicalize/
-  persist/read path for AAPL, confirming every published =Manifest=
-  records =AdjustmentSplitAdjusted=.
+  persist/read path for AAPL over a recent range, confirming every
+  published =Manifest= records =AdjustmentSplitAdjusted=. This proves
+  the metadata label only — a recent range crosses no split boundary,
+  so it cannot demonstrate adjustment semantics actually normalizing
+  history. That is =TestSmokeAlpacaAAPLSplitAdjustment='s own job (PR
+  #332 review finding: the first draft only had this test, which does
+  not satisfy #326's "exercises adjustment-sensitive behavior"
+  acceptance criterion by itself).
+- =TestSmokeAlpacaAAPLSplitAdjustment=: a small, bounded, real
+  historical range spanning AAPL's actual 2020-08-31 4-for-1 split —
+  the same reference date =stooq_aapl_fullarchive_test.go='s own
+  =aaplSplitDates= uses, so this result is directly comparable to that
+  offline fixture's. Asserts the close-to-close ratio across the split
+  boundary stays near 1 (split-adjusted), not the ~0.25x a
+  raw/unadjusted series would show — proving live that Alpaca's
+  adjustment actually normalizes the split, not merely that the
+  Manifest label says so.
 - =TestSmokeAlpacaVsStooqComparison=: a live Alpaca SPY sync compared,
   date by date, against the same real local Stooq archive
   =stooq_fullarchive_test.go= already uses, with a documented 1%
@@ -84,17 +99,23 @@ already uses.
 
 ** No Alpaca SDK or provider-native types escape
 
-Verified structurally: this file imports only =marketdata='s own
-public API, the standard library, testify, and a YAML parser for its
-own credential file — never =marketdata/internal/provider/alpaca= or
-the =alpacahq= SDK directly. =alpacaSmokeCredential= satisfies
-=Config.AlpacaCredential= structurally (the same technique
-=cmd/trader/data/service.go='s =oandaTokenCredential= already uses for
-OANDA) without importing the interface's own defining package. That
-this file compiles and drives the full pipeline without ever importing
-those packages is itself the proof of EQ-13's "no Alpaca SDK types
-escape the provider boundary" acceptance criterion — not merely
-claimed by convention.
+Verified structurally: this file never imports
+=marketdata/internal/provider/alpaca= or the =alpacahq= SDK directly.
+=alpacaSmokeCredential= satisfies =Config.AlpacaCredential=
+structurally (the same technique =cmd/trader/data/service.go='s
+=oandaTokenCredential= already uses for OANDA) without importing the
+interface's own defining package. That this file compiles and drives
+the full Alpaca pipeline without ever importing those packages is
+itself the proof of EQ-13's "no Alpaca SDK types escape the provider
+boundary" acceptance criterion — not merely claimed by convention.
+
+This file does import =marketdata/internal/provider/stooq=, but only
+for =TestSmokeAlpacaVsStooqComparison='s own comparison leg —
+mirroring =stooq_fullarchive_test.go='s identical import for the
+identical reason (importing a real Stooq CSV). That is a deliberate,
+narrow dependency on Stooq's own provider package for a cross-provider
+sanity check, not a leak of Alpaca-specific internals, and does not
+weaken the claim above (PR #332 review).
 
 * Manual prerequisites (never commit credentials)
 
@@ -139,14 +160,19 @@ go test -tags alpacasmoke -race ./marketdata/... -run TestSmokeAlpaca -v
     SPY: 14 real trading days from 2026-08-14 to 2026-09-03
     coverage: 2 partition(s), 0 gap(s)
     SPY extension: 14 -> 16 bars, 0 legitimately revised
---- PASS: TestSmokeAlpacaEndToEndSPY (0.40s)
+--- PASS: TestSmokeAlpacaEndToEndSPY (0.41s)
 === RUN   TestSmokeAlpacaEndToEndAAPL
     synced eq:NASDAQ:AAPL D1 2026-08: 21 record(s) written, 0 revised
     synced eq:NASDAQ:AAPL D1 2026-09: 5 record(s) written, 0 revised
     published eq:NASDAQ:AAPL D1: 21 bars, feed=iex, adjustment=split_adjusted
     published eq:NASDAQ:AAPL D1: 5 bars, feed=iex, adjustment=split_adjusted
     AAPL: 11 real trading days from 2026-08-19 to 2026-09-03
---- PASS: TestSmokeAlpacaEndToEndAAPL (0.16s)
+--- PASS: TestSmokeAlpacaEndToEndAAPL (0.20s)
+=== RUN   TestSmokeAlpacaAAPLSplitAdjustment
+    synced eq:NASDAQ:AAPL D1 2020-08: 21 record(s) written, 0 revised
+    synced eq:NASDAQ:AAPL D1 2020-09: 21 record(s) written, 0 revised
+    AAPL 2020 4-for-1 split: close 124.84 (2020-08-28) -> close 129.11 (2020-08-31), ratio=1.0342
+--- PASS: TestSmokeAlpacaAAPLSplitAdjustment (0.18s)
 === RUN   TestSmokeAlpacaVsStooqComparison
     synced etf:ARCA:SPY D1 2026-08: 21 record(s) written, 0 revised
     synced etf:ARCA:SPY D1 2026-09: 5 record(s) written, 0 revised
@@ -159,9 +185,9 @@ go test -tags alpacasmoke -race ./marketdata/... -run TestSmokeAlpaca -v
     2026-08-31: alpaca close=766.87 stooq close=767.05 diff=0.0235%
     2026-09-01: alpaca close=761.63 stooq close=761.78 diff=0.0197%
     2026-09-02: alpaca close=765.13 stooq close=765.16 diff=0.0039%
---- PASS: TestSmokeAlpacaVsStooqComparison (0.42s)
+--- PASS: TestSmokeAlpacaVsStooqComparison (0.54s)
 PASS
-ok  	github.com/rustyeddy/trader/marketdata	1.998s
+ok  	github.com/rustyeddy/trader/marketdata	2.358s
 #+END_EXAMPLE
 
 ** Observations
@@ -178,6 +204,14 @@ ok  	github.com/rustyeddy/trader/marketdata	1.998s
   test logs (rather than hard-asserts) any revision found in the
   overlap window, since a genuine late correction is a legitimate,
   expected outcome (#325/#329), not a failure.
+- AAPL's real 2020-08-31 4-for-1 split shows a close-to-close ratio
+  of =1.0342= — ordinary day-to-day movement, comfortably within the
+  documented 0.5-1.5 tolerance and nowhere near the ~0.25 a
+  raw/unadjusted series would show. This is what actually
+  distinguishes "the Manifest label says split-adjusted" from
+  "the returned history is genuinely, correctly split-adjusted" (PR
+  #332 review) — =TestSmokeAlpacaEndToEndAAPL='s recent-range request
+  alone cannot demonstrate this, since it crosses no split boundary.
 - Alpaca (IEX feed) and Stooq's independently-sourced SPY closes
   agreed to within 0.024% on every one of the 8 overlapping trading
   days checked — comfortably inside the documented 1% tolerance,

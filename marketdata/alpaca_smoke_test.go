@@ -51,16 +51,22 @@ package marketdata
 //
 // # No Alpaca SDK or provider-native types escape
 //
-// This file imports only marketdata's own public API, the standard
-// library, testify, and a YAML parser for its own credential file —
-// never marketdata/internal/provider/alpaca or the alpacahq SDK
-// directly. alpacaSmokeCredential below satisfies
+// This file never imports marketdata/internal/provider/alpaca or the
+// alpacahq SDK directly. alpacaSmokeCredential below satisfies
 // Config.AlpacaCredential structurally (the same technique
 // cmd/trader/data/service.go's oandaTokenCredential already uses for
 // OANDA), without importing the interface's own defining package.
-// That this file compiles and drives the full pipeline without ever
-// importing those packages is itself the proof of EQ-13's "no Alpaca
-// SDK types escape the provider boundary" acceptance criterion.
+// That this file compiles and drives the full Alpaca pipeline without
+// ever importing those packages is itself the proof of EQ-13's "no
+// Alpaca SDK types escape the provider boundary" acceptance criterion.
+//
+// This file does import marketdata/internal/provider/stooq — but only
+// for TestSmokeAlpacaVsStooqComparison's own comparison leg, mirroring
+// stooq_fullarchive_test.go's identical import for the identical
+// reason (importing a real Stooq CSV). That is a deliberate, narrow
+// dependency on Stooq's own provider package for a cross-provider
+// sanity check, not a leak of Alpaca-specific internals, and does not
+// weaken the claim above (PR #332 review).
 //
 // # Running this
 //
@@ -86,7 +92,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -366,13 +371,14 @@ func TestSmokeAlpacaEndToEndSPY(t *testing.T) {
 	t.Logf("SPY extension: %d -> %d bars, %d legitimately revised", len(firstBars), len(extendedBars), revisedCount)
 }
 
-// TestSmokeAlpacaEndToEndAAPL is EQ-13's AAPL acceptance criterion:
-// the same retrieve -> canonicalize -> persist -> Manager read path,
-// specifically confirming adjustment-sensitive provenance is recorded
-// correctly against real data (the offline
-// TestAlpacaEndToEnd_AAPLRecordsSplitAdjustedPolicy fixture test
-// already proves the mechanism deterministically; this confirms it
-// holds live).
+// TestSmokeAlpacaEndToEndAAPL is EQ-13's AAPL retrieve/canonicalize/
+// persist/Manager-read acceptance criterion, over a recent range. It
+// confirms the Manifest metadata label (AdjustmentSplitAdjusted) is
+// recorded against real data, but a recent range with no split
+// boundary in it cannot demonstrate that adjustment semantics actually
+// affect or correctly normalize returned history — that is
+// TestSmokeAlpacaAAPLSplitAdjustment's own, separate job (PR #332
+// review).
 func TestSmokeAlpacaEndToEndAAPL(t *testing.T) {
 	ctx := context.Background()
 	mgr := newSmokeAlpacaManager(t)
@@ -391,6 +397,65 @@ func TestSmokeAlpacaEndToEndAAPL(t *testing.T) {
 	bars := readAllBars(t, ctx, mustBars(t, ctx, mgr, query))
 	assertBarsWellFormed(t, bars)
 	t.Logf("AAPL: %d real trading days from %s to %s", len(bars), span.Start().Format("2006-01-02"), span.End().Format("2006-01-02"))
+}
+
+// TestSmokeAlpacaAAPLSplitAdjustment is issue #326 (EQ-13)'s AAPL
+// adjustment-sensitive acceptance criterion, addressed directly (PR
+// #332 review): a small, bounded, real historical range spanning
+// AAPL's real 2020-08-31 4-for-1 split — the same reference date
+// stooq_aapl_fullarchive_test.go's own aaplSplitDates uses, so this
+// result is directly comparable to that offline fixture's — proving
+// live that Alpaca's own adjustment normalizes the split rather than
+// merely labeling the Manifest correctly. The close-to-close ratio
+// across the split boundary must stay near 1: split-adjusted data
+// absorbs a real split into ordinary day-to-day movement, where
+// raw/unadjusted data would show a discontinuous ~4x (or ~0.25x,
+// depending on direction) jump.
+func TestSmokeAlpacaAAPLSplitAdjustment(t *testing.T) {
+	ctx := context.Background()
+	mgr := newSmokeAlpacaManager(t)
+	aapl := alpacaSmokeAAPLID(t)
+
+	// 2020-08-28 (last trading day before the split) through
+	// 2020-09-01 (a couple of trading days after), well in the past —
+	// no "still forming session" concern applies to a fixed historical
+	// range the way it does to smokeRecentRange's "now"-relative ones.
+	span, err := NewTimeRange(
+		time.Date(2020, 8, 26, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 9, 2, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: aapl, Interval: D1, Range: span}
+
+	buildResult := syncThenBuild(t, ctx, mgr, query)
+	require.NotEmpty(t, buildResult.Published)
+	for _, pr := range buildResult.Published {
+		assert.Equal(t, AdjustmentSplitAdjusted, pr.Manifest.AdjustmentPolicy)
+	}
+
+	bars := readAllBars(t, ctx, mustBars(t, ctx, mgr, query))
+	assertBarsWellFormed(t, bars)
+
+	byDate := make(map[string]Bar, len(bars))
+	for _, b := range bars {
+		byDate[b.Time.Format("2006-01-02")] = b
+	}
+	before, ok := byDate["2020-08-28"]
+	require.True(t, ok, "missing bar for 2020-08-28 (last trading day before AAPL's real 4-for-1 split)")
+	after, ok := byDate["2020-08-31"]
+	require.True(t, ok, "missing bar for 2020-08-31 (AAPL's real 4-for-1 split effective date)")
+
+	ratio := after.Close.Float64() / before.Close.Float64()
+	t.Logf("AAPL 2020 4-for-1 split: close %s (2020-08-28) -> close %s (2020-08-31), ratio=%.4f", before.Close, after.Close, ratio)
+	// Mirrors stooq_aapl_fullarchive_test.go's own aaplSplitDates
+	// tolerance reasoning exactly: unadjusted raw data would show ratio
+	// near 1/4 = 0.25 (a real 4-for-1 split divides the pre-split price
+	// by 4); split-adjusted data keeps ordinary day-to-day movement,
+	// comfortably within 50% either way. The two are not remotely close
+	// to each other, so a generous tolerance here still cleanly
+	// distinguishes them.
+	assert.InDeltaf(t, 1.0, ratio, 0.5,
+		"close-to-close ratio across AAPL's real 2020-08-31 split = %.4f, want ~1 (split-adjusted); a raw/unadjusted series would show ~0.25 here", ratio)
 }
 
 // TestSmokeAlpacaVsStooqComparison is EQ-13's cross-provider
@@ -472,17 +537,19 @@ func TestSmokeAlpacaVsStooqComparison(t *testing.T) {
 // closeDiffRatio returns |a-b|/b as a float64, for the comparison
 // tolerance check only — analytical, not an authoritative value, so
 // float64 here does not conflict with ADR-004's exact-value rule for
-// order/accounting values.
+// order/accounting values. Uses Price.Float64() directly, not a
+// String()+strconv.ParseFloat round-trip: ADR-045 documents that
+// round-trip as a smell, and Price.Float64() already handles the
+// whole/fractional split needed to stay exact within float64's 53-bit
+// range (PR #332 review). b (the comparison baseline) must be
+// non-zero — a real SPY/AAPL close is never legitimately zero, so a
+// zero baseline is a real data problem to fail loudly on, not a
+// silent 0% difference.
 func closeDiffRatio(t *testing.T, a, b num.Price) float64 {
 	t.Helper()
-	af, err := strconv.ParseFloat(a.String(), 64)
-	require.NoError(t, err)
-	bf, err := strconv.ParseFloat(b.String(), 64)
-	require.NoError(t, err)
-	if bf == 0 {
-		return 0
-	}
-	diff := af - bf
+	bf := b.Float64()
+	require.NotZero(t, bf, "comparison baseline Close must not be zero")
+	diff := a.Float64() - bf
 	if diff < 0 {
 		diff = -diff
 	}
