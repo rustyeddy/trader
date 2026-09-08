@@ -29,10 +29,14 @@
 package marketdata_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,17 +87,86 @@ const (
 	eqr01CEMAPeriod                 = 200
 )
 
-// eqr01CUSEquityCalendarYears spans every year the development
-// partition (2005-2018) plus generous margin can touch, matching the
-// protocol's own "record the exact year range used" provenance
-// requirement (see docs/research/eqr-01-research-protocol.org's
-// Trading-day and session provenance section).
+// eqr01CUSEquityCalendarYears spans 2005 through 2026 — the *full*
+// frozen EQR-01 protocol span (development through the frozen final-
+// holdout end year), exactly as
+// docs/research/eqr-01-research-protocol.org's own Trading-day and
+// session provenance section requires: "must be explicitly configured
+// with StandardUSEquityHolidays for the full set of calendar years
+// this protocol's partitions span (2005 through the frozen holdout end
+// year) ... a differently configured calendar (a narrower year range
+// ...) would misclassify real NYSE holidays as trading days and is not
+// an equivalent, reproducible substitute." This run only ever reads
+// development-partition bars, but the calendar configuration itself
+// must match the frozen protocol's full range regardless of which
+// partition a given run happens to query (PR #321 review).
 func eqr01CUSEquityCalendarYears() []int {
-	years := make([]int, 0, 20)
-	for y := 2004; y <= 2019; y++ {
+	years := make([]int, 0, 22)
+	for y := 2005; y <= 2026; y++ {
 		years = append(years, y)
 	}
 	return years
+}
+
+// filterCSVBeforeDevelopmentEnd reads srcPath — Stooq's native
+// "Date,Open,High,Low,Close,Volume" daily CSV export — and writes a
+// copy under t.TempDir() containing only the header plus rows whose
+// Date is strictly before eqr01CDevelopmentEnd (2019-01-01), returning
+// the copy's path. This is what keeps validation/final-holdout rows
+// out of the raw-partition archive stooq.Import builds, rather than
+// relying solely on the later Manager query Range to keep them unread
+// (see the caller's own comment).
+func filterCSVBeforeDevelopmentEnd(t *testing.T, srcPath string) string {
+	t.Helper()
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		t.Fatalf("filterCSVBeforeDevelopmentEnd: open %s: %v", srcPath, err)
+	}
+	defer func() { _ = src.Close() }()
+
+	dstPath := filepath.Join(t.TempDir(), "spy_us_d_development_only.csv")
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		t.Fatalf("filterCSVBeforeDevelopmentEnd: create %s: %v", dstPath, err)
+	}
+	defer func() { _ = dst.Close() }()
+
+	scanner := bufio.NewScanner(src)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	if !scanner.Scan() {
+		t.Fatalf("filterCSVBeforeDevelopmentEnd: %s: empty file", srcPath)
+	}
+	if _, err := fmt.Fprintln(dst, scanner.Text()); err != nil {
+		t.Fatalf("filterCSVBeforeDevelopmentEnd: write header: %v", err)
+	}
+
+	var kept, dropped int
+	for scanner.Scan() {
+		row := strings.TrimSpace(scanner.Text())
+		if row == "" {
+			continue
+		}
+		fields := strings.SplitN(row, ",", 2)
+		date, err := time.Parse("2006-01-02", fields[0])
+		if err != nil {
+			t.Fatalf("filterCSVBeforeDevelopmentEnd: parse date %q: %v", fields[0], err)
+		}
+		if !date.Before(eqr01CDevelopmentEnd) {
+			dropped++
+			continue
+		}
+		if _, err := fmt.Fprintln(dst, row); err != nil {
+			t.Fatalf("filterCSVBeforeDevelopmentEnd: write row: %v", err)
+		}
+		kept++
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("filterCSVBeforeDevelopmentEnd: scan %s: %v", srcPath, err)
+	}
+	t.Logf("filtered source CSV to development-partition rows only: kept %d, dropped %d (at/after %s)",
+		kept, dropped, eqr01CDevelopmentEnd.Format("2006-01-02"))
+	return dstPath
 }
 
 // TestEQR01C_DevelopmentPartition runs the frozen EQR-01C phenomenon
@@ -121,7 +194,17 @@ func TestEQR01C_DevelopmentPartition(t *testing.T) {
 	ctx := context.Background()
 	rawRoot := t.TempDir()
 
-	importResult, err := stooq.Import(ctx, fullArchiveEQR01CSPYCSVPath, rawRoot, "SPY")
+	// Bound the ingestion path itself, not merely the later query:
+	// filter the source CSV down to development-partition rows only
+	// before it ever reaches stooq.Import, so the raw-partition archive
+	// this test builds under rawRoot never contains a validation or
+	// final-holdout row in the first place (PR #321 review) — a query
+	// Range restriction alone would leave validation/holdout rows
+	// sitting in the local raw store even though this particular run
+	// never reads them, which is not the same guarantee.
+	developmentOnlyCSVPath := filterCSVBeforeDevelopmentEnd(t, fullArchiveEQR01CSPYCSVPath)
+
+	importResult, err := stooq.Import(ctx, developmentOnlyCSVPath, rawRoot, "SPY")
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}

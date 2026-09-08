@@ -234,6 +234,21 @@ func TestRunRSIRegimeEventStudy_PartitionEndExclusion(t *testing.T) {
 	}
 }
 
+// findCell returns the RSICellStats for (bucket, horizonLabel) out of
+// stats, failing the test if it is not present — every (RSIBucket,
+// Horizon) combination is always present since aggregateRSI reports
+// every cell, including empty ones (issue #319 PR #321 review).
+func findCell(t *testing.T, stats []RSICellStats, bucket RSIBucket, horizonLabel string) RSICellStats {
+	t.Helper()
+	for _, s := range stats {
+		if s.Bucket == bucket && s.Horizon.Label == horizonLabel {
+			return s
+		}
+	}
+	t.Fatalf("no cell found for bucket=%v horizon=%s", bucket, horizonLabel)
+	return RSICellStats{}
+}
+
 // TestRunRSIRegimeEventStudy_PositiveRegimeFiltering proves
 // PositiveRegimeStats only ever aggregates ForwardReturns whose
 // Observation.Regime is RegimePositive, while AllRegimeStats aggregates
@@ -249,17 +264,26 @@ func TestRunRSIRegimeEventStudy_PositiveRegimeFiltering(t *testing.T) {
 	result, err := RunRSIRegimeEventStudy(bars, cfg)
 	require.NoError(t, err)
 
-	require.Len(t, result.PositiveRegimeStats, 1, "only bucket B6/1d has any positive-regime forward returns")
-	posCell := result.PositiveRegimeStats[0]
-	assert.Equal(t, RSIBucketB6, posCell.Bucket)
-	assert.Equal(t, "1d", posCell.Horizon.Label)
+	// Every (RSIBucket, Horizon) combination is reported, including
+	// empty cells: 6 buckets x 1 horizon = 6 rows in each view.
+	require.Len(t, result.PositiveRegimeStats, 6)
+	require.Len(t, result.AllRegimeStats, 6)
+
+	posCell := findCell(t, result.PositiveRegimeStats, RSIBucketB6, "1d")
 	require.Equal(t, 1, posCell.Count, "only index 3's observation is RegimePositive with a 1d forward return")
 	assert.InDelta(t, (103.0-105)/105, posCell.MeanReturn, tol)
 
-	require.Len(t, result.AllRegimeStats, 1, "every 1d forward return shares bucket B6 in this fixture")
-	allCell := result.AllRegimeStats[0]
-	assert.Equal(t, RSIBucketB6, allCell.Bucket)
+	allCell := findCell(t, result.AllRegimeStats, RSIBucketB6, "1d")
 	assert.Equal(t, 4, allCell.Count, "indices 2,3,4,5 all have a 1d forward return")
+
+	// Every other bucket has zero forward returns in this fixture (all
+	// of them land in B6) and must still be reported, marked empty and
+	// insufficient rather than omitted.
+	for _, bucket := range []RSIBucket{RSIBucketB1, RSIBucketB2, RSIBucketB3, RSIBucketB4, RSIBucketB5} {
+		cell := findCell(t, result.AllRegimeStats, bucket, "1d")
+		assert.Zero(t, cell.Count, "bucket %v", bucket)
+		assert.True(t, cell.Insufficient, "bucket %v", bucket)
+	}
 }
 
 func TestRunRSIRegimeEventStudy_MinObservationsInsufficientFlag(t *testing.T) {
@@ -269,15 +293,19 @@ func TestRunRSIRegimeEventStudy_MinObservationsInsufficientFlag(t *testing.T) {
 	cfgStrict.MinObservations = 5
 	resultStrict, err := RunRSIRegimeEventStudy(bars, cfgStrict)
 	require.NoError(t, err)
-	require.Len(t, resultStrict.AllRegimeStats, 1)
-	assert.True(t, resultStrict.AllRegimeStats[0].Insufficient, "count 4 < MinObservations 5")
+	require.Len(t, resultStrict.AllRegimeStats, 6)
+	assert.True(t, findCell(t, resultStrict.AllRegimeStats, RSIBucketB6, "1d").Insufficient, "count 4 < MinObservations 5")
 
 	cfgLoose := baseRSIRegimeConfig(t, day(1))
 	cfgLoose.MinObservations = 4
 	resultLoose, err := RunRSIRegimeEventStudy(bars, cfgLoose)
 	require.NoError(t, err)
-	require.Len(t, resultLoose.AllRegimeStats, 1)
-	assert.False(t, resultLoose.AllRegimeStats[0].Insufficient, "count 4 >= MinObservations 4")
+	require.Len(t, resultLoose.AllRegimeStats, 6)
+	assert.False(t, findCell(t, resultLoose.AllRegimeStats, RSIBucketB6, "1d").Insufficient, "count 4 >= MinObservations 4")
+	// Every empty bucket is insufficient regardless of MinObservations,
+	// since MinObservations must be positive (validated) and 0 < any
+	// positive threshold.
+	assert.True(t, findCell(t, resultLoose.AllRegimeStats, RSIBucketB1, "1d").Insufficient)
 }
 
 // TestRunRSIRegimeEventStudy_DeterministicBootstrap proves the

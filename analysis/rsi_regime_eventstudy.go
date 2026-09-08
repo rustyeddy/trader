@@ -292,9 +292,16 @@ func RunRSIRegimeEventStudy(bars []marketdata.Bar, cfg RSIRegimeEventStudyConfig
 	return result, nil
 }
 
-// aggregateRSI groups frs by (Bucket, Horizon) and computes RSICellStats
-// for every combination that has at least one observation, in
-// RSIBuckets order then horizons order.
+// aggregateRSI groups frs by (Bucket, Horizon) and computes one
+// RSICellStats for every (Bucket, Horizon) combination in RSIBuckets x
+// horizons — including combinations with zero observations — in
+// RSIBuckets order then horizons order. Every cell is reported, per
+// the frozen protocol's own requirement that a cell below the minimum
+// observation count "is reported as insufficient evidence, not as
+// positive or negative evidence, and [is] still shown in the results
+// table rather than omitted" (docs/research/eqr-01-research-protocol.org).
+// A zero-observation cell is the most extreme case of that same rule,
+// not a special case to be dropped.
 func aggregateRSI(frs []RSIForwardReturn, horizons []Horizon, minObservations int, bootstrap BootstrapConfig) []RSICellStats {
 	type key struct {
 		bucket  RSIBucket
@@ -311,10 +318,7 @@ func aggregateRSI(frs []RSIForwardReturn, horizons []Horizon, minObservations in
 	for _, bucket := range RSIBuckets {
 		for _, h := range horizons {
 			k := key{bucket: bucket, horizon: h}
-			returns, ok := groups[k]
-			if !ok {
-				continue
-			}
+			returns := groups[k] // nil, and therefore len 0, when the cell has no observations.
 			lower, upper := bootstrapMeanCI(returns, bootstrap)
 			stats = append(stats, RSICellStats{
 				Bucket:           bucket,

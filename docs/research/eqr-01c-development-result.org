@@ -50,16 +50,30 @@ The test, gated behind the =fullarchive= tag and skipped unless an
 operator edits a local, uncommitted path constant, does the following
 against the real local Stooq archive (=/srv/trading/data/raw/stooq/spy_us_d.csv=):
 
-1. Runs =stooq.Import= once into a temporary raw-partition root.
+1. Filters the source CSV down to development-partition rows only
+   (=Date < 2019-01-01=) before it ever reaches the importer, then runs
+   =stooq.Import= over that filtered copy into a temporary raw-
+   partition root. This bounds the *ingestion* path itself, not merely
+   the later query: the raw-partition archive this test builds never
+   contains a validation or final-holdout row in the first place, so
+   there is no local copy of that data sitting on disk for a later,
+   different query to accidentally read (PR #321 review).
 2. Registers SPY as an ETF Listing (=ARCA=, ticker =SPY=, provider
    =stooq=) via =service/marketdata.RegisterETFInstrument=.
 3. Builds a =*marketdata.Manager= with a =USEquityCalendar= configured
-   via =StandardUSEquityHolidays= for years 2004-2019.
+   via =StandardUSEquityHolidays= for years 2005-2026 — the *full*
+   frozen EQR-01 protocol span (development through the frozen final-
+   holdout end year), per the protocol's own explicit requirement that
+   a narrower configured range is not an equivalent reproducible
+   substitute, even though this particular run only ever reads
+   development-partition bars (PR #321 review; the calendar
+   configuration is a property of the protocol, not of which partition
+   one run happens to query).
 4. Queries exactly the development partition
    (=[2005-02-25, 2019-01-01)=, half-open) via =Manager.Plan= /
-   =Manager.Build= / =Manager.Bars= — the query's own =Range= is the
-   only mechanism restricting the run to development data; validation
-   and final-holdout bars are never requested and never read.
+   =Manager.Build= / =Manager.Bars= against that already development-
+   only raw archive — validation and final-holdout bars are neither
+   ingested, requested, nor read anywhere in this run.
 5. Runs =analysis.RunRSIRegimeEventStudy= over the resulting bars with
    the frozen EQR-01 parameters (below) and prints the required
    measurements for both the primary (positive-regime) and secondary
@@ -87,7 +101,7 @@ requirement.
 | Interval                  | D1                                                               |
 | Provider                  | stooq                                                            |
 | Adjustment                | split-adjusted (=AdjustmentSplitAdjusted=, ADR-048)              |
-| Calendar                  | =USEquityCalendar= + =StandardUSEquityHolidays(2004..2019)=      |
+| Calendar                  | =USEquityCalendar= + =StandardUSEquityHolidays(2005..2026)= (full frozen protocol span) |
 | Partition                 | development: 2005-02-25 through 2018-12-31 (query end 2019-01-01, exclusive) |
 | Regime                    | =Close[t] > EMA(200)[t]=                                         |
 | Pullback observable       | RSI(2)                                                           |
@@ -97,11 +111,14 @@ requirement.
 | Bootstrap method          | nonparametric, 2000 resamples, 95% percentile interval           |
 | Bootstrap seed            | Seed1=319, Seed2=2000 (=math/rand/v2= =PCG=, fixed and recorded) |
 
-Raw import: 5,415 rows imported from the local Stooq export, spanning
-2005-02-25 through 2026-09-04 (the full archive; only the development-
-partition slice of it was ever queried or read into this study).
-Development-partition query returned 3,485 D1 bars (2005-02-25 through
-2018-12-31). Of those, 3,286 qualify as observations (both RSI(2) and
+Raw import: the local Stooq export (5,415 total rows, spanning
+2005-02-25 through 2026-09-04) was filtered to development-partition
+rows only (=Date < 2019-01-01=) before import — 3,485 rows kept, 1,930
+dropped — so =stooq.Import= itself ingested only 3,485 rows (2005-02-25
+through 2018-12-31); no validation or final-holdout row was ever
+written to the raw-partition archive this run built. The subsequent
+development-partition query returned those same 3,485 D1 bars. Of
+those, 3,286 qualify as observations (both RSI(2) and
 EMA(200) Ready — EMA(200)'s own 200-bar warmup consumes the partition's
 first 199 bars, which is expected and not an ambiguity: the
 development partition begins at the archive's own true first day, so
