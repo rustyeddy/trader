@@ -1,0 +1,189 @@
+#+TITLE: EQ-13: Alpaca End-to-End Equity Pipeline Smoke Test
+#+STARTUP: overview indent
+
+* Status
+
+Records issue #326 (EQ-13): proving the complete Alpaca historical
+equity pipeline end-to-end —
+
+#+BEGIN_EXAMPLE
+Alpaca Go SDK -> provider adapter -> raw bars -> canonical derivation
+    -> canonical persistence -> marketdata.Manager -> consumer read
+#+END_EXAMPLE
+
+— through Trader's normal architecture, using a real Alpaca paper
+credential, rather than bypassing =marketdata.Manager=/storage or
+comparing provider-native values directly in downstream code. This is
+a results/procedure record, not a durable architecture decision — it
+carries no ADR number, matching =eq-07-backtest-pipeline-note.org= and
+=eq-09-spy-paper-smoke.org='s own convention.
+
+Depends on and confirms, against real data, the mechanisms EQ-10
+(#323), EQ-11 (#324), and EQ-12 (#325/#329) already prove
+deterministically offline.
+
+* What was built
+
+New file =marketdata/alpaca_smoke_test.go= (=//go:build alpacasmoke=,
+reusing the tag already established by #297/#301/#302, not a fourth
+tag for the identical "real Alpaca credentials, never committed"
+purpose). Three tests:
+
+- =TestSmokeAlpacaEndToEndSPY=: retrieve -> canonicalize -> persist ->
+  =Manager= read for a real, recent SPY D1 range; asserts chronological
+  order, uniqueness, and =Bar.Validate= on every bar (issue #72's own
+  canonical invariant, exercised here against live data rather than
+  only fixtures); re-runs the identical sync to prove idempotence;
+  extends the range and re-syncs to prove incremental update (every
+  previously-covered date still present afterward, extension augments
+  rather than replaces); logs provider/feed/adjustment/calendar and
+  =Coverage=.
+- =TestSmokeAlpacaEndToEndAAPL=: the same retrieve/canonicalize/
+  persist/read path for AAPL, confirming every published =Manifest=
+  records =AdjustmentSplitAdjusted=.
+- =TestSmokeAlpacaVsStooqComparison=: a live Alpaca SPY sync compared,
+  date by date, against the same real local Stooq archive
+  =stooq_fullarchive_test.go= already uses, with a documented 1%
+  Close tolerance rather than byte equality.
+
+** Two-phase acquire-then-canonicalize, not Plan+Build alone
+
+The first implementation attempt called =mgr.Plan= then =mgr.Build=
+directly against an empty store, exactly as the pre-populated-raw
+fullarchive tests do. Every test failed with an empty
+=BuildResult.Published= and no error: against a store with no existing
+raw data, =Plan= returns =ActionDownloadRaw= entries, and
+=Manager.Build='s own action-kind switch silently routes anything that
+isn't =ActionNormalizeCanonical=/=ActionDeriveCanonical= to
+=Skipped= — "executing it is Sync's responsibility, not Build's."
+Downloading is =Sync='s job. The fix, factored into a shared
+=syncThenBuild= helper: =Plan= -> =Sync= (executes the download) ->
+=Plan= again (now raw exists, so this returns
+=ActionNormalizeCanonical=) -> =Build=. This is not a Manager defect;
+it is the documented division of responsibility between the two
+commands (=cmd/trader/data/sync.go='s own doc comment: "Sync acquires
+missing raw data; it never builds or publishes canonical data") — this
+file's first draft simply had not exercised the "nothing persisted
+yet" case the fullarchive tests never hit.
+
+** Credentials: a local file, not environment variables
+
+=config/arch_test.go='s =TestDomainPackagesDoNotReadEnvOrFlags= fails
+the build for any =os.Getenv= call outside =config/=, =cmd/=, or
+=test/=, and =marketdata= cannot be relocated there. Rather than
+requiring an operator to hand-edit a constant every run, this file
+follows =examples/eq09/smoke_test.go='s own established alternative:
+=loadAlpacaSmokeCredentials= reads a local, uncommitted YAML profile
+file (default path
+=~/.config/alpaca/profiles/paper.yaml=, =api_key=/=secret_key= fields)
+— reading an explicit local file path is not restricted by that same
+check — falling back to hand-edited =alpacaSmokeKeyID=/
+=alpacaSmokeSecretKey= constants when no such file is present, the
+"edit locally, never commit" discipline every other =alpacasmoke= file
+already uses.
+
+** No Alpaca SDK or provider-native types escape
+
+Verified structurally: this file imports only =marketdata='s own
+public API, the standard library, testify, and a YAML parser for its
+own credential file — never =marketdata/internal/provider/alpaca= or
+the =alpacahq= SDK directly. =alpacaSmokeCredential= satisfies
+=Config.AlpacaCredential= structurally (the same technique
+=cmd/trader/data/service.go='s =oandaTokenCredential= already uses for
+OANDA) without importing the interface's own defining package. That
+this file compiles and drives the full pipeline without ever importing
+those packages is itself the proof of EQ-13's "no Alpaca SDK types
+escape the provider boundary" acceptance criterion — not merely
+claimed by convention.
+
+* Manual prerequisites (never commit credentials)
+
+1. An Alpaca account with paper trading (or Market Data API access)
+   enabled.
+2. A paper-account API key ID/secret key pair.
+3. Either place that pair at
+   =~/.config/alpaca/profiles/paper.yaml= (=api_key=/=secret_key=
+   fields), or edit =alpacaSmokeKeyID=/=alpacaSmokeSecretKey= in
+   =marketdata/alpaca_smoke_test.go= locally — never commit the edit.
+4. Optionally, for =TestSmokeAlpacaVsStooqComparison= only: edit
+   =stooqSmokeSPYCSVPath= to a real local Stooq SPY export (for
+   example =/srv/trading/data/raw/stooq/spy_us_d.csv=). The other two
+   tests do not need this and run without it.
+
+#+BEGIN_SRC sh
+go test -tags alpacasmoke ./marketdata/... -run TestSmokeAlpaca -v
+#+END_SRC
+
+Unlike EQ-09's live paper-trading round trip, this does not require
+running during real NYSE regular hours: every requested range ends
+several days before "now" specifically to stay clear of any
+still-forming trading day, so historical D1 data is available
+regardless of when the test runs.
+
+* Recorded result
+
+Run live on 2026-09-08, against a real Alpaca account (Market Data
+API), using credentials loaded from
+=~/.config/alpaca/profiles/paper.yaml=, with race detection enabled:
+
+#+BEGIN_SRC sh
+go test -tags alpacasmoke -race ./marketdata/... -run TestSmokeAlpaca -v
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+=== RUN   TestSmokeAlpacaEndToEndSPY
+    synced etf:ARCA:SPY D1 2026-08: 21 record(s) written, 0 revised
+    synced etf:ARCA:SPY D1 2026-09: 5 record(s) written, 0 revised
+    published etf:ARCA:SPY D1: 21 bars, feed=iex, adjustment=split_adjusted, calendar=usequitycalendar-v1
+    published etf:ARCA:SPY D1: 5 bars, feed=iex, adjustment=split_adjusted, calendar=usequitycalendar-v1
+    SPY: 14 real trading days from 2026-08-14 to 2026-09-03
+    coverage: 2 partition(s), 0 gap(s)
+    SPY extension: 14 -> 16 bars, 0 legitimately revised
+--- PASS: TestSmokeAlpacaEndToEndSPY (0.40s)
+=== RUN   TestSmokeAlpacaEndToEndAAPL
+    synced eq:NASDAQ:AAPL D1 2026-08: 21 record(s) written, 0 revised
+    synced eq:NASDAQ:AAPL D1 2026-09: 5 record(s) written, 0 revised
+    published eq:NASDAQ:AAPL D1: 21 bars, feed=iex, adjustment=split_adjusted
+    published eq:NASDAQ:AAPL D1: 5 bars, feed=iex, adjustment=split_adjusted
+    AAPL: 11 real trading days from 2026-08-19 to 2026-09-03
+--- PASS: TestSmokeAlpacaEndToEndAAPL (0.16s)
+=== RUN   TestSmokeAlpacaVsStooqComparison
+    synced etf:ARCA:SPY D1 2026-08: 21 record(s) written, 0 revised
+    synced etf:ARCA:SPY D1 2026-09: 5 record(s) written, 0 revised
+    imported 5415 Stooq rows through 2026-09-04
+    2026-08-24: alpaca close=763.46 stooq close=763.47 diff=0.0013%
+    2026-08-25: alpaca close=765.79 stooq close=765.91 diff=0.0157%
+    2026-08-26: alpaca close=765.94 stooq close=766.08 diff=0.0183%
+    2026-08-27: alpaca close=771.18 stooq close=771.1  diff=0.0104%
+    2026-08-28: alpaca close=769.28 stooq close=769.35 diff=0.0091%
+    2026-08-31: alpaca close=766.87 stooq close=767.05 diff=0.0235%
+    2026-09-01: alpaca close=761.63 stooq close=761.78 diff=0.0197%
+    2026-09-02: alpaca close=765.13 stooq close=765.16 diff=0.0039%
+--- PASS: TestSmokeAlpacaVsStooqComparison (0.42s)
+PASS
+ok  	github.com/rustyeddy/trader/marketdata	1.998s
+#+END_EXAMPLE
+
+** Observations
+
+- Every published =Manifest= recorded =feed=iex=,
+  =adjustment=split_adjusted=, matching the offline fixture tests'
+  own assumptions against real API responses, not just hand-built
+  JSON.
+- The idempotent re-run left every bar's =Close= byte-identical
+  (asserted, not merely logged) — no spurious revisions from
+  re-fetching already-settled data.
+- Extending the range by 3 calendar days added exactly 2 new trading
+  days (14 -> 16) with =0= legitimately revised bars in this run; the
+  test logs (rather than hard-asserts) any revision found in the
+  overlap window, since a genuine late correction is a legitimate,
+  expected outcome (#325/#329), not a failure.
+- Alpaca (IEX feed) and Stooq's independently-sourced SPY closes
+  agreed to within 0.024% on every one of the 8 overlapping trading
+  days checked — comfortably inside the documented 1% tolerance,
+  and consistent with both being genuinely split-adjusted, real market
+  data rather than two unrelated series.
+- =go vet -tags alpacasmoke ./marketdata/= and a plain,
+  =alpacasmoke=-tagged =go build= are clean; the untagged
+  =go build ./...=/=go test ./...= are byte-for-byte unaffected — this
+  file contributes nothing to normal CI.
