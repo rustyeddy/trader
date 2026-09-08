@@ -841,6 +841,36 @@ func TestMergeAlpacaRecordsByTime_UnchangedRefetchIsNotARevision(t *testing.T) {
 	assert.Equal(t, 0, revised)
 }
 
+// TestMergeAlpacaRecordsByTime_DuplicateFetchedTimeCountsOnce is PR
+// #329's review finding: fetched repeating the same Time more than
+// once (a paginated or overlapping provider response could plausibly
+// do this) must not inflate revised beyond len(existing) — each
+// already-persisted record that ends up different can be revised at
+// most once, regardless of how many times fetched happens to name its
+// Time.
+func TestMergeAlpacaRecordsByTime_DuplicateFetchedTimeCountsOnce(t *testing.T) {
+	at := time.Date(2020, time.May, 4, 0, 0, 0, 0, time.UTC)
+	existing := []alpaca.Record{{
+		Time: at, Open: num.MustParsePrice("280"), High: num.MustParsePrice("282"),
+		Low: num.MustParsePrice("279"), Close: num.MustParsePrice("281"), Volume: 1000,
+	}}
+	// Two fetched records at the identical Time, both differing from
+	// existing's original value and from each other — a naively
+	// progressive comparison (each fetched record checked against the
+	// previous fetched record rather than existing's own original
+	// value) would count this as 2 revisions instead of 1.
+	fetched := []alpaca.Record{
+		{Time: at, Open: num.MustParsePrice("280"), High: num.MustParsePrice("282"),
+			Low: num.MustParsePrice("279"), Close: num.MustParsePrice("281.5"), Volume: 1000},
+		{Time: at, Open: num.MustParsePrice("280"), High: num.MustParsePrice("282"),
+			Low: num.MustParsePrice("279"), Close: num.MustParsePrice("281.8"), Volume: 1000},
+	}
+	merged, revised := mergeAlpacaRecordsByTime(existing, fetched)
+	require.Len(t, merged, 1, "one Time slot in, one Time slot out")
+	assert.Equal(t, 1, revised, "one already-existing record ended up revised, not two")
+	assert.Equal(t, "281.8", merged[0].Close.String(), "fetched's last occurrence still wins the slot")
+}
+
 // TestAlpacaSync_RunningSyncTwiceIsIdempotent is issue #325 (EQ-12)'s
 // own "running the same sync twice produces no duplicate canonical
 // bars and no semantic changes" acceptance criterion: syncing twice
@@ -937,6 +967,119 @@ func TestAlpacaSync_DetectsAndAppliesARevisedRecord(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, records, 2)
 	assert.Equal(t, "105", records[0].Close.String(), "fetched wins the revision")
+}
+
+// rangeAwareAlpacaDoer is fakeAlpacaDoer's opposite: instead of
+// returning a fixed, canned response regardless of what was
+// requested, it actually reads the request's own "start" query
+// parameter and serves only fixture bars on or after it — the same
+// range-filtering behavior the real Alpaca API applies. This is what
+// TestAlpacaSync_ExtendsRequestOverlapAndDetectsRevision (PR #329
+// review) needs to distinguish "the merge helper can detect a
+// revision" (already proven by TestAlpacaSync_DetectsAndAppliesARevisedRecord,
+// whose fake ignores range filtering entirely) from "syncOneAlpaca's
+// real incremental fetch actually requests enough overlap to ever see
+// one" — a fake that returns out-of-range data regardless of the
+// request cannot tell the two apart.
+type rangeAwareAlpacaDoer struct {
+	mu       sync.Mutex
+	bars     []barFixture // full fixture universe, by date
+	requests []*http.Request
+}
+
+func (f *rangeAwareAlpacaDoer) RoundTrip(req *http.Request) (*http.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+
+	start, err := time.Parse(time.RFC3339, req.URL.Query().Get("start"))
+	if err != nil {
+		return nil, fmt.Errorf("rangeAwareAlpacaDoer: parse start: %w", err)
+	}
+	var served []barFixture
+	for _, bf := range f.bars {
+		d, err := time.Parse("2006-01-02", bf.date)
+		if err != nil {
+			return nil, fmt.Errorf("rangeAwareAlpacaDoer: parse fixture date: %w", err)
+		}
+		if !d.Before(start) {
+			served = append(served, bf)
+		}
+	}
+	body := alpacaBarsJSONForTestWithClose(served)
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+}
+
+// lastRequestedStart returns the "start" query parameter of the most
+// recent request this doer served, for a test to assert against.
+func (f *rangeAwareAlpacaDoer) lastRequestedStart(t *testing.T) time.Time {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	require.NotEmpty(t, f.requests)
+	req := f.requests[len(f.requests)-1]
+	start, err := time.Parse(time.RFC3339, req.URL.Query().Get("start"))
+	require.NoError(t, err)
+	return start
+}
+
+// TestAlpacaSync_ExtendsRequestOverlapAndDetectsRevision is PR #329's
+// review finding, addressed directly: syncOneAlpaca's original
+// "advance strictly past the last persisted record" logic meant a
+// real (range-filtering) Alpaca response could never re-cover an
+// already-persisted date, so a provider-side correction to it could
+// never be observed in the actual incremental sync path — only in the
+// merge helper tested in isolation against a fake that ignored the
+// requested range. This test uses rangeAwareAlpacaDoer, which does
+// honor the requested range like the real API, to prove both halves
+// together: the sync actually requests a start on or before the last
+// persisted date (the overlap window), and a changed value for that
+// date is genuinely fetched and counted as a revision through the
+// real path — not asserted against a fake return value the request
+// never earned.
+func TestAlpacaSync_ExtendsRequestOverlapAndDetectsRevision(t *testing.T) {
+	rawRoot := t.TempDir()
+	existing := []alpaca.Record{
+		{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("100"), High: num.MustParsePrice("101"),
+			Low: num.MustParsePrice("99"), Close: num.MustParsePrice("100.5"), Volume: 1000},
+		{Time: time.Date(2020, 5, 4, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("100"), High: num.MustParsePrice("101"),
+			Low: num.MustParsePrice("99"), Close: num.MustParsePrice("102.0"), Volume: 1000},
+	}
+	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, alpaca.FeedIEX, existing, true))
+
+	// The fixture universe: May 4 (the last persisted date) revised to
+	// a genuinely different close, and May 5, a brand-new date. If
+	// syncOneAlpaca requested a start strictly after May 4 (the
+	// original, pre-fix behavior), this doer's own range filtering
+	// would never serve the revised May 4 row at all.
+	doer := &rangeAwareAlpacaDoer{bars: []barFixture{
+		{date: "2020-05-04", close: "110.00"},
+		{date: "2020-05-05", close: "103.00"},
+	}}
+	mgr := newAlpacaTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "extend",
+	}}}
+	result, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+
+	requestedStart := doer.lastRequestedStart(t)
+	assert.False(t, requestedStart.After(time.Date(2020, 5, 4, 0, 0, 0, 0, time.UTC)),
+		"sync must request on or before the last persisted date (2020-05-04) to have any chance of observing a correction to it, requested %s instead", requestedStart)
+
+	assert.Equal(t, 3, result.Downloaded[0].RecordsWritten, "May 1 (untouched), May 4 (revised), May 5 (new)")
+	assert.Equal(t, 1, result.Downloaded[0].RecordsRevised, "only May 4 actually changed value")
+
+	records, err := alpaca.ReadPartitionRecords(context.Background(), rawRoot, "SPY", 2020, time.May)
+	require.NoError(t, err)
+	require.Len(t, records, 3)
+	assert.Equal(t, "100.5", records[0].Close.String(), "May 1 was outside this fetch's served range and must be untouched")
+	assert.Equal(t, "110", records[1].Close.String(), "May 4's correction was applied")
 }
 
 // alpacaRawPartitionPathForTest mirrors partitionPath's own convention

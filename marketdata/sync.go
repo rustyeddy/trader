@@ -281,6 +281,25 @@ func mergeRecordsByTime(existing, fetched []oanda.Record) []oanda.Record {
 	return out
 }
 
+// alpacaSyncOverlapRecords is how many of a partition's own most
+// recently persisted records syncOneAlpaca re-requests on every
+// extension, specifically so a provider-side correction to
+// already-persisted data can actually be observed and reported via
+// RecordsRevised (PR #329 review). Every alpaca.Record represents a
+// fully closed trading day with no incomplete-tail case to handle
+// (see syncOneAlpaca's own doc comment), but Alpaca can still revise a
+// closed day's own bar after the fact; advancing strictly past the
+// last persisted record — the original behavior — made that
+// invisible in the real incremental path, since a normal fetch would
+// simply never re-request a date it already has. Re-requesting the
+// last persisted record is the minimum overlap that can ever detect a
+// correction to it. 1 is the documented starting value, matching the
+// review's own "at minimum the last persisted trading day"; widen it
+// only if evidence of a longer correction lag actually appears —
+// this is deliberately not solved speculatively for an unbounded
+// window.
+const alpacaSyncOverlapRecords = 1
+
 // syncOneAlpaca executes a single ActionDownloadRaw entry against
 // Alpaca, mirroring syncOneOANDA's own "missing versus extend" logic.
 // It differs from syncOneOANDA in one respect: every alpaca.Record
@@ -288,8 +307,9 @@ func mergeRecordsByTime(existing, fetched []oanda.Record) []oanda.Record {
 // alpaca.Partition.LastComplete's own doc comment) — there is no
 // provisional/incomplete tail record analogous to an OANDA candle
 // whose Complete flag might still be false, so there is no
-// incomplete-tail re-fetch case to handle; advancing strictly past the
-// last existing record's own Time is always correct.
+// incomplete-tail re-fetch case to handle on that account. There is,
+// however, a distinct reason to re-request part of what is already
+// persisted: alpacaSyncOverlapRecords's own doc comment.
 func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadResult, error) {
 	rawIntervalToken, ok := intervalToRawInterval(action.Interval)
 	if !ok {
@@ -341,7 +361,16 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 	default:
 		sort.Slice(existing, func(i, j int) bool { return existing[i].Time.Before(existing[j].Time) })
 		if n := len(existing); n > 0 {
-			from = existing[n-1].Time.Add(time.Nanosecond)
+			// Re-request the last alpacaSyncOverlapRecords persisted
+			// records (inclusive) rather than advancing strictly past
+			// them, so a provider-side correction to one of them can
+			// actually be fetched and detected — see
+			// alpacaSyncOverlapRecords's own doc comment.
+			overlapIdx := n - alpacaSyncOverlapRecords
+			if overlapIdx < 0 {
+				overlapIdx = 0
+			}
+			from = existing[overlapIdx].Time
 		}
 	}
 
@@ -431,26 +460,46 @@ var ErrFeedMismatch = errors.New("marketdata: alpaca feed mismatch")
 // extend regardless of iteration order.
 // mergeAlpacaRecordsByTime merges existing and fetched, fetched always
 // winning a collision at the same Time, and additionally reports
-// revised: the number of Time collisions where fetched's own OHLCV
-// fields actually differ from existing's — a provider-side revision to
-// an already-persisted bar (for example a late correction), not merely
-// a re-fetch of unchanged data (issue #325, EQ-12's own "detect
-// conflicting revisions... and handle them explicitly rather than
-// silently corrupting or duplicating data" requirement). The merge
-// policy itself is unchanged and already deterministic (fetched wins);
-// revised makes that policy's actual effect observable to a caller via
-// DownloadResult, rather than a silent overwrite indistinguishable from
-// an ordinary unchanged re-fetch.
+// revised: the number of existing records whose Time collided with
+// fetched and whose OHLCV fields actually ended up different — a
+// provider-side revision to an already-persisted bar (for example a
+// late correction), not merely a re-fetch of unchanged data (issue
+// #325, EQ-12's own "detect conflicting revisions... and handle them
+// explicitly rather than silently corrupting or duplicating data"
+// requirement). The merge policy itself is unchanged and already
+// deterministic (fetched wins); revised makes that policy's actual
+// effect observable to a caller via DownloadResult, rather than a
+// silent overwrite indistinguishable from an ordinary unchanged
+// re-fetch.
+//
+// revised is computed against existing's original, pre-fetch values —
+// not against a running/mutated merge state — and counts each
+// colliding Time at most once, even if fetched itself repeats that
+// Time more than once (a paginated or overlapping provider response
+// could plausibly do this). Comparing against a progressively-updated
+// map would double-count such a case: the second occurrence would be
+// compared against the first fetched value rather than the original
+// existing one, reporting two revisions for one already-persisted
+// record (PR #329 review). RecordsRevised is documented as counting
+// already-existing records overwritten, not collisions observed, so
+// it must not exceed len(existing) regardless of how fetched is
+// shaped.
 func mergeAlpacaRecordsByTime(existing, fetched []alpaca.Record) (merged []alpaca.Record, revised int) {
+	original := make(map[int64]alpaca.Record, len(existing))
 	byTime := make(map[int64]alpaca.Record, len(existing)+len(fetched))
 	for _, r := range existing {
-		byTime[r.Time.UTC().UnixNano()] = r
+		key := r.Time.UTC().UnixNano()
+		original[key] = r
+		byTime[key] = r
 	}
+	counted := make(map[int64]bool, len(fetched))
 	for _, r := range fetched {
-		if old, ok := byTime[r.Time.UTC().UnixNano()]; ok && !alpacaRecordFieldsEqual(old, r) {
+		key := r.Time.UTC().UnixNano()
+		if old, ok := original[key]; ok && !alpacaRecordFieldsEqual(old, r) && !counted[key] {
 			revised++
+			counted[key] = true
 		}
-		byTime[r.Time.UTC().UnixNano()] = r
+		byTime[key] = r
 	}
 	out := make([]alpaca.Record, 0, len(byTime))
 	for _, r := range byTime {
