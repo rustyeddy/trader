@@ -242,7 +242,7 @@ names explicitly: "insufficient observation counts throughout the
 relevant buckets in either partition." The validation partition (4
 years, ~1,000 sessions, ~809 usable observations after EMA(200)
 warmup) simply produced far fewer extreme-oversold (RSI(2)<10) days
-than the 14-year development partition did — SPI's 2019-2022 window
+than the 14-year development partition did — SPY's 2019-2022 window
 was a less volatile, less frequently-extreme-pullback period on a
 per-observation basis for this instrument.
 
@@ -324,13 +324,17 @@ Continue criterion would want to see, not more.
 
 ** No accidental holdout access
 
-Confirmed structurally, not merely by convention: =filterCSVBeforeFinalHoldout=
-stops scanning the source CSV at the first row on or after 2023-01-01
-and never opens, reads, or parses any byte beyond that row's own Date
-field. The raw-partition archive this test built therefore contains no
-final-holdout row, and the validation query itself additionally never
-requested anything at or after 2023-01-01. Final holdout was not
-accessed in the production of this document.
+Confirmed structurally, not merely by convention:
+=filterCSVBeforeFinalHoldout= stops scanning the source CSV the moment
+it reaches the first row on or after 2023-01-01. That one boundary row's
+line is necessarily read (into the scanner's buffer) to determine its
+Date, but no OHLCV value from it — or from any row after it — is ever
+parsed or written to the filtered copy, and no further line of the
+source file is even buffered. The raw-partition archive this test
+built therefore contains no final-holdout row, and the validation
+query itself additionally never requested anything at or after
+2023-01-01. Final holdout was not accessed in the production of this
+document.
 
 * Classification and Decision
 

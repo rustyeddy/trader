@@ -78,11 +78,14 @@ const (
 // first row on or after the final-holdout boundary, exactly mirroring
 // filterCSVBeforeDevelopmentEnd's own stop-scan strategy (issue #319,
 // PR #321 re-review): no OHLCV value from any final-holdout row is
-// ever parsed, and no byte of the file past the single boundary-
-// crossing row's Date field is ever read. Development and validation
-// rows (everything strictly before 2023-01-01) are both kept, since
-// this run's raw-partition archive needs to cover the validation
-// query range; development rows already went through EQR-01C's own
+// ever parsed or written to the filtered copy, and no line of the
+// file after the single boundary-crossing row is even buffered. The
+// boundary-crossing row's own line is necessarily read into
+// bufio.Scanner's buffer to determine its Date, but its OHLCV fields
+// are never parsed or used. Development and validation rows
+// (everything strictly before 2023-01-01) are both kept, since this
+// run's raw-partition archive needs to cover the validation query
+// range; development rows already went through EQR-01C's own
 // identical structural boundary and are not re-examined here.
 func filterCSVBeforeFinalHoldout(t *testing.T, srcPath string) string {
 	t.Helper()
