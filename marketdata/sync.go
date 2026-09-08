@@ -21,6 +21,15 @@ type DownloadResult struct {
 	// partition file holds after this Sync call — the full file's
 	// content, not just the newly-fetched tail for an "extend".
 	RecordsWritten int
+	// RecordsRevised is the number of already-existing records this
+	// call's fetch overwrote with a genuinely different OHLCV value at
+	// the same Time — a provider-side revision to an already-persisted
+	// bar, surfaced explicitly rather than silently indistinguishable
+	// from an unchanged re-fetch (issue #325, EQ-12). Currently only
+	// ever non-zero for the "alpaca" provider
+	// (mergeAlpacaRecordsByTime); zero for every other provider and for
+	// a brand-new partition with nothing to revise.
+	RecordsRevised int
 }
 
 // SkippedAction records one Plan Action Sync did not execute, and why —
@@ -374,20 +383,21 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 	}
 
 	merged := existing
+	var revised int
 	if upper.After(from) {
 		fetched, err := m.alpacaClient.FetchBars(ctx, alpaca.BarRequest{Symbol: symbol, From: from, To: upper})
 		if err != nil {
 			return DownloadResult{}, fmt.Errorf("fetch bars: %w", err)
 		}
 		if len(fetched) > 0 || mustNotExist {
-			merged = mergeAlpacaRecordsByTime(existing, fetched)
+			merged, revised = mergeAlpacaRecordsByTime(existing, fetched)
 			if err := alpaca.WritePartition(ctx, m.rawRoot, symbol, action.Year, action.Month, currentFeed, merged, mustNotExist); err != nil {
 				return DownloadResult{}, fmt.Errorf("write partition: %w", err)
 			}
 		}
 	}
 
-	return DownloadResult{Action: action, RecordsWritten: len(merged)}, nil
+	return DownloadResult{Action: action, RecordsWritten: len(merged), RecordsRevised: revised}, nil
 }
 
 // ErrFeedMismatch marks an attempt to extend an existing, non-empty
@@ -419,12 +429,27 @@ var ErrFeedMismatch = errors.New("marketdata: alpaca feed mismatch")
 // (PR #312 review) — so the merged result is explicitly sorted by Time
 // before being returned, guaranteeing a well-ordered partition on every
 // extend regardless of iteration order.
-func mergeAlpacaRecordsByTime(existing, fetched []alpaca.Record) []alpaca.Record {
+// mergeAlpacaRecordsByTime merges existing and fetched, fetched always
+// winning a collision at the same Time, and additionally reports
+// revised: the number of Time collisions where fetched's own OHLCV
+// fields actually differ from existing's — a provider-side revision to
+// an already-persisted bar (for example a late correction), not merely
+// a re-fetch of unchanged data (issue #325, EQ-12's own "detect
+// conflicting revisions... and handle them explicitly rather than
+// silently corrupting or duplicating data" requirement). The merge
+// policy itself is unchanged and already deterministic (fetched wins);
+// revised makes that policy's actual effect observable to a caller via
+// DownloadResult, rather than a silent overwrite indistinguishable from
+// an ordinary unchanged re-fetch.
+func mergeAlpacaRecordsByTime(existing, fetched []alpaca.Record) (merged []alpaca.Record, revised int) {
 	byTime := make(map[int64]alpaca.Record, len(existing)+len(fetched))
 	for _, r := range existing {
 		byTime[r.Time.UTC().UnixNano()] = r
 	}
 	for _, r := range fetched {
+		if old, ok := byTime[r.Time.UTC().UnixNano()]; ok && !alpacaRecordFieldsEqual(old, r) {
+			revised++
+		}
 		byTime[r.Time.UTC().UnixNano()] = r
 	}
 	out := make([]alpaca.Record, 0, len(byTime))
@@ -432,7 +457,15 @@ func mergeAlpacaRecordsByTime(existing, fetched []alpaca.Record) []alpaca.Record
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
-	return out
+	return out, revised
+}
+
+// alpacaRecordFieldsEqual reports whether a and b carry the same OHLCV
+// values — Time is deliberately not compared, since every call site
+// already established Time equality (the shared map key) before
+// calling this.
+func alpacaRecordFieldsEqual(a, b alpaca.Record) bool {
+	return a.Open == b.Open && a.High == b.High && a.Low == b.Low && a.Close == b.Close && a.Volume == b.Volume
 }
 
 // resolveRawSymbol resolves id to this Manager's provider-native display

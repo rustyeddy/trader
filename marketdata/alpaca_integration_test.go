@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -809,7 +811,7 @@ func TestMergeAlpacaRecordsByTime_ResultIsSortedByTime(t *testing.T) {
 	existing := []alpaca.Record{mk(4, "281"), mk(1, "280")}
 	fetched := []alpaca.Record{mk(4, "281.5"), mk(6, "283"), mk(5, "282")}
 
-	merged := mergeAlpacaRecordsByTime(existing, fetched)
+	merged, revised := mergeAlpacaRecordsByTime(existing, fetched)
 
 	require.Len(t, merged, 4)
 	for i := 1; i < len(merged); i++ {
@@ -819,6 +821,249 @@ func TestMergeAlpacaRecordsByTime_ResultIsSortedByTime(t *testing.T) {
 	assert.True(t, merged[3].Time.Equal(time.Date(2020, time.May, 6, 0, 0, 0, 0, time.UTC)))
 	// fetched's own May 4 record must win the collision with existing's.
 	assert.Equal(t, "281.5", merged[1].Close.String())
+	// The May 4 collision changed Close (281 -> 281.5): a real revision,
+	// counted. May 5/6 are brand-new Times, not collisions, and don't count.
+	assert.Equal(t, 1, revised)
+}
+
+// TestMergeAlpacaRecordsByTime_UnchangedRefetchIsNotARevision proves
+// re-fetching identical data for an already-covered Time is not
+// counted as a revision (issue #325, EQ-12) — only a genuine value
+// change at a colliding Time counts.
+func TestMergeAlpacaRecordsByTime_UnchangedRefetchIsNotARevision(t *testing.T) {
+	rec := alpaca.Record{
+		Time: time.Date(2020, time.May, 4, 0, 0, 0, 0, time.UTC),
+		Open: num.MustParsePrice("280"), High: num.MustParsePrice("282"),
+		Low: num.MustParsePrice("279"), Close: num.MustParsePrice("281"), Volume: 1000,
+	}
+	merged, revised := mergeAlpacaRecordsByTime([]alpaca.Record{rec}, []alpaca.Record{rec})
+	require.Len(t, merged, 1)
+	assert.Equal(t, 0, revised)
+}
+
+// TestAlpacaSync_RunningSyncTwiceIsIdempotent is issue #325 (EQ-12)'s
+// own "running the same sync twice produces no duplicate canonical
+// bars and no semantic changes" acceptance criterion: syncing twice
+// against a fetch client that returns the exact same data both times
+// produces byte-identical raw partitions and zero revisions on the
+// second run.
+func TestAlpacaSync_RunningSyncTwiceIsIdempotent(t *testing.T) {
+	rawRoot := t.TempDir()
+	body := alpacaBarsJSONForTest([]string{"2020-05-01", "2020-05-04"})
+	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{{status: 200, body: body}}}
+	mgr := newAlpacaTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "missing",
+	}}}
+	result1, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	require.Equal(t, 2, result1.Downloaded[0].RecordsWritten)
+	assert.Zero(t, result1.Downloaded[0].RecordsRevised)
+
+	bytes1, err := os.ReadFile(alpacaRawPartitionPathForTest(rawRoot, "SPY", 2020, time.May))
+	require.NoError(t, err)
+
+	// Second sync: the existing partition's own tail (May 4) is before
+	// the month's end, so syncOneAlpaca's "extend" logic still issues a
+	// fetch for the remaining range — this fake transport (unlike the
+	// real Alpaca API) does not filter by the requested range and
+	// returns the identical May 1/May 4 body again regardless, which is
+	// exactly what makes this a genuine test of merge-time idempotency:
+	// both records collide by Time with identical values, so nothing is
+	// duplicated and nothing is counted as revised.
+	doer.responses = []fakeAlpacaResponse{{status: 200, body: body}}
+	result2, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	assert.Equal(t, 2, result2.Downloaded[0].RecordsWritten, "no duplicate records after a second sync")
+	assert.Zero(t, result2.Downloaded[0].RecordsRevised)
+
+	bytes2, err := os.ReadFile(alpacaRawPartitionPathForTest(rawRoot, "SPY", 2020, time.May))
+	require.NoError(t, err)
+	assert.Equal(t, bytes1, bytes2, "the raw partition file must be byte-identical after an idempotent second sync")
+}
+
+// TestAlpacaSync_DetectsAndAppliesARevisedRecord is issue #325
+// (EQ-12)'s own "detect conflicting revisions for an already-persisted
+// bar and handle them explicitly" acceptance criterion, exercised at
+// the full Sync level (TestMergeAlpacaRecordsByTime_ResultIsSortedByTime
+// already proves the same policy at the merge-function level): a
+// second sync whose fetch returns a different Close for an
+// already-covered date is applied (fetched wins, the existing
+// deterministic policy) and reported via DownloadResult.RecordsRevised
+// rather than silently indistinguishable from an unchanged re-fetch.
+func TestAlpacaSync_DetectsAndAppliesARevisedRecord(t *testing.T) {
+	rawRoot := t.TempDir()
+	existing := []alpaca.Record{{
+		Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		Open: num.MustParsePrice("100"), High: num.MustParsePrice("101"),
+		Low: num.MustParsePrice("99"), Close: num.MustParsePrice("100.5"), Volume: 1000,
+	}}
+	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, alpaca.FeedIEX, existing, true))
+
+	// syncOneAlpaca's own "extend" logic normally fetches only from just
+	// past the existing tail forward, which would never re-request May
+	// 1. Using Reason "missing" here does not itself change that
+	// fetch-range logic (syncOneAlpaca computes "from" purely from
+	// whether a raw partition already has records, regardless of
+	// Reason) — what actually makes this fetch legitimately re-cover
+	// May 1 is that this fake transport, unlike the real Alpaca API,
+	// does not filter its canned response by the requested range at
+	// all: whatever range syncOneAlpaca asks for, it returns both dates
+	// below regardless. That is exactly the scenario this test needs —
+	// a fetch that happens to re-cover an already-persisted date with a
+	// genuinely different value — without needing to fake a real
+	// mid-month revision request/response cycle precisely.
+	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
+		{status: 200, body: alpacaBarsJSONForTestWithClose([]barFixture{
+			{date: "2020-05-01", close: "105.00"},
+			{date: "2020-05-04", close: "110.00"},
+		})},
+	}}
+	mgr := newAlpacaTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "missing",
+	}}}
+	result, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
+	assert.Equal(t, 1, result.Downloaded[0].RecordsRevised, "May 1's Close changed from 100.5 to 105.00")
+
+	records, err := alpaca.ReadPartitionRecords(context.Background(), rawRoot, "SPY", 2020, time.May)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	assert.Equal(t, "105", records[0].Close.String(), "fetched wins the revision")
+}
+
+// alpacaRawPartitionPathForTest mirrors partitionPath's own convention
+// (unexported inside the alpaca package) so this file's tests can
+// locate a raw partition file directly, without depending on any
+// unexported alpaca-package helper.
+func alpacaRawPartitionPathForTest(root, symbol string, year int, month time.Month) string {
+	return filepath.Join(root, symbol, fmt.Sprintf("%04d", year), fmt.Sprintf("%02d", int(month)),
+		fmt.Sprintf("%s-%04d-%02d-d1.csv", symbol, year, int(month)))
+}
+
+// barFixture names one synthetic bar's date and close for
+// alpacaBarsJSONForTestWithClose.
+type barFixture struct {
+	date  string
+	close string
+}
+
+// alpacaBarsJSONForTestWithClose is alpacaBarsJSONForTest generalized
+// to let a test control each bar's own Close value — needed to
+// construct a genuine revision (a re-fetched date with a materially
+// different price) rather than an incidentally-identical re-fetch.
+func alpacaBarsJSONForTestWithClose(bars []barFixture) string {
+	var b strings.Builder
+	b.WriteString(`{"bars":{"SPY":[`)
+	for i, bf := range bars {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"t":"%sT04:00:00Z","o":100.00,"h":101.00,"l":99.00,"c":%s,"v":123456}`, bf.date, bf.close)
+	}
+	b.WriteString(`]},"next_page_token":null}`)
+	return b.String()
+}
+
+// TestAlpacaEndToEnd_HolidayGapReadsCorrectly mirrors
+// TestStooqEndToEnd_HolidayGapReadsCorrectly exactly (issue #325,
+// EQ-12's own "calendar/session gaps are distinguished from
+// missing-data gaps" and "SPY and AAPL are covered in offline
+// deterministic tests" acceptance criteria): a real closed-market
+// holiday (New Year's Day 2020, a genuine NYSE closure) has no bar and
+// is not a coverage gap, proving Alpaca's own path integrates
+// correctly with the same USEquityCalendar-driven session model Stooq
+// already proves this for.
+func TestAlpacaEndToEnd_HolidayGapReadsCorrectly(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	records := []alpaca.Record{
+		{Time: time.Date(2019, 12, 30, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("296.759"), High: num.MustParsePrice("296.759"),
+			Low: num.MustParsePrice("296.759"), Close: num.MustParsePrice("296.759")},
+		{Time: time.Date(2019, 12, 31, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("297.478"), High: num.MustParsePrice("297.478"),
+			Low: num.MustParsePrice("297.478"), Close: num.MustParsePrice("297.478")},
+		{Time: time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("300.272"), High: num.MustParsePrice("300.272"),
+			Low: num.MustParsePrice("300.272"), Close: num.MustParsePrice("300.272")},
+		{Time: time.Date(2020, 1, 3, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("297.994"), High: num.MustParsePrice("297.994"),
+			Low: num.MustParsePrice("297.994"), Close: num.MustParsePrice("297.994")},
+	}
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2019, time.December, alpaca.FeedIEX, records[:2], true))
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.January, alpaca.FeedIEX, records[2:], true))
+
+	mgr := newAlpacaTestManager(t, rawRoot)
+	span, err := NewTimeRange(
+		time.Date(2019, 12, 30, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 1, 4, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: alpacaSPYID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	_, err = mgr.Build(ctx, plan)
+	require.NoError(t, err)
+
+	cov, err := mgr.Coverage(ctx, BarQuery{Instrument: alpacaSPYID(t), Interval: D1, Range: span})
+	require.NoError(t, err)
+	assert.Empty(t, cov.Gaps, "New Year's Day is a real NYSE closure, not a coverage gap")
+
+	reader, err := mgr.Bars(ctx, query)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
+
+	var bars []Bar
+	for {
+		b, err := reader.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		bars = append(bars, b)
+	}
+	require.Len(t, bars, 4, "expected exactly the 4 real trading days; New Year's Day must not appear as a bar")
+}
+
+// TestAlpacaCoverage_MissingMonthIsAGap proves the mirror image of
+// TestAlpacaEndToEnd_HolidayGapReadsCorrectly: a calendar month with no
+// raw partition at all (as opposed to a holiday within an
+// already-covered partition) is reported as a genuine Coverage gap —
+// issue #325 (EQ-12)'s own explicit distinction between the two.
+//
+// Coverage.Gaps only reports calendar-implied bars missing from a
+// partition that has actually been built (PartitionCoverageCurrent);
+// a partition nothing has ever synced or built at all is reported
+// through Partitions[].Status instead — the same convention
+// build_test.go/coverage_test.go already establish for every other
+// provider (PartitionCoverageMissing), which this test matches rather
+// than inventing a second, Alpaca-specific meaning for "missing."
+func TestAlpacaCoverage_MissingMonthIsAGap(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+	mgr := newAlpacaTestManager(t, rawRoot)
+
+	span, err := NewTimeRange(
+		time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+
+	cov, err := mgr.Coverage(ctx, BarQuery{Instrument: alpacaSPYID(t), Interval: D1, Range: span})
+	require.NoError(t, err)
+	require.Len(t, cov.Partitions, 1)
+	assert.Equal(t, PartitionCoverageMissing, cov.Partitions[0].Status,
+		"an entire month with no raw partition at all must be reported as missing")
 }
 
 func TestAlpacaSync_NonAlpacaDownloadActionsAreSkipped(t *testing.T) {
