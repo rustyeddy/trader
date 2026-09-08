@@ -224,6 +224,7 @@ func TestStooqEndToEnd_PlanBuildBars(t *testing.T) {
 		assert.Equal(t, BasisTrade, pr.Manifest.Basis)
 		assert.Equal(t, calendarVersionUSEquityV1, pr.Manifest.CalendarVersion)
 		assert.Equal(t, "stooq", pr.Manifest.Provider)
+		assert.Empty(t, pr.Manifest.Feed, "issue #324 (EQ-11): stooq has no feed concept, unlike alpaca's IEX/SIP")
 	}
 
 	reader, err := mgr.Bars(ctx, query)

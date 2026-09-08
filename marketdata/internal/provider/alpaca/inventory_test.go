@@ -22,8 +22,8 @@ func TestInspect_FindsWrittenPartitions(t *testing.T) {
 	june := []Record{
 		{Time: time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("284.00")},
 	}
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, may, true))
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.June, june, true))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, may, true))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.June, FeedIEX, june, true))
 
 	inv, err := Inspect(ctx, root)
 	require.NoError(t, err)
@@ -36,6 +36,7 @@ func TestInspect_FindsWrittenPartitions(t *testing.T) {
 	assert.Equal(t, 2, inv.Partitions[0].RowCount)
 	assert.True(t, inv.Partitions[0].LastComplete)
 	assert.NotEmpty(t, inv.Partitions[0].Fingerprint)
+	assert.Equal(t, FeedIEX, inv.Partitions[0].Feed)
 
 	assert.Equal(t, time.June, inv.Partitions[1].Month)
 	assert.Equal(t, 1, inv.Partitions[1].RowCount)
@@ -54,8 +55,8 @@ func TestInspect_ReportsMalformedPartitionWithoutAbortingWalk(t *testing.T) {
 
 	may := []Record{{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("282.80")}}
 	june := []Record{{Time: time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("284.00")}}
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, may, true))
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.June, june, true))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, may, true))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.June, FeedIEX, june, true))
 
 	path := partitionPath(root, "SPY", 2020, time.May)
 	require.NoError(t, writeFile(path, "# schema=raw-v1 source=alpaca instrument=SPY tf=d1 year=2020 month=05\n"+rawV1Header+"\nnot,a,valid,row,at,all\n"))

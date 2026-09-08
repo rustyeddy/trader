@@ -18,14 +18,23 @@ import (
 var ErrPartitionAlreadyExists = errors.New("alpaca: raw partition already exists")
 
 // WritePartition atomically writes records as a raw-v1 partition file
-// for (symbol, year, month) under root: a schema comment, the raw-v1
-// column header, then one row per record in exactly the order given.
+// for (symbol, year, month) under root: a schema comment recording
+// feed as this partition's own feed provenance, the raw-v1 column
+// header, then one row per record in exactly the order given.
 //
 // Like stooq.WritePartition, records is deliberately *not* sorted
 // before writing: Sync (marketdata/sync.go) merges newly fetched
 // records with any already on disk and is responsible for the
 // resulting order, and a live API fetch's own pagination order is not
 // a substitute for an explicit ordering guarantee at this layer either.
+//
+// feed records which Alpaca data feed (FeedIEX/FeedSIP) produced
+// records — issue #324 (EQ-11)'s own requirement that feed provenance
+// be recorded rather than inferred later, since IEX and SIP are not
+// directly comparable data for the same symbol/date (ADR-050/052).
+// Sync (marketdata/sync.go) is responsible for refusing to silently
+// mix two different feeds' data into one partition file; WritePartition
+// itself only ever records whatever feed it is given.
 //
 // mustNotExist, when true, rejects (ErrPartitionAlreadyExists) writing
 // over a path that already has a file. When false, an existing file at
@@ -37,7 +46,7 @@ var ErrPartitionAlreadyExists = errors.New("alpaca: raw partition already exists
 // written, flushed, and synced first, then linked (mustNotExist) or
 // renamed (replace) into place — the same discipline stooq.WritePartition
 // and oanda.WritePartition already apply.
-func WritePartition(ctx context.Context, root, symbol string, year int, month time.Month, records []Record, mustNotExist bool) error {
+func WritePartition(ctx context.Context, root, symbol string, year int, month time.Month, feed Feed, records []Record, mustNotExist bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -62,7 +71,7 @@ func WritePartition(ctx context.Context, root, symbol string, year int, month ti
 	}()
 
 	bw := bufio.NewWriter(tmp)
-	if err := encodeRawPartition(ctx, bw, symbol, year, month, records); err != nil {
+	if err := encodeRawPartition(ctx, bw, symbol, year, month, feed, records); err != nil {
 		return fmt.Errorf("alpaca: write partition: %w", err)
 	}
 	if err := bw.Flush(); err != nil {
@@ -97,9 +106,9 @@ func WritePartition(ctx context.Context, root, symbol string, year int, month ti
 	return nil
 }
 
-func encodeRawPartition(ctx context.Context, w *bufio.Writer, symbol string, year int, month time.Month, records []Record) error {
-	if _, err := fmt.Fprintf(w, "# schema=raw-v1 source=alpaca instrument=%s tf=%s year=%04d month=%02d\n",
-		symbol, RawD1, year, int(month)); err != nil {
+func encodeRawPartition(ctx context.Context, w *bufio.Writer, symbol string, year int, month time.Month, feed Feed, records []Record) error {
+	if _, err := fmt.Fprintf(w, "# schema=raw-v1 source=alpaca instrument=%s tf=%s year=%04d month=%02d feed=%s\n",
+		symbol, RawD1, year, int(month), feed); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(w, rawV1Header); err != nil {

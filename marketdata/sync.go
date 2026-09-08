@@ -319,9 +319,11 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 		upper = today
 	}
 
-	existing, err := alpaca.ReadPartitionRecords(ctx, m.rawRoot, symbol, action.Year, action.Month)
+	snapshot, err := alpaca.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
 	mustNotExist := false
 	from := monthStart
+	existing := snapshot.Records
+	existingFeed := snapshot.Feed
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		mustNotExist = true
@@ -334,6 +336,43 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 		}
 	}
 
+	// A non-empty existingFeed disagreeing with the client's own
+	// configured feed means this month's raw partition was fetched
+	// under a different feed than the one about to extend it — IEX and
+	// SIP are not directly comparable data for the same symbol/date
+	// (ADR-050/052), so silently appending one feed's bars onto
+	// another's would mix two different datasets under one partition
+	// identity (issue #324, EQ-11's own "do not silently mix" scope
+	// item).
+	//
+	// A partition with existing rows but an empty existingFeed (written
+	// before EQ-11 added feed provenance) is refused for extension too,
+	// not silently accepted: WritePartition below writes the *entire*
+	// merged partition under one feed value, so accepting the extension
+	// would relabel those legacy rows' genuinely unknowable provenance
+	// as currentFeed — turning an honest "unknown" into a false,
+	// concrete claim, and still risking an actual mixed-feed partition
+	// if those rows in fact came from the other feed (PR #328 review).
+	// The only safe response is to require an explicit re-fetch of the
+	// whole partition under a known feed, not an incremental extension.
+	// A partition with no existing rows at all (nonexistent, or present
+	// but empty) has no provenance to protect and is written under
+	// currentFeed normally, regardless of what its own possibly-absent
+	// feed metadata said.
+	currentFeed := m.alpacaClient.Feed()
+	switch {
+	case len(existing) == 0:
+		// Nothing to conflict with.
+	case existingFeed == "":
+		return DownloadResult{}, fmt.Errorf(
+			"marketdata: alpaca: %w: existing partition %s %04d-%02d has %d row(s) with no recorded feed provenance (written before issue #324) and cannot be safely extended under feed %q — re-fetch this partition from scratch under a known feed instead",
+			ErrFeedMismatch, symbol, action.Year, action.Month, len(existing), currentFeed)
+	case existingFeed != currentFeed:
+		return DownloadResult{}, fmt.Errorf(
+			"marketdata: alpaca: %w: existing partition %s %04d-%02d was fetched under feed %q, client is configured for %q",
+			ErrFeedMismatch, symbol, action.Year, action.Month, existingFeed, currentFeed)
+	}
+
 	merged := existing
 	if upper.After(from) {
 		fetched, err := m.alpacaClient.FetchBars(ctx, alpaca.BarRequest{Symbol: symbol, From: from, To: upper})
@@ -342,7 +381,7 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 		}
 		if len(fetched) > 0 || mustNotExist {
 			merged = mergeAlpacaRecordsByTime(existing, fetched)
-			if err := alpaca.WritePartition(ctx, m.rawRoot, symbol, action.Year, action.Month, merged, mustNotExist); err != nil {
+			if err := alpaca.WritePartition(ctx, m.rawRoot, symbol, action.Year, action.Month, currentFeed, merged, mustNotExist); err != nil {
 				return DownloadResult{}, fmt.Errorf("write partition: %w", err)
 			}
 		}
@@ -350,6 +389,20 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 
 	return DownloadResult{Action: action, RecordsWritten: len(merged)}, nil
 }
+
+// ErrFeedMismatch marks an attempt to extend an existing, non-empty
+// Alpaca raw partition in a way that could mix two different feeds'
+// data into one partition file (issue #324, EQ-11): either the
+// client's configured feed genuinely disagrees with the partition's
+// own recorded feed, or the partition has rows but no recorded feed at
+// all (written before this issue existed) and so cannot be proven
+// compatible with the client's configured feed either way. IEX and SIP
+// are not directly comparable data for the same symbol/date
+// (ADR-050/052); this error exists so that difference is never
+// silently mixed into one partition file, and so legacy rows with
+// genuinely unknowable provenance are never relabeled with a concrete
+// feed just because that happens to be the feed used to extend them.
+var ErrFeedMismatch = errors.New("marketdata: alpaca feed mismatch")
 
 // mergeAlpacaRecordsByTime is mergeRecordsByTime's alpaca.Record
 // counterpart: at most one Record per distinct Time, with fetched

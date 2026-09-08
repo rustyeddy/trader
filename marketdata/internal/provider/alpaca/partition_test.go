@@ -22,6 +22,10 @@ func writePartitionFile(t *testing.T, root, symbol string, year int, month time.
 	return path
 }
 
+// TestOpen_ReadsRecordsAndMeta's fixture has no "feed=" token at all —
+// the exact shape a partition written before issue #324 (EQ-11) added
+// feed provenance would have — proving Meta reports Feed("") ("unknown"),
+// not an error, for that legacy case (Reader.Meta's own doc comment).
 func TestOpen_ReadsRecordsAndMeta(t *testing.T) {
 	root := t.TempDir()
 	path := writePartitionFile(t, root, "SPY", 2020, time.May,
@@ -32,10 +36,11 @@ func TestOpen_ReadsRecordsAndMeta(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = r.Close() }()
 
-	symbol, year, month := r.Meta()
+	symbol, year, month, feed := r.Meta()
 	assert.Equal(t, "SPY", symbol)
 	assert.Equal(t, 2020, year)
 	assert.Equal(t, time.May, month)
+	assert.Equal(t, Feed(""), feed, "a partition written before EQ-11 has no feed token, reported as unknown, not an error")
 
 	rec, err := r.Next(context.Background())
 	require.NoError(t, err)
@@ -112,8 +117,8 @@ func TestWritePartition_MustNotExistRejectsExisting(t *testing.T) {
 	ctx := context.Background()
 	rec := Record{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC)}
 
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, []Record{rec}, true))
-	err := WritePartition(ctx, root, "SPY", 2020, time.May, []Record{rec}, true)
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, []Record{rec}, true))
+	err := WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, []Record{rec}, true)
 	assert.ErrorIs(t, err, ErrPartitionAlreadyExists)
 }
 
@@ -123,13 +128,35 @@ func TestWritePartition_ReplacesExistingWhenNotMustNotExist(t *testing.T) {
 	first := Record{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("100")}
 	second := Record{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("200")}
 
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, []Record{first}, true))
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, []Record{second}, false))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, []Record{first}, true))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, []Record{second}, false))
 
 	snap, err := ReadPartitionSnapshot(ctx, root, "SPY", 2020, time.May)
 	require.NoError(t, err)
 	require.Len(t, snap.Records, 1)
 	assert.Equal(t, "200", snap.Records[0].Open.String())
+}
+
+// TestWritePartition_FeedRoundTripsThroughSnapshotAndMeta proves the
+// feed WritePartition is given (issue #324, EQ-11) survives through
+// both read paths this package exposes: ReadPartitionSnapshot.Feed and
+// Reader.Meta's own feed return value.
+func TestWritePartition_FeedRoundTripsThroughSnapshotAndMeta(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	rec := Record{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("100")}
+
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedSIP, []Record{rec}, true))
+
+	snap, err := ReadPartitionSnapshot(ctx, root, "SPY", 2020, time.May)
+	require.NoError(t, err)
+	assert.Equal(t, FeedSIP, snap.Feed)
+
+	r, err := Open(partitionPath(root, "SPY", 2020, time.May))
+	require.NoError(t, err)
+	defer func() { _ = r.Close() }()
+	_, _, _, feed := r.Meta()
+	assert.Equal(t, FeedSIP, feed)
 }
 
 func TestReadPartitionSnapshot_MissingFile(t *testing.T) {
@@ -144,7 +171,7 @@ func TestReadPartitionRecords_ReturnsRecordsInFileOrder(t *testing.T) {
 		{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("100")},
 		{Time: time.Date(2020, 5, 4, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("101")},
 	}
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, recs, true))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, recs, true))
 
 	got, err := ReadPartitionRecords(ctx, root, "SPY", 2020, time.May)
 	require.NoError(t, err)
@@ -162,7 +189,7 @@ func TestReadPartitionRecords_CancelledContext(t *testing.T) {
 	root := t.TempDir()
 	ctx := context.Background()
 	rec := Record{Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC)}
-	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, []Record{rec}, true))
+	require.NoError(t, WritePartition(ctx, root, "SPY", 2020, time.May, FeedIEX, []Record{rec}, true))
 
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()

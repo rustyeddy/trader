@@ -1,0 +1,193 @@
+#+TITLE: Alpaca Canonical Derivation and Feed Dataset Identity ADR-053
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+* Context
+
+Issue #324 (EQ-11) asks for the deterministic derivation step that
+converts provider-native Alpaca historical bars
+(=marketdata/internal/provider/alpaca.Record=, already produced by
+issue #323's SDK-based =Client.FetchBars=) into Trader's canonical
+=marketdata.Bar=, with complete provenance preserved. Most of this
+pipeline already existed, built by ADR-050 (EQ-04) and exercised by
+=marketdata/normalize_alpaca.go='s =normalizeAlpacaRecord=/
+=normalizeAlpacaSequence= and =build_normalize.go='s =case "alpaca":=
+arm: OHLCV mapping, =USEquityCalendar= alignment validation,
+duplicate/out-of-order rejection, and the =AdjustmentSplitAdjusted=
+policy assignment were all already correct and already tested.
+
+The one genuine gap this issue's own acceptance criteria named
+explicitly: "Adjustment mode and source/feed provenance are
+represented in dataset/cache identity rather than inferred later" and
+"Ensure canonical cache/dataset identity includes every semantic input
+that can change the resulting bars, including provider/feed and
+adjustment mode where applicable." Issue #323 (EQ-10) had just added
+explicit feed selection (=alpaca.Feed=, =FeedIEX=/=FeedSIP=) to
+=alpaca.Client=, but nothing recorded *which* feed actually produced a
+given raw partition or canonical dataset — =Manifest.Provider= being
+="alpaca"= for both feeds would let two genuinely different datasets
+(IEX's single-exchange data and SIP's consolidated tape are not
+directly comparable for the same symbol/date, per ADR-050/052) share
+one dataset identity.
+
+* Decision
+
+** Feed provenance is recorded at the raw layer, not assumed from current configuration
+
+=alpaca.WritePartition= gains a required =feed Feed= parameter,
+recorded as a new =feed=<value>= token on the raw partition's existing
+=# schema=...= comment line (alongside =source=/=instrument=/=tf=/
+=year=/=month=). =alpaca.Reader= parses it back (=Reader.Meta=,
+=PartitionSnapshot.Feed=, =Inspect='s own =Partition.Feed=), so a
+canonical build reads *what the raw file actually says was fetched*,
+not what the current =Manager='s client happens to be configured for
+today — those can legitimately disagree if the configuration changes
+between syncs of the same partition.
+
+A raw partition written before this issue has no =feed=​= token at
+all. This is deliberately *not* an error: =crossCheckSchema= leaves
+=Reader.feed= at its zero value (=Feed("")=, "unknown") for such a
+file, since there is no way to recover which feed actually produced
+already-fetched real data after the fact. Every other cross-checked
+schema field (=source=/=instrument=/=tf=/=year=/=month=) remains
+required exactly as before; only =feed= is optional for this
+backward-compatibility reason.
+
+** Sync refuses to silently mix two feeds' data into one partition
+
+=marketdata/sync.go='s =syncOneAlpaca= now reads the existing
+partition via =alpaca.ReadPartitionSnapshot= (replacing a plain
+=ReadPartitionRecords= call, which had no way to also report feed) and
+compares its recorded feed against the =*alpaca.Client='s own
+configured feed (=Client.Feed()=, added by this issue) *before*
+fetching or writing anything. Three cases, in order:
+
+- No existing rows at all (a nonexistent partition, or one that exists
+  but is empty) has no provenance to protect and is written under the
+  client's configured feed normally.
+- Existing rows whose recorded feed genuinely disagrees with the
+  client's configured feed are rejected with a new sentinel,
+  =ErrFeedMismatch=; the existing partition is left completely
+  untouched and no fetch is even attempted.
+- Existing rows with *no* recorded feed (=Feed("")=, a partition
+  written before this issue existed) are *also* rejected with
+  =ErrFeedMismatch=, not silently accepted. An earlier draft of this
+  decision treated an unknown existing feed as compatible with
+  whatever feed the extension used, then rewrote the entire merged
+  partition under that feed — which silently turned those legacy
+  rows' genuinely unknowable provenance into a false, concrete claim,
+  and could still produce an actual mixed-feed partition if they had
+  in fact come from the other feed. Review correctly rejected this
+  (PR #328): the safe response to unknowable legacy provenance is to
+  require an explicit re-fetch of the whole partition under a known
+  feed, the same as a genuine disagreement — never to manufacture
+  provenance that was never actually recorded.
+
+** Manifest gains Feed; Revision is bumped to v3
+
+=marketdata.Manifest= gains a =Feed string= field: an opaque,
+optional provenance string (empty for a provider with no feed concept —
+=oanda=, =stooq= — or for a dataset built before this field existed),
+following the same "opaque name, not a validated enum" convention
+=Provider= itself already uses, deliberately kept a plain =string=
+rather than reusing the internal =alpaca.Feed= type so =Manifest=
+remains provider-neutral in its own field types.
+
+Per this issue's own explicit dataset-identity requirement, =Feed= is
+added to =Manifest.Revision='s hashed =revisionInput=, and
+=manifestRevisionVersion= is bumped from ="manifest-revision-v2"= to
+="manifest-revision-v3"= — the identical mechanism (and identical
+reasoning) ADR-048/EQ-05 already established when =AdjustmentPolicy=
+was added to =revisionInput= for the v1-to-v2 bump: two manifests
+differing only in which feed produced them must not share a Revision.
+=build_normalize.go='s =readAndNormalizeRaw= gains a matching =feed
+string= return value, threaded from the raw snapshot for Alpaca (empty
+for Stooq and OANDA, which have no feed concept) into the published
+=Manifest.Feed=.
+
+The canonical CSV store's own on-disk header (=store_csv.go='s
+=manifestJSON=) gains a matching =feed=, wired symmetrically on both
+encode (=manifestToJSON=) and decode (=decodeManifestJSON=) — the store
+must round-trip =Feed= exactly, or a dataset's recomputed Revision
+would disagree with the value it stored at build time purely due to
+that asymmetry, independent of the version-string bump above.
+
+** Consequence: every existing manifest-embedding fixture needed regenerating once
+
+Bumping =manifestRevisionVersion= changes every =Manifest.Revision()=
+value, including ones already computed and stored inside checked-in
+test fixtures — not only Alpaca's. This surfaced two categories, both
+regenerated as part of this issue:
+
+- One committed canonical-store fixture,
+  =marketdata/testdata/oanda/EURUSD/2020/03/EURUSD-2020-03-h1.csv=,
+  whose header's stored =revision= field was recomputed by hand
+  (=Manifest.Revision()= against the same field values already in the
+  file) and substituted in place — the file's actual bar data and every
+  other header field are unchanged.
+- Six =report= package golden files (=representative=/=zero_trade= ×
+  json/org/txt) embedding a =ConfigDigest=/=Revision= value, regenerated
+  via =golden_test.go='s own documented procedure (temporarily swap the
+  =os.ReadFile= comparison for =os.WriteFile=, run the affected tests
+  once, revert).
+
+No other checked-in fixture in the repository embeds a =Manifest=-
+derived hash (confirmed by a full-repository search for the JSON
+="revision"= key across every =.golden= and raw/canonical =.csv= file
+before and after this change).
+
+* Consequences
+
+- A caller reading =Manifest.Feed= can distinguish IEX-sourced from
+  SIP-sourced Alpaca datasets without inferring it from anything else;
+  two otherwise-identical datasets differing only in feed now also
+  differ in =Revision=, so a cache keyed on Revision cannot conflate
+  them.
+- Extending an existing Alpaca raw partition under a newly-reconfigured
+  feed now fails loudly (=ErrFeedMismatch=) instead of silently
+  appending incomparable data, with one deliberate, documented
+  exception for pre-existing partitions with no recorded feed.
+- Any future addition to =Manifest= that participates in dataset
+  identity must repeat this same two-part pattern: add the field to
+  =revisionInput= *and* bump =manifestRevisionVersion=, or two manifests
+  differing only in that new field will silently share a Revision.
+- =Inspect='s =Partition.Feed= gives an operator visibility into which
+  feed produced each raw partition on disk, independent of building
+  anything canonical from it.
+
+* Alternatives Considered
+
+- *Infer feed from the current =Manager= configuration at build time,
+  rather than recording it in the raw partition.* Rejected: this is
+  precisely the "inferred later" shape issue #324's own acceptance
+  criteria rule out, and it would silently mislabel a raw partition's
+  true provenance the moment an operator reconfigured the client's feed
+  without re-fetching every existing partition.
+- *Reuse the internal =alpaca.Feed= type directly on the public
+  =Manifest= struct.* Rejected: =Manifest= is provider-neutral by
+  design (=Provider= is a plain string precisely so the type does not
+  depend on any one provider package), and every other provider
+  already has no feed concept at all — a plain, optional =string=
+  matches that shape exactly.
+- *Accept an unknown existing feed as compatible with whatever feed
+  the extension uses, and rewrite the merged partition under that
+  feed.* This was this ADR's own first draft, and PR #328 review
+  correctly rejected it: it manufactures provenance that was never
+  actually recorded, defeating the point of adding feed to raw
+  provenance and =Manifest.Revision= at all, and can still produce a
+  real mixed-feed partition if the legacy rows in fact came from the
+  other feed. Adopted instead: refuse extension of a *non-empty*
+  unknown-feed partition (=ErrFeedMismatch=), requiring an explicit
+  re-fetch under a known feed — the same response as a genuine
+  disagreement. An empty existing partition is still written under the
+  configured feed normally, since it has no rows whose provenance
+  could be misrepresented.
+- *Leave =manifestRevisionVersion= unbumped, accepting that two
+  manifests differing only in Feed might collide.* Rejected outright:
+  this is exactly the "must not share a Revision" failure ADR-048's own
+  identical precedent for =AdjustmentPolicy= already established as
+  unacceptable, and the whole point of this issue's dataset-identity
+  requirement.

@@ -160,6 +160,7 @@ the original decided, use full supersession instead.
 | 050 | Alpaca historical equity market-data provider (in adr-050-alpaca-historical-provider.org) | Accepted |
 | 051 | Alpaca paper broker adapter: REST-polling Account.Events for Phase 1 (in adr-051-alpaca-broker-events-polling.org) | Accepted |
 | 052 | Alpaca historical provider: official Go SDK migration (in adr-052-alpaca-sdk-migration.org) | Accepted, partial amendment of 050 |
+| 053 | Alpaca canonical derivation and feed dataset identity (in adr-053-alpaca-canonical-derivation-feed-identity.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -606,9 +607,43 @@ feed from account tier) — while leaving ADR-050's other decisions
 raw-partition persistence, split-adjustment default, timestamp
 re-anchoring) unchanged. It also records a new consequence ADR-050
 never had to address: the SDK's own =Bar= type decodes prices directly
-into =float64=, so this package now quantizes each price to the cent
-tick size before constructing =num.Price=, using the checked,
-quantized reconstruction path ADR-045 already permits.
+into =float64=, so this package reconstructs each price via its
+shortest round-tripping decimal text before constructing =num.Price=,
+preserving genuine sub-cent precision a split-adjusted historical
+series can legitimately carry (falling back to =num.Price='s own
+8-decimal scale only when that text exceeds it) — the checked
+reconstruction path ADR-045 already permits, deliberately *not*
+rounded to the cent tick size, which is an execution-time concept and
+would silently discard real history if applied during ingestion (PR
+#327 review corrected an earlier draft that did round to the tick
+size).
+
+Note: ADR-053 is likewise maintained in its own file,
+=docs/arch/adr-053-alpaca-canonical-derivation-feed-identity.org=,
+rather than inline in this registry. Its own Status section is
+authoritative. Issue #324 (EQ-11) asks for the deterministic
+Alpaca-record-to-canonical-=Bar= derivation step, most of which
+already existed from ADR-050 (EQ-04); this ADR records the one
+genuine gap that work's own acceptance criteria named explicitly —
+feed provenance (IEX vs. SIP, added by issue #323/EQ-10) was not yet
+represented in dataset/cache identity. It records =alpaca.WritePartition=
+gaining a required =feed= parameter recorded on the raw partition's own
+schema line (optional only for a pre-existing partition with no such
+token, an accepted backward-compatibility gap), =syncOneAlpaca=
+refusing to silently extend a partition under a disagreeing feed
+(=ErrFeedMismatch=, with the same legacy-unknown exception),
+=Manifest= gaining a plain, provider-neutral =Feed string= field added
+to =Revision='s hashed input with a matching =manifestRevisionVersion=
+bump (="manifest-revision-v2"= to ="v3"=, the identical mechanism
+ADR-048/EQ-05 already established for =AdjustmentPolicy='s own v1-to-v2
+bump), and the canonical CSV store's header gaining a matching,
+symmetric =feed= field on both encode and decode. It also records the
+resulting one-time fixture regeneration the version bump required: one
+committed canonical-store CSV fixture's stored revision recomputed by
+hand, and six =report= package golden files regenerated via
+=golden_test.go='s own documented procedure — confirmed to be the
+complete set of checked-in files anywhere in the repository that embed
+a =Manifest=-derived hash.
 
 * ADR-001: Modular monolith before service decomposition
 

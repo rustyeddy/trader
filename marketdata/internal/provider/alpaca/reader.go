@@ -29,6 +29,7 @@ const rawFieldCount = 6
 type Reader struct {
 	path    string
 	meta    meta
+	feed    Feed
 	file    *os.File
 	scanner *bufio.Scanner
 	line    int
@@ -71,8 +72,13 @@ func newReader(path string, m meta, src io.Reader, file *os.File) (*Reader, erro
 }
 
 // Meta returns the partition-level context shared by every Record.
-func (r *Reader) Meta() (symbol string, year int, month time.Month) {
-	return r.meta.Symbol, r.meta.Year, r.meta.Month
+// feed is the data feed recorded in the file's own schema comment
+// (issue #324, EQ-11) — Feed("") for a partition written before that
+// provenance existed, a documented, accepted gap for legacy files
+// rather than an error, since there is no way to recover which feed
+// actually produced them after the fact.
+func (r *Reader) Meta() (symbol string, year int, month time.Month, feed Feed) {
+	return r.meta.Symbol, r.meta.Year, r.meta.Month, r.feed
 }
 
 func (r *Reader) consumeHeader() error {
@@ -83,7 +89,7 @@ func (r *Reader) consumeHeader() error {
 			continue
 		}
 		if strings.HasPrefix(line, "#") {
-			if err := crossCheckSchema(line, r.path, r.meta); err != nil {
+			if err := r.crossCheckSchema(line); err != nil {
 				return err
 			}
 			continue
@@ -103,8 +109,13 @@ func (r *Reader) consumeHeader() error {
 	return nil
 }
 
-// crossCheckSchema validates a "# schema=" comment line against m.
-func crossCheckSchema(comment, path string, m meta) error {
+// crossCheckSchema validates a "# schema=" comment line against r's own
+// path-derived meta, and records its "feed=" token (if any) as r.feed.
+// A missing "feed=" token is not an error — it means the partition was
+// written before issue #324 (EQ-11) added feed provenance — and leaves
+// r.feed at its zero value (Feed("")), the documented "unknown" state
+// for legacy data (see Meta's own doc comment).
+func (r *Reader) crossCheckSchema(comment string) error {
 	trimmed := strings.TrimSpace(strings.TrimPrefix(comment, "#"))
 	if !strings.HasPrefix(trimmed, "schema=") {
 		return nil
@@ -116,23 +127,27 @@ func crossCheckSchema(comment, path string, m meta) error {
 			kv[k] = v
 		}
 	}
+	m := r.meta
 	if kv["schema"] != "raw-v1" {
-		return fmt.Errorf("%w: %s: unsupported schema %q", ErrMalformedData, path, kv["schema"])
+		return fmt.Errorf("%w: %s: unsupported schema %q", ErrMalformedData, r.path, kv["schema"])
 	}
 	if kv["source"] != "alpaca" {
-		return fmt.Errorf("%w: %s: unexpected source %q", ErrMalformedData, path, kv["source"])
+		return fmt.Errorf("%w: %s: unexpected source %q", ErrMalformedData, r.path, kv["source"])
 	}
 	if got := kv["instrument"]; got != m.Symbol {
-		return fmt.Errorf("%w: %s: schema instrument %q disagrees with file name %q", ErrMalformedData, path, got, m.Symbol)
+		return fmt.Errorf("%w: %s: schema instrument %q disagrees with file name %q", ErrMalformedData, r.path, got, m.Symbol)
 	}
 	if kv["tf"] != string(RawD1) {
-		return fmt.Errorf("%w: %s: unexpected tf %q", ErrMalformedData, path, kv["tf"])
+		return fmt.Errorf("%w: %s: unexpected tf %q", ErrMalformedData, r.path, kv["tf"])
 	}
 	if got := kv["year"]; got != strconv.Itoa(m.Year) {
-		return fmt.Errorf("%w: %s: schema year %q disagrees with file name year %d", ErrMalformedData, path, got, m.Year)
+		return fmt.Errorf("%w: %s: schema year %q disagrees with file name year %d", ErrMalformedData, r.path, got, m.Year)
 	}
 	if got := kv["month"]; got != fmt.Sprintf("%02d", int(m.Month)) {
-		return fmt.Errorf("%w: %s: schema month %q disagrees with file name month %02d", ErrMalformedData, path, got, int(m.Month))
+		return fmt.Errorf("%w: %s: schema month %q disagrees with file name month %02d", ErrMalformedData, r.path, got, int(m.Month))
+	}
+	if feed, ok := kv["feed"]; ok {
+		r.feed = Feed(feed)
 	}
 	return nil
 }

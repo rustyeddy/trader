@@ -411,6 +411,7 @@ func TestManifestRevision_ChangesPerField(t *testing.T) {
 			m.Span = span
 		}},
 		{"basis", func(m *Manifest) { m.Basis = BasisAsk }},
+		{"feed", func(m *Manifest) { m.Feed = "sip" }},
 		{"schemaVersion", func(m *Manifest) { m.SchemaVersion = 2 }},
 		{"rawFingerprint", func(m *Manifest) {
 			m.RawFingerprint = "sha256:" + "0000000000000000000000000000000000000000000000000000000000000"

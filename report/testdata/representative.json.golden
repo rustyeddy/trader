@@ -7,7 +7,7 @@
     "span_start": "2024-01-01T00:00:00Z",
     "span_end": "2024-01-03T00:00:00Z",
     "trader_version": "test-v0",
-    "config_digest": "sha256:c47503ab5f83f891644beddd46be0fadbd78c91507e8d4a5cb4bc0f99d3992e8"
+    "config_digest": "sha256:9bba3cca59d4312730d85c62e14b067a54b5956c622b4df216d03cbcb5979e2b"
   },
   "dataset": [
     {
@@ -16,7 +16,7 @@
       "interval": "H1",
       "span_start": "2024-01-01T00:00:00Z",
       "span_end": "2024-01-03T00:00:00Z",
-      "revision": "8ad96ce51057945ae9f1d9a2d8e1aa3ae7482bc6f2e866d23d72a5e0f5d061fe"
+      "revision": "737bf38eda779d2b44980de248ca2b83d2477b53f6a1f5d9d83a3e5d975b8911"
     },
     {
       "provider": "oanda",
@@ -24,7 +24,7 @@
       "interval": "H1",
       "span_start": "2024-01-01T00:00:00Z",
       "span_end": "2024-01-03T00:00:00Z",
-      "revision": "3863b9ad46908377e0cc3e0688838c139534779a9285201dabb98ac5a9109662"
+      "revision": "1962f680c67d57d835081a3b61e362c5a747cefa9f2326d151fb6320a1b00267"
     }
   ],
   "performance": {
