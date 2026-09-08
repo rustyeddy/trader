@@ -144,9 +144,11 @@ func (r *RSI) Ready() bool {
 
 // Value returns r's current RSI, always in [0, 100]. It is meaningful
 // only once Ready reports true; before then it returns 0, which is
-// otherwise indistinguishable from a genuine zero-gain/zero-loss
-// (flat) average — callers must consult Ready, not infer readiness
-// from Value, exactly as EMA.Value/SMA.Value already document.
+// otherwise indistinguishable from a genuine ready-state RSI of 0 (all
+// recent changes were losses — see the Boundary values section below,
+// not a flat/no-movement window, which this package defines as 50, not
+// 0) — callers must consult Ready, not infer readiness from Value,
+// exactly as EMA.Value/SMA.Value already document.
 //
 // Once Ready, Value is always defined — see the package doc comment's
 // Boundary values section for the three cases where dividing average
