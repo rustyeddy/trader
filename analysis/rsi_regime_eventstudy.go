@@ -43,6 +43,27 @@ type RSIRegimeEventStudyConfig struct {
 	// Bootstrap configures the nonparametric bootstrap confidence
 	// interval computed for each cell's mean forward return.
 	Bootstrap BootstrapConfig
+	// ObservationStart, if non-zero, restricts which bars may become
+	// Observations (and therefore contribute ForwardReturns): a bar at
+	// index i produces an Observation only if bars[i].Time is not
+	// before ObservationStart. Every bar is still fed into the RSI/EMA
+	// indicators in order regardless of ObservationStart, so bars
+	// before it serve as legitimate historical warmup/context — the
+	// same information a real observer at time t would actually have
+	// had available — without themselves ever appearing as evidence.
+	//
+	// This exists for exactly one reason (issue #320, EQR-01D review):
+	// a caller studying one partition (for example EQR-01's validation
+	// partition) may supply bars starting well before that partition so
+	// EMA(200)/RSI(2) are already warmed up at the partition's own
+	// first bar, rather than restarting indicator state at the
+	// partition boundary and losing that partition's own early
+	// observations to warmup. The zero value imposes no restriction:
+	// every bar from indicator-ready onward becomes an observation,
+	// exactly the behavior this field did not exist to change (EQR-01C,
+	// #319, never sets it, and its already-reported result is
+	// unaffected).
+	ObservationStart time.Time
 }
 
 func (cfg RSIRegimeEventStudyConfig) validate() error {
@@ -196,15 +217,23 @@ type RSIRegimeEventStudyResult struct {
 //
 // # Partition-boundary exclusion
 //
-// bars must be exactly the caller's chosen partition (for example the
-// EQR-01 development partition) — RunRSIRegimeEventStudy has no
-// partition concept of its own. Because a forward return is only
-// computed when bars[Index+Horizon.Bars] exists within the supplied
-// slice, an observation near the end of bars simply contributes fewer
-// (or zero) ForwardReturns rather than reaching past the slice's end —
-// this is the exact mechanism that keeps a forward label from crossing
-// a partition boundary, provided the caller never supplies bars beyond
-// the partition itself.
+// bars must end exactly at the caller's chosen partition boundary (for
+// example the EQR-01 validation partition's own end) — RunRSIRegimeEventStudy
+// has no partition concept of its own. Because a forward return is
+// only computed when bars[Index+Horizon.Bars] exists within the
+// supplied slice, an observation near the end of bars simply
+// contributes fewer (or zero) ForwardReturns rather than reaching past
+// the slice's end — this is the exact mechanism that keeps a forward
+// label from crossing a partition boundary, provided the caller never
+// supplies bars beyond the partition itself.
+//
+// bars need not, however, start at the partition's own beginning: a
+// caller may prepend earlier bars purely as indicator warmup/context
+// and set cfg.ObservationStart to the partition's actual start, so
+// EMA(200)/RSI(2) are already warmed up at the partition's first real
+// observation instead of restarting cold at the partition boundary and
+// losing that partition's own early bars to warmup (see
+// ObservationStart's own doc comment).
 //
 // RunRSIRegimeEventStudy returns an error if cfg is malformed. An
 // empty or too-short bars slice is not an error: it simply produces a
@@ -246,6 +275,12 @@ func RunRSIRegimeEventStudy(bars []marketdata.Bar, cfg RSIRegimeEventStudyConfig
 			return RSIRegimeEventStudyResult{}, err
 		}
 		if !rsi.Ready() || !ema.Ready() {
+			continue
+		}
+		if !cfg.ObservationStart.IsZero() && bars[i].Time.Before(cfg.ObservationStart) {
+			// Warmup-only bar: the indicators above have already been
+			// updated with it (real historical context), but it never
+			// becomes an Observation or contributes a ForwardReturn.
 			continue
 		}
 

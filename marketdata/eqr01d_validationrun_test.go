@@ -210,12 +210,19 @@ func TestEQR01D_ValidationPartition(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Validation partition only: this query's Range is the sole
-	// mechanism selecting validation bars out of the (development +
-	// validation) raw archive imported above. Final holdout is
-	// structurally unreachable from this query — and was never even
-	// ingested, per filterCSVBeforeFinalHoldout above.
-	span, err := marketdata.NewTimeRange(eqr01DValidationStart, eqr01DValidationEnd)
+	// Query from the development partition's own start through the
+	// validation end: development bars (2005-02-25 through 2018-12-31)
+	// are supplied purely as indicator warmup/context (see
+	// analysis.RSIRegimeEventStudyConfig.ObservationStart, added by
+	// issue #320 review), so EMA(200)/RSI(2) are already warmed up at
+	// validation's own first bar rather than restarting cold at the
+	// partition boundary — the same real historical information a
+	// production system would actually have had available at any
+	// validation-partition timestamp. Final holdout remains
+	// structurally unreachable: the query's own End is still
+	// eqr01DValidationEnd (2023-01-01), and final-holdout rows were
+	// never even ingested, per filterCSVBeforeFinalHoldout above.
+	span, err := marketdata.NewTimeRange(eqr01CDevelopmentStart, eqr01DValidationEnd)
 	if err != nil {
 		t.Fatalf("NewTimeRange: %v", err)
 	}
@@ -251,16 +258,16 @@ func TestEQR01D_ValidationPartition(t *testing.T) {
 			}
 			t.Fatalf("Bars.Next: %v", err)
 		}
-		if b.Time.Before(eqr01DValidationStart) || !b.Time.Before(eqr01DValidationEnd) {
-			t.Fatalf("bar %s is outside the validation partition [%s, %s) — this must never happen",
-				b.Time, eqr01DValidationStart, eqr01DValidationEnd)
+		if b.Time.Before(eqr01CDevelopmentStart) || !b.Time.Before(eqr01DValidationEnd) {
+			t.Fatalf("bar %s is outside [%s, %s) — this must never happen (final holdout must never be reached)",
+				b.Time, eqr01CDevelopmentStart, eqr01DValidationEnd)
 		}
 		bars = append(bars, b)
 	}
 	if len(bars) == 0 {
-		t.Fatal("no bars returned for the validation partition")
+		t.Fatal("no bars returned")
 	}
-	t.Logf("validation partition: %d bars, %s -> %s", len(bars), bars[0].Time.Format("2006-01-02"), bars[len(bars)-1].Time.Format("2006-01-02"))
+	t.Logf("queried range (warmup + validation): %d bars, %s -> %s", len(bars), bars[0].Time.Format("2006-01-02"), bars[len(bars)-1].Time.Format("2006-01-02"))
 
 	cfg := analysis.RSIRegimeEventStudyConfig{
 		Instrument:      id,
@@ -274,13 +281,24 @@ func TestEQR01D_ValidationPartition(t *testing.T) {
 			Seed1:     eqr01DBootstrapSeed1,
 			Seed2:     eqr01DBootstrapSeed2,
 		},
+		// Development bars (everything before eqr01DValidationStart)
+		// warm up RSI(2)/EMA(200) but never themselves become
+		// observations or contribute forward-return evidence — see the
+		// query comment above and ObservationStart's own doc comment.
+		ObservationStart: eqr01DValidationStart,
 	}
 
 	result, err := analysis.RunRSIRegimeEventStudy(bars, cfg)
 	if err != nil {
 		t.Fatalf("RunRSIRegimeEventStudy: %v", err)
 	}
-	t.Logf("observations=%d forward_returns=%d", len(result.Observations), len(result.ForwardReturns))
+	for _, obs := range result.Observations {
+		if obs.Time.Before(eqr01DValidationStart) || !obs.Time.Before(eqr01DValidationEnd) {
+			t.Fatalf("observation at %s falls outside the validation partition [%s, %s) — ObservationStart failed to exclude a warmup bar",
+				obs.Time, eqr01DValidationStart, eqr01DValidationEnd)
+		}
+	}
+	t.Logf("validation observations=%d forward_returns=%d (warmup bars excluded from both)", len(result.Observations), len(result.ForwardReturns))
 
 	t.Log("PRIMARY (Regime = Positive, i.e. Close > EMA(200)):")
 	logEQR01CStats(t, result.PositiveRegimeStats)
