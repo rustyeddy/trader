@@ -14,47 +14,57 @@
 // USEquityCalendar, issue #296, which this provider's D1 data
 // validates against exactly like Stooq's).
 //
-// # A partially-verified API-shape assumption — read before trusting this package's request/response wiring
+// # Wire protocol: delegated to the official Alpaca Go SDK
 //
-// Nothing in this repository, and no live network access in the
-// environment this package was originally written in, could verify
-// Alpaca's real Market Data API v2 wire contract directly. This
-// package's request construction and response parsing (see client.go
-// and wireshape.go) were built against general, publicly documented
-// knowledge of that API's shape. A subsequent code review (PR #312)
-// confirmed the core request contract this package assumes against
-// Alpaca's current official documentation directly — the single-symbol
-// bars endpoint, timeframe=1Day, start/end, limit, page_token,
-// adjustment=split, and feed=iex are all real, verified values, not
-// guesses. The response *body* shape this package decodes against
-// remains the still-unverified part: field names/types beyond what
-// review specifically checked, error-response bodies, and pagination
-// edge cases (an empty final page, a malformed token) have not been
-// exercised against a real request. wireshape.go isolates every
-// JSON-shape-specific type and parsing function into one small file
-// specifically so that correcting it against the real API (via the
-// opt-in smoke test in marketdata/internal/provider/alpaca/smoke_test.go,
-// run by an operator with real credentials) is a small, contained
-// change, not a redesign of this package. See ADR-050
-// (docs/arch/adr-050-alpaca-historical-provider.org) for the full
-// discussion of this risk and how it is scoped.
+// Issue #297's first implementation constructed and decoded Alpaca's
+// historical-bars HTTP/JSON protocol by hand, and documented the
+// result as a partially-verified assumption (a subsequent review, PR
+// #312, confirmed the core request contract directly against Alpaca's
+// documentation, but the response body shape beyond a few checked
+// fields remained unverified against a real request). Issue #323
+// replaced that hand-written acquisition path with the official
+// module github.com/alpacahq/alpaca-trade-api-go/v3, which Alpaca
+// itself maintains — resolving that risk by construction rather than
+// by further manual verification. One concrete, verified correction
+// this produced: the SDK's GetBars/GetMultiBars always call the
+// multi-symbol /v2/stocks/bars?symbols=... endpoint (a
+// map-of-symbol-to-bars response), never the single-symbol
+// /v2/stocks/{symbol}/bars path endpoint (a flat array) the original
+// hand-written client assumed — the two are genuinely different wire
+// shapes, and this package now uses whichever one Alpaca's own SDK
+// actually exercises.
+//
+// client.go owns retry/backoff policy and rate limiting — concerns the
+// SDK does not manage the way this package needs (see Client's own doc
+// comment for the resulting, deliberately coarser cancellation
+// contract: the SDK's historical-bars methods accept no
+// context.Context and own their own internal pagination loop, so
+// ctx cancellation is checked only between whole fetch attempts, not
+// within a single SDK call). wireshape.go isolates the one
+// SDK-type-to-Record conversion this package still owns, including a
+// documented, deliberate float64-to-num.Price quantization step (see
+// its own doc comment) made necessary by the SDK's Bar type decoding
+// prices directly into float64 with no original decimal text
+// recoverable afterward. See ADR-050
+// (docs/arch/adr-050-alpaca-historical-provider.org) for the original
+// design discussion this issue builds on.
 //
 // # Timestamp normalization: trading date, not literal fetched instant
 //
-// Alpaca's assumed JSON bar shape times a daily bar at midnight
-// America/New_York civil time, expressed in UTC (for example
-// "2024-01-02T05:00:00Z" during EST) — not the 09:30 regular-session
-// open, and not literal midnight UTC the way Stooq's native
-// "YYYY-MM-DD" dates already are.
-// Storing that literal fetched instant verbatim would make Alpaca's
-// raw partitions misaligned against USEquityCalendar's midnight-UTC D1
+// Alpaca's bars times a daily bar at midnight America/New_York civil
+// time, expressed in UTC (for example "2024-01-02T05:00:00Z" during
+// EST) — not the 09:30 regular-session open, and not literal midnight
+// UTC the way Stooq's native "YYYY-MM-DD" dates already are. Storing
+// that literal fetched instant verbatim would make Alpaca's raw
+// partitions misaligned against USEquityCalendar's midnight-UTC D1
 // anchor (built to agree with Stooq) on every single row. This package
 // deliberately re-anchors: it converts the fetched timestamp to its
 // trading date in America/New_York civil time, then stores Record.Time
-// as that date at midnight UTC — see recordFromWireBar in wireshape.go.
-// This makes both providers' D1 data normalize identically regardless
-// of how each one originally timestamps a daily bar, and is exactly
-// the kind of provider-specific convention difference ADR-047's
-// internal-provider-seam design expects each provider package to
-// absorb internally rather than leaking to marketdata.
+// as that date at midnight UTC — see recordsFromSDKBars in
+// wireshape.go. This makes both providers' D1 data normalize
+// identically regardless of how each one originally timestamps a daily
+// bar, and is exactly the kind of provider-specific convention
+// difference ADR-047's internal-provider-seam design expects each
+// provider package to absorb internally rather than leaking to
+// marketdata.
 package alpaca

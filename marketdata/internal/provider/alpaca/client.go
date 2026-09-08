@@ -2,25 +2,26 @@ package alpaca
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/rustyeddy/trader/clock"
+
+	sdkalpaca "github.com/alpacahq/alpaca-trade-api-go/v3/alpaca"
+	sdkmarketdata "github.com/alpacahq/alpaca-trade-api-go/v3/marketdata"
+	"github.com/mailru/easyjson/jlexer"
 )
 
 // Sentinel errors Client returns (wrapped), classifying a failed
 // request without requiring a caller to inspect an HTTP status code
 // directly — mirrors oanda.Client's identical classification shape and
-// retry policy (issue #297). A permanent error (ErrUnauthorized,
-// ErrBadRequest) is never retried; a transient one (ErrRateLimited,
+// retry policy (issue #297, carried forward unchanged by issue #323's
+// SDK migration). A permanent error (ErrUnauthorized, ErrBadRequest)
+// is never retried; a transient one (ErrRateLimited,
 // ErrProviderUnavailable, or a network-level failure) is retried up to
 // Client's configured attempt limit, reported as ErrRetriesExhausted
 // if every attempt fails.
@@ -32,7 +33,9 @@ var (
 	// ErrBadRequest marks an HTTP 400/404 response: the request itself
 	// (symbol, timeframe, range) is malformed or refers to something
 	// Alpaca does not recognize. Retrying without changing the request
-	// cannot succeed.
+	// cannot succeed. Also used for a response this package cannot
+	// decode at all (see classifySDKErr) — a permanent, not transient,
+	// condition.
 	ErrBadRequest = errors.New("alpaca: bad request")
 	// ErrRateLimited marks an HTTP 429 response.
 	ErrRateLimited = errors.New("alpaca: rate limited")
@@ -46,13 +49,25 @@ var (
 	ErrUnexpectedStatus = errors.New("alpaca: unexpected status")
 )
 
-// HTTPDoer is the minimal seam Client issues requests through —
-// oanda.HTTPDoer's identical shape. Satisfied by *http.Client; tests
-// inject a fake implementation, so no unit test in this package ever
-// makes a real network call.
-type HTTPDoer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
+// Feed selects which historical data feed Alpaca serves a request
+// from. Phase 1 pins FeedIEX as ClientConfig's default (ADR-050's own
+// free-tier choice); FeedSIP exists so a caller with a paid SIP
+// entitlement may select it explicitly. This package never infers a
+// feed from account tier — issue #323's own explicit requirement.
+type Feed string
+
+const (
+	// FeedIEX is the Investors Exchange feed: one specific exchange's
+	// own data, not the consolidated multi-exchange tape. Available on
+	// Alpaca's free tier. ClientConfig's default.
+	FeedIEX Feed = "iex"
+	// FeedSIP is the consolidated multi-exchange Securities Information
+	// Processor tape. Requires a paid Alpaca market-data entitlement;
+	// selecting it does not itself grant access — Alpaca's API rejects
+	// an unentitled request with ErrUnauthorized, the same as any other
+	// authorization failure.
+	FeedSIP Feed = "sip"
+)
 
 // rateLimiter and its two implementations are oanda.Client's identical
 // pacing mechanism, copied verbatim in shape (not import — this
@@ -111,6 +126,9 @@ type ClientConfig struct {
 	// Credential supplies the key ID/secret key pair for every
 	// request. Required.
 	Credential CredentialProvider
+	// Feed selects the historical data feed. Zero value selects
+	// FeedIEX (ADR-050's pinned Phase 1 default).
+	Feed Feed
 
 	// MaxAttempts bounds how many times a transiently-failing request
 	// is attempted in total. Non-positive selects a package default (3).
@@ -123,10 +141,19 @@ type ClientConfig struct {
 	// when positive. Zero (the default) disables rate limiting at this
 	// layer.
 	MinRequestInterval time.Duration
+	// RequestTimeout bounds a single underlying HTTP request. The
+	// official Alpaca Go SDK's historical-bars methods accept no
+	// context.Context (see Client's own doc comment on cancellation),
+	// so ctx cancellation cannot interrupt a request already in
+	// flight — RequestTimeout is the only backstop against one hung
+	// indefinitely. Non-positive selects a package default (30s).
+	RequestTimeout time.Duration
 
-	// HTTPClient overrides the transport Client issues requests through
-	// (default http.DefaultClient).
-	HTTPClient HTTPDoer
+	// HTTPClient overrides the transport the underlying SDK client
+	// issues requests through (default: a *http.Client with
+	// RequestTimeout applied). Tests inject one with a fake
+	// http.RoundTripper as its Transport, never a real network call.
+	HTTPClient *http.Client
 
 	// clock and pageLimit are internal test seams, unexported so no
 	// caller can inject a non-deterministic dependency or a
@@ -138,17 +165,53 @@ type ClientConfig struct {
 const (
 	defaultMaxAttempts    = 3
 	defaultRetryBaseDelay = 500 * time.Millisecond
+	defaultRequestTimeout = 30 * time.Second
 )
 
-// Client is a minimal Alpaca Market Data API v2 client for historical
-// daily-bar download (issue #297). It is the only network-facing type
-// in this package. Client is safe for concurrent use: FetchBars may be
-// called from multiple goroutines against the same Client, and the
-// rate limiter serializes and paces their requests against each other.
+// Client is a minimal Alpaca Market Data API client for historical
+// daily-bar download (issue #297), delegating request construction,
+// pagination, and response decoding to the official Alpaca Go SDK
+// (github.com/alpacahq/alpaca-trade-api-go/v3, issue #323) rather than
+// duplicating that protocol work by hand. Client owns only the
+// concerns the SDK does not: retry/backoff policy, rate limiting, and
+// translating the SDK's own types into this package's Record.
+//
+// # Cancellation is coarse-grained, not per-request
+//
+// The SDK's GetBars/GetMultiBars accept no context.Context and fully
+// own their own internal multi-page fetch loop, so ctx cancellation
+// cannot interrupt a request — or a later page of a paginated fetch —
+// already in flight. FetchBars checks ctx before issuing a fetch
+// attempt and while waiting out retry backoff/rate-limit pacing
+// between attempts, and RequestTimeout bounds how long any single
+// underlying HTTP call may hang, but a caller must not expect
+// mid-page-boundary cancellation the way a hand-rolled pagination loop
+// could offer. This is an accepted, deliberate consequence of
+// delegating wire-protocol ownership to the SDK (issue #323's own
+// "delegate that protocol work... instead of duplicating it inside
+// Trader" goal) — not an oversight.
+//
+// # Price quantization
+//
+// The SDK's Bar type decodes prices directly into float64 fields, so
+// unlike this package's previous hand-written JSON decoding (which
+// preserved the API's original decimal text via json.Number), the
+// original wire text no longer exists by the time this package
+// receives a value. recordsFromSDKBars (wireshape.go) quantizes each
+// float64 to the cent tick size (ADR-047's Phase 1 equity default)
+// before constructing num.Price — the checked, quantized construction
+// path ADR-045 explicitly permits for a float64 becoming authoritative
+// again, applied here because the SDK leaves no other choice, not
+// because it is casually safe to skip quantization in general.
+//
+// Client is safe for concurrent use: FetchBars may be called from
+// multiple goroutines against the same Client, and the rate limiter
+// serializes and paces their requests against each other.
 type Client struct {
 	baseURL     string
 	credential  CredentialProvider
-	http        HTTPDoer
+	feed        Feed
+	httpClient  *http.Client
 	clock       clock.Clock
 	limiter     rateLimiter
 	maxAttempts int
@@ -168,9 +231,9 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cl == nil {
 		cl = clock.Real{}
 	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+	feed := cfg.Feed
+	if feed == "" {
+		feed = FeedIEX
 	}
 	maxAttempts := cfg.MaxAttempts
 	if maxAttempts <= 0 {
@@ -179,6 +242,14 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	retryBase := cfg.RetryBaseDelay
 	if retryBase <= 0 {
 		retryBase = defaultRetryBaseDelay
+	}
+	requestTimeout := cfg.RequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = defaultRequestTimeout
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: requestTimeout}
 	}
 	var limiter rateLimiter = noopRateLimiter{}
 	if cfg.MinRequestInterval > 0 {
@@ -191,7 +262,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	return &Client{
 		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
 		credential:  cfg.Credential,
-		http:        httpClient,
+		feed:        feed,
+		httpClient:  httpClient,
 		clock:       cl,
 		limiter:     limiter,
 		maxAttempts: maxAttempts,
@@ -200,14 +272,13 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
-// defaultPageLimit is the page size this client requests. Alpaca's
-// real API (per the unverified assumption documented in doc.go) caps
-// a single response at 10,000 bars; this client requests a smaller,
-// still-generous default so an ordinary Phase 1 daily-bar fetch (at
-// most a few thousand rows for a multi-year range) rarely if ever
-// needs more than one page in practice, while pagination itself is
-// still fully implemented and tested for the case where the API
-// enforces its own smaller cap or a longer range is requested.
+// defaultPageLimit is the page size this client requests from the SDK.
+// Alpaca's real API caps a single response at 10,000 bars (v2MaxLimit
+// in the SDK); this client requests that same generous default so an
+// ordinary Phase 1 daily-bar fetch (at most a few thousand rows for a
+// multi-year range) rarely if ever needs more than one page in
+// practice, while pagination itself remains fully exercised and tested
+// for the case where a longer range is requested.
 const defaultPageLimit = 10000
 
 // BarRequest describes one historical daily-bar download: Symbol is
@@ -219,17 +290,19 @@ type BarRequest struct {
 	From, To time.Time
 }
 
-// FetchBars downloads every daily bar in req's range, paginating
-// automatically via the assumed next_page_token cursor (see doc.go's
-// unverified-API-shape note) and pacing/retrying per Client's
-// configured policy. Returned Records are in ascending Time order,
-// with Time already re-anchored to midnight UTC of each bar's own
-// trading date (see recordFromWireBar in wireshape.go) — not the
-// literal fetched instant.
+// FetchBars downloads every daily bar in req's range via the SDK's
+// GetBars, which owns pagination internally, and retries the whole
+// fetch (not individual pages — see Client's own doc comment) per
+// Client's configured attempt/backoff/rate-limit policy. Returned
+// Records are in ascending Time order, with Time already re-anchored
+// to midnight UTC of each bar's own trading date (see
+// recordsFromSDKBars in wireshape.go) — not the literal fetched
+// instant.
 //
-// FetchBars honors ctx cancellation between pages and within a single
-// attempt's retry backoff; it starts no goroutines and performs no
-// background work.
+// FetchBars honors ctx cancellation before each attempt and during
+// retry backoff/rate-limit waits; it starts no goroutines and performs
+// no background work. See Client's own doc comment for why this is
+// coarser than per-page cancellation.
 func (c *Client) FetchBars(ctx context.Context, req BarRequest) ([]Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -242,55 +315,35 @@ func (c *Client) FetchBars(ctx context.Context, req BarRequest) ([]Record, error
 		return nil, fmt.Errorf("alpaca: fetch bars: %w: to must be after from", ErrBadRequest)
 	}
 
-	var out []Record
-	pageToken := ""
-	for {
-		if err := ctx.Err(); err != nil {
-			return out, err
-		}
-		bars, next, err := c.fetchPage(ctx, symbol, req.From, req.To, pageToken)
-		if err != nil {
-			return out, err
-		}
-		out = append(out, bars...)
-		if next == "" {
-			break
-		}
-		pageToken = next
-	}
-	return out, nil
-}
-
-// fetchPage issues one paginated bars request, retrying transient
-// failures per Client's policy, and returns the page's records plus
-// Alpaca's own next-page cursor (empty when this was the last page).
-func (c *Client) fetchPage(ctx context.Context, symbol string, from, to time.Time, pageToken string) ([]Record, string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if attempt > 1 {
 			delay := c.retryBase * time.Duration(1<<uint(attempt-2))
 			timer := c.clock.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return nil, "", ctx.Err()
+				return nil, ctx.Err()
 			case <-timer.C():
 			}
 		}
 		if err := c.limiter.Wait(ctx); err != nil {
-			return nil, "", err
+			return nil, err
 		}
 
-		bars, next, err := c.doFetchPage(ctx, symbol, from, to, pageToken)
+		records, err := c.fetchAllPages(symbol, req.From, req.To)
 		if err == nil {
-			return bars, next, nil
+			return records, nil
 		}
 		if !isTransient(err) {
-			return nil, "", err
+			return nil, err
 		}
 		lastErr = err
 	}
-	return nil, "", fmt.Errorf("alpaca: %w after %d attempts: %v", ErrRetriesExhausted, c.maxAttempts, lastErr)
+	return nil, fmt.Errorf("alpaca: %w after %d attempts: %v", ErrRetriesExhausted, c.maxAttempts, lastErr)
 }
 
 // isTransient reports whether err should be retried.
@@ -298,87 +351,95 @@ func isTransient(err error) bool {
 	return errors.Is(err, ErrRateLimited) || errors.Is(err, ErrProviderUnavailable) || errors.Is(err, errNetwork)
 }
 
-// errNetwork marks a failure from HTTPDoer.Do itself (no HTTP response
-// at all), always treated as transient.
+// errNetwork marks a failure that never produced a classifiable
+// Alpaca API error response (a transport-level failure, or a
+// canceled/timed-out request), always treated as transient.
 var errNetwork = errors.New("alpaca: network error")
 
-// doFetchPage issues exactly one HTTP request and parses its response.
-// It never retries; fetchPage owns retry policy.
+// fetchAllPages issues one full, SDK-owned multi-page bars fetch: it
+// resolves credentials once (CredentialProvider's own doc comment
+// already documents that resolving fresh per outer attempt, rather
+// than once for a Client's whole lifetime, is the point — this is
+// coarser than the previous per-HTTP-page resolution, since the SDK
+// owns the page loop internally and offers no per-page hook, but still
+// re-resolves on every retried attempt), constructs a short-lived SDK
+// client with them, and calls GetBars.
 //
-// # Request shape (unverified — see doc.go)
-//
-// GET {baseURL}/v2/stocks/{symbol}/bars, with query parameters
-// timeframe=1Day, start/end (RFC3339), limit, adjustment=split (see
-// ADR-050 for why "split," matching Stooq's own AdjustmentSplitAdjusted
-// choice, was picked over "raw"/"dividend"/"all"), feed=iex (Phase 1
-// deliberately pins the free-tier IEX feed rather than exposing feed
-// selection — see the package doc comment; IEX is one specific
-// exchange's own data, not the consolidated multi-exchange SIP tape,
-// so OHLC/volume values from this provider are not directly comparable
-// to a consolidated-feed source for the same symbol/date — PR #312
-// review), and page_token when
-// continuing a prior page. Auth is two headers, APCA-API-KEY-ID and
-// APCA-API-SECRET-KEY — never a single bearer token the way OANDA
-// uses.
-func (c *Client) doFetchPage(ctx context.Context, symbol string, from, to time.Time, pageToken string) ([]Record, string, error) {
-	keyID, secretKey, err := c.credential.Credentials(ctx)
+// The SDK's own internal retry (ClientOpts.RetryLimit) is disabled
+// (-1): Client.FetchBars is the sole owner of retry/backoff policy, so
+// a transient failure here is retried by the caller (FetchBars),
+// exactly once per outer attempt, not compounded by a second retry
+// layer inside the SDK.
+func (c *Client) fetchAllPages(symbol string, from, to time.Time) ([]Record, error) {
+	keyID, secretKey, err := c.credential.Credentials(context.Background())
 	if err != nil {
-		return nil, "", fmt.Errorf("alpaca: resolve credentials: %w", err)
+		return nil, fmt.Errorf("alpaca: resolve credentials: %w", err)
 	}
 
-	u, err := url.Parse(c.baseURL + "/v2/stocks/" + symbol + "/bars")
-	if err != nil {
-		return nil, "", fmt.Errorf("alpaca: %w: %v", ErrBadRequest, err)
-	}
-	q := u.Query()
-	q.Set("timeframe", "1Day")
-	q.Set("start", from.UTC().Format(time.RFC3339Nano))
-	q.Set("end", to.UTC().Format(time.RFC3339Nano))
-	q.Set("limit", strconv.Itoa(c.pageLimit))
-	q.Set("adjustment", "split")
-	q.Set("feed", "iex")
-	if pageToken != "" {
-		q.Set("page_token", pageToken)
-	}
-	u.RawQuery = q.Encode()
+	sdkClient := sdkmarketdata.NewClient(sdkmarketdata.ClientOpts{
+		APIKey:     keyID,
+		APISecret:  secretKey,
+		BaseURL:    c.baseURL,
+		Feed:       string(c.feed),
+		HTTPClient: c.httpClient,
+		RetryLimit: -1,
+	})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	bars, err := sdkClient.GetBars(symbol, sdkmarketdata.GetBarsRequest{
+		TimeFrame:  sdkmarketdata.OneDay,
+		Adjustment: sdkmarketdata.AdjustmentSplit,
+		// GetBarsRequest.End is documented as inclusive; BarRequest's
+		// own To is the half-open [From, To) upper bound
+		// marketdata.Manager expects throughout this codebase, so the
+		// one-nanosecond subtraction converts between the two
+		// conventions without changing BarRequest's own public
+		// contract.
+		Start:     from,
+		End:       to.Add(-time.Nanosecond),
+		PageLimit: c.pageLimit,
+		Feed:      string(c.feed),
+		Sort:      sdkmarketdata.SortAsc,
+	})
 	if err != nil {
-		return nil, "", fmt.Errorf("alpaca: %w: %v", ErrBadRequest, err)
+		return nil, classifySDKErr(err)
 	}
-	// Never logged, never included in an error message: both secrets
-	// are only ever placed on these two outgoing request headers.
-	req.Header.Set("APCA-API-KEY-ID", keyID)
-	req.Header.Set("APCA-API-SECRET-KEY", secretKey)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", errNetwork, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", classifyStatus(resp.StatusCode, resp.Body)
-	}
-
-	var parsed barsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return nil, "", fmt.Errorf("alpaca: %w: decode response: %v", ErrBadRequest, err)
-	}
-	records, err := parsed.records()
-	if err != nil {
-		return nil, "", err
-	}
-	return records, parsed.NextPageToken, nil
+	return recordsFromSDKBars(bars)
 }
 
-// classifyStatus maps an HTTP status code to one of Client's sentinel
-// errors, including a body excerpt for diagnostics — never a request
+// classifySDKErr maps an error returned by the SDK's GetBars/
+// GetMultiBars to one of Client's sentinel errors.
+//
+//   - *sdkalpaca.APIError carries a real HTTP status code from a
+//     completed request: classified by status exactly as this
+//     package's previous hand-rolled classifyStatus already did.
+//   - *jlexer.LexerError marks a response body the SDK could not
+//     decode at all — a permanent condition (ErrBadRequest), not a
+//     transient one: retrying an identical request against a
+//     genuinely malformed response cannot succeed.
+//   - Anything else (no HTTP response at all: connection failure,
+//     timeout, DNS failure, or ctx-driven cancellation reaching the
+//     SDK's own http.Client) is errNetwork, always transient.
+func classifySDKErr(err error) error {
+	var apiErr *sdkalpaca.APIError
+	if errors.As(err, &apiErr) {
+		return classifyStatus(apiErr.StatusCode, apiErr.Body)
+	}
+	var lexErr *jlexer.LexerError
+	if errors.As(err, &lexErr) {
+		return fmt.Errorf("alpaca: %w: decode response: %v", ErrBadRequest, err)
+	}
+	return fmt.Errorf("%w: %v", errNetwork, err)
+}
+
+// classifyStatus maps an HTTP status code (and a diagnostic body
+// excerpt, already captured by *sdkalpaca.APIError — never a request
 // header, so neither secret can leak into an error message via this
-// path.
-func classifyStatus(status int, body io.Reader) error {
-	b, _ := io.ReadAll(io.LimitReader(body, 4*1024))
-	excerpt := strings.TrimSpace(string(b))
+// path) to one of Client's sentinel errors.
+func classifyStatus(status int, body string) error {
+	excerpt := strings.TrimSpace(body)
+	if len(excerpt) > 4*1024 {
+		excerpt = excerpt[:4*1024]
+	}
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return fmt.Errorf("%w: http %d: %s", ErrUnauthorized, status, excerpt)
