@@ -32,4 +32,29 @@ var (
 	// ErrUnknownBucket is returned by Bucket.UnmarshalText for any
 	// text other than one of the five labels Bucket.String produces.
 	ErrUnknownBucket = errors.New("analysis: unknown bucket label")
+
+	// ErrUnknownRSIBucket is returned by RSIBucket.UnmarshalText for
+	// any text other than one of the six labels RSIBucket.String
+	// produces.
+	ErrUnknownRSIBucket = errors.New("analysis: unknown RSI bucket label")
+
+	// ErrUnknownRegime is returned by Regime.UnmarshalText for any text
+	// other than one of Regime.String's two labels.
+	ErrUnknownRegime = errors.New("analysis: unknown regime label")
+
+	// ErrInvalidRSIPeriod is returned when an RSIRegimeEventStudyConfig's
+	// RSIPeriod is non-positive.
+	ErrInvalidRSIPeriod = errors.New("analysis: RSI period must be positive")
+
+	// ErrInvalidEMAPeriod is returned when an RSIRegimeEventStudyConfig's
+	// EMAPeriod is non-positive.
+	ErrInvalidEMAPeriod = errors.New("analysis: EMA period must be positive")
+
+	// ErrInvalidMinObservations is returned when an
+	// RSIRegimeEventStudyConfig's MinObservations is non-positive.
+	ErrInvalidMinObservations = errors.New("analysis: minimum observation count must be positive")
+
+	// ErrInvalidBootstrapResamples is returned when a BootstrapConfig's
+	// Resamples is non-positive.
+	ErrInvalidBootstrapResamples = errors.New("analysis: bootstrap resample count must be positive")
 )
