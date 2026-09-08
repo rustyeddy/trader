@@ -287,6 +287,16 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
+// Feed returns the historical data feed this Client was configured
+// with (ClientConfig.Feed, defaulting to FeedIEX). Issue #324 (EQ-11)
+// needs this to record which feed produced a raw partition's data as
+// part of that partition's own provenance — Feed selection materially
+// changes the resulting bars (ADR-050/052), so it must be recorded,
+// not merely applied and forgotten.
+func (c *Client) Feed() Feed {
+	return c.feed
+}
+
 // defaultPageLimit is the page size this client requests from the SDK.
 // Alpaca's real API caps a single response at 10,000 bars (v2MaxLimit
 // in the SDK); this client requests that same generous default so an

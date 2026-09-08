@@ -118,7 +118,7 @@ func TestAlpacaEndToEnd_RejectsWrongCalendarType(t *testing.T) {
 		Open: num.MustParsePrice("282.80"), High: num.MustParsePrice("283.19"),
 		Low: num.MustParsePrice("278.85"), Close: num.MustParsePrice("282.79"), Volume: 74424000,
 	}
-	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.May, []alpaca.Record{rec}, true))
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.May, alpaca.FeedIEX, []alpaca.Record{rec}, true))
 
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(alpacaSPYListing(t)))
@@ -164,7 +164,7 @@ func TestAlpacaEndToEnd_PlanBuildBars(t *testing.T) {
 			Open: num.MustParsePrice("280.34"), High: num.MustParsePrice("286.44"),
 			Low: num.MustParsePrice("278.83"), Close: num.MustParsePrice("285.34"), Volume: 61139700},
 	}
-	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.May, records, true))
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.May, alpaca.FeedIEX, records, true))
 
 	mgr := newAlpacaTestManager(t, rawRoot)
 
@@ -189,6 +189,7 @@ func TestAlpacaEndToEnd_PlanBuildBars(t *testing.T) {
 		assert.Equal(t, AdjustmentSplitAdjusted, pr.Manifest.AdjustmentPolicy)
 		assert.Equal(t, calendarVersionUSEquityV1, pr.Manifest.CalendarVersion)
 		assert.Equal(t, "alpaca", pr.Manifest.Provider)
+		assert.Equal(t, string(alpaca.FeedIEX), pr.Manifest.Feed, "issue #324 (EQ-11): feed provenance recorded on the built Manifest, not inferred later")
 	}
 
 	reader, err := mgr.Bars(ctx, query)
@@ -229,7 +230,7 @@ func TestAlpacaEndToEnd_AAPLPlanBuildBars(t *testing.T) {
 			Open: num.MustParsePrice("286.25"), High: num.MustParsePrice("299.00"),
 			Low: num.MustParsePrice("285.00"), Close: num.MustParsePrice("297.56"), Volume: 45765000},
 	}
-	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "AAPL", 2020, time.May, records, true))
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "AAPL", 2020, time.May, alpaca.FeedIEX, records, true))
 
 	mgr := newAlpacaTestManager(t, rawRoot)
 	span, err := NewTimeRange(
@@ -254,6 +255,93 @@ func TestAlpacaEndToEnd_AAPLPlanBuildBars(t *testing.T) {
 	assert.Equal(t, "297.56", b.Close.String())
 }
 
+// TestAlpacaEndToEnd_AAPLRecordsSplitAdjustedPolicy is issue #324
+// (EQ-11)'s own "AAPL fixtures exercise split/adjustment semantics and
+// agree with ADR-048" acceptance criterion, mirroring
+// TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy (stooq_integration_test.go)
+// exactly: the identical three real AAPL daily values spanning AAPL's
+// real 2020-08-31 4-for-1 split (already confirmed split-adjusted
+// against the real Stooq archive by issue #298/EQ-05) are supplied as
+// alpaca.Records instead — proving Alpaca's own normalization path
+// (normalizeAlpacaRecord/normalizeAlpacaSequence) converges on the
+// identical canonical result for the identical real economic data,
+// through a genuinely different code path than Stooq's. This is
+// EQ-11's own concern (raw-record-to-canonical derivation), not
+// EQ-10's (fetching): records are constructed directly here rather
+// than round-tripped through a simulated Alpaca SDK HTTP response,
+// exactly matching this issue's own scope boundary ("Non-goals:
+// Fetching data from Alpaca; owned by EQ-10").
+func TestAlpacaEndToEnd_AAPLRecordsSplitAdjustedPolicy(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	records := []alpaca.Record{
+		{Time: time.Date(2020, 8, 28, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("122.34"), High: num.MustParsePrice("122.76"),
+			Low: num.MustParsePrice("120.946"), Close: num.MustParsePrice("121.171"), Volume: 193260092},
+		{Time: time.Date(2020, 8, 31, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("123.86"), High: num.MustParsePrice("127.167"),
+			Low: num.MustParsePrice("122.33"), Close: num.MustParsePrice("125.283"), Volume: 232475310},
+		{Time: time.Date(2020, 9, 1, 0, 0, 0, 0, time.UTC),
+			Open: num.MustParsePrice("128.892"), High: num.MustParsePrice("130.865"),
+			Low: num.MustParsePrice("126.744"), Close: num.MustParsePrice("130.267"), Volume: 157045285},
+	}
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "AAPL", 2020, time.August, alpaca.FeedIEX, records[:1], true))
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "AAPL", 2020, time.September, alpaca.FeedIEX, records[2:], true))
+	// The 08-31 row belongs to the August partition (matches the real
+	// Stooq fixture's own month split); WritePartition with
+	// mustNotExist=false extends the August file already written above.
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "AAPL", 2020, time.August, alpaca.FeedIEX, records[:2], false))
+
+	mgr := newAlpacaTestManager(t, rawRoot)
+	span, err := NewTimeRange(
+		time.Date(2020, 8, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 10, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: alpacaAAPLID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	buildResult, err := mgr.Build(ctx, plan)
+	require.NoError(t, err)
+	require.NotEmpty(t, buildResult.Published)
+	for _, pr := range buildResult.Published {
+		assert.Equal(t, AdjustmentSplitAdjusted, pr.Manifest.AdjustmentPolicy)
+	}
+
+	reader, err := mgr.Bars(ctx, query)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
+
+	var bars []Bar
+	for {
+		b, err := reader.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		bars = append(bars, b)
+	}
+	require.Len(t, bars, 3)
+
+	// Same invariant TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy
+	// checks: a ~4x-unadjusted jump across the real split date would put
+	// the close-to-close ratio near 4 or 0.25; split-adjusted data keeps
+	// it close to 1.
+	ratio := bars[1].Close.Float64() / bars[0].Close.Float64()
+	assert.InDelta(t, 1.0, ratio, 0.2, "close-to-close ratio across the split date = %v, want ~1 (split-adjusted), not ~4 or ~0.25 (unadjusted)", ratio)
+
+	// Exact values round-trip unchanged through Alpaca's own
+	// normalization path — these are num.Price values throughout (never
+	// float64), so no quantization concern applies here (that is
+	// EQ-10's own client.go/wireshape.go concern at the fetch boundary,
+	// not this normalization boundary).
+	assert.Equal(t, "121.171", bars[0].Close.String())
+	assert.Equal(t, "125.283", bars[1].Close.String())
+	assert.Equal(t, "130.267", bars[2].Close.String())
+}
+
 // TestAlpacaEndToEnd_RejectsCorruptRawData mirrors
 // TestStooqEndToEnd_RejectsCorruptRawData for Alpaca's own
 // normalizeAlpacaSequence/Bar.Validate reuse.
@@ -268,7 +356,7 @@ func TestAlpacaEndToEnd_RejectsCorruptRawData(t *testing.T) {
 		Low:   num.MustParsePrice("95"),
 		Close: num.MustParsePrice("92"),
 	}
-	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.May, []alpaca.Record{rec}, true))
+	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.May, alpaca.FeedIEX, []alpaca.Record{rec}, true))
 
 	mgr := newAlpacaTestManager(t, rawRoot)
 	span, err := NewTimeRange(
@@ -305,7 +393,7 @@ func TestAlpacaEndToEnd_RejectsOutOfOrderRawData(t *testing.T) {
 		Low: num.MustParsePrice("278.85"), Close: num.MustParsePrice("282.79"),
 	}
 	require.NoError(t, alpaca.WritePartition(ctx, rawRoot, "SPY", 2020, time.May,
-		[]alpaca.Record{later, earlier}, true))
+		alpaca.FeedIEX, []alpaca.Record{later, earlier}, true))
 
 	mgr := newAlpacaTestManager(t, rawRoot)
 	span, err := NewTimeRange(
@@ -379,14 +467,22 @@ func alpacaBarsJSONForTest(dates []string) string {
 // set, and an *alpaca.Client built with a fake http.RoundTripper (never
 // a real network call) injected via Config's own in-package test seam —
 // mirroring newTestManagerWithSync (sync_test.go) exactly for the
-// "alpaca" provider branch.
+// "alpaca" provider branch. The client's feed defaults to FeedIEX; use
+// newAlpacaTestManagerWithSyncAndFeed to configure a different one
+// (issue #324, EQ-11's own feed-mismatch guard tests need this).
 func newAlpacaTestManagerWithSync(t *testing.T, rawRoot string, transport http.RoundTripper) *Manager {
+	t.Helper()
+	return newAlpacaTestManagerWithSyncAndFeed(t, rawRoot, transport, alpaca.FeedIEX)
+}
+
+func newAlpacaTestManagerWithSyncAndFeed(t *testing.T, rawRoot string, transport http.RoundTripper, feed alpaca.Feed) *Manager {
 	t.Helper()
 	client, err := alpaca.NewClient(alpaca.ClientConfig{
 		BaseURL:        "https://fake.example.com",
 		Credential:     alpaca.StaticCredential{KeyID: "test-key", SecretKey: "test-secret"},
 		HTTPClient:     &http.Client{Transport: transport},
 		RetryBaseDelay: time.Millisecond,
+		Feed:           feed,
 	})
 	require.NoError(t, err)
 
@@ -556,7 +652,7 @@ func TestAlpacaSync_ExtendsExistingRawPartition(t *testing.T) {
 		Open: num.MustParsePrice("100"), High: num.MustParsePrice("101"),
 		Low: num.MustParsePrice("99"), Close: num.MustParsePrice("100.5"), Volume: 1000,
 	}}
-	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, existing, true))
+	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, alpaca.FeedIEX, existing, true))
 
 	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
 		{status: 200, body: alpacaBarsJSONForTest([]string{"2020-05-04"})},
@@ -575,6 +671,90 @@ func TestAlpacaSync_ExtendsExistingRawPartition(t *testing.T) {
 	records, err := alpaca.ReadPartitionRecords(context.Background(), rawRoot, "SPY", 2020, time.May)
 	require.NoError(t, err)
 	require.Len(t, records, 2)
+}
+
+// TestAlpacaSync_RecordsFeedOnFreshPartition proves a brand-new raw
+// partition Sync writes records the client's own configured feed
+// (issue #324, EQ-11) — provenance that did not exist before this
+// issue and must not be silently omitted.
+func TestAlpacaSync_RecordsFeedOnFreshPartition(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
+		{status: 200, body: alpacaBarsJSONForTest([]string{"2020-05-01"})},
+	}}
+	mgr := newAlpacaTestManagerWithSyncAndFeed(t, rawRoot, doer, alpaca.FeedSIP)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "missing",
+	}}}
+	_, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+
+	snap, err := alpaca.ReadPartitionSnapshot(context.Background(), rawRoot, "SPY", 2020, time.May)
+	require.NoError(t, err)
+	assert.Equal(t, alpaca.FeedSIP, snap.Feed)
+}
+
+// TestAlpacaSync_RejectsExtendingWithADifferentFeed is issue #324
+// (EQ-11)'s own "do not silently mix" requirement: a partition already
+// fetched under one feed must never be silently extended by a client
+// configured for a different one — IEX and SIP are not directly
+// comparable data for the same symbol/date (ADR-050/052).
+func TestAlpacaSync_RejectsExtendingWithADifferentFeed(t *testing.T) {
+	rawRoot := t.TempDir()
+	existing := []alpaca.Record{{
+		Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		Open: num.MustParsePrice("100"), High: num.MustParsePrice("101"),
+		Low: num.MustParsePrice("99"), Close: num.MustParsePrice("100.5"), Volume: 1000,
+	}}
+	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, alpaca.FeedSIP, existing, true))
+
+	doer := &fakeAlpacaDoer{} // must never be called
+	mgr := newAlpacaTestManagerWithSyncAndFeed(t, rawRoot, doer, alpaca.FeedIEX)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "extend",
+	}}}
+	_, err := mgr.Sync(context.Background(), plan)
+	require.ErrorIs(t, err, ErrFeedMismatch)
+	assert.Empty(t, doer.requests, "must never fetch when the existing partition's feed disagrees with the client's configured feed")
+
+	records, err := alpaca.ReadPartitionRecords(context.Background(), rawRoot, "SPY", 2020, time.May)
+	require.NoError(t, err)
+	require.Len(t, records, 1, "the existing partition must be left untouched")
+}
+
+// TestAlpacaSync_AcceptsExtendingALegacyPartitionWithNoRecordedFeed
+// proves a partition written before issue #324 (EQ-11) added feed
+// provenance (Feed("") — the "unknown" state, not a real feed value
+// disagreeing with the client's own) is accepted for extension rather
+// than rejected: there is no way to recover which feed actually
+// produced it, so treating "unknown" as a hard conflict would block
+// every future sync of every already-existing real partition the
+// moment this issue merges.
+func TestAlpacaSync_AcceptsExtendingALegacyPartitionWithNoRecordedFeed(t *testing.T) {
+	rawRoot := t.TempDir()
+	existing := []alpaca.Record{{
+		Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		Open: num.MustParsePrice("100"), High: num.MustParsePrice("101"),
+		Low: num.MustParsePrice("99"), Close: num.MustParsePrice("100.5"), Volume: 1000,
+	}}
+	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, alpaca.Feed(""), existing, true))
+
+	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
+		{status: 200, body: alpacaBarsJSONForTest([]string{"2020-05-04"})},
+	}}
+	mgr := newAlpacaTestManagerWithSyncAndFeed(t, rawRoot, doer, alpaca.FeedIEX)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "extend",
+	}}}
+	result, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
 }
 
 // TestMergeAlpacaRecordsByTime_ResultIsSortedByTime confirms

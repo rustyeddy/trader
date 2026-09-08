@@ -59,7 +59,7 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		return PublishResult{}, err
 	}
 
-	normalized, fingerprint, basis, adjustmentPolicy, calendarVersion, err := m.readAndNormalizeRaw(ctx, rawInterval, symbol, action)
+	normalized, fingerprint, basis, adjustmentPolicy, feed, calendarVersion, err := m.readAndNormalizeRaw(ctx, rawInterval, symbol, action)
 	if err != nil {
 		return PublishResult{}, err
 	}
@@ -92,6 +92,7 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		Span:             span,
 		Basis:            basis,
 		AdjustmentPolicy: adjustmentPolicy,
+		Feed:             feed,
 		SchemaVersion:    canonicalSchemaVersion,
 		RawFingerprint:   fingerprint,
 		BuilderVersion:   builderVersion,
@@ -160,11 +161,11 @@ const calendarVersionUSEquityV1 = "usequitycalendar-v1"
 // oanda's own bid-basis, FXCalendar-aligned build is entirely unchanged
 // from before this seam existed; stooq is the second, natively-written
 // implementation.
-func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol string, action Action) ([]normalizedRecord, string, PriceBasis, AdjustmentPolicy, string, error) {
+func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol string, action Action) ([]normalizedRecord, string, PriceBasis, AdjustmentPolicy, string, string, error) {
 	switch m.providerName {
 	case "stooq":
 		if rawInterval != string(stooq.RawD1) {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("marketdata: stooq: only %s is supported, got %s", D1, action.Interval)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("marketdata: stooq: only %s is supported, got %s", D1, action.Interval)
 		}
 		// The recorded CalendarVersion below (calendarVersionUSEquityV1)
 		// is a specific claim about which Calendar implementation
@@ -178,30 +179,32 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		// also anchor to midnight UTC — a Manifest that names the wrong
 		// Calendar (PR #310 review).
 		if _, ok := m.calendar.(*USEquityCalendar); !ok {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf(
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf(
 				"marketdata: stooq: %w: provider \"stooq\" requires Config.Calendar to be a *USEquityCalendar, got %T",
 				ErrInvalidConfig, m.calendar)
 		}
 		snapshot, err := stooq.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
 		if err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("read raw partition: %w", err)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", err
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", err
 		}
 		normalized, err := normalizeStooqSequence(m.calendar, snapshot.Records)
 		if err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("normalize: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("normalize: %w", err)
 		}
 		// AdjustmentSplitAdjusted: Stooq's own daily equity history is
 		// split-adjusted (confirmed empirically against AAPL's real
 		// splits, issue #298) but not dividend-adjusted — see
-		// AdjustmentSplitAdjusted's own doc comment.
-		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, calendarVersionUSEquityV1, nil
+		// AdjustmentSplitAdjusted's own doc comment. Stooq has no feed
+		// concept (issue #324, EQ-11): Manifest.Feed is empty for a
+		// Stooq-sourced dataset.
+		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, "", calendarVersionUSEquityV1, nil
 
 	case "alpaca":
 		if rawInterval != string(alpaca.RawD1) {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("marketdata: alpaca: only %s is supported, got %s", D1, action.Interval)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("marketdata: alpaca: only %s is supported, got %s", D1, action.Interval)
 		}
 		// Same verification stooq's own case above performs, and for the
 		// identical reason (PR #310 review): a Manifest.CalendarVersion
@@ -210,33 +213,42 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		// alignment, not merely that some midnight-UTC-aligned Calendar
 		// was configured.
 		if _, ok := m.calendar.(*USEquityCalendar); !ok {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf(
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf(
 				"marketdata: alpaca: %w: provider \"alpaca\" requires Config.Calendar to be a *USEquityCalendar, got %T",
 				ErrInvalidConfig, m.calendar)
 		}
 		snapshot, err := alpaca.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
 		if err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("read raw partition: %w", err)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", err
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", err
 		}
 		normalized, err := normalizeAlpacaSequence(m.calendar, snapshot.Records)
 		if err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("normalize: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("normalize: %w", err)
 		}
 		// AdjustmentSplitAdjusted, matching Stooq's own choice above, for
 		// cross-provider comparability of the same instrument: Alpaca's
 		// bars endpoint is requested with adjustment=split (see
-		// alpaca.Client.doFetchPage), which is Alpaca's own
-		// split-adjusted-but-not-dividend-adjusted convention — the same
-		// shape AdjustmentSplitAdjusted's own doc comment already
-		// describes for Stooq. calendarVersionUSEquityV1 is reused
-		// unchanged: both providers validate against the exact same
-		// USEquityCalendar D1 boundary (midnight UTC), so there is no
+		// alpaca.Client.fetchAllPages, issue #323's SDK migration), which
+		// is Alpaca's own split-adjusted-but-not-dividend-adjusted
+		// convention — the same shape AdjustmentSplitAdjusted's own doc
+		// comment already describes for Stooq. calendarVersionUSEquityV1
+		// is reused unchanged: both providers validate against the exact
+		// same USEquityCalendar D1 boundary (midnight UTC), so there is no
 		// reason to mint a second, functionally-identical calendar
-		// version string.
-		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, calendarVersionUSEquityV1, nil
+		// version string. snapshot.Feed (issue #324, EQ-11) records which
+		// Alpaca feed (IEX/SIP) actually produced this raw partition's
+		// data, read back from the partition's own schema comment rather
+		// than assumed from the client's current configuration — the two
+		// can disagree if the client's configured feed changed since this
+		// partition was last fetched (syncOneAlpaca's own feed-mismatch
+		// guard, sync.go, prevents that from ever silently mixing two
+		// feeds' data into one partition, but does not prevent an
+		// operator from later reading an older partition with a
+		// differently-configured Manager).
+		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, string(snapshot.Feed), calendarVersionUSEquityV1, nil
 
 	default:
 		// ReadPartitionSnapshot, not separate ReadPartitionRecords/
@@ -250,15 +262,15 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		oandaInterval := oanda.RawInterval(rawInterval)
 		snapshot, err := oanda.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, oandaInterval, action.Year, action.Month)
 		if err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("read raw partition: %w", err)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", err
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", err
 		}
 		normalized, err := normalizeOANDASequence(oandaInterval, m.calendar, snapshot.Records)
 		if err != nil {
-			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("normalize: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", "", fmt.Errorf("normalize: %w", err)
 		}
-		return normalized, snapshot.Fingerprint, BasisBid, AdjustmentNotApplicable, calendarVersionCurrent, nil
+		return normalized, snapshot.Fingerprint, BasisBid, AdjustmentNotApplicable, "", calendarVersionCurrent, nil
 	}
 }

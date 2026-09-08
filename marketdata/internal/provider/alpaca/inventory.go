@@ -74,6 +74,11 @@ type Partition struct {
 	LastComplete bool
 
 	Fingerprint string
+	// Feed is the data feed recorded in the partition's own schema
+	// comment (issue #324, EQ-11) — see Reader.Meta's own doc comment
+	// for the meaning of its zero value on a legacy (pre-EQ-11)
+	// partition.
+	Feed Feed
 }
 
 // Inventory is a deterministic, read-only summary of a raw Alpaca
@@ -187,10 +192,12 @@ func inspectFile(ctx context.Context, root, path string) (Partition, bool, error
 		rowCount++
 	}
 
+	_, _, _, feed := r.Meta()
 	p.Status = PartitionStatusOK
 	p.RowCount = rowCount
 	p.FirstTime = first
 	p.LastTime = last
 	p.LastComplete = rowCount > 0
+	p.Feed = feed
 	return p, false, nil
 }

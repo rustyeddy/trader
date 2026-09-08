@@ -150,6 +150,18 @@ type Manifest struct {
 	// there is no corresponding BarSet field to agree with: adjustment
 	// convention is dataset-level provenance, not a per-bar property.
 	AdjustmentPolicy AdjustmentPolicy
+	// Feed records which data feed within Provider produced this
+	// dataset, when Provider distinguishes more than one — for example
+	// Alpaca's "iex" (free-tier, single-exchange) versus "sip" (paid,
+	// consolidated-market) feeds, which are not directly comparable for
+	// the same symbol/date (ADR-050/052, issue #324/EQ-11's own
+	// "provider/feed... in dataset/cache identity" requirement). Empty
+	// for a provider with no such distinction (oanda, stooq) or for a
+	// dataset built before this field existed. Like Provider, this is
+	// an opaque name, not a validated enum: only Provider's own package
+	// knows which feed values are meaningful for it, so Manifest itself
+	// places no constraint on Feed beyond carrying it through Revision.
+	Feed string
 
 	// SchemaVersion identifies the canonical Bar/BarSet field layout this
 	// dataset was built against. It is bumped when that layout changes in
@@ -405,8 +417,10 @@ func (m Manifest) Matches(bs BarSet) error {
 // silent reinterpretation of old bytes. Bumped to v2 when
 // AdjustmentPolicy was added to revisionInput (issue #298, EQ-05):
 // two manifests differing only in adjustment convention must not
-// share a Revision.
-const manifestRevisionVersion = "manifest-revision-v2"
+// share a Revision. Bumped to v3 when Feed was added (issue #324,
+// EQ-11), for the identical reason: two manifests differing only in
+// which Alpaca feed produced them must not share a Revision either.
+const manifestRevisionVersion = "manifest-revision-v3"
 
 // revisionInput is the exact, unambiguous structure Revision hashes.
 // Using encoding/json rather than a hand-built delimited string removes
@@ -427,6 +441,7 @@ type revisionInput struct {
 	SpanEnd          int64              `json:"span_end"`
 	Basis            PriceBasis         `json:"basis"`
 	AdjustmentPolicy AdjustmentPolicy   `json:"adjustment_policy"`
+	Feed             string             `json:"feed"`
 	SchemaVersion    int                `json:"schema_version"`
 	RawFingerprint   string             `json:"raw_fingerprint"`
 	BuilderVersion   string             `json:"builder_version"`
@@ -477,6 +492,7 @@ func (m Manifest) Revision() string {
 		SpanEnd:          m.Span.end.UnixNano(),
 		Basis:            m.Basis,
 		AdjustmentPolicy: m.AdjustmentPolicy,
+		Feed:             m.Feed,
 		SchemaVersion:    m.SchemaVersion,
 		RawFingerprint:   m.RawFingerprint,
 		BuilderVersion:   m.BuilderVersion,

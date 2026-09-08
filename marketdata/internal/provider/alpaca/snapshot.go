@@ -20,10 +20,13 @@ func fingerprintBytes(data []byte) string {
 
 // PartitionSnapshot pairs the records parsed from a raw partition with
 // the content fingerprint of the exact bytes they were parsed from —
-// stooq.PartitionSnapshot's own counterpart.
+// stooq.PartitionSnapshot's own counterpart. Feed is the data feed
+// recorded in the partition's own schema comment (issue #324, EQ-11) —
+// see Reader.Meta's own doc comment for the meaning of its zero value.
 type PartitionSnapshot struct {
 	Records     []Record
 	Fingerprint string
+	Feed        Feed
 }
 
 // ReadPartitionSnapshot reads the raw partition file for (symbol, year,
@@ -59,5 +62,6 @@ func ReadPartitionSnapshot(ctx context.Context, root, symbol string, year int, m
 		}
 		records = append(records, rec)
 	}
-	return PartitionSnapshot{Records: records, Fingerprint: fingerprint}, nil
+	_, _, _, feed := r.Meta()
+	return PartitionSnapshot{Records: records, Fingerprint: fingerprint, Feed: feed}, nil
 }

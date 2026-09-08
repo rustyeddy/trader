@@ -385,17 +385,24 @@ type manifestJSON struct {
 	SpanEnd          string           `json:"span_end"`
 	Basis            PriceBasis       `json:"basis"`
 	AdjustmentPolicy AdjustmentPolicy `json:"adjustment_policy"`
-	SchemaVersion    int              `json:"schema_version"`
-	RawFingerprint   string           `json:"raw_fingerprint"`
-	BuilderVersion   string           `json:"builder_version"`
-	ValidatorVersion string           `json:"validator_version"`
-	ResamplerVersion string           `json:"resampler_version"`
-	CalendarVersion  string           `json:"calendar_version"`
-	BuiltAt          string           `json:"built_at"`
-	BarCount         int              `json:"bar_count"`
-	FirstBar         string           `json:"first_bar,omitempty"`
-	LastBar          string           `json:"last_bar,omitempty"`
-	Parent           *parentJSON      `json:"parent,omitempty"`
+	// Feed is Manifest.Feed (issue #324, EQ-11), omitted entirely for a
+	// dataset with no feed provenance (empty string) rather than
+	// written as an explicit empty field — a canonical file built
+	// before this field existed decodes it back as "", the same value
+	// it implicitly had at the time, so an old file's stored Revision
+	// still recomputes correctly.
+	Feed             string      `json:"feed,omitempty"`
+	SchemaVersion    int         `json:"schema_version"`
+	RawFingerprint   string      `json:"raw_fingerprint"`
+	BuilderVersion   string      `json:"builder_version"`
+	ValidatorVersion string      `json:"validator_version"`
+	ResamplerVersion string      `json:"resampler_version"`
+	CalendarVersion  string      `json:"calendar_version"`
+	BuiltAt          string      `json:"built_at"`
+	BarCount         int         `json:"bar_count"`
+	FirstBar         string      `json:"first_bar,omitempty"`
+	LastBar          string      `json:"last_bar,omitempty"`
+	Parent           *parentJSON `json:"parent,omitempty"`
 	// Revision is m.Revision() at encode time. load recomputes it from
 	// the decoded Manifest and rejects the file if the two disagree —
 	// the cheapest possible defense against a hand-edited or partially
@@ -467,6 +474,7 @@ func manifestToJSON(m Manifest) manifestJSON {
 		SpanEnd:          m.Span.End().Format(time.RFC3339Nano),
 		Basis:            m.Basis,
 		AdjustmentPolicy: m.AdjustmentPolicy,
+		Feed:             m.Feed,
 		SchemaVersion:    m.SchemaVersion,
 		RawFingerprint:   m.RawFingerprint,
 		BuilderVersion:   m.BuilderVersion,
@@ -673,6 +681,7 @@ func decodeManifestJSON(line, path string, expectedInstrument instrument.ID) (Ma
 		Span:             span,
 		Basis:            h.Basis,
 		AdjustmentPolicy: h.AdjustmentPolicy,
+		Feed:             h.Feed,
 		SchemaVersion:    h.SchemaVersion,
 		RawFingerprint:   h.RawFingerprint,
 		BuilderVersion:   h.BuilderVersion,
