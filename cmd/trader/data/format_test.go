@@ -195,6 +195,7 @@ func TestJSONFormatter_FormatSync(t *testing.T) {
 		Downloaded: []marketdata.DownloadResult{{
 			Action:         marketdata.Action{Interval: marketdata.H1, Year: 2024, Month: time.January},
 			RecordsWritten: 3,
+			RecordsRevised: 2,
 		}},
 		Skipped: []marketdata.SkippedAction{{
 			Action: marketdata.Action{Kind: marketdata.ActionRepairRaw, Interval: marketdata.H1, Year: 2024, Month: time.January},
@@ -208,6 +209,7 @@ func TestJSONFormatter_FormatSync(t *testing.T) {
 	var decoded struct {
 		Downloaded []struct {
 			RecordsWritten int `json:"records_written"`
+			RecordsRevised int `json:"records_revised"`
 		} `json:"downloaded"`
 		Skipped []struct {
 			Kind   string `json:"kind"`
@@ -217,9 +219,62 @@ func TestJSONFormatter_FormatSync(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded))
 	require.Len(t, decoded.Downloaded, 1)
 	require.Equal(t, 3, decoded.Downloaded[0].RecordsWritten)
+	require.Equal(t, 2, decoded.Downloaded[0].RecordsRevised)
 	require.Len(t, decoded.Skipped, 1)
 	require.Equal(t, "repair-raw", decoded.Skipped[0].Kind)
 	require.Equal(t, "raw partition invalid", decoded.Skipped[0].Reason)
+}
+
+// TestJSONFormatter_FormatSync_ZeroRecordsRevisedIsNotOmitted is issue
+// #330's own acceptance criterion: a sync with zero revisions (every
+// provider except "alpaca", always, and "alpaca" on an ordinary
+// unchanged re-fetch) must still serialize records_revised as 0, not
+// silently drop the field — an operator scripting against this JSON
+// should never need to distinguish "zero" from "the field doesn't
+// exist here."
+func TestJSONFormatter_FormatSync_ZeroRecordsRevisedIsNotOmitted(t *testing.T) {
+	result := marketdata.SyncResult{
+		Downloaded: []marketdata.DownloadResult{{
+			Action:         marketdata.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
+			RecordsWritten: 21,
+			RecordsRevised: 0,
+		}},
+	}
+	var buf bytes.Buffer
+	err := jsonFormatter{}.FormatSync(&buf, svc.SyncResponse{Result: result})
+	require.NoError(t, err)
+	require.Contains(t, buf.String(), `"records_revised": 0`)
+}
+
+func TestTableFormatter_FormatSync(t *testing.T) {
+	result := marketdata.SyncResult{
+		Downloaded: []marketdata.DownloadResult{{
+			Action:         marketdata.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
+			RecordsWritten: 21,
+			RecordsRevised: 2,
+		}},
+	}
+	var buf bytes.Buffer
+	err := tableFormatter{}.FormatSync(&buf, svc.SyncResponse{Result: result})
+	require.NoError(t, err)
+	require.Contains(t, buf.String(), "21 record(s), 2 revised")
+}
+
+// TestTableFormatter_FormatSync_ZeroRevisedIsShown mirrors
+// TestJSONFormatter_FormatSync_ZeroRecordsRevisedIsNotOmitted for the
+// table format: a zero revised count is printed as "0 revised", not
+// silently dropped from the line.
+func TestTableFormatter_FormatSync_ZeroRevisedIsShown(t *testing.T) {
+	result := marketdata.SyncResult{
+		Downloaded: []marketdata.DownloadResult{{
+			Action:         marketdata.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
+			RecordsWritten: 21,
+		}},
+	}
+	var buf bytes.Buffer
+	err := tableFormatter{}.FormatSync(&buf, svc.SyncResponse{Result: result})
+	require.NoError(t, err)
+	require.Contains(t, buf.String(), "21 record(s), 0 revised")
 }
 
 func TestJSONFormatter_FormatBuild(t *testing.T) {

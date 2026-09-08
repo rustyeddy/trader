@@ -108,6 +108,7 @@ type jsonDownload struct {
 	Year           int    `json:"year"`
 	Month          int    `json:"month"`
 	RecordsWritten int    `json:"records_written"`
+	RecordsRevised int    `json:"records_revised"`
 }
 
 type jsonSkipped struct {
@@ -140,6 +141,7 @@ func toJSONSyncResult(result marketdata.SyncResult) jsonSyncResult {
 		downloaded[i] = jsonDownload{
 			Interval: d.Action.Interval.String(), Year: d.Action.Year,
 			Month: int(d.Action.Month), RecordsWritten: d.RecordsWritten,
+			RecordsRevised: d.RecordsRevised,
 		}
 	}
 	return jsonSyncResult{Downloaded: downloaded, Skipped: toJSONSkipped(result.Skipped)}
