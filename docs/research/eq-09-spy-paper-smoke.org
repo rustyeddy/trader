@@ -126,16 +126,87 @@ constant itself silently changing.
 
 * Recorded result
 
-*Not yet run against a real account as of this note's initial commit* —
-this section records the architecture/plumbing implementation and its
-own unit-tested logic; the live run itself requires a real credential
-pair an operator supplies locally, per the prerequisites above, and its
-result (real fill price, timing, and final account state) should be
-appended here as a live, non-deterministic observation once run, the
-same way =eq-07='s note records its own hand-computed backtest numbers
-— but explicitly labeled as observed evidence from one specific run,
-not a repeatable assertion the way EQ-07's exact-arithmetic backtest
-checks are.
+Run live on 2026-09-08, during real NYSE regular trading hours,
+against a real Alpaca paper account, using credentials loaded from a
+local, uncommitted YAML file (see EQ-09's own credential-loading
+addition to =smoke_test.go=):
+
+#+BEGIN_EXAMPLE
+=== RUN   TestSmokeSPYPaperRoundTrip
+    fetched 5 real SPY daily bars through marketdata.Manager
+    account equity 99998.86 USD; targeting 2 share(s) via risk fraction 0.0002
+    submitted enter order 77714d1c-..., for 1 shares of SPY, status working
+    observed order ...  transition to status working
+    observed order ...  transition to status filled
+    observed fill event for order ...: 1 shares @ 767.68
+    account snapshot after fill: equity=99998.88 USD cash=[99231.18 USD]
+    submitted exit order e0b379b7-..., status working
+    observed order ...  transition to status filled
+    observed fill event for order ...: 1 shares @ 767.67
+    final account snapshot: equity=99998.85 USD, SPY position flat
+--- PASS: TestSmokeSPYPaperRoundTrip (9.24s)
+PASS
+#+END_EXAMPLE
+
+Every acceptance criterion below was demonstrated in this one run: SPY
+was resolved once and used identically for the market-data read and
+the broker leg; real market data came back through
+=marketdata.Manager=; the enter order was risk-sized (from real fetched
+account equity, not a guess — see the sizing-bug note below), planned,
+risk-admitted, and submitted through the normal
+=order.Intent -> pipeline.Pipeline= path; both the order's
+=StatusFilled= transition and its corresponding canonical fill event
+were observed via =Account.Events=; the position was closed via a plain
+=order.IntentExit= through the same pipeline; and the final snapshot
+confirmed a flat SPY position. Round-trip cost over the ~9-second run
+was 3 cents on a ~$100,000 account (bid/ask spread on two market
+orders), consistent with a liquid, actively-traded ETF.
+
+** Two real bugs found and fixed by this live run
+
+Neither was reachable by the hermetic, fake-server-backed test suite —
+both required a real account with real state.
+
+1. *Sizing math*: the test's first attempt used a fixed
+   =RiskFraction = 0.001= with a =$1.00= =AdverseDistance=.
+   =risk.FixedFractionSizer= sizes
+   =Quantity = (Equity * RiskFraction) / AdverseDistance=; against
+   Alpaca's real ~$100,000 default paper balance this sized roughly
+   100 shares, which =risk.MaxPositionQuantityRule= correctly rejected
+   as exceeding the 2-share smoke cap — the risk system worked exactly
+   as designed, but the test's own fixed parameters didn't account for
+   the account's real size. Fixed by fetching the account's actual
+   equity first and deriving =RiskFraction= from it
+   (=(targetShares * AdverseDistance) / Equity=), targeting
+   =maxSmokeQuantity= itself (not 1 share) to leave margin against a
+   real, distinct rounding edge case this fix also surfaced: sizing
+   rounds its raw quotient *down* to the nearest whole share, and a
+   quotient computed to target exactly 1 share can land fractionally
+   under 1 (real account equity is never a round number — observed
+   =$99,999.14=) and round all the way down to zero.
+2. *Alpaca adapter bug* (=adapters/broker/alpaca=, already merged in
+   PR #313): =Account.Events='s polling loop and =Account.Snapshot='s
+   open-orders read both aborted entirely the first time either
+   encountered *any* order on the account whose =client_order_id= does
+   not parse as a Trader =OrderID= — in practice, any order not
+   submitted by Trader itself (this run's own first attempt left a
+   stray order that happened to collide with an unrelated,
+   already-present foreign order on the account, but the bug is
+   general: a real, actively-used paper account can carry orders
+   placed through Alpaca's own dashboard or another integration at any
+   time). One foreign order broke event/snapshot visibility for every
+   Trader-owned order on the account. Fixed in both call sites to skip
+   an order whose =client_order_id= fails to parse
+   (=errors.Is(err, id.ErrInvalidID)=) rather than treating it as a
+   fatal error — that order is simply not representable in Trader's
+   own vocabulary and is omitted, not fatal. Two new regression tests
+   (=TestAccountHandle_Snapshot_SkipsForeignOpenOrder=,
+   =TestEventReader_Poll_SkipsForeignOrder=) lock this in.
+
+Both fixes, and this recorded result, are included in PR #314 alongside
+the rest of EQ-09's own implementation, rather than being deferred to
+a separate follow-up — the live run was PR #314's own last remaining
+acceptance-criterion item.
 
 * Per-acceptance-criterion findings
 

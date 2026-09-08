@@ -2,6 +2,7 @@ package alpaca
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -197,6 +198,20 @@ func (r *eventReader) poll(ctx context.Context) error {
 
 		o, err := wireOrderToOrder(wo, r.account.broker.deps.Resolver, r.account.broker.name, r.account.broker.ref.AccountID, r.account.broker.deps.IDs)
 		if err != nil {
+			if errors.Is(err, id.ErrInvalidID) {
+				// wo.ClientOrderID does not parse as a Trader OrderID at
+				// all — this order was not submitted by Trader (a real
+				// paper account can carry orders placed through Alpaca's
+				// own dashboard, another integration, or left over from
+				// account setup). Such an order is not representable in
+				// Trader's own vocabulary and is simply not observable
+				// through this stream; skipping it here, rather than
+				// aborting the entire poll, is what keeps one foreign
+				// order from silently breaking every Trader-owned order's
+				// own event delivery (found live against a real paper
+				// account, PR #314/EQ-09 live run).
+				continue
+			}
 			return fmt.Errorf("alpaca: poll orders: %w", err)
 		}
 		r.account.broker.corr.rememberOrderID(o.Request.OrderID, wo.ID)

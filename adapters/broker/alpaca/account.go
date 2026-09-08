@@ -78,6 +78,20 @@ func (h *accountHandle) Snapshot(ctx context.Context) (account.Snapshot, error) 
 	for _, wo := range wireOpenOrders {
 		o, err := wireOrderToOrder(wo, h.broker.deps.Resolver, h.broker.name, h.broker.ref.AccountID, h.broker.deps.IDs)
 		if err != nil {
+			if errors.Is(err, id.ErrInvalidID) {
+				// This order was not submitted by Trader (its
+				// client_order_id does not parse as a Trader OrderID at
+				// all — a real paper account can carry orders placed
+				// through Alpaca's own dashboard or another integration).
+				// It is not representable in Trader's own order.Order
+				// vocabulary and is simply omitted from this Snapshot's
+				// OpenOrders, rather than failing the whole Snapshot call
+				// (found live against a real paper account, PR
+				// #314/EQ-09 live run — see the identical fix in
+				// event_reader.go's poll for the corresponding Events
+				// path).
+				continue
+			}
 			return account.Snapshot{}, fmt.Errorf("alpaca: snapshot: %w", err)
 		}
 		h.broker.corr.rememberOrderID(o.Request.OrderID, o.BrokerOrderID)

@@ -305,15 +305,49 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 
 	// --- Steps 3-4: the normal decision/order pipeline, submitting a
 	// deliberately small real paper Enter order ---
-	adverse := num.MustParsePrice("1.00")
+	//
+	// RiskFraction is computed from the account's own real current
+	// equity, not a fixed guess: risk.FixedFractionSizer sizes
+	// Quantity = (Equity * RiskFraction) / AdverseDistance (times the
+	// listing's multiplier, 1 for equities), so a fixed RiskFraction
+	// combined with a real, unknown paper-account balance can size far
+	// larger than intended — confirmed live: 0.001 against Alpaca's
+	// default ~$100k paper balance and a $1.00 AdverseDistance sized
+	// ~100 shares, which risk.MaxPositionQuantityRule correctly
+	// rejected as exceeding maxSmokeQuantity (the system worked; the
+	// test's own fixed parameters didn't account for the account's
+	// real size). Deriving RiskFraction from Equity directly targets
+	// targetShares regardless of the account's actual balance, with
+	// maxSmokeQuantity remaining a real, independent backstop rather
+	// than the primary sizing mechanism.
+	preSnap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	adverse := num.MustParsePrice("10.00") // ~1.3% of a ~$770 SPY share — a realistic short-term stop distance, not an arbitrary $1
+	// targetShares matches maxSmokeQuantity itself, not 1: sizing rounds
+	// the raw (equity*riskFraction)/adverseDistance quotient DOWN to the
+	// nearest whole share, and a raw quotient computed to target exactly
+	// 1 share can land fractionally under 1 (real account equity is
+	// never a round number, e.g. $99,999.14) and round all the way down
+	// to zero — confirmed live. Targeting the cap itself leaves margin
+	// against that floor-to-zero edge case while risk.MaxPositionQuantityRule
+	// still independently caps the result at maxSmokeQuantity regardless.
+	targetShares := maxSmokeQuantity
+	targetRiskMoney, err := adverse.MulQuantity(targetShares, preSnap.Currency())
+	require.NoError(t, err)
+	riskFraction, err := targetRiskMoney.Div(preSnap.Equity())
+	require.NoError(t, err)
+	t.Logf("account equity %s; targeting %s share(s) via risk fraction %s", preSnap.Equity(), targetShares, riskFraction)
+
 	enterResp, err := svc.Submit(ctx, svcexecution.SubmitRequest{
 		AccountID:       alpacaEQ09AccountID,
 		Intent:          buildIntent(order.IntentEnter, order.Buy),
 		Listing:         spyListing,
-		RiskFraction:    num.MustParseRate("0.001"), // deliberately tiny; maxQty above is the real backstop
+		RiskFraction:    riskFraction,
 		AdverseDistance: &adverse,
 	})
-	require.NoError(t, err)
+	if err != nil {
+		require.ErrorIs(t, err, svcexecution.ErrRejected, "unexpected non-rejection error submitting the enter intent: %v", err)
+	}
 	require.True(t, enterResp.Decision.Allowed, "risk declined the enter intent: %+v", enterResp.Decision.Violations)
 	require.NotNil(t, enterResp.Order.AcceptedQuantity)
 	assert.True(t, enterResp.Order.AcceptedQuantity.Cmp(num.MustParseQuantity("0")) > 0, "expected a positive quantity")
