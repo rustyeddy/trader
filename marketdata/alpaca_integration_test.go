@@ -726,15 +726,18 @@ func TestAlpacaSync_RejectsExtendingWithADifferentFeed(t *testing.T) {
 	require.Len(t, records, 1, "the existing partition must be left untouched")
 }
 
-// TestAlpacaSync_AcceptsExtendingALegacyPartitionWithNoRecordedFeed
-// proves a partition written before issue #324 (EQ-11) added feed
-// provenance (Feed("") — the "unknown" state, not a real feed value
-// disagreeing with the client's own) is accepted for extension rather
-// than rejected: there is no way to recover which feed actually
-// produced it, so treating "unknown" as a hard conflict would block
-// every future sync of every already-existing real partition the
-// moment this issue merges.
-func TestAlpacaSync_AcceptsExtendingALegacyPartitionWithNoRecordedFeed(t *testing.T) {
+// TestAlpacaSync_RejectsExtendingALegacyPartitionWithNoRecordedFeed
+// proves a *non-empty* partition written before issue #324 (EQ-11)
+// added feed provenance (Feed("") — genuinely unknown, not a real feed
+// value disagreeing with the client's own) is refused for incremental
+// extension, not silently accepted (PR #328 re-review): accepting it
+// would rewrite the whole partition under currentFeed, turning those
+// legacy rows' honestly unknowable provenance into a false, concrete
+// claim — and could still produce an actual mixed-feed partition if
+// they in fact came from a different feed. The safe response is to
+// require an explicit re-fetch of the whole partition under a known
+// feed, exactly like a genuine feed disagreement.
+func TestAlpacaSync_RejectsExtendingALegacyPartitionWithNoRecordedFeed(t *testing.T) {
 	rawRoot := t.TempDir()
 	existing := []alpaca.Record{{
 		Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
@@ -742,6 +745,32 @@ func TestAlpacaSync_AcceptsExtendingALegacyPartitionWithNoRecordedFeed(t *testin
 		Low: num.MustParsePrice("99"), Close: num.MustParsePrice("100.5"), Volume: 1000,
 	}}
 	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, alpaca.Feed(""), existing, true))
+
+	doer := &fakeAlpacaDoer{} // must never be called
+	mgr := newAlpacaTestManagerWithSyncAndFeed(t, rawRoot, doer, alpaca.FeedIEX)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "extend",
+	}}}
+	_, err := mgr.Sync(context.Background(), plan)
+	require.ErrorIs(t, err, ErrFeedMismatch)
+	assert.Empty(t, doer.requests, "must never fetch when an existing non-empty partition's feed is unknown")
+
+	records, err := alpaca.ReadPartitionRecords(context.Background(), rawRoot, "SPY", 2020, time.May)
+	require.NoError(t, err)
+	require.Len(t, records, 1, "the existing partition must be left untouched")
+}
+
+// TestAlpacaSync_WritesFreshFeedOverAnEmptyLegacyPartition proves the
+// carve-out this issue's guard still allows: a partition file that
+// exists but has zero rows (a real month with no trading days, or an
+// otherwise-empty legacy file) has no provenance to protect, and is
+// written under the client's configured feed normally rather than
+// being refused the way a non-empty legacy partition is.
+func TestAlpacaSync_WritesFreshFeedOverAnEmptyLegacyPartition(t *testing.T) {
+	rawRoot := t.TempDir()
+	require.NoError(t, alpaca.WritePartition(context.Background(), rawRoot, "SPY", 2020, time.May, alpaca.Feed(""), nil, true))
 
 	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
 		{status: 200, body: alpacaBarsJSONForTest([]string{"2020-05-04"})},
@@ -754,7 +783,11 @@ func TestAlpacaSync_AcceptsExtendingALegacyPartitionWithNoRecordedFeed(t *testin
 	}}}
 	result, err := mgr.Sync(context.Background(), plan)
 	require.NoError(t, err)
-	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
+	assert.Equal(t, 1, result.Downloaded[0].RecordsWritten)
+
+	snap, err := alpaca.ReadPartitionSnapshot(context.Background(), rawRoot, "SPY", 2020, time.May)
+	require.NoError(t, err)
+	assert.Equal(t, alpaca.FeedIEX, snap.Feed)
 }
 
 // TestMergeAlpacaRecordsByTime_ResultIsSortedByTime confirms

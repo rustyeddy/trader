@@ -387,10 +387,17 @@ type manifestJSON struct {
 	AdjustmentPolicy AdjustmentPolicy `json:"adjustment_policy"`
 	// Feed is Manifest.Feed (issue #324, EQ-11), omitted entirely for a
 	// dataset with no feed provenance (empty string) rather than
-	// written as an explicit empty field — a canonical file built
-	// before this field existed decodes it back as "", the same value
-	// it implicitly had at the time, so an old file's stored Revision
-	// still recomputes correctly.
+	// written as an explicit empty field. This only keeps encode and
+	// decode symmetric for an empty Feed — decoding a file with no
+	// "feed" key back into Manifest.Feed == "" — it does not by itself
+	// make a canonical file built before this field existed decode to a
+	// correctly-recomputing Revision: manifestRevisionVersion's own v2
+	// to v3 bump changes every Manifest.Revision() value regardless of
+	// Feed, so a pre-v3 canonical file's stored revision no longer
+	// recomputes correctly and must be rebuilt or (for the one checked-in
+	// fixture this repository has) have its stored revision recomputed
+	// by hand — see this issue's own ADR for the one-time fixture
+	// regeneration this required.
 	Feed             string      `json:"feed,omitempty"`
 	SchemaVersion    int         `json:"schema_version"`
 	RawFingerprint   string      `json:"raw_fingerprint"`

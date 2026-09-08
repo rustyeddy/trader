@@ -63,14 +63,28 @@ partition via =alpaca.ReadPartitionSnapshot= (replacing a plain
 =ReadPartitionRecords= call, which had no way to also report feed) and
 compares its recorded feed against the =*alpaca.Client='s own
 configured feed (=Client.Feed()=, added by this issue) *before*
-fetching or writing anything. A real, non-empty disagreement is
-rejected with a new sentinel, =ErrFeedMismatch=, and the existing
-partition is left completely untouched — no fetch is even attempted.
-An empty existing feed (the legacy "unknown" case above) is accepted
-without complaint, since it is not evidence of an actual conflict, only
-of missing provenance from before this issue existed; treating it as a
-hard block would break every already-fetched real Alpaca partition the
-moment this issue merged.
+fetching or writing anything. Three cases, in order:
+
+- No existing rows at all (a nonexistent partition, or one that exists
+  but is empty) has no provenance to protect and is written under the
+  client's configured feed normally.
+- Existing rows whose recorded feed genuinely disagrees with the
+  client's configured feed are rejected with a new sentinel,
+  =ErrFeedMismatch=; the existing partition is left completely
+  untouched and no fetch is even attempted.
+- Existing rows with *no* recorded feed (=Feed("")=, a partition
+  written before this issue existed) are *also* rejected with
+  =ErrFeedMismatch=, not silently accepted. An earlier draft of this
+  decision treated an unknown existing feed as compatible with
+  whatever feed the extension used, then rewrote the entire merged
+  partition under that feed — which silently turned those legacy
+  rows' genuinely unknowable provenance into a false, concrete claim,
+  and could still produce an actual mixed-feed partition if they had
+  in fact come from the other feed. Review correctly rejected this
+  (PR #328): the safe response to unknowable legacy provenance is to
+  require an explicit re-fetch of the whole partition under a known
+  feed, the same as a genuine disagreement — never to manufacture
+  provenance that was never actually recorded.
 
 ** Manifest gains Feed; Revision is bumped to v3
 
@@ -158,12 +172,19 @@ before and after this change).
   depend on any one provider package), and every other provider
   already has no feed concept at all — a plain, optional =string=
   matches that shape exactly.
-- *Treat any existing partition with an empty recorded feed as a hard
-  mismatch, forcing an explicit one-time re-fetch to "upgrade" every
-  already-fetched partition.* Rejected as needlessly disruptive: there
-  is no way to recover which feed actually produced legacy data, so
-  refusing to ever extend it again would only block real, otherwise-
-  correct future syncs without recovering any lost information.
+- *Accept an unknown existing feed as compatible with whatever feed
+  the extension uses, and rewrite the merged partition under that
+  feed.* This was this ADR's own first draft, and PR #328 review
+  correctly rejected it: it manufactures provenance that was never
+  actually recorded, defeating the point of adding feed to raw
+  provenance and =Manifest.Revision= at all, and can still produce a
+  real mixed-feed partition if the legacy rows in fact came from the
+  other feed. Adopted instead: refuse extension of a *non-empty*
+  unknown-feed partition (=ErrFeedMismatch=), requiring an explicit
+  re-fetch under a known feed — the same response as a genuine
+  disagreement. An empty existing partition is still written under the
+  configured feed normally, since it has no rows whose provenance
+  could be misrepresented.
 - *Leave =manifestRevisionVersion= unbumped, accepting that two
   manifests differing only in Feed might collide.* Rejected outright:
   this is exactly the "must not share a Revision" failure ADR-048's own
