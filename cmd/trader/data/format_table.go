@@ -85,8 +85,8 @@ func formatTableSkipped(w io.Writer, skipped []marketdata.SkippedAction) {
 
 func formatTableSyncResult(w io.Writer, result marketdata.SyncResult) {
 	for _, d := range result.Downloaded {
-		_, _ = fmt.Fprintf(w, "downloaded  %s %04d-%02d  %d record(s)\n",
-			d.Action.Interval, d.Action.Year, int(d.Action.Month), d.RecordsWritten)
+		_, _ = fmt.Fprintf(w, "downloaded  %s %04d-%02d  %d record(s), %d revised\n",
+			d.Action.Interval, d.Action.Year, int(d.Action.Month), d.RecordsWritten, d.RecordsRevised)
 	}
 	formatTableSkipped(w, result.Skipped)
 }
