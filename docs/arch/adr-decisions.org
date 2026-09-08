@@ -159,6 +159,7 @@ the original decided, use full supersession instead.
 | 049 | US equity market calendar and trading-session semantics (in adr-049-us-equity-market-calendar.org) | Accepted |
 | 050 | Alpaca historical equity market-data provider (in adr-050-alpaca-historical-provider.org) | Accepted |
 | 051 | Alpaca paper broker adapter: REST-polling Account.Events for Phase 1 (in adr-051-alpaca-broker-events-polling.org) | Accepted |
+| 052 | Alpaca historical provider: official Go SDK migration (in adr-052-alpaca-sdk-migration.org) | Accepted, partial amendment of 050 |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -582,6 +583,32 @@ polls), and a synthesized, non-correlating =PendingCommandID= when
 translating a wire order Alpaca itself reports as
 =pending_cancel=/=pending_replace= (order.Order's own ADR-018
 invariant requires one, and Alpaca's wire shape carries none at all).
+
+Note: ADR-052 is likewise maintained in its own file,
+=docs/arch/adr-052-alpaca-sdk-migration.org=, rather than inline in
+this registry. Its own Status section is authoritative. Issue #323
+(EQ-10) asks for Alpaca's hand-written historical-bars HTTP/JSON
+client (ADR-050) to be replaced with the official
+=github.com/alpacahq/alpaca-trade-api-go/v3= Go SDK; this ADR is a
+*partial amendment* of ADR-050 (this registry's own mechanism,
+established by ADR-021), correcting exactly three of ADR-050's
+sub-decisions — wire-protocol ownership (including a concrete
+correction to ADR-050's own "verified" claim that Alpaca's real API
+uses a single-symbol =/v2/stocks/{symbol}/bars= endpoint: reading the
+SDK's own source shows it always calls the multi-symbol
+=/v2/stocks/bars?symbols=...= endpoint instead), the injectable-
+transport shape (=*http.Client=/=http.RoundTripper=, replacing the
+=HTTPDoer= interface, since the SDK's own =ClientOpts.HTTPClient=
+field is concrete), and feed selectability (now an explicit
+=ClientConfig.Feed=, per issue #323's own requirement not to infer a
+feed from account tier) — while leaving ADR-050's other decisions
+(third-arm-of-seam integration, two-secret credential interface,
+raw-partition persistence, split-adjustment default, timestamp
+re-anchoring) unchanged. It also records a new consequence ADR-050
+never had to address: the SDK's own =Bar= type decodes prices directly
+into =float64=, so this package now quantizes each price to the cent
+tick size before constructing =num.Price=, using the checked,
+quantized reconstruction path ADR-045 already permits.
 
 * ADR-001: Modular monolith before service decomposition
 

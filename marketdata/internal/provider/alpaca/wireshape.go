@@ -1,102 +1,124 @@
 package alpaca
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"time"
+
+	sdkmarketdata "github.com/alpacahq/alpaca-trade-api-go/v3/marketdata"
 
 	"github.com/rustyeddy/trader/num"
 )
 
-// This file isolates every JSON-shape-specific type and parsing
-// function for Alpaca's historical-bars response, deliberately, per
-// doc.go's own "unverified API shape" note: if the real API's wire
-// format differs from what is assumed here, this is the one file that
-// needs correcting — client.go's request construction, retry policy,
-// and pagination loop do not need to change.
+// This file isolates every SDK-bar-to-Record conversion, mirroring the
+// role its previous, hand-written-JSON-decoding version played (issue
+// #297): if the SDK's own Bar shape or this package's conversion
+// policy ever needs correcting, this is the one file that needs to
+// change — client.go's request construction, retry policy, and
+// pagination delegation do not.
 //
-// # Assumed response shape
+// # Why quantize a float64 into num.Price at all
 //
-//	{
-//	  "bars": [
-//	    {"t": "2024-01-02T05:00:00Z", "o": 472.16, "h": 473.67,
-//	     "l": 470.49, "c": 472.65, "v": 123456789, "n": 4567, "vw": 472.1}
-//	  ],
-//	  "symbol": "SPY",
-//	  "next_page_token": "abc123"
-//	}
+// sdkmarketdata.Bar decodes Open/High/Low/Close directly into float64
+// fields (github.com/alpacahq/alpaca-trade-api-go/v3/marketdata's own
+// easyjson-generated decoder) — unlike this package's previous
+// hand-written decoder, which decoded into json.Number specifically to
+// preserve the API's original decimal text for num.ParsePrice. By the
+// time this package receives a sdkmarketdata.Bar, that original text
+// no longer exists: the SDK's own decoding has already performed one
+// binary-float rounding pass that cannot be undone.
 //
-// "next_page_token" is assumed to be either absent, null, or an empty
-// string when there is no further page.
+// quantizedPriceFromFloat is the deliberate response to that
+// constraint, not a casual shortcut: it rounds the float64 to the cent
+// tick size (ADR-047's Phase 1 equity default) before constructing
+// num.Price via num.ParsePrice's own checked parsing — exactly the
+// "round to the listing's tick size, then construct via the type's own
+// constructor" reconstruction path ADR-045 explicitly permits for an
+// analytical float64 becoming authoritative again. It is not a general
+// license to skip quantization elsewhere; it exists here only because
+// adopting the official SDK (issue #323) leaves no alternative.
 
-// barsResponse is the assumed JSON shape of Alpaca's
-// /v2/stocks/{symbol}/bars response.
-type barsResponse struct {
-	Bars          []wireBar `json:"bars"`
-	Symbol        string    `json:"symbol"`
-	NextPageToken string    `json:"next_page_token"`
+// quantizedPriceFromFloat constructs a num.Price from v, preserving as
+// much of v's real decimal precision as num.Price's own 8-decimal
+// scale (ADR-004) supports, rather than rounding to the cent tick
+// size. Historical split-adjusted equity series can legitimately carry
+// genuine sub-cent prices — a stock with a large historical split
+// ratio produces adjusted prices with real fractional-cent precision —
+// and rounding those to $0.01 during ingestion would silently discard
+// real history rather than an execution-time convenience. Tick-size
+// quantization belongs at an executable order/tick-size boundary, not
+// here (PR #327 review; an earlier version of this function, and of
+// ADR-052's own rationale, rounded to the cent tick size, which was
+// wrong for exactly this reason).
+//
+// v is first rendered via strconv.FormatFloat's shortest round-tripping
+// decimal text (precision -1): the smallest decimal string that
+// parses back to the exact same float64, preserving every real digit
+// the SDK's own float64 carries. If that text exceeds num.Price's
+// 8-decimal scale (num.ErrPrecision), this falls back to 8 decimal
+// places — the maximum precision available — rather than 2, so as
+// little real information as possible is discarded even in that rare
+// case.
+//
+// It rejects a non-finite v (NaN/Inf) with ErrBadRequest — a value
+// that should never occur in a real Alpaca bar, but one this package
+// must not silently propagate into an accounting type if it ever does.
+func quantizedPriceFromFloat(name string, v float64) (num.Price, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return num.Price{}, fmt.Errorf("alpaca: %w: %s: non-finite price %v", ErrBadRequest, name, v)
+	}
+	price, err := num.ParsePrice(strconv.FormatFloat(v, 'f', -1, 64))
+	if err == nil {
+		return price, nil
+	}
+	if !errors.Is(err, num.ErrPrecision) {
+		return num.Price{}, fmt.Errorf("alpaca: %w: %s: %v", ErrBadRequest, name, err)
+	}
+	price, err = num.ParsePrice(strconv.FormatFloat(v, 'f', 8, 64))
+	if err != nil {
+		return num.Price{}, fmt.Errorf("alpaca: %w: %s: %v", ErrBadRequest, name, err)
+	}
+	return price, nil
 }
 
-// wireBar is one assumed bar entry. Prices are decoded as
-// json.Number, not float64: Alpaca's real API almost certainly encodes
-// them as JSON numeric literals, and decoding straight into a Go
-// float64 before constructing a num.Price would round the value once
-// in an unspecified way before num.ParsePrice's own parsing could ever
-// see it. json.Number preserves the literal's original decimal text
-// (json.Decoder never re-renders a numeric token through float64
-// arithmetic when the destination type is json.Number), so
-// num.ParsePrice parses the exact text the API sent — the same
-// exactness discipline oanda.Record's own string-based price decoding
-// already follows for a wire format that happens to use JSON strings
-// instead of numbers for the same purpose. This is not a case ADR-045
-// governs (that ADR's boundary is for an internal, already-exact
-// num.Price converting *out* to float64 for analytical use); this is
-// external, arbitrary-precision wire data converting *in*, which
-// num.ParsePrice's own ordinary construction path already handles
-// correctly as long as it never passes through float64 first.
-type wireBar struct {
-	Time   string      `json:"t"`
-	Open   json.Number `json:"o"`
-	High   json.Number `json:"h"`
-	Low    json.Number `json:"l"`
-	Close  json.Number `json:"c"`
-	Volume int64       `json:"v"`
-}
-
-// records converts the decoded response into Records, re-anchoring
-// each bar's Time from its literal fetched instant to midnight UTC of
-// its own trading date in America/New_York civil time — see the
-// package doc comment's "Timestamp normalization" section for why.
-func (r barsResponse) records() ([]Record, error) {
+// recordsFromSDKBars converts bars (as returned by
+// sdkmarketdata.Client.GetBars) into Records, re-anchoring each bar's
+// Timestamp from its literal fetched instant to midnight UTC of its
+// own trading date in America/New_York civil time — see the package
+// doc comment's "Timestamp normalization" section for why — and
+// quantizing each price field via quantizedPriceFromFloat.
+func recordsFromSDKBars(bars []sdkmarketdata.Bar) ([]Record, error) {
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		return nil, fmt.Errorf("alpaca: %w: load America/New_York location: %v", ErrBadRequest, err)
 	}
 
-	out := make([]Record, 0, len(r.Bars))
-	for i, b := range r.Bars {
-		t, err := time.Parse(time.RFC3339Nano, b.Time)
-		if err != nil {
-			return nil, fmt.Errorf("alpaca: %w: bar %d: time: %v", ErrBadRequest, i, err)
+	out := make([]Record, 0, len(bars))
+	for i, b := range bars {
+		if b.Volume > math.MaxInt64 {
+			return nil, fmt.Errorf("alpaca: %w: bar %d: volume %d overflows int64", ErrBadRequest, i, b.Volume)
 		}
-		tradingDate := t.In(loc)
+
+		tradingDate := b.Timestamp.In(loc)
 		day := time.Date(tradingDate.Year(), tradingDate.Month(), tradingDate.Day(), 0, 0, 0, 0, time.UTC)
 
-		rec := Record{Time: day, Volume: b.Volume}
+		rec := Record{Time: day, Volume: int64(b.Volume)}
 		prices := []struct {
 			dst  *num.Price
-			s    string
+			v    float64
 			name string
 		}{
-			{&rec.Open, b.Open.String(), "o"},
-			{&rec.High, b.High.String(), "h"},
-			{&rec.Low, b.Low.String(), "l"},
-			{&rec.Close, b.Close.String(), "c"},
+			{&rec.Open, b.Open, "o"},
+			{&rec.High, b.High, "h"},
+			{&rec.Low, b.Low, "l"},
+			{&rec.Close, b.Close, "c"},
 		}
 		for _, p := range prices {
-			v, err := num.ParsePrice(p.s)
+			v, err := quantizedPriceFromFloat(p.name, p.v)
 			if err != nil {
-				return nil, fmt.Errorf("alpaca: %w: bar %d: %s: %v", ErrBadRequest, i, p.name, err)
+				return nil, fmt.Errorf("alpaca: bar %d: %w", i, err)
 			}
 			*p.dst = v
 		}

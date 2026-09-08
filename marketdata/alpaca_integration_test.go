@@ -327,6 +327,13 @@ func TestAlpacaEndToEnd_RejectsOutOfOrderRawData(t *testing.T) {
 }
 
 // --- Sync (fake Alpaca HTTP transport) ---
+//
+// fakeAlpacaDoer implements http.RoundTripper (issue #323, the Alpaca
+// Go SDK migration): the SDK's own ClientOpts.HTTPClient field is a
+// concrete *http.Client, not an interface, so this package's test seam
+// injects a fake Transport rather than a fake Do-shaped interface —
+// the same adjustment marketdata/internal/provider/alpaca's own
+// client_test.go makes.
 
 type fakeAlpacaResponse struct {
 	status int
@@ -339,7 +346,7 @@ type fakeAlpacaDoer struct {
 	requests  []*http.Request
 }
 
-func (f *fakeAlpacaDoer) Do(req *http.Request) (*http.Response, error) {
+func (f *fakeAlpacaDoer) RoundTrip(req *http.Request) (*http.Response, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, req)
@@ -348,39 +355,44 @@ func (f *fakeAlpacaDoer) Do(req *http.Request) (*http.Response, error) {
 	}
 	r := f.responses[0]
 	f.responses = f.responses[1:]
-	return &http.Response{StatusCode: r.status, Body: io.NopCloser(strings.NewReader(r.body))}, nil
+	return &http.Response{StatusCode: r.status, Body: io.NopCloser(strings.NewReader(r.body)), Header: make(http.Header)}, nil
 }
 
+// alpacaBarsJSONForTest builds a bars response in the shape the
+// official Alpaca Go SDK actually decodes (issue #323): "bars" keyed
+// by symbol, matching sdkmarketdata's multiBarResponse — not this
+// package's own earlier, unverified single-symbol-array assumption.
 func alpacaBarsJSONForTest(dates []string) string {
 	var b strings.Builder
-	b.WriteString(`{"symbol":"SPY","bars":[`)
+	b.WriteString(`{"bars":{"SPY":[`)
 	for i, d := range dates {
 		if i > 0 {
 			b.WriteString(",")
 		}
 		fmt.Fprintf(&b, `{"t":"%sT04:00:00Z","o":100.00,"h":101.00,"l":99.00,"c":100.50,"v":123456}`, d)
 	}
-	b.WriteString(`],"next_page_token":null}`)
+	b.WriteString(`]},"next_page_token":null}`)
 	return b.String()
 }
 
 // newAlpacaTestManagerWithSync returns a Manager wired for Sync: RawRoot
-// set, and an *alpaca.Client built with a fake HTTPDoer (never a real
-// network call) injected via Config's own in-package test seam —
+// set, and an *alpaca.Client built with a fake http.RoundTripper (never
+// a real network call) injected via Config's own in-package test seam —
 // mirroring newTestManagerWithSync (sync_test.go) exactly for the
 // "alpaca" provider branch.
-func newAlpacaTestManagerWithSync(t *testing.T, rawRoot string, doer alpaca.HTTPDoer) *Manager {
+func newAlpacaTestManagerWithSync(t *testing.T, rawRoot string, transport http.RoundTripper) *Manager {
 	t.Helper()
 	client, err := alpaca.NewClient(alpaca.ClientConfig{
 		BaseURL:        "https://fake.example.com",
 		Credential:     alpaca.StaticCredential{KeyID: "test-key", SecretKey: "test-secret"},
-		HTTPClient:     doer,
+		HTTPClient:     &http.Client{Transport: transport},
 		RetryBaseDelay: time.Millisecond,
 	})
 	require.NoError(t, err)
 
 	r := instrument.NewMemoryResolver()
 	require.NoError(t, r.Register(alpacaSPYListing(t)))
+	require.NoError(t, r.Register(alpacaAAPLListing(t)))
 
 	m, err := New(Config{
 		Clock:        testClock(),
@@ -393,6 +405,53 @@ func newAlpacaTestManagerWithSync(t *testing.T, rawRoot string, doer alpaca.HTTP
 	})
 	require.NoError(t, err)
 	return m
+}
+
+// alpacaBarsJSONForTestSymbol is alpacaBarsJSONForTest generalized to
+// an arbitrary symbol, needed for
+// TestAlpacaSync_FetchesSecondaryInstrumentAAPLThroughSameSDKPath
+// (issue #323's own "AAPL can be retrieved through the same path as a
+// secondary equity reference instrument" acceptance criterion).
+func alpacaBarsJSONForTestSymbol(symbol string, dates []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `{"bars":{%q:[`, symbol)
+	for i, d := range dates {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"t":"%sT04:00:00Z","o":100.00,"h":101.00,"l":99.00,"c":100.50,"v":123456}`, d)
+	}
+	b.WriteString(`]},"next_page_token":null}`)
+	return b.String()
+}
+
+// TestAlpacaSync_FetchesSecondaryInstrumentAAPLThroughSameSDKPath
+// proves the SDK-delegated fetch path (issue #323) is symbol-agnostic:
+// AAPL flows through the identical Sync/FetchBars/recordsFromSDKBars
+// path SPY's own sync tests already exercise, not a path that happens
+// to work only for the one symbol every other test in this file uses.
+func TestAlpacaSync_FetchesSecondaryInstrumentAAPLThroughSameSDKPath(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
+		{status: 200, body: alpacaBarsJSONForTestSymbol("AAPL", []string{"2020-05-01", "2020-05-04"})},
+	}}
+	mgr := newAlpacaTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaAAPLID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "missing",
+	}}}
+	result, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
+
+	require.Len(t, doer.requests, 1)
+	assert.Equal(t, "AAPL", doer.requests[0].URL.Query().Get("symbols"))
+
+	records, err := alpaca.ReadPartitionRecords(context.Background(), rawRoot, "AAPL", 2020, time.May)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
 }
 
 func TestAlpacaSync_DownloadsMissingRawPartition(t *testing.T) {
@@ -446,8 +505,14 @@ func TestAlpacaSync_NeverRequestsThroughStillFormingTradingDay(t *testing.T) {
 	end := doer.requests[0].URL.Query().Get("end")
 	parsed, err := time.Parse(time.RFC3339Nano, end)
 	require.NoError(t, err)
-	assert.True(t, parsed.Equal(time.Date(2026, time.January, 7, 0, 0, 0, 0, time.UTC)),
-		"end = %s, want exactly midnight UTC of the still-forming day, excluding it", end)
+	// Alpaca's real "end" parameter is documented as inclusive
+	// (sdkmarketdata.GetBarsRequest.End's own doc comment), while
+	// BarRequest.To is this codebase's own half-open upper bound
+	// (issue #323) — the client converts by subtracting one
+	// nanosecond, so the wire value here is one nanosecond before
+	// midnight UTC of the still-forming day, not that instant exactly.
+	assert.True(t, parsed.Equal(time.Date(2026, time.January, 7, 0, 0, 0, 0, time.UTC).Add(-time.Nanosecond)),
+		"end = %s, want one nanosecond before midnight UTC of the still-forming day, excluding it", end)
 }
 
 // TestAlpacaSync_RequestsThroughTodayOnceSessionHasClosed is the
@@ -477,8 +542,11 @@ func TestAlpacaSync_RequestsThroughTodayOnceSessionHasClosed(t *testing.T) {
 	end := doer.requests[0].URL.Query().Get("end")
 	parsed, err := time.Parse(time.RFC3339Nano, end)
 	require.NoError(t, err)
-	assert.True(t, parsed.Equal(afterClose.Now()),
-		"end = %s, want the real current instant (%s) since the session already closed", end, afterClose.Now())
+	// See TestAlpacaSync_NeverRequestsThroughStillFormingTradingDay's
+	// own comment: "end" is Alpaca's inclusive upper bound, one
+	// nanosecond before BarRequest.To's own half-open boundary.
+	assert.True(t, parsed.Equal(afterClose.Now().Add(-time.Nanosecond)),
+		"end = %s, want one nanosecond before the real current instant (%s) since the session already closed", end, afterClose.Now())
 }
 
 func TestAlpacaSync_ExtendsExistingRawPartition(t *testing.T) {

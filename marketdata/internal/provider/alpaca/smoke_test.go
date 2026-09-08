@@ -47,12 +47,12 @@ package alpaca
 //	go test -tags alpacasmoke ./marketdata/internal/provider/alpaca/... \
 //	    -run TestSmokeFetchBars -v
 //
-// A successful run is the first real-world confirmation of this
-// package's assumed wire shape (see doc.go and wireshape.go); a
-// failure here — especially a JSON-decoding error — is the expected
-// signal that wireshape.go's assumptions need correcting against the
-// real API, not that client.go's request/retry/pagination logic is
-// wrong.
+// A successful run is a real-world exercise of this package's
+// SDK-delegated fetch path (see doc.go); a failure here that is not a
+// credential/authorization problem most likely indicates an SDK
+// version mismatch or a genuine Alpaca API change, not a bug in this
+// package's own client.go/wireshape.go conversion logic — that logic
+// is exercised deterministically by this package's non-smoke tests.
 
 import (
 	"context"
@@ -98,7 +98,7 @@ func TestSmokeFetchBars(t *testing.T) {
 	from := to.AddDate(0, 0, -10)
 
 	records, err := c.FetchBars(context.Background(), BarRequest{Symbol: "SPY", From: from, To: to})
-	require.NoError(t, err, "a decoding error here means wireshape.go's assumed response shape needs correcting against the real API")
+	require.NoError(t, err)
 	assert.NotEmpty(t, records, "expected at least one SPY trading day in a 10-day recent historical window")
 
 	for _, r := range records {

@@ -1,0 +1,206 @@
+#+TITLE: Alpaca Historical Provider: Official Go SDK Migration ADR-052
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+Partial amendment of ADR-050 (see
+=docs/arch/adr-decisions.org='s own Partial Amendment Rules). This
+ADR corrects three specific sub-decisions ADR-050 made about *how*
+Alpaca's historical-bars protocol is implemented — the request/
+response wire shape and endpoint, the injectable-transport shape, and
+feed selectability — while leaving every other ADR-050 decision
+(third-arm-of-seam integration, two-secret credential *interface*,
+raw-partition persistence convention, split-adjustment default,
+timestamp re-anchoring approach) unchanged and still in force.
+
+* Context
+
+Issue #297 (EQ-04, ADR-050) implemented Alpaca's historical Market
+Data API by hand: a custom HTTP client (=client.go=) and a JSON
+decoder (=wireshape.go=) built against general, publicly documented
+knowledge of that API's shape, with no live network access available
+to verify it. ADR-050's own Context section named this explicitly:
+"the exact response *body* shape this code decodes against ...
+[remains] genuinely unverified ... since no real request was actually
+issued against the live API from this environment."
+
+Issue #323 (EQ-10) asks Trader to stop duplicating that protocol work
+and instead depend on Alpaca's own maintained Go SDK,
+=github.com/alpacahq/alpaca-trade-api-go/v3=, for request
+construction, pagination, and response decoding — resolving ADR-050's
+named verification risk by construction (the SDK is Alpaca's own,
+presumably tested against its real API) rather than by further manual
+confirmation from this environment.
+
+** A specific, previously "verified" claim in ADR-050 was wrong
+
+ADR-050's Context section states, as a PR #312 review finding: "the
+single-symbol bars endpoint (=/v2/stocks/{symbol}/bars=) ... [is a]
+real, verified parameter[]/value[], not [a] guess." Reading the
+official SDK's own source directly (=marketdata/rest.go=,
+=GetBars=/=GetMultiBars=) shows this is incorrect: the SDK always
+calls the *multi-symbol* endpoint, =GET /v2/stocks/bars= with a
+=symbols=<SYMBOL>= query parameter, decoding a response shaped
+=map[string][]Bar= keyed by symbol (=multiBarResponse=) — never the
+single-symbol path endpoint ADR-050 named, which would decode a flat
+array. Both endpoints may genuinely exist in Alpaca's real API; the
+point is that ADR-050's confidence in the single-symbol path variant
+was misplaced, and this package now uses whichever endpoint Alpaca's
+own actively-maintained SDK actually exercises, rather than either
+guess.
+
+* Decision
+
+** Wire protocol ownership moves to the SDK; wireshape.go's role narrows accordingly
+
+=marketdata/internal/provider/alpaca/client.go= no longer constructs
+HTTP requests or decodes JSON responses itself. =Client.fetchAllPages=
+constructs a short-lived =sdkmarketdata.Client= (fresh per outer retry
+attempt, so credential rotation — =CredentialProvider='s own
+documented contract — is still honored, just at attempt granularity
+rather than per literal HTTP page) and calls its =GetBars=, which owns
+pagination internally via the corrected multi-symbol endpoint above.
+
+=wireshape.go= keeps its role as the one file isolating a
+provider-shape-specific conversion, but that conversion is now
+SDK-type-to-=Record= (=recordsFromSDKBars=) rather than
+JSON-to-=Record=. The removed =barsResponse=/=wireBar=/
+=(barsResponse).records= types, and their unverified-shape risk, no
+longer exist in this package at all.
+
+** Cancellation is coarser: per-attempt, not per-HTTP-page
+
+The SDK's =GetBars=/=GetMultiBars= accept no =context.Context= and
+own their entire multi-page fetch loop synchronously and
+uninterruptibly. =Client.FetchBars= therefore checks =ctx= before each
+outer retry attempt (and while waiting out backoff/rate-limit pacing
+between attempts), but cannot interrupt a single SDK call, or one of
+its internal pages, once issued. A new =ClientConfig.RequestTimeout=
+(default 30s), applied to the underlying =*http.Client.Timeout=, is
+the resulting backstop against one hung request, compensating for the
+lost context propagation. This is an accepted, deliberate narrowing —
+the direct consequence of delegating wire-protocol ownership to the
+SDK, which is exactly what issue #323 asks for — not an oversight to
+be worked around by reimplementing the SDK's own pagination loop by
+hand.
+
+** Injectable-transport shape changes: *http.Client/RoundTripper, not HTTPDoer
+
+ADR-050's "HTTP client shape mirrors oanda.Client" decision specified
+an injectable =HTTPDoer= interface (=Do(req) (*http.Response, error)=)
+for fakeable tests. The SDK's own =ClientOpts.HTTPClient= field is a
+concrete =*http.Client=, not an interface, so =ClientConfig.HTTPClient=
+changes type to match: a =*http.Client= whose =Transport= a test
+fakes with an =http.RoundTripper= implementation — the standard Go
+idiom for faking an HTTP client, and the same adjustment made
+throughout this package's and =marketdata='s own test suites.
+=HTTPDoer= is removed; nothing else in this package or in
+=marketdata= referenced it beyond the removed tests.
+
+** Feed becomes explicitly selectable
+
+ADR-050 pinned =feed=iex= as "not exposed as a caller-selectable
+parameter." Issue #323 asks for explicit historical feed selection
+without silently choosing a feed based on account tier. =ClientConfig=
+gains a =Feed= field (=FeedIEX= default, =FeedSIP= available for a
+caller with a paid entitlement), plumbed into the SDK's own
+=GetBarsRequest.Feed=. =adjustment=split= remains fixed and
+unconfigurable — ADR-050's cross-provider-comparability reasoning for
+that specific choice is unaffected by this ADR and is not revisited
+here.
+
+** Price precision: a new consequence of the SDK's own Bar type — preserved, not quantized to the tick size
+
+ADR-050 did not need to address this because its hand-written decoder
+preserved the API's original decimal price text via =json.Number=,
+letting =num.ParsePrice= parse the exact wire text with no rounding
+step. The SDK's =sdkmarketdata.Bar= decodes prices directly into
+=float64= fields; by the time this package receives a =Bar=, that
+original text no longer exists to recover.
+
+An earlier version of this ADR, and of =wireshape.go='s
+=quantizedPriceFromFloat=, rounded each price to the cent tick size
+(ADR-047's Phase 1 equity default) before constructing =num.Price=.
+Review correctly rejected this: historical split-adjusted equity
+series can legitimately carry genuine sub-cent prices (a stock with a
+large historical split ratio produces adjusted closes with real
+fractional-cent precision), and rounding those to $0.01 during
+ingestion silently discards real history rather than applying an
+execution-time convenience — tick-size quantization is a property of
+an *executable order*, not of a *historical observation*, and belongs
+at the order/execution boundary those two ADRs actually govern, not
+here.
+
+The corrected =quantizedPriceFromFloat= instead renders each float64
+via its shortest round-tripping decimal text
+(=strconv.FormatFloat(v, 'f', -1, 64)=: the smallest decimal string
+that parses back to the exact same float64) and constructs =num.Price=
+from that text directly, preserving every real digit the SDK's own
+float64 carries. Only when that text exceeds =num.Price='s 8-decimal
+scale (ADR-004) — signaled by =num.ErrPrecision= — does it fall back to
+8 decimal places, the maximum precision available, rather than to 2.
+This is still the same "construct via the type's own checked
+constructor" reconstruction path ADR-045 permits for an analytical
+=float64= becoming authoritative again; what changed is only how much
+of the float64's real precision is preserved before that construction,
+not whether reconstruction through the checked constructor itself is
+appropriate. ADR-004/045's own prohibition on *unquantized*,
+uncontrolled float64 propagation elsewhere is unaffected: every value
+here still passes through =num.ParsePrice='s own validated parsing,
+never a raw float64 written directly into a =num.Price= field.
+
+* Consequences
+
+- Alpaca's response-body wire shape is no longer this codebase's own
+  unverified assumption; it is the SDK's, and the SDK's own endpoint
+  choice (multi-symbol query, not single-symbol path) is now what this
+  package actually exercises — a concrete correction to a specific
+  claim ADR-050 recorded as verified.
+- =ClientConfig.HTTPClient='s type change (=HTTPDoer= to
+  =*http.Client=) is confined to this internal package; no test or
+  production caller outside =marketdata/internal/provider/alpaca= and
+  =marketdata='s own Alpaca-specific test file referenced =HTTPDoer=,
+  and both were updated in the same change.
+- A caller needing true mid-fetch cancellation responsiveness (for
+  example a very long historical range under a tight deadline) does
+  not get it from this provider; =RequestTimeout= bounds the damage
+  from one hung request, but does not replace fine-grained
+  cancellation. No current Trader caller depends on that granularity —
+  =marketdata/sync.go='s own month-by-month fetch cadence keeps any
+  single real request small in practice.
+- =ClientConfig.Feed= is additive and defaults to ADR-050's own
+  =FeedIEX= choice, so no existing caller's observed behavior changes
+  by omission.
+
+* Alternatives Considered
+
+- *Keep the hand-written HTTP/JSON client and treat issue #323 as
+  already satisfied by ADR-050's PR #312 review.* Rejected: issue #323
+  explicitly asks to delegate protocol work to the maintained SDK
+  rather than continue maintaining a duplicate implementation, and
+  reading the SDK's own source directly surfaced a concrete, real
+  endpoint-shape correction ADR-050's review pass could not have found
+  without either live API access or the SDK's own source — exactly the
+  kind of verification this migration was meant to provide.
+- *Reimplement per-page cancellation by calling a lower-level,
+  single-page SDK primitive instead of GetBars/GetMultiBars.* Rejected:
+  the SDK exposes no public single-page fetch primitive; only the
+  full-pagination-loop-owning =GetBars=/=GetMultiBars= are exported.
+  Reaching for the SDK's unexported internals to preserve one test's
+  exact prior granularity would defeat the point of delegating
+  protocol ownership to a maintained library.
+- *Preserve the =HTTPDoer= interface by wrapping a =*http.Client= call
+  behind it.* Rejected as pointless indirection: the SDK requires a
+  concrete =*http.Client= at its own boundary regardless, so keeping a
+  same-shaped wrapper interface on top of it would not restore any
+  capability actually lost (a fake =HTTPDoer= could never inject
+  behavior at a level below where the SDK itself calls =Do=) — it
+  would only add a layer that always forwards to the same
+  =*http.Client=.
+- *Do not quantize; store the SDK's float64 price directly as
+  authoritative.* Rejected outright: this is exactly the unquantized
+  float64 propagation ADR-004/045 prohibit at the accounting/order
+  boundary, and raw canonical bar prices feed directly into that
+  boundary later in the pipeline.

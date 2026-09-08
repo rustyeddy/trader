@@ -8,6 +8,15 @@ Trader's first *live* historical equity data provider, behind the same
 =marketdata= provider boundary ADR-047/048/049 already established for
 Stooq's offline-import path.
 
+Amended by ADR-052: the wire-protocol-ownership, injectable-transport-
+shape, and feed-selectability sub-decisions below are corrected by
+issue #323's migration to the official Alpaca Go SDK — including a
+concrete correction to this document's own "verified" single-symbol-
+endpoint claim (see ADR-052's Context). Every other decision below
+(third-arm-of-seam integration, two-secret credential interface,
+raw-partition persistence convention, split-adjustment default,
+timestamp re-anchoring approach) remains in force, unchanged.
+
 * Context
 
 ADR-047 named Alpaca as Phase 1's second provider from the start, and
