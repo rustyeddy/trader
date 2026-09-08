@@ -78,6 +78,20 @@ func (h *accountHandle) Snapshot(ctx context.Context) (account.Snapshot, error) 
 	for _, wo := range wireOpenOrders {
 		o, err := wireOrderToOrder(wo, h.broker.deps.Resolver, h.broker.name, h.broker.ref.AccountID, h.broker.deps.IDs)
 		if err != nil {
+			if errors.Is(err, id.ErrInvalidID) {
+				// This order was not submitted by Trader (its
+				// client_order_id does not parse as a Trader OrderID at
+				// all — a real paper account can carry orders placed
+				// through Alpaca's own dashboard or another integration).
+				// It is not representable in Trader's own order.Order
+				// vocabulary and is simply omitted from this Snapshot's
+				// OpenOrders, rather than failing the whole Snapshot call
+				// (found live against a real paper account, PR
+				// #314/EQ-09 live run — see the identical fix in
+				// event_reader.go's poll for the corresponding Events
+				// path).
+				continue
+			}
 			return account.Snapshot{}, fmt.Errorf("alpaca: snapshot: %w", err)
 		}
 		h.broker.corr.rememberOrderID(o.Request.OrderID, o.BrokerOrderID)
@@ -140,11 +154,28 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 	}
 
 	h.broker.corr.rememberOrderID(req.OrderID, wireResp.ID)
-	h.broker.corr.observe(wireResp.ID, observedOrderState{status: wireResp.Status, filledQty: orDefault(wireResp.FilledQty, "0")})
+	// prevState is always the zero observedOrderState here (this
+	// Alpaca order id has never been observed before) — captured from
+	// observe's own return rather than assumed, so this stays correct
+	// even if that ever changes. If Alpaca's POST /v2/orders response
+	// already reports the order filled (a small paper market order
+	// commonly fills synchronously, within the HTTP response window),
+	// emitFillIfIncreased synthesizes the corresponding EventKindFill
+	// immediately — see its own doc comment for the bug this fixes
+	// (PR #314 review): without it, this call alone would have
+	// recorded the already-final filled quantity as the correlator's
+	// baseline, so the next poll would see no increase and never
+	// produce a Fill event at all for an order that Alpaca filled
+	// synchronously.
+	newState := observedOrderState{status: wireResp.Status, filledQty: orDefault(wireResp.FilledQty, "0")}
+	prevState := h.broker.corr.observe(wireResp.ID, newState)
 	if _, err := h.broker.corr.appendEvent(func(sequence uint64) (brokerpkg.Event, error) {
 		return buildOrderEvent(h.broker.deps, o, req.Metadata.EventID, sequence)
 	}); err != nil {
 		return order.Order{}, fmt.Errorf("alpaca: submit: record event: %w", err)
+	}
+	if err := emitFillIfIncreased(h.broker, prevState, newState, o); err != nil {
+		return order.Order{}, fmt.Errorf("alpaca: submit: %w", err)
 	}
 	return o, nil
 }

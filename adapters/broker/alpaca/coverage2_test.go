@@ -278,7 +278,6 @@ func TestEmitFillIfIncreased_NoOpWhenQuantityDidNotIncrease(t *testing.T) {
 	acc, err := broker.OpenAccount(context.Background(), broker.ref.AccountID)
 	require.NoError(t, err)
 	h := acc.(*accountHandle)
-	reader := &eventReader{account: h}
 
 	o, err := order.NewOrder(order.Order{
 		Request:          mustRequest(t, listing, broker.ref.AccountID),
@@ -287,7 +286,7 @@ func TestEmitFillIfIncreased_NoOpWhenQuantityDidNotIncrease(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = reader.emitFillIfIncreased(observedOrderState{filledQty: "1"}, observedOrderState{filledQty: "1"}, o)
+	err = emitFillIfIncreased(h.broker, observedOrderState{filledQty: "1"}, observedOrderState{filledQty: "1"}, o)
 	require.NoError(t, err)
 
 	// No event should have been recorded.
@@ -393,4 +392,84 @@ func TestEventReader_CloseWakesBlockedNext(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Next did not wake up promptly after Close")
 	}
+}
+
+// TestAccountHandle_Snapshot_SkipsForeignOpenOrder is a direct
+// regression for a bug found during EQ-09's live paper smoke run
+// (PR #314): a real Alpaca paper account can carry an order Trader
+// never submitted (a client_order_id that isn't one of Trader's own
+// OrderIDs — for example, an order placed through Alpaca's own
+// dashboard). Snapshot must skip such an order, not fail entirely and
+// take every other order down with it.
+func TestAccountHandle_Snapshot_SkipsForeignOpenOrder(t *testing.T) {
+	server := newFakeAlpacaServer()
+	listing := testListing(t, "AAPL")
+	broker := testBroker(t, server, listing)
+	acc, err := broker.OpenAccount(context.Background(), broker.ref.AccountID)
+	require.NoError(t, err)
+
+	// A foreign order: a bare UUID-shaped client_order_id, not a
+	// Trader-minted OrderID.
+	server.orders["foreign-1"] = wireOrder{
+		ID: "foreign-1", ClientOrderID: "f9b967a9-a4b1-4179-8dec-fdb905edfc93",
+		Symbol: "AAPL", Qty: "5", FilledQty: "0", Type: "market", Side: "buy",
+		TimeInForce: "day", Status: "new",
+	}
+
+	orderID := id.MustParseOrderID("ord_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	submitTestOrder(t, acc, listing, broker.ref.AccountID, orderID)
+
+	snap, err := acc.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.Len(t, snap.OpenOrders(), 1, "expected only the Trader-owned order, foreign order skipped")
+	assert.Equal(t, orderID, snap.OpenOrders()[0].Request.OrderID)
+}
+
+// TestEventReader_Poll_SkipsForeignOrder is event_reader.go's own
+// counterpart to the Snapshot regression above: a poll must skip a
+// foreign order (unparseable client_order_id) and keep delivering
+// events for every Trader-owned order, rather than aborting the whole
+// poll — the actual live failure mode found in PR #314/EQ-09's live
+// run (one foreign order broke Account.Events for the entire account).
+func TestEventReader_Poll_SkipsForeignOrder(t *testing.T) {
+	server := newFakeAlpacaServer()
+	listing := testListing(t, "AAPL")
+	broker := testBroker(t, server, listing)
+	acc, err := broker.OpenAccount(context.Background(), broker.ref.AccountID)
+	require.NoError(t, err)
+
+	orderID := id.MustParseOrderID("ord_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	o := submitTestOrder(t, acc, listing, broker.ref.AccountID, orderID)
+	require.Equal(t, order.StatusWorking, o.Status)
+
+	// Seed a foreign order directly into the fake server (bypassing
+	// Submit, which would itself never produce a foreign
+	// client_order_id) — simulating an order this adapter observes but
+	// never created.
+	server.orders["foreign-1"] = wireOrder{
+		ID: "foreign-1", ClientOrderID: "f9b967a9-a4b1-4179-8dec-fdb905edfc93",
+		Symbol: "AAPL", Qty: "5", FilledQty: "0", Type: "market", Side: "buy",
+		TimeInForce: "day", Status: "new",
+	}
+	server.settleFill(o.BrokerOrderID, "10", "150.25")
+
+	reader, err := acc.Events(context.Background(), "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+
+	// First event: Submit's own synchronous order-accepted event.
+	ev1, err := reader.Next(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, brokerpkg.EventKindOrder, ev1.Kind)
+
+	// Poll must still surface the Trader-owned order's fill transition
+	// despite the foreign order sitting in the same order list.
+	ev2, err := reader.Next(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, brokerpkg.EventKindOrder, ev2.Kind)
+	assert.Equal(t, order.StatusFilled, ev2.Order.Status)
+
+	ev3, err := reader.Next(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, brokerpkg.EventKindFill, ev3.Kind)
 }

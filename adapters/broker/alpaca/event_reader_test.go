@@ -182,3 +182,41 @@ func TestEventReader_PollDetectsCancelSettlement(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, order.StatusCanceled, ev3.Order.Status)
 }
+
+// TestEventReader_SynchronousFillEmitsFillEvent is a direct regression
+// for PR #314 review: Alpaca's POST /v2/orders response can report a
+// market order as already filled synchronously (the common case for a
+// small paper order). Submit must synthesize the corresponding
+// EventKindFill event itself in that case — see emitFillIfIncreased's
+// own doc comment for the bug this fixes: Submit previously recorded
+// the already-final filled quantity as the correlator's baseline
+// without ever emitting a Fill event, so the next poll saw no increase
+// and permanently suppressed it.
+func TestEventReader_SynchronousFillEmitsFillEvent(t *testing.T) {
+	server := newFakeAlpacaServer()
+	server.autoFill = true
+	listing := testListing(t, "AAPL")
+	broker := testBroker(t, server, listing)
+	acc, err := broker.OpenAccount(context.Background(), broker.ref.AccountID)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(context.Background(), "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+
+	orderID := id.MustParseOrderID("ord_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	o := submitTestOrder(t, acc, listing, broker.ref.AccountID, orderID)
+	require.Equal(t, order.StatusFilled, o.Status)
+
+	ev1, err := reader.Next(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, brokerpkg.EventKindOrder, ev1.Kind)
+	assert.Equal(t, order.StatusFilled, ev1.Order.Status)
+
+	ev2, err := reader.Next(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, brokerpkg.EventKindFill, ev2.Kind)
+	require.NotNil(t, ev2.Fill)
+	assert.Equal(t, orderID, ev2.Fill.OrderID)
+	assert.True(t, ev2.Fill.Quantity.Equal(num.MustParseQuantity("10")))
+}
