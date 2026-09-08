@@ -107,6 +107,30 @@ func TestDataSync_Alpaca_MissingCredentialsProducesClearError(t *testing.T) {
 		"error must be classifiable via errors.Is(err, marketdata.ErrInvalidConfig), matching OANDA's own missing-credential behavior")
 }
 
+// TestDataSync_Alpaca_OneSidedCredentialProducesClearError is PR
+// #334's review finding, addressed directly: supplying exactly one of
+// TRADER_ALPACA_KEY_ID/TRADER_ALPACA_SECRET_KEY must not silently fall
+// through to the generic "not configured" case (which would hide that
+// the operator did configure something, just not both halves of it).
+// buildDataContext now rejects a one-sided pair explicitly, at
+// config-resolution time, before Manager is even constructed.
+func TestDataSync_Alpaca_OneSidedCredentialProducesClearError(t *testing.T) {
+	t.Setenv("TRADER_ALPACA_KEY_ID", "test-key")
+	// TRADER_ALPACA_SECRET_KEY deliberately left unset.
+
+	storeRoot := t.TempDir()
+	rawRoot := t.TempDir()
+
+	_, err := runData(t, storeRoot, rawRoot,
+		"sync", "SPY", "D1",
+		"--provider", "alpaca", "--exchange", "ARCA", "--kind", "etf",
+		"--from", "2024-01-08", "--to", "2024-01-10")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must both be supplied together")
+	require.True(t, errors.Is(err, marketdata.ErrInvalidConfig),
+		"error must be classifiable via errors.Is(err, marketdata.ErrInvalidConfig)")
+}
+
 // TestDataSync_Alpaca_MissingExchangeProducesClearError proves the
 // non-FX instrument-parsing half of #331: requesting a non-FX
 // provider's instrument without --exchange fails with an actionable

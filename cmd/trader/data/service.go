@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -265,13 +266,27 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 	// supplied together" check for every command run against a
 	// different provider (a real regression caught by
 	// vertical_slice_test.go's OANDA-only scenarios while developing
-	// this). Both fields are therefore gated behind the identical
-	// condition, so an incomplete pair still correctly leaves Manager
-	// to report its own ErrInvalidConfig, not silently authenticate
-	// with an empty secret.
-	if cfg.AlpacaKeyID != "" && cfg.AlpacaSecretKey != "" {
+	// this).
+	//
+	// A one-sided pair (exactly one of KeyID/SecretKey set) is
+	// rejected explicitly here, rather than silently falling through
+	// to the both-empty case: PR #334 review correctly pointed out
+	// that letting Manager's later, generic "Alpaca credential/base
+	// URL is not configured" Sync-time error stand in for this case
+	// hides the operator's actual mistake — they *did* configure
+	// something, just not both halves of it. This mirrors #331's own
+	// acceptance criterion (an incomplete pair must be classifiable
+	// and clear, the same as OANDA's construction-time "must be
+	// supplied together" check), surfaced at config-resolution time
+	// rather than only at Sync time.
+	switch {
+	case cfg.AlpacaKeyID != "" && cfg.AlpacaSecretKey != "":
 		managerCfg.AlpacaCredential = alpacaKeyIDSecretCredential{keyID: cfg.AlpacaKeyID, secretKey: cfg.AlpacaSecretKey}
 		managerCfg.AlpacaBaseURL = cfg.AlpacaBaseURL
+	case cfg.AlpacaKeyID != "" || cfg.AlpacaSecretKey != "":
+		return dataContext{}, fmt.Errorf(
+			"%w: Alpaca key ID and secret key must both be supplied together (set both TRADER_ALPACA_KEY_ID and TRADER_ALPACA_SECRET_KEY)",
+			marketdata.ErrInvalidConfig)
 	}
 
 	manager, err := marketdata.New(managerCfg)
