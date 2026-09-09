@@ -1,0 +1,169 @@
+#+TITLE: Rounding a Computed Stop Price to the Listing's Tick Size ADR-056
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+* Context
+
+Issue #340, discovered while running issue #335 (EQS-01)'s own required
+initial SPY D1 backtest: =strategy/smatrend= computes each trailing-
+stop price as =highWaterMark.MulRate(retainFraction)= (90% of the
+high-water mark). Against real SPY prices this routinely lands on a
+sub-cent value (=368.964= for a tick size of =0.01=), and
+=execution.planAdjustStop=/=PlanReplace= passed that price straight
+into =order.NewProposal=/=order.NewReplaceRequest=, which correctly
+rejected it via =instrument.Spec.ValidatePrice=:
+
+#+BEGIN_EXAMPLE
+order: invalid proposal: stop price: instrument: invalid spec:
+price 368.964 is not a multiple of tick size 0.01
+#+END_EXAMPLE
+
+This is a general gap, not specific to =smatrend=: any strategy that
+computes a stop/limit price from arithmetic on market data — a
+fraction of a high, an ATR multiple, and so on — rather than copying an
+already tick-aligned price verbatim will hit the identical rejection.
+=num.Price= had no "round to tick size" primitive at all (only
+=num.Quantity.RoundDown=, ADR-030), and a =strategy.Strategy=
+implementation has no =instrument.Listing=/=Spec= access to round
+against even if one existed — ADR-005's own strategy/execution
+boundary keeps a Listing's tick size out of the strategy layer
+entirely. The fix therefore cannot live in =smatrend= (or any other
+strategy); it belongs in =execution=, which already resolves the
+=Listing= for every =Plan=/=PlanReplace= call.
+
+=num='s own package doc and =ParseRate='s doc comment both state a
+firm numeric-architecture convention: "nothing [is] silently rounded."
+A fix that quietly widened =instrument.Spec.ValidatePrice='s
+acceptance, or rounded inside =order.NewProposal= without comment,
+would violate that convention by making rounding invisible. This ADR
+records an explicit, narrowly-scoped rounding step instead, confined
+to the one path that needs it.
+
+* Decision
+
+Add two new =num.Price= primitives, mirroring =Quantity.RoundDown='s
+exact scaled-integer style (ADR-030) precisely:
+
+#+BEGIN_SRC go
+func (p Price) RoundDown(tick Price) (Price, error) // floor(p/tick) x tick
+func (p Price) RoundUp(tick Price) (Price, error)    // ceil(p/tick) x tick
+#+END_SRC
+
+Both report =ErrDivideByZero= for a zero tick, matching
+=DivisibleBy='s existing convention. Two directional primitives are
+needed (not one bidirectional "round to nearest") because which
+direction is *safe* for a protective stop depends on which side of the
+market it protects — a single "nearest" rounding could legitimately
+move a stop in the wrong direction for either side.
+
+=execution= gains one small helper, =roundStopPriceToTick(price
+num.Price, side order.Side, listing instrument.Listing) (num.Price,
+error)=, called from both consumers of a caller-supplied
+=StopPrice=:
+
+- =planner.Plan='s =order.IntentAdjustStop= case (initial placement):
+  rounds =intent.StopPrice= before constructing the =order.Proposal=.
+- =planner.PlanReplace= (ratcheting an existing resting stop): rounds
+  =intent.StopPrice= before constructing the =order.ReplaceRequest=,
+  using the *existing* resting order's own =Side= (its own protective
+  direction, per =findRestingStopOrder='s existing side-matching
+  guarantee) rather than recomputing it.
+
+The rounding direction is chosen so a computed stop is never rounded
+into being *more aggressive/tighter* than what the caller asked for:
+
+- A Sell stop protects a long position from below; rounding it further
+  down (=RoundDown=) gives the position strictly more room than the
+  unrounded value, never less.
+- A Buy stop protects a short position from above; rounding it further
+  up (=RoundUp=) does the same, symmetrically.
+
+A stop price that already lands exactly on a tick rounds to itself in
+either direction — this is a true no-op for every existing caller that
+already supplies an aligned price (every current test fixture, and any
+composed-by-hand =IntentAdjustStop= that already respects the
+listing's tick size), which is why every pre-existing
+=execution=/=pipeline=/=backtest= test continued to pass unmodified
+once this change landed.
+
+No other =order.Intent= kind carries a caller-supplied price today
+(=Enter=/=Exit=/=TargetExposure= never set one), so this is the one
+and only place =execution= rounds anything. =order.NewProposal= and
+=order.NewReplaceRequest= keep their existing strict validation
+unchanged — this ADR does not weaken =instrument.Spec.ValidatePrice=
+for any other caller; it only ensures =execution= never hands it an
+unrounded, strategy-computed value in the first place.
+
+* Consequences
+
+- A strategy (=smatrend=, or any future strategy computing a derived
+  stop/limit price) can call =strategy.IntentFactory.AdjustStop= with
+  an arithmetically-derived price and have it accepted, correctly
+  rounded to the listing's own tick size, instead of the run aborting
+  with a validation error.
+- The rounding direction is explicit and tested for both stop sides:
+  =TestPlanAdjustStop_RoundsMisalignedStopPriceToTick=/
+  =_ShortPosition= (initial placement) and
+  =TestPlanReplace_RoundsMisalignedStopPriceToTick= (ratchet), plus
+  =num='s own =TestPriceRoundDown=/=TestPriceRoundUp= (including issue
+  #340's own exact =368.964= motivating case).
+  Every pre-existing test in =num=, =execution=, =pipeline=, and
+  =backtest= passed unmodified, confirming this is additive for a
+  caller that already supplies a tick-aligned price.
+- PR #341 review found =RoundUp='s first implementation computed its
+  result as =(count+1) x tick.raw= — for a =p= near the top of
+  =Price='s representable range with a fractional remainder, that
+  product could overflow =int64= and silently wrap negative,
+  violating =Price='s non-negative invariant. Fixed by computing
+  =RoundDown='s own (always in-range) result first and adding one
+  further tick via =fixed.Add='s checked arithmetic, reporting
+  =num.ErrOverflow= instead of wrapping.
+  =TestPriceRoundUp_ReportsOverflowInsteadOfWrapping= is the
+  regression, confirmed (by hand-simulating the original
+  =(count+1)*tick.raw= arithmetic) to actually wrap to a large
+  negative value under the original implementation rather than merely
+  passing once the fix was applied.
+- =strategy/smatrend='s own real SPY backtest (issue #335) can now run
+  to completion against real Alpaca data without a tick-size
+  rejection.
+- A future strategy computing a *limit* price (rather than a stop)
+  would need the identical treatment added at whatever seam
+  eventually supports limit-price replacement — out of scope here, per
+  =execution='s own existing "no unused replacement vocabulary
+  speculatively" stance (ADR-054's own Alternatives Considered).
+
+* Alternatives Considered
+
+- *Round inside =order.NewProposal=/=order.NewReplaceRequest=
+  themselves, transparently.* Rejected: this would make rounding
+  invisible to every caller of those constructors, including ones that
+  legitimately want strict rejection of a misaligned price (any future
+  caller that is not =execution='s own =IntentAdjustStop= path).
+  Keeping the rounding call explicit and localized to the one place
+  that needs it preserves =num='s "nothing silently rounded"
+  convention everywhere else.
+- *Round inside =strategy/smatrend= itself, to the nearest cent.*
+  Considered and rejected (this was the original workaround proposed
+  before filing this issue): =smatrend= has no =Listing=/=Spec= access
+  under ADR-005's own strategy/execution boundary, so it cannot know
+  the *actual* configured tick size — hardcoding "$0.01" would be
+  wrong for any instrument with a coarser or finer tick, and would
+  still require every other strategy computing a derived stop price to
+  repeat the same guess independently.
+- *A single bidirectional "round to nearest tick" primitive.*
+  Rejected: "nearest" is not always "safe" — for a protective stop,
+  the safe direction depends on which side of the market it protects,
+  so a single symmetric primitive would round a stop in the wrong
+  (tighter-than-requested) direction roughly half the time.
+- *Widen =instrument.Spec.ValidatePrice= to silently round instead of
+  rejecting a misaligned price.* Rejected: this is =instrument='s own
+  general-purpose validation, used by every caller that constructs a
+  =Proposal=/=ReplaceRequest=, most of which have deliberately chosen
+  strict rejection as the correct behavior for a price that did not
+  come from an intentional derived-price computation (a fat-fingered
+  literal, a unit-mismatched provider price, and so on). Silently
+  rounding there would hide exactly the class of bug strict rejection
+  exists to catch.

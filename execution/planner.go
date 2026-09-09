@@ -64,7 +64,11 @@ func (p *planner) Plan(ctx context.Context, in PlanInput) (PlanResult, error) {
 		side, qty, err = planAdjustStop(in.Account, in.Listing)
 		reduceOnly = true
 		orderType = order.Stop
-		stopPrice = intent.StopPrice
+		if err == nil {
+			var rounded num.Price
+			rounded, err = roundStopPriceToTick(*intent.StopPrice, side, in.Listing)
+			stopPrice = &rounded
+		}
 	default:
 		err = fmt.Errorf("%w: %v", ErrUnsupportedIntentKind, intent.Kind)
 	}

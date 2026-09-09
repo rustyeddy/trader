@@ -299,6 +299,50 @@ func TestPlanAdjustStop_ShortPosition(t *testing.T) {
 	assert.Equal(t, order.Stop, result.Proposal.Type)
 }
 
+// TestPlanAdjustStop_RoundsMisalignedStopPriceToTick is issue #340's
+// own regression: a strategy-computed stop price that is not an exact
+// multiple of the listing's tick size (0.00001 for mustEurUsdListing)
+// must be rounded, not rejected — down (away from a long position's
+// protective side) for a Sell stop.
+func TestPlanAdjustStop_RoundsMisalignedStopPriceToTick(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t, deps.IDs)
+	pos := mustPosition(t, accountID, listing, order.Long, "1000")
+	snap := mustSnapshot(t, accountID, listing, pos)
+	intent := mustAdjustStopIntentAt(t, deps.IDs, listing.InstrumentID(), "1.050003")
+
+	result, err := p.Plan(context.Background(), PlanInput{Intent: intent, Listing: listing, Account: snap})
+	require.NoError(t, err)
+	assert.Equal(t, order.Sell, result.Proposal.Side)
+	require.NotNil(t, result.Proposal.StopPrice)
+	assert.Equal(t, "1.05", result.Proposal.StopPrice.String(), "must round down to the listing's own tick size, not reject")
+}
+
+// TestPlanAdjustStop_RoundsMisalignedStopPriceToTick_ShortPosition
+// mirrors the above for a short position's Buy stop, which must round
+// up instead.
+func TestPlanAdjustStop_RoundsMisalignedStopPriceToTick_ShortPosition(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t, deps.IDs)
+	pos := mustPosition(t, accountID, listing, order.Short, "1000")
+	snap := mustSnapshot(t, accountID, listing, pos)
+	intent := mustAdjustStopIntentAt(t, deps.IDs, listing.InstrumentID(), "1.050003")
+
+	result, err := p.Plan(context.Background(), PlanInput{Intent: intent, Listing: listing, Account: snap})
+	require.NoError(t, err)
+	assert.Equal(t, order.Buy, result.Proposal.Side)
+	require.NotNil(t, result.Proposal.StopPrice)
+	assert.Equal(t, "1.05001", result.Proposal.StopPrice.String(), "must round up to the listing's own tick size, not reject")
+}
+
 // TestPlanAdjustStop_ExistingStopOrderIsRejected is issue #336's
 // dispatch boundary: Plan handles only *initial* stop placement: an
 // instrument that already has a resting Stop order must be ratcheted

@@ -190,3 +190,70 @@ func (p Price) DivisibleBy(step Price) (bool, error) {
 	}
 	return p.raw%step.raw == 0, nil
 }
+
+// RoundDown returns the largest multiple of tick that is <= p:
+// floor(p/tick) x tick, mirroring Quantity.RoundDown's own scaled-
+// integer style exactly (issue #340) — tick.raw and p.raw already
+// share the same fixed-point scale, so their plain integer quotient is
+// already the exact, dimensionless multiple count, and Go's integer
+// division truncates toward zero, which equals floor for the
+// non-negative values Price always holds.
+//
+// RoundDown reports ErrDivideByZero when tick is zero, matching
+// DivisibleBy's own existing convention. Callers computing a
+// derived price from arithmetic (a fraction of a high-water mark, an
+// ATR multiple, and so on) rather than copying an already tick-
+// aligned price verbatim must round it to the listing's own
+// instrument.Spec.TickSize() before constructing an order.Proposal/
+// order.ReplaceRequest — see execution's own IntentAdjustStop handling
+// for the one place this is done today. This is an explicit,
+// documented rounding step, never an implicit one: num's own package
+// doc states plainly that "nothing [is] silently rounded," and
+// RoundDown exists precisely so a caller that does want to round has
+// a named, exact operation to call instead of reaching for float64
+// arithmetic or truncated decimal text.
+func (p Price) RoundDown(tick Price) (Price, error) {
+	if tick.raw == 0 {
+		return Price{}, ErrDivideByZero
+	}
+	count := p.raw / tick.raw
+	return Price{raw: count * tick.raw}, nil
+}
+
+// RoundUp returns the smallest multiple of tick that is >= p:
+// ceil(p/tick) x tick. See RoundDown's own doc comment for the shared
+// rationale and Price's non-negative-by-construction assumption;
+// RoundUp differs only in rounding toward positive infinity instead of
+// toward zero — the direction needed so a protective Buy stop (which
+// protects a short position from above) is never rounded into being
+// more aggressive/tighter than what the caller computed: moving it
+// further up gives the position strictly more room, never less.
+//
+// RoundUp reports ErrDivideByZero when tick is zero. A p that is
+// already an exact multiple of tick rounds to itself, exactly like
+// RoundDown; only a genuinely fractional remainder rounds up to the
+// next multiple.
+//
+// Unlike RoundDown, RoundUp cannot compute its result as a plain
+// count*tick.raw product: incrementing the multiple count first and
+// then multiplying could overflow int64 for a p near the top of
+// Price's representable range, silently wrapping negative and
+// violating Price's non-negative invariant (PR #341 review). Instead
+// it computes RoundDown's own (always in-range, since it never
+// exceeds p.raw) result directly, then adds one further tick via
+// fixed.Add's checked arithmetic — reporting ErrOverflow rather than
+// wrapping if even that single increment does not fit.
+func (p Price) RoundUp(tick Price) (Price, error) {
+	if tick.raw == 0 {
+		return Price{}, ErrDivideByZero
+	}
+	down := (p.raw / tick.raw) * tick.raw
+	if down == p.raw {
+		return Price{raw: down}, nil
+	}
+	raw, err := fixed.Add(down, tick.raw)
+	if err != nil {
+		return Price{}, wrapFixedErr(err)
+	}
+	return Price{raw: raw}, nil
+}
