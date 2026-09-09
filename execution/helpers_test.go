@@ -157,12 +157,31 @@ func mustSnapshotWithOpenOrders(t *testing.T, accountID id.AccountID, listing in
 	return snap
 }
 
-// mustRestingStopOrder builds a working (non-terminal) Stop order.Order
-// for accountID/listing — the fixture the "already has a resting
-// stop" branch of Plan(IntentAdjustStop)/PlanReplace needs, at
-// whatever stopPrice the test wants the *existing* order to carry
-// (PlanReplace's job is moving it to a *new* one).
+// mustRestingStopOrder builds a working (non-terminal), ReduceOnly Stop
+// order.Order for accountID/listing — the fixture the "already has a
+// resting protective stop" branch of Plan(IntentAdjustStop)/
+// PlanReplace needs, at whatever stopPrice the test wants the
+// *existing* order to carry (PlanReplace's job is moving it to a *new*
+// one). See mustNonProtectiveStopOrder for a fixture that deliberately
+// does *not* qualify as a protective stop (PR #337 review).
 func mustRestingStopOrder(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, stopPrice string) order.Order {
+	t.Helper()
+	return mustStopOrder(t, gen, accountID, listing, side, quantity, stopPrice, true)
+}
+
+// mustNonProtectiveStopOrder builds a resting Stop order that
+// findRestingStopOrder must *not* treat as this instrument's
+// protective stop — either because reduceOnly is false (it could
+// increase, not only reduce, the position) or because side is the
+// side that would open exposure rather than close it (PR #337
+// review's own "verify its side protects the current position, and
+// require ReduceOnly" request).
+func mustNonProtectiveStopOrder(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, stopPrice string, reduceOnly bool) order.Order {
+	t.Helper()
+	return mustStopOrder(t, gen, accountID, listing, side, quantity, stopPrice, reduceOnly)
+}
+
+func mustStopOrder(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, stopPrice string, reduceOnly bool) order.Order {
 	t.Helper()
 	sp := num.MustParsePrice(stopPrice)
 	proposal, err := order.NewProposal(order.Proposal{
@@ -173,7 +192,7 @@ func mustRestingStopOrder(t *testing.T, gen *id.Generator, accountID id.AccountI
 		TimeInForce: order.GTC,
 		Quantity:    num.MustParseQuantity(quantity),
 		StopPrice:   &sp,
-		ReduceOnly:  true,
+		ReduceOnly:  reduceOnly,
 		Metadata:    id.Metadata{EventID: mustEventID(t, gen), CorrelationID: mustCorrelationID(t, gen)},
 	})
 	require.NoError(t, err)

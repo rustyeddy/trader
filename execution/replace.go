@@ -8,6 +8,7 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 )
 
@@ -73,20 +74,35 @@ func checkReplaceInput(in ReplaceInput) (order.Intent, error) {
 }
 
 // PlanReplace implements Planner: it finds the account's own resting
-// Stop order for in.Listing's instrument and returns a validated
-// order.ReplaceRequest moving that order's StopPrice to in.Intent's —
-// ratcheting an already-placed protective stop, as opposed to Plan's
-// own IntentAdjustStop case, which places the *initial* one (there is
-// nothing yet for PlanReplace to find). ErrNoRestingStopOrder reports
-// the case Plan is meant to handle instead.
+// protective Stop order for in.Listing's instrument (findRestingStopOrder's
+// own doc comment defines exactly what qualifies) and returns a
+// validated order.ReplaceRequest moving that order's StopPrice to
+// in.Intent's — ratcheting an already-placed protective stop, as
+// opposed to Plan's own IntentAdjustStop case, which places the
+// *initial* one (there is nothing yet for PlanReplace to find).
+// ErrNoRestingStopOrder reports the case Plan is meant to handle
+// instead.
 //
-// PlanReplace supports only order.IntentAdjustStop — see ADR-054 for
-// why quantity/limit-price replacement is not planned here: this
-// package's only real consumer (a trailing-stop-style strategy) only
-// ever moves a stop price, and inventing unused replacement vocabulary
-// speculatively is exactly what execution/doc.go's own history (the
-// original, narrower IntentAdjustStop deferral this issue closes)
-// warns against repeating.
+// PlanReplace also keeps the stop's own Quantity synchronized with the
+// account's current position size in in.Listing's instrument, setting
+// NewQuantity whenever it has changed since the resting order was last
+// placed or replaced (PR #337 review — issue #336's own non-goals
+// already scoped this in: "quantity-changing replaces *beyond* what's
+// needed to keep a protective stop's quantity in sync with the current
+// position size" are out of scope; staying in sync is not). This is
+// the one quantity-changing case PlanReplace supports — it does not
+// otherwise plan independent, position-sizing-driven replacement.
+// findRestingStopOrder's own side-matching already guarantees the
+// order this function finds still actually protects the current
+// position's side, so no separate side check is needed here.
+//
+// Beyond that, PlanReplace supports only order.IntentAdjustStop — see
+// ADR-054 for why arbitrary limit-price replacement is not planned
+// here: this package's only real consumer (a trailing-stop-style
+// strategy) never needs it, and inventing unused replacement
+// vocabulary speculatively is exactly what execution/doc.go's own
+// history (the original, narrower IntentAdjustStop deferral this
+// issue closes) warns against repeating.
 //
 // PlanReplace shares Plan's determinism contract: given identical
 // *initial* Deps state and an identical ReplaceInput, two independently
@@ -110,6 +126,20 @@ func (p *planner) PlanReplace(ctx context.Context, in ReplaceInput) (ReplaceResu
 		return ReplaceResult{}, fmt.Errorf("%w: %v", ErrNoRestingStopOrder, intent.Instrument)
 	}
 
+	// Keep the stop's own Quantity synchronized with the current
+	// position size (PR #337 review). planAdjustStop cannot fail here
+	// with ErrNoPositionToProtect: findRestingStopOrder already found a
+	// protective stop whose Side matches a real position's protective
+	// side, so that same position is necessarily still open.
+	_, currentQty, err := planAdjustStop(in.Account, in.Listing)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	var newQuantity *num.Quantity
+	if existing.AcceptedQuantity == nil || !existing.AcceptedQuantity.Equal(currentQty) {
+		newQuantity = &currentQty
+	}
+
 	eventID, err := id.GenerateEventID(p.deps.IDs)
 	if err != nil {
 		return ReplaceResult{}, err
@@ -117,6 +147,7 @@ func (p *planner) PlanReplace(ctx context.Context, in ReplaceInput) (ReplaceResu
 
 	req, err := order.NewReplaceRequest(order.ReplaceRequest{
 		OrderID:      existing.Request.OrderID,
+		NewQuantity:  newQuantity,
 		NewStopPrice: intent.StopPrice,
 		Metadata: id.Metadata{
 			EventID:       eventID,

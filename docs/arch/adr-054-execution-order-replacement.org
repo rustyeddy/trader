@@ -71,15 +71,43 @@ contract (see =Plan='s own doc comment) and one implementation
 (=planner=), and =PlanReplace= is meaningless without =Plan= already
 having decided initial placement doesn't apply.
 
-=PlanReplace= supports only =order.IntentAdjustStop=, and only ever
-sets =NewStopPrice= on the =ReplaceRequest= it builds — never
-=NewQuantity= or =NewLimitPrice=. This package's one real consumer (a
-trailing-stop-style strategy) only ever moves a stop price;
-quantity/limit-price replacement is not invented here speculatively,
-matching the exact restraint the original =IntentAdjustStop= deferral
-was itself an instance of. A future consumer that genuinely needs
-quantity-changing replacement is new, real scope for a later decision,
-not an extension of this one.
+=PlanReplace= supports only =order.IntentAdjustStop=, and always sets
+=NewStopPrice= on the =ReplaceRequest= it builds. It also sets
+=NewQuantity= — but only to resynchronize the stop's own quantity with
+the account's *current* position size, when that has changed since the
+resting order was last placed or replaced (PR #337 review: the
+original version of this decision never set =NewQuantity= at all,
+which meant a stop order's own quantity could silently drift out of
+sync with a position that grew after the stop was first placed — a
+100-unit position that grew to 150 would leave only 100 units
+protected). It never sets =NewLimitPrice=, and never sets =NewQuantity=
+for any reason *other* than that resynchronization — this package's one
+real consumer (a trailing-stop-style strategy) never independently
+resizes a position through =IntentAdjustStop=; whatever grew or shrank
+the position already went through its own =IntentEnter=/
+=IntentTargetExposure= intent and its own risk evaluation. Limit-price
+replacement specifically is not invented here speculatively, matching
+the exact restraint the original =IntentAdjustStop= deferral was itself
+an instance of. A future consumer that genuinely needs independent,
+position-sizing-driven quantity replacement (not merely staying in
+sync with a position already sized elsewhere) is new, real scope for a
+later decision, not an extension of this one.
+
+=findRestingStopOrder= (the lookup both =Plan= and =PlanReplace= use to
+decide whether a protective stop already exists) means exactly that —
+"protective stop" — not "any resting =Stop= order for this
+instrument" (PR #337 review): it requires =ReduceOnly=, and, whenever
+the account currently holds a position, requires the order's own
+=Side= to be the side that actually closes that position. An order
+that fails either check (for example a stale =Stop= left resting after
+a position fully reversed) is invisible to this lookup; =Plan= would
+place a fresh protective stop for the current position rather than
+mistake the stale order for it, or =PlanReplace= would correctly report
+=ErrNoRestingStopOrder=. Reconciling or canceling a genuinely orphaned
+order this leaves behind is not attempted here — #335's own strategy
+design never reverses a position without a full exit first, so no
+current consumer can actually produce that case; it is a documented
+limitation, not a silently accepted general bug.
 
 ** =pipeline.Result= gains a second, mutually exclusive shape
 
@@ -107,23 +135,32 @@ this" on the replacement path, where risk was never evaluated at all
 (see below). A caller must check =Replace != nil= first. This is
 documented directly on =Result='s own doc comment, not left implicit.
 
-** Risk evaluation is deliberately skipped for a =StopPrice=-only replacement
+** Risk evaluation is deliberately skipped for this replacement
 
-=risk.Engine= is not consulted on the replacement path. =PlanReplace=
-never changes an order's quantity or the account's notional exposure —
-it only moves an already-approved stop order's trigger price — and no
-existing =risk.Rule= inspects =StopPrice= at all. There is also no new
-=Proposal= to evaluate on this path: =risk.Input.Proposal= expects a
-candidate new order, and synthesizing one to represent "the account's
-exposure after this stop moves" would not change under any existing
-Rule, since exposure itself is unchanged.
+=risk.Engine= is not consulted on the replacement path, including when
+=PlanReplace= sets =NewQuantity= to resynchronize the stop with the
+account's current position size. The reasoning is not "quantity never
+changes here" (it can, see above) but that this specific quantity
+change is never an independent exposure decision: it only ever brings
+a *protective* order back into agreement with a position size some
+other, already risk-evaluated intent (=IntentEnter=/
+=IntentTargetExposure=, each planned through the ordinary =Plan=/
+=risk.Engine= path in full) already produced. The account's actual
+notional exposure does not change on this path at all — only how much
+of the *already-approved* exposure the resting stop order currently
+covers. No existing =risk.Rule= inspects =StopPrice= either. There is
+also no new =Proposal= to evaluate on this path: =risk.Input.Proposal=
+expects a candidate new order, and synthesizing one to represent "the
+account's exposure after this replacement" would not change under any
+existing Rule, since exposure itself is unchanged.
 
-This is a scoped decision about a =StopPrice=-only replacement
-specifically, not a general "replacements skip risk" policy. A future
-quantity-changing replacement (explicitly out of scope for this issue
-and for =PlanReplace= as built) would change notional exposure and
-would need real risk consideration before being added — this ADR does
-not pre-approve that.
+This is a scoped decision about *this* replacement — a =StopPrice=
+ratchet, optionally paired with resynchronizing =NewQuantity= to an
+already-approved position size — not a general "replacements skip
+risk" policy. A future replacement that changes exposure independently
+(not merely re-stating a size some other, already-evaluated intent
+already produced) would need real risk consideration before being
+added — this ADR does not pre-approve that.
 
 ** Journaling/correlation
 
@@ -201,11 +238,24 @@ same chain the way =emacross= already correlates its reversal intents.
   including the three intent kinds that can never produce a
   replacement, would spread the special case wider than confining it
   to =IntentAdjustStop='s own two call sites.
-- *A quantity-changing/full =ReplaceRequest= vocabulary built now,
-  since the type already supports =NewQuantity=/=NewLimitPrice=.*
-  Rejected as speculative: this issue's one real consumer never needs
-  either, and =execution/doc.go='s own history is a direct lesson
-  against inventing unused vocabulary ahead of a real need.
+- *=NewLimitPrice= replacement built now, since the type already
+  supports it.* Rejected as speculative: this issue's one real
+  consumer never needs it, and =execution/doc.go='s own history is a
+  direct lesson against inventing unused vocabulary ahead of a real
+  need. (=NewQuantity=, unlike =NewLimitPrice=, ended up genuinely
+  needed — not for independent position-sizing, but to keep a
+  protective stop's own quantity from silently drifting out of sync
+  with the position it protects; see above.)
+- *Leaving the protective stop's own quantity unsynchronized with the
+  account's current position size.* This was the original version of
+  this decision, and PR #337 review correctly identified it as a real
+  gap, not a deliberate scope boundary: issue #336's own non-goals
+  already scoped a position-sync-driven quantity change *in*
+  ("quantity-changing replaces *beyond* what's needed to keep a
+  protective stop's quantity in sync with the current position size"
+  are out of scope), so leaving the stop under-protecting a grown
+  position was an implementation gap against this decision's own
+  stated scope, not a considered alternative worth preserving.
 - *Full =risk.Engine= re-evaluation on every replacement, synthesizing
   a "resulting" Proposal.* Rejected: no existing Rule reads
   =StopPrice=, so this would add real complexity (a proposal that
