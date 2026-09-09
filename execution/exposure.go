@@ -93,3 +93,39 @@ func opposite(s order.Side) order.Side {
 	}
 	return order.Buy
 }
+
+// planAdjustStop determines the Side and Quantity a protective stop
+// order for acc's entire current position in listing needs — the same
+// closing side/quantity planExit computes (a protective stop is, in
+// the end, a conditional exit), but reported as ErrNoPositionToProtect
+// rather than ErrNoPositionToExit when there is nothing to protect, so
+// a caller debugging an IntentAdjustStop failure sees an error that
+// actually names what it was trying to do.
+func planAdjustStop(acc account.Snapshot, listing instrument.Listing) (order.Side, num.Quantity, error) {
+	side, qty, err := planExit(acc, listing)
+	if err != nil {
+		return 0, num.Quantity{}, ErrNoPositionToProtect
+	}
+	return side, qty, nil
+}
+
+// findRestingStopOrder returns acc's own resting (non-terminal) Stop
+// order for listing's instrument, if any — the signal
+// execution.Plan/PlanReplace and pipeline.Pipeline use to decide
+// between "place the initial protective stop" (Plan) and "ratchet the
+// existing one" (PlanReplace). Matching is by instrument identity, the
+// same convention findPosition already uses.
+func findRestingStopOrder(acc account.Snapshot, listing instrument.Listing) (order.Order, bool) {
+	for _, o := range acc.OpenOrders() {
+		if o.Status.Terminal() {
+			continue
+		}
+		if o.Request.Type != order.Stop {
+			continue
+		}
+		if o.Request.Listing.InstrumentID().Equal(listing.InstrumentID()) {
+			return o, true
+		}
+	}
+	return order.Order{}, false
+}

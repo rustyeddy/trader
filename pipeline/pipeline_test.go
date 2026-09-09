@@ -241,7 +241,17 @@ func (rejectingRule) Evaluate(ctx context.Context, in risk.Input) (risk.RuleResu
 	return risk.RuleResult{Violations: []risk.Violation{{Message: "test: always rejects"}}}, nil
 }
 
-func TestPipelineSubmit_UnsupportedIntentKindPropagatesPlanningError(t *testing.T) {
+// TestPipelineSubmit_PlanningErrorPropagatesAndNeverTouchesBroker
+// proves a planning failure propagates through Pipeline.Submit as a
+// classifiable error, with the broker never touched. It uses
+// IntentAdjustStop against an account with no open position
+// (execution.ErrNoPositionToProtect) as its example planning failure —
+// before issue #336, IntentAdjustStop was itself always unsupported
+// (execution.ErrUnsupportedIntentKind); it is now the position-less
+// case specifically that fails, which still exercises the identical
+// "planning fails, Submit never reaches the broker" property this test
+// exists to prove.
+func TestPipelineSubmit_PlanningErrorPropagatesAndNeverTouchesBroker(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, "10000")
 	p := newPipeline(t, h)
@@ -254,7 +264,7 @@ func TestPipelineSubmit_UnsupportedIntentKindPropagatesPlanningError(t *testing.
 		Listing: h.listing,
 		Account: before,
 	})
-	require.ErrorIs(t, err, execution.ErrUnsupportedIntentKind)
+	require.ErrorIs(t, err, execution.ErrNoPositionToProtect)
 	assert.Equal(t, pipeline.Result{}, result)
 
 	after := h.snapshot(t, ctx)

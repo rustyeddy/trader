@@ -1,0 +1,186 @@
+#+TITLE: Order Replacement in the Execution/Risk Pipeline ADR-054
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+* Context
+
+Issue #336 asks for =order.IntentAdjustStop= to actually be executable
+through Trader's normal strategy/execution/risk/broker pipeline, so a
+strategy can establish and ratchet a protective stop order (for
+example a trailing stop). Discovered while scoping issue #335 (a
+baseline SMA-trend equity strategy with a 10% trailing stop): the
+strategy layer already had everything needed to *express* this —
+=strategy.IntentFactory.AdjustStop=, =order.Type= including =Stop=,
+=order.ReplaceRequest=/=ReplaceResult=, and =broker.Account.Replace= —
+and the simulated broker (=adapters/broker/sim=) already had real,
+working =Stop=-order support end to end: =Submit= accepts a
+=Stop=-type request with =StopPrice=, =Replace= supports
+=NewStopPrice=, and =Advance='s intrabar fill logic (=stopTriggerPrice=,
+=IntrabarPolicy=) already handles gap-through and intrabar-trigger
+fills deterministically.
+
+But the seam connecting a strategy's =IntentAdjustStop= to any of that
+did not exist. =execution.Planner.Plan= explicitly did not support
+=order.IntentAdjustStop= (=ErrUnsupportedIntentKind=) and, more
+generally, always planned a Market/GTC order regardless of
+=Intent.Kind= — there was no path from any intent to a =Stop=-type
+proposal at all, for either initial placement or replacement. This was
+a deliberate deferral, recorded in =execution/doc.go= at the time:
+modifying an existing protective stop is conceptually a *replacement*
+proposal, "a distinct vocabulary this package does not define yet,
+deferred until a real consumer needs it." Issue #336 is that consumer.
+
+=pipeline.Pipeline= (which composes =risk.Sizer= + =execution.Planner=
++ =risk.Engine= + =broker.Broker=, ADR-006) was built entirely around
+one path: =Proposal -> risk.Decision -> order.Request -> order.Order=
+(new-order submission). There was no replacement-shaped path anywhere
+in it.
+
+* Decision
+
+** Two distinct cases, not one
+
+An =IntentAdjustStop= means two genuinely different things depending
+on whether a resting stop order already exists for the instrument:
+
+- *Initial placement* (no resting stop yet): this is, in the end, a
+  new order — a =Stop=-type, =ReduceOnly= Proposal sized to close the
+  account's entire current position, at the intent's =StopPrice=. It
+  fits the *existing* =Plan=/=Proposal= vocabulary exactly, so
+  =execution.Planner.Plan= now handles it directly, alongside
+  =IntentEnter=/=IntentExit=/=IntentTargetExposure=, through the
+  identical =pipeline.Pipeline.Submit=/=Evaluate= path, unchanged.
+
+- *Ratcheting an existing stop*: this is a genuine replacement of an
+  order that already exists, not a new one. =Plan= detects this case
+  (a resting, non-terminal =Stop= order already exists for the
+  instrument) and reports the new sentinel =ErrExistingStopOrder=
+  rather than attempting to plan a second, redundant stop order.
+  =pipeline.Pipeline.Evaluate= treats that specific error as a dispatch
+  signal (via =errors.Is=, not an =Intent.Kind= check performed twice
+  in two places) and calls the new =Planner.PlanReplace= method
+  instead, which returns a validated =order.ReplaceRequest= naming the
+  existing order and its new =StopPrice=.
+
+=Planner= gains =PlanReplace= as a second method on the same interface
+=Plan= lives on, not a separate interface: both share one determinism
+contract (see =Plan='s own doc comment) and one implementation
+(=planner=), and =PlanReplace= is meaningless without =Plan= already
+having decided initial placement doesn't apply.
+
+=PlanReplace= supports only =order.IntentAdjustStop=, and only ever
+sets =NewStopPrice= on the =ReplaceRequest= it builds — never
+=NewQuantity= or =NewLimitPrice=. This package's one real consumer (a
+trailing-stop-style strategy) only ever moves a stop price;
+quantity/limit-price replacement is not invented here speculatively,
+matching the exact restraint the original =IntentAdjustStop= deferral
+was itself an instance of. A future consumer that genuinely needs
+quantity-changing replacement is new, real scope for a later decision,
+not an extension of this one.
+
+** =pipeline.Result= gains a second, mutually exclusive shape
+
+=Result= gains a =Replace *ReplaceOutcome= field
+(=ReplaceOutcome{ Request order.ReplaceRequest; Result
+order.ReplaceResult }=), populated *instead of*
+=Proposal=/=Decision=/=Request=/=Order= when =Evaluate= took the
+replacement path. This was chosen over either splitting =Submit= into
+two differently-named entry points, or returning a different result
+type from a different method: =backtest.Scheduler= and every other
+caller in the codebase call =Pipeline.Submit= uniformly, once per
+intent, with no branching on =Intent.Kind= today — introducing a
+second entry point would have required every existing caller to learn
+a new dispatch rule for exactly the one intent kind that needs it.
+Keeping =Submit=/=Evaluate= as the single entry point, and letting
+=Result= carry either shape, preserves that "the caller does not need
+to know what kind of intent this is" property =strategy.Strategy=
+implementations already rely on (=emacross= hands every kind to the
+same =IntentFactory=-produced values without special-casing any of
+them downstream).
+
+The consequence a caller must respect: =Result.Decision='s zero value
+is =Allowed: false=, which must never be misread as "risk rejected
+this" on the replacement path, where risk was never evaluated at all
+(see below). A caller must check =Replace != nil= first. This is
+documented directly on =Result='s own doc comment, not left implicit.
+
+** Risk evaluation is deliberately skipped for a =StopPrice=-only replacement
+
+=risk.Engine= is not consulted on the replacement path. =PlanReplace=
+never changes an order's quantity or the account's notional exposure —
+it only moves an already-approved stop order's trigger price — and no
+existing =risk.Rule= inspects =StopPrice= at all. There is also no new
+=Proposal= to evaluate on this path: =risk.Input.Proposal= expects a
+candidate new order, and synthesizing one to represent "the account's
+exposure after this stop moves" would not change under any existing
+Rule, since exposure itself is unchanged.
+
+This is a scoped decision about a =StopPrice=-only replacement
+specifically, not a general "replacements skip risk" policy. A future
+quantity-changing replacement (explicitly out of scope for this issue
+and for =PlanReplace= as built) would change notional exposure and
+would need real risk consideration before being added — this ADR does
+not pre-approve that.
+
+** Journaling/correlation
+
+Neither =execution= nor =pipeline= journal anything themselves — that
+remains a strategy's own responsibility via =strategy.Environment.Journal=,
+exactly as =strategy/emacross='s own =recordSignal= already
+demonstrates for its crossover signals. What this issue's own scope
+covers is preserving the correlation chain ADR-005 already requires:
+=PlanReplace='s =order.ReplaceRequest.Metadata= sets =CorrelationID=
+from =Intent.Metadata.CorrelationID= and =CausationID= from
+=Intent.Metadata.EventID=, identically to every other stage's own
+Metadata construction. A strategy that wants to journal its own
+stop-adjustment decisions (the way #335's trailing-stop strategy will)
+can correlate them against that chain the same way =emacross= already
+correlates its reversal intents.
+
+* Consequences
+
+- A strategy can now place and ratchet a real protective stop order
+  through the same =strategy.IntentFactory.AdjustStop= ->
+  =pipeline.Pipeline.Submit= path used for every other intent kind,
+  with the actual intrabar/gap fill precision determined by
+  =adapters/broker/sim.Broker.Advance='s existing, already-correct
+  logic — not reimplemented at the strategy layer.
+- =Result= now has two mutually exclusive populated shapes. Every
+  caller inspecting a =Result= for a call that might have been an
+  =IntentAdjustStop= must check =Replace= first.
+- =Planner= is a two-method interface now, not one; any future
+  alternative =Planner= implementation must implement both.
+- Quantity-changing or limit-price replacement remains unimplemented
+  and unplanned-for; a future issue needing it must design its own
+  risk treatment rather than assume this decision's =StopPrice=-only
+  skip extends to it.
+
+* Alternatives Considered
+
+- *A single =Plan= method returning either a Proposal or a
+  Replace-shaped result via a union/variant return type.* Rejected:
+  =PlanResult=/=ReplaceResult= are used in genuinely different
+  contexts (a new proposal flows into =risk.Engine=; a replacement does
+  not), and forcing every =Plan= caller to type-switch on every call,
+  including the three intent kinds that can never produce a
+  replacement, would spread the special case wider than confining it
+  to =IntentAdjustStop='s own two call sites.
+- *A quantity-changing/full =ReplaceRequest= vocabulary built now,
+  since the type already supports =NewQuantity=/=NewLimitPrice=.*
+  Rejected as speculative: this issue's one real consumer never needs
+  either, and =execution/doc.go='s own history is a direct lesson
+  against inventing unused vocabulary ahead of a real need.
+- *Full =risk.Engine= re-evaluation on every replacement, synthesizing
+  a "resulting" Proposal.* Rejected: no existing Rule reads
+  =StopPrice=, so this would add real complexity (a proposal that
+  does not correspond to any order actually being submitted) to
+  evaluate against rules that could never object.
+- *Splitting =Pipeline.Submit= into =Submit=/=SubmitReplace=, requiring
+  callers to dispatch on =Intent.Kind= themselves.* Rejected: every
+  existing caller (=backtest.Scheduler= in particular) calls =Submit=
+  uniformly today; requiring kind-aware dispatch at every call site
+  would leak an internal distinction into orchestration code that
+  currently, correctly, does not need to know it.

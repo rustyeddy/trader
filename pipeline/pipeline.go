@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -70,11 +71,35 @@ type Input struct {
 // discussion). Order is populated only after a successful broker
 // submission — never on rejection, and never on a planning, sizing, or
 // risk-evaluation failure.
+//
+// Replace is Result's other, mutually exclusive shape (issue #336): it
+// is populated *instead of* Proposal/Decision/Request/Order when
+// Input.Intent resolved to an order replacement rather than a
+// new-order submission — currently only order.IntentAdjustStop against
+// an instrument that already has a resting order to ratchet (see
+// ReplaceOutcome's own doc comment for why risk evaluation does not
+// run on this path). A caller must check Replace != nil before reading
+// any of Proposal/Decision/Request/Order: all four stay their ordinary
+// Go zero values on the replace path, and Decision's zero value in
+// particular (Allowed: false) must not be misread as a risk rejection
+// that never happened.
 type Result struct {
 	Proposal order.Proposal
 	Decision risk.Decision
 	Request  order.Request
 	Order    order.Order
+	Replace  *ReplaceOutcome
+}
+
+// ReplaceOutcome carries a replacement's own request/result pair,
+// mirroring Proposal/Order's "built during Evaluate, filled in during
+// Submit" split: Request is always populated once planning succeeds;
+// Result is populated only after a successful broker Replace call
+// (Submit only — Evaluate never calls the broker, so Evaluate's own
+// Result.Replace.Result is always the zero value).
+type ReplaceOutcome struct {
+	Request order.ReplaceRequest
+	Result  order.ReplaceResult
 }
 
 // Pipeline composes risk.Sizer, execution.Planner, risk.Engine, and
@@ -156,6 +181,16 @@ func (p *Pipeline) Evaluate(ctx context.Context, in Input) (Result, error) {
 		Account:  in.Account,
 		Quantity: qty,
 	})
+	// ErrExistingStopOrder is Plan's own signal (issue #336) that
+	// validIntent.Kind is order.IntentAdjustStop against an instrument
+	// that already has a resting stop order to ratchet, rather than
+	// place fresh — Plan handles only the latter case itself. This is
+	// the one place that dispatch happens; every other Intent.Kind
+	// (including a first-time IntentAdjustStop, which Plan does handle
+	// directly) falls straight through the unchanged path below.
+	if errors.Is(err, execution.ErrExistingStopOrder) {
+		return p.evaluateReplace(ctx, in)
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("pipeline: planning intent: %w", err)
 	}
@@ -185,6 +220,40 @@ func (p *Pipeline) Evaluate(ctx context.Context, in Input) (Result, error) {
 	return Result{Proposal: planResult.Proposal, Decision: decision, Request: req}, nil
 }
 
+// evaluateReplace is Evaluate's own continuation once Planner.Plan has
+// reported execution.ErrExistingStopOrder (issue #336): it plans the
+// replacement via Planner.PlanReplace and returns it as Result.Replace.
+//
+// # Why risk.Engine is not consulted here
+//
+// PlanReplace supports only order.IntentAdjustStop, and every field
+// order.ReplaceRequest can carry it might produce is StopPrice —
+// PlanReplace never sets NewQuantity or NewLimitPrice (see its own doc
+// comment: quantity/limit replacement is out of scope, ADR-054).
+// Moving a resting stop order's trigger price does not change the
+// account's position size or notional exposure — it changes only
+// *when* an already risk-approved exit might trigger — and no existing
+// risk.Rule inspects StopPrice at all (risk.Input.Proposal is not even
+// available here: there is no new Proposal on this path, only a
+// replacement of one already approved when it was first placed).
+// Re-running every Rule against a synthesized "resulting" Proposal
+// would evaluate exposure that has not changed, for no rule that would
+// actually look at what changed. ADR-054 records this as the
+// deliberate scope of this decision — not silently skipped, and not
+// automatically extended to any future quantity-changing replace,
+// which would need real risk consideration before being added here.
+func (p *Pipeline) evaluateReplace(ctx context.Context, in Input) (Result, error) {
+	replaceResult, err := p.deps.Planner.PlanReplace(ctx, execution.ReplaceInput{
+		Intent:  in.Intent,
+		Listing: in.Listing,
+		Account: in.Account,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("pipeline: planning replacement: %w", err)
+	}
+	return Result{Replace: &ReplaceOutcome{Request: replaceResult.Request}}, nil
+}
+
 // Submit is Evaluate's thin mutating continuation: it runs the
 // identical read-only preparation Evaluate does, and — only when
 // Decision.Allowed — submits the already-built Result.Request via
@@ -199,6 +268,11 @@ func (p *Pipeline) Evaluate(ctx context.Context, in Input) (Result, error) {
 // never called in that case. See Evaluate's own doc comment for the
 // determinism and error-propagation guarantees Submit inherits from
 // it.
+//
+// When Evaluate resolved to a replacement (Result.Replace != nil,
+// issue #336), Submit calls deps.Broker.OpenAccount(...).Replace
+// instead of Submit, and populates Result.Replace.Result rather than
+// Result.Order.
 func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
 	result, err := p.Evaluate(ctx, in)
 	if err != nil {
@@ -209,6 +283,16 @@ func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
 	if err != nil {
 		return result, fmt.Errorf("pipeline: opening broker account: %w", err)
 	}
+
+	if result.Replace != nil {
+		rr, err := acc.Replace(ctx, result.Replace.Request)
+		if err != nil {
+			return result, fmt.Errorf("pipeline: replacing order: %w", err)
+		}
+		result.Replace.Result = rr
+		return result, nil
+	}
+
 	o, err := acc.Submit(ctx, result.Request)
 	if err != nil {
 		return result, fmt.Errorf("pipeline: submitting order: %w", err)

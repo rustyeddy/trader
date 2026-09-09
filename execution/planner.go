@@ -11,11 +11,13 @@ import (
 
 // planner is the v0 reference Planner implementation (#179, M4-04):
 // direct translation of IntentEnter/IntentExit/IntentTargetExposure
-// into exactly one Proposal. It always plans a Market/GTC order —
-// Intent carries no limit-price hint (#177), so there is nothing to
-// plan a Limit or Stop order from yet; that is additive future work
-// once a real consumer needs it. IntentAdjustStop is not supported —
-// see ErrUnsupportedIntentKind's own doc comment.
+// into exactly one Market/GTC Proposal. IntentAdjustStop (issue #336)
+// is the one exception: it plans a Stop/GTC, ReduceOnly Proposal
+// instead, sized to close the account's entire current position —
+// but only for *initial* stop placement, when no resting Stop order
+// already exists for the instrument. Ratcheting an existing stop is a
+// replacement, not a new-order Proposal; see PlanReplace and
+// ErrExistingStopOrder.
 type planner struct {
 	deps Deps
 }
@@ -43,6 +45,8 @@ func (p *planner) Plan(ctx context.Context, in PlanInput) (PlanResult, error) {
 	var side order.Side
 	var qty num.Quantity
 	var reduceOnly bool
+	orderType := order.Market
+	var stopPrice *num.Price
 
 	switch intent.Kind {
 	case order.IntentEnter:
@@ -52,6 +56,15 @@ func (p *planner) Plan(ctx context.Context, in PlanInput) (PlanResult, error) {
 		reduceOnly = true
 	case order.IntentTargetExposure:
 		side, qty, reduceOnly, err = planTargetExposure(in.Account, in.Listing, intent.Side, *intent.Quantity)
+	case order.IntentAdjustStop:
+		if _, exists := findRestingStopOrder(in.Account, in.Listing); exists {
+			err = fmt.Errorf("%w: %v", ErrExistingStopOrder, intent.Instrument)
+			break
+		}
+		side, qty, err = planAdjustStop(in.Account, in.Listing)
+		reduceOnly = true
+		orderType = order.Stop
+		stopPrice = intent.StopPrice
 	default:
 		err = fmt.Errorf("%w: %v", ErrUnsupportedIntentKind, intent.Kind)
 	}
@@ -68,9 +81,10 @@ func (p *planner) Plan(ctx context.Context, in PlanInput) (PlanResult, error) {
 		Listing:     in.Listing,
 		AccountID:   in.Account.AccountID(),
 		Side:        side,
-		Type:        order.Market,
+		Type:        orderType,
 		TimeInForce: order.GTC,
 		Quantity:    qty,
+		StopPrice:   stopPrice,
 		ReduceOnly:  reduceOnly,
 		Metadata: id.Metadata{
 			EventID:       eventID,

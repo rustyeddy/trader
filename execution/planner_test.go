@@ -235,7 +235,10 @@ func TestPlanTargetExposureAlreadyAtTarget(t *testing.T) {
 	require.ErrorIs(t, err, ErrAlreadyAtTarget)
 }
 
-func TestPlanAdjustStopIsUnsupported(t *testing.T) {
+// TestPlanAdjustStop_NoPosition is issue #336's own boundary case:
+// there is nothing for a protective stop to protect without an open
+// position.
+func TestPlanAdjustStop_NoPosition(t *testing.T) {
 	deps := testDeps()
 	p, err := NewPlanner(deps)
 	require.NoError(t, err)
@@ -246,7 +249,74 @@ func TestPlanAdjustStopIsUnsupported(t *testing.T) {
 	intent := mustAdjustStopIntent(t, deps.IDs, listing.InstrumentID())
 
 	_, err = p.Plan(context.Background(), PlanInput{Intent: intent, Listing: listing, Account: snap})
-	require.ErrorIs(t, err, ErrUnsupportedIntentKind)
+	require.ErrorIs(t, err, ErrNoPositionToProtect)
+}
+
+// TestPlanAdjustStop_InitialPlacement is issue #336's central case:
+// with an open long position and no resting stop order yet, Plan
+// builds a ReduceOnly Sell Stop proposal sized to the whole position,
+// at the intent's own StopPrice.
+func TestPlanAdjustStop_InitialPlacement(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t, deps.IDs)
+	pos := mustPosition(t, accountID, listing, order.Long, "1000")
+	snap := mustSnapshot(t, accountID, listing, pos)
+	intent := mustAdjustStopIntent(t, deps.IDs, listing.InstrumentID())
+
+	result, err := p.Plan(context.Background(), PlanInput{Intent: intent, Listing: listing, Account: snap})
+	require.NoError(t, err)
+	assert.Equal(t, order.Sell, result.Proposal.Side)
+	assert.Equal(t, order.Stop, result.Proposal.Type)
+	assert.True(t, result.Proposal.ReduceOnly)
+	assert.Equal(t, "1000", result.Proposal.Quantity.String())
+	require.NotNil(t, result.Proposal.StopPrice)
+	assert.Equal(t, intent.StopPrice.String(), result.Proposal.StopPrice.String())
+	assert.Equal(t, intent.Metadata.CorrelationID, result.Proposal.Metadata.CorrelationID)
+	assert.Equal(t, intent.Metadata.EventID, result.Proposal.Metadata.CausationID)
+}
+
+// TestPlanAdjustStop_ShortPosition mirrors
+// TestPlanAdjustStop_InitialPlacement for a short position: the
+// protective stop is a Buy, not a Sell.
+func TestPlanAdjustStop_ShortPosition(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t, deps.IDs)
+	pos := mustPosition(t, accountID, listing, order.Short, "1000")
+	snap := mustSnapshot(t, accountID, listing, pos)
+	intent := mustAdjustStopIntent(t, deps.IDs, listing.InstrumentID())
+
+	result, err := p.Plan(context.Background(), PlanInput{Intent: intent, Listing: listing, Account: snap})
+	require.NoError(t, err)
+	assert.Equal(t, order.Buy, result.Proposal.Side)
+	assert.Equal(t, order.Stop, result.Proposal.Type)
+}
+
+// TestPlanAdjustStop_ExistingStopOrderIsRejected is issue #336's
+// dispatch boundary: Plan handles only *initial* stop placement: an
+// instrument that already has a resting Stop order must be ratcheted
+// via PlanReplace instead, not planned as a second, redundant stop.
+func TestPlanAdjustStop_ExistingStopOrderIsRejected(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t, deps.IDs)
+	pos := mustPosition(t, accountID, listing, order.Long, "1000")
+	existing := mustRestingStopOrder(t, deps.IDs, accountID, listing, order.Sell, "1000", "1.05000")
+	snap := mustSnapshotWithOpenOrders(t, accountID, listing, []order.Position{pos}, []order.Order{existing})
+	intent := mustAdjustStopIntent(t, deps.IDs, listing.InstrumentID())
+
+	_, err = p.Plan(context.Background(), PlanInput{Intent: intent, Listing: listing, Account: snap})
+	require.ErrorIs(t, err, ErrExistingStopOrder)
 }
 
 func TestPlanRejectsListingInstrumentMismatch(t *testing.T) {

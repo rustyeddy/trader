@@ -161,6 +161,7 @@ the original decided, use full supersession instead.
 | 051 | Alpaca paper broker adapter: REST-polling Account.Events for Phase 1 (in adr-051-alpaca-broker-events-polling.org) | Accepted |
 | 052 | Alpaca historical provider: official Go SDK migration (in adr-052-alpaca-sdk-migration.org) | Accepted, partial amendment of 050 |
 | 053 | Alpaca canonical derivation and feed dataset identity (in adr-053-alpaca-canonical-derivation-feed-identity.org) | Accepted |
+| 054 | Order replacement in the execution/risk pipeline (in adr-054-execution-order-replacement.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
