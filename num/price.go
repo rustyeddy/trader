@@ -232,13 +232,27 @@ func (p Price) RoundDown(tick Price) (Price, error) {
 // already an exact multiple of tick rounds to itself, exactly like
 // RoundDown; only a genuinely fractional remainder rounds up to the
 // next multiple.
+//
+// Unlike RoundDown, RoundUp cannot compute its result as a plain
+// count*tick.raw product: incrementing the multiple count first and
+// then multiplying could overflow int64 for a p near the top of
+// Price's representable range, silently wrapping negative and
+// violating Price's non-negative invariant (PR #341 review). Instead
+// it computes RoundDown's own (always in-range, since it never
+// exceeds p.raw) result directly, then adds one further tick via
+// fixed.Add's checked arithmetic — reporting ErrOverflow rather than
+// wrapping if even that single increment does not fit.
 func (p Price) RoundUp(tick Price) (Price, error) {
 	if tick.raw == 0 {
 		return Price{}, ErrDivideByZero
 	}
-	count := p.raw / tick.raw
-	if p.raw%tick.raw != 0 {
-		count++
+	down := (p.raw / tick.raw) * tick.raw
+	if down == p.raw {
+		return Price{raw: down}, nil
 	}
-	return Price{raw: count * tick.raw}, nil
+	raw, err := fixed.Add(down, tick.raw)
+	if err != nil {
+		return Price{}, wrapFixedErr(err)
+	}
+	return Price{raw: raw}, nil
 }

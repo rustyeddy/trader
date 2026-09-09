@@ -113,6 +113,19 @@ unrounded, strategy-computed value in the first place.
   Every pre-existing test in =num=, =execution=, =pipeline=, and
   =backtest= passed unmodified, confirming this is additive for a
   caller that already supplies a tick-aligned price.
+- PR #341 review found =RoundUp='s first implementation computed its
+  result as =(count+1) x tick.raw= — for a =p= near the top of
+  =Price='s representable range with a fractional remainder, that
+  product could overflow =int64= and silently wrap negative,
+  violating =Price='s non-negative invariant. Fixed by computing
+  =RoundDown='s own (always in-range) result first and adding one
+  further tick via =fixed.Add='s checked arithmetic, reporting
+  =num.ErrOverflow= instead of wrapping.
+  =TestPriceRoundUp_ReportsOverflowInsteadOfWrapping= is the
+  regression, confirmed (by hand-simulating the original
+  =(count+1)*tick.raw= arithmetic) to actually wrap to a large
+  negative value under the original implementation rather than merely
+  passing once the fix was applied.
 - =strategy/smatrend='s own real SPY backtest (issue #335) can now run
   to completion against real Alpaca data without a tick-size
   rejection.

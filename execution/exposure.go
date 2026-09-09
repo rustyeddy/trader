@@ -110,7 +110,7 @@ func planAdjustStop(acc account.Snapshot, listing instrument.Listing) (order.Sid
 }
 
 // roundStopPriceToTick rounds price to listing's own tick size, in the
-// direction that never makes the protective stop side places more
+// direction that never makes the protective stop it places more
 // aggressive/tighter than what the caller (a strategy computing a
 // derived price — a fraction of a high-water mark, an ATR multiple,
 // and so on) actually asked for (issue #340): a Sell stop protects a

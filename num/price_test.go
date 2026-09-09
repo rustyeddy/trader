@@ -307,6 +307,21 @@ func TestPriceRoundUpZeroTick(t *testing.T) {
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
 
+// TestPriceRoundUp_ReportsOverflowInsteadOfWrapping is PR #341
+// review's own finding: a p close enough to Price's maximum
+// representable raw value, with a fractional remainder against tick,
+// must report ErrOverflow rather than silently wrapping negative when
+// rounding up would exceed int64's range.
+func TestPriceRoundUp_ReportsOverflowInsteadOfWrapping(t *testing.T) {
+	tick := MustParsePrice("0.01")
+	// One raw unit short of a tick below the maximum representable
+	// value, with a nonzero remainder against a one-cent tick: RoundUp
+	// must add one more tick and overflow, not wrap.
+	p := Price{raw: math.MaxInt64 - 1}
+	_, err := p.RoundUp(tick)
+	require.ErrorIs(t, err, ErrOverflow)
+}
+
 // TestPriceFloat64 proves Float64 (ADR-045) converts to the same
 // float64 value Go's own compiler produces for the identical decimal
 // literal — the correctly-rounded float64 nearest that decimal value,
