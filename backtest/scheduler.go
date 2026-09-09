@@ -362,6 +362,21 @@ type Scheduler struct {
 	// IntrabarAdvancer's own doc comment for why Phase 3 reuses this
 	// instead of resolving its own, potentially ambiguous, Listing per
 	// bar (PR #339 review).
+	//
+	// Keying by instrument.ID alone effectively assumes one execution
+	// Listing per instrument within a single backtest run: the most
+	// recently submitted-against Listing for an instrument silently
+	// overwrites any earlier one cached for that same instrument.
+	// Every current caller (ResolverInputBuilder, "one provider per
+	// account", ADR-016) already only ever submits one instrument
+	// against one Listing per run, so this is not a live bug today.
+	// But if Trader someday allows one economic instrument to carry
+	// simultaneous resting orders on more than one venue/Listing within
+	// the same run, this cache — and IntrabarAdvancer's own per-event
+	// call in Phase 3 — would need to key by Listing (or resolve every
+	// Listing that instrument has ever been submitted against), not by
+	// instrument.ID alone, or a resting order on the losing Listing
+	// would stop being advanced/triggered at all.
 	listingsByInstrument map[instrument.ID]instrument.Listing
 
 	// lastBrokerSeq is the highest broker.Event.Sequence already
