@@ -1,0 +1,161 @@
+#+TITLE: Wiring ADR-026 Resting-Order Triggering into backtest.Scheduler ADR-055
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+* Context
+
+Issue #338, discovered immediately after issue #336/#337 shipped real
+=order.IntentAdjustStop= support (ADR-054): =backtest.Scheduler= never
+called the simulated broker's own per-bar resting-order-trigger
+machinery at all. This was a known, explicitly documented gap —
+=Scheduler='s own package doc comment (under "Market-order-only
+execution") stated plainly that a resting Limit or Stop order
+submitted during a Scheduler-driven run "fills only if the broker
+fills it synchronously at submission time; it is never later
+triggered against a subsequent bar's OHLC," and that closing the gap
+was "deferred to a follow-up M5 issue."
+
+That gap matters now: a protective stop order placed and ratcheted via
+=IntentAdjustStop= (ADR-054) would place correctly, resize correctly,
+and re-price correctly — and then silently never fill, no matter how
+far price moved through it. Issue #335 (a baseline SMA-trend equity
+strategy with a 10% trailing stop, EQS-01) depends entirely on a
+protective stop that actually triggers; it cannot proceed until this
+gap closes.
+
+The underlying machinery already exists and is already proven: ADR-026
+defined =sim.Broker.Advance(ctx, Observation) error= and its intrabar
+fill logic (=stopTriggerPrice=, =IntrabarPolicy=, gap-vs-intrabar
+handling), and =backtest.MarketObserver=/=ObserveMark= (issue #219)
+already established the exact pattern needed to reach it from
+=Scheduler= without =Scheduler= or any composition root importing
+=adapters/broker/sim= directly: a narrow, primitive-typed interface
+that a broker adapter's own account handle satisfies structurally.
+
+* Decision
+
+Add a new =backtest.IntrabarAdvancer= interface, alongside
+=MarketObserver=, not replacing it:
+
+#+BEGIN_SRC go
+type IntrabarAdvancer interface {
+    AdvanceBar(ctx context.Context, listing instrument.Listing, open, high, low, close num.Price, at time.Time) error
+}
+#+END_SRC
+
+Its signature mirrors =MarketObserver.ObserveMark='s own convention
+(only already-shared primitive types: =instrument.Listing=,
+=num.Price=, =time.Time=) precisely so =adapters/broker/sim='s
+=accountHandle= can satisfy it structurally, without that package
+importing =backtest=. Unlike =ObserveMark=, =AdvanceBar= takes
+=instrument.Listing=, not just =instrument.ID=: the underlying
+broker-side matching in =accountState.advance= is by the exact
+=Listing= a resting order was submitted against, not by instrument
+identity alone (the same distinction already noted in
+=IntrabarAdvancer='s own doc comment).
+
+=SchedulerDeps= gains two new required fields: =IntrabarAdvancer=
+itself, and =Resolver instrument.Resolver=, needed to turn each
+batch event's =instrument.ID= into the broker-side =Listing=
+=AdvanceBar= requires (Scheduler previously had no resolver of its
+own — only =ResolverInputBuilder= did, and only for intents a
+strategy actually emitted, not for every batch event unconditionally).
+Both are validated as required, exactly like every other
+=SchedulerDeps= field — never optional, never silently skipped.
+
+=Scheduler='s existing Phase 3 batch loop (mark revaluation, per
+issue #219) gains one =AdvanceBar= call per batch event, immediately
+alongside the existing =ObserveMark= call, using that event's own
+bar's full OHLC (not just Close). This placement is deliberate:
+
+- It runs *after* Phase 2 (flushing this batch's own newly-eligible
+  queued intents), so a stop ratcheted from the *prior* bar's =OnBar=
+  is already resting at its new price before =AdvanceBar= evaluates
+  this bar — matching issue #335's own no-lookahead requirement that a
+  stop's trigger level reflect only prior information.
+- It runs *before* this bar's own =OnBar= call, so a strategy
+  evaluating the frozen snapshot for this bar already sees the
+  consequences of any trigger =AdvanceBar= just produced (a closed
+  position, a cleared resting order) — exactly as it already sees
+  =ObserveMark='s revalued marks.
+
+=RunnerParams.validate= and =service/backtest.Environment.validate=
+both gain a parallel type-assertion check —
+=p.Account.(backtest.IntrabarAdvancer)= — mirroring the identical
+existing check for =MarketObserver=, and both are threaded through to
+=SchedulerDeps= the same way: no new field on =RunnerParams=/
+=Environment= beyond the =Resolver= field =RunnerParams= (though not
+=Environment=, which composes =backtest.RunnerParams= directly)
+already carried for =ResolverInputBuilder='s own use.
+
+=MarketObserver= is kept, not removed or folded into
+=IntrabarAdvancer=, even though =accountState.advance= (which backs
+=AdvanceBar=) already revalues marks as its own first internal step.
+Removing =MarketObserver= would touch every composition root and
+every test helper that already constructs one, for no behavioral
+gain beyond one redundant mark-revaluation pass per bar — harmless,
+not a correctness concern, and explicitly called out as an accepted,
+documented inefficiency rather than a problem to solve here.
+
+* Consequences
+
+- A protective stop placed via =IntentAdjustStop= (ADR-054) through a
+  real =backtest.Runner=-driven run now actually triggers when a
+  later bar's OHLC breaches it — proven end to end in
+  =TestScheduler_IntrabarAdvancerTriggersRestingStop=, which asserts
+  the position closes and the resting order clears with no test-side
+  call to =sim.Broker.Advance= anywhere: only Scheduler's own internal
+  wiring produces the result.
+- Issue #335 (EQS-01) is now unblocked: its trailing-stop exit
+  mechanism has a working foundation to build on.
+- Every existing caller that constructs =SchedulerDeps=/=RunnerParams=/
+  =service/backtest.Environment= directly (test helpers included) must
+  now also supply a =Resolver= and an account that implements
+  =IntrabarAdvancer= — a real =sim.Broker=-backed account already does,
+  by construction, so this is additive for any caller already using
+  the simulated broker, and a hard compile/validation-time signal for
+  any caller that is not.
+- =MarketObserver= and =IntrabarAdvancer= now run once per batch event,
+  per bar, unconditionally — a small, accepted, documented redundancy
+  (=AdvanceBar= already revalues marks as part of its own operation) in
+  exchange for not touching every existing =MarketObserver= call site.
+- =IntrabarAdvancer= is, like =MarketObserver=, deliberately not part
+  of the public =broker.Broker= port: a real (non-simulated) broker
+  adapter has no simulation to drive, and the interface exists purely
+  to let =backtest= reach the simulator's own intrabar machinery
+  without either package importing the other.
+
+* Alternatives Considered
+
+- *Fold =AdvanceBar= into =MarketObserver=, replacing =ObserveMark=
+  entirely.* Rejected: it would force every existing composition root
+  and test helper that constructs a =MarketObserver=-only fake (there
+  are several, for tests that do not need real resting-order
+  triggering) to also implement =AdvanceBar=, for no functional gain —
+  =ObserveMark='s own doc comment already establishes that keeping
+  mark revaluation and resting-order-trigger evaluation conceptually
+  separate was a deliberate M5 decision, not an oversight to undo here.
+- *Give =AdvanceBar= an =instrument.ID= parameter instead of a full
+  =instrument.Listing=, matching =ObserveMark='s own signature exactly.*
+  Rejected: =accountState.advance= matches resting orders by the exact
+  =Listing= they were submitted against (provider/venue-specific), not
+  by instrument identity alone, so an =instrument.ID=-only signature
+  could not correctly select which resting orders to evaluate once an
+  account holds listings for the same instrument from more than one
+  provider (deferred, but not architecturally foreclosed elsewhere in
+  Trader).
+- *Add =AdvanceBar= to the public =broker.Broker= port instead of a
+  =backtest=-owned capability interface.* Rejected per ADR-026's own
+  original reasoning, reaffirmed here: a real broker adapter has no
+  simulation to drive, so this capability belongs at the seam between
+  =backtest= and the simulator, not in the broker-neutral vocabulary
+  every adapter must implement.
+- *Resolve the batch event's =Listing= once per batch (not once per
+  event) by caching Scheduler-side.* Rejected as premature
+  optimization outside this issue's scope: =instrument.Resolver=
+  implementations (=instrument.MemoryResolver=) are already
+  in-memory, read-only, and cheap per ADR-016; a per-event resolve
+  call adds no measured cost this issue needs to solve.

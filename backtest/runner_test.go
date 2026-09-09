@@ -287,6 +287,14 @@ func (a eventsErrorAccount) ObserveMark(ctx context.Context, instrumentID instru
 	return a.Account.(backtest.MarketObserver).ObserveMark(ctx, instrumentID, close, at)
 }
 
+// AdvanceBar delegates to the wrapped Account, which must itself
+// implement backtest.IntrabarAdvancer — RunnerParams.validate requires
+// it (issue #338), so eventsErrorAccount must not break that contract
+// merely by embedding broker.Account.
+func (a eventsErrorAccount) AdvanceBar(ctx context.Context, listing instrument.Listing, open, high, low, close num.Price, at time.Time) error {
+	return a.Account.(backtest.IntrabarAdvancer).AdvanceBar(ctx, listing, open, high, low, close, at)
+}
+
 func TestRunner_PropagatesTradeDerivationErrors(t *testing.T) {
 	strat := mustEnterOnFirstBarStrategy(t)
 	params := mustRunnerParams(t, strat)

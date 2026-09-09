@@ -74,10 +74,12 @@ type InputBuilder interface {
 // backtest... not by widening broker.Broker."
 //
 // ObserveMark deliberately does only this: it never evaluates resting
-// Limit/Stop order triggers. That remains ADR-026's own separate,
-// still-deferred concern (a broker-side Advance-shaped operation, not
-// this one) — conflating the two here would silently change order-
-// fill behavior as a side effect of fixing an equity-curve bug.
+// Limit/Stop order triggers. That is ADR-026's own separate concern (a
+// broker-side Advance-shaped operation, not this one) — conflating the
+// two here would silently change order-fill behavior as a side effect
+// of fixing an equity-curve bug. Scheduler now performs that separate
+// operation too, via IntrabarAdvancer (issue #338), immediately
+// alongside every ObserveMark call in its own Phase 3 loop.
 //
 // Every RunnerParams.Account/SchedulerDeps.MarketObserver is required,
 // never optional: silently degrading to a stale-mark equity curve when
@@ -142,6 +144,20 @@ type SchedulerDeps struct {
 	// See MarketObserver's own doc comment for why this is required,
 	// not optional.
 	MarketObserver MarketObserver
+	// Resolver resolves an emitted event's own instrument.ID to the
+	// broker-side Listing IntrabarAdvancer needs (issue #338) — the
+	// same resolution direction ResolverInputBuilder already performs
+	// for submitted intents, needed here independently because
+	// IntrabarAdvancer must run against every batch's own bars whether
+	// or not the strategy emitted anything this bar.
+	Resolver instrument.Resolver
+	// IntrabarAdvancer advances each batch's own bars through the
+	// broker's resting Limit/Stop order trigger machinery (ADR-026,
+	// issue #338), closing the gap this type's own package doc
+	// previously described as deferred: without it, a resting
+	// protective stop (order.IntentAdjustStop, issues #336/#337) places
+	// and ratchets correctly but never actually fills.
+	IntrabarAdvancer IntrabarAdvancer
 }
 
 func (d SchedulerDeps) validate() error {
@@ -171,6 +187,12 @@ func (d SchedulerDeps) validate() error {
 	}
 	if d.MarketObserver == nil {
 		return fmt.Errorf("%w: market observer must be set", ErrInvalidSchedulerDeps)
+	}
+	if d.Resolver == nil {
+		return fmt.Errorf("%w: resolver must be set", ErrInvalidSchedulerDeps)
+	}
+	if d.IntrabarAdvancer == nil {
+		return fmt.Errorf("%w: intrabar advancer must be set", ErrInvalidSchedulerDeps)
 	}
 	return nil
 }
@@ -290,20 +312,18 @@ func (d SchedulerDeps) validate() error {
 // FillPriceSource) is a run-composition concern, not Scheduler's own —
 // see InputBuilder's doc comment.
 //
-// # Market-order-only execution
+// # Resting-order triggering
 //
-// Scheduler drives Pipeline.Submit only. It never calls a simulator-
-// specific market-observation advancement operation (ADR-026) — that
-// capability is deliberately not part of the public broker.Broker
-// port (a real adapter has no simulation to drive), and Scheduler
-// depends only on that port. This means a resting Limit or Stop order
-// submitted during a Scheduler-driven run fills only if the broker
-// fills it synchronously at submission time; it is never later
-// triggered against a subsequent bar's OHLC. A strategy that relies on
-// resting order triggering will appear to work at submission and then
-// silently never fill. Closing this gap is deferred to a follow-up M5
-// issue introducing a simulation-facing capability owned by backtest
-// or another simulation-facing port — not by widening broker.Broker.
+// Scheduler drives Pipeline.Submit for every emitted intent, plus one
+// IntrabarAdvancer call per batch event (issue #338), immediately
+// alongside MarketObserver.ObserveMark in Phase 3 — see runBatch. A
+// resting Limit or Stop order submitted during a Scheduler-driven run
+// therefore is later triggered against each subsequent bar's own OHLC,
+// not only filled synchronously at submission time. IntrabarAdvancer,
+// like MarketObserver, is deliberately not part of the public
+// broker.Broker port (a real adapter has no simulation to drive);
+// Scheduler depends on it as a separate, narrow, structurally-satisfied
+// capability instead of widening broker.Broker.
 //
 // # Cancellation
 //
@@ -523,18 +543,40 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		}
 	}
 
-	// Phase 3: revalue marks from this batch's own bars, then evaluate
-	// against one frozen snapshot/history. Revaluation happens before
-	// the snapshot so the snapshot's own Equity() reflects this batch's
-	// price action, not last batch's stale marks — see MarketObserver's
-	// own doc comment for why this is a required, mark-only step,
-	// deliberately not evaluating resting-order triggers.
+	// Phase 3: revalue marks and trigger any resting order from this
+	// batch's own bars, then evaluate against one frozen snapshot/
+	// history. This happens before the snapshot so the snapshot's own
+	// Equity()/Positions()/OpenOrders() reflect this batch's price
+	// action — including any resting Stop/Limit order IntrabarAdvancer
+	// just triggered — not last batch's stale state.
+	//
+	// IntrabarAdvancer runs against the resolved Listing with this
+	// bar's own full OHLC, using whatever stop/limit price is already
+	// resting from *prior* bars only: Phase 2 already flushed this
+	// batch's own newly-eligible intents (a ratchet queued from the
+	// prior bar's OnBar, for example) before this loop runs, so the
+	// order IntrabarAdvancer evaluates here already reflects that
+	// flush — issue #335's own "use the stop level established from
+	// prior information" no-lookahead requirement — while this bar's
+	// own OnBar call (which might ratchet again from *this* bar's
+	// data) has not run yet. MarketObserver still runs too (issue
+	// #338's own scope decision: kept alongside, not replaced by
+	// IntrabarAdvancer, which already revalues marks as part of its
+	// own broker-side operation — redundant but harmless, not a
+	// correctness concern).
 	for _, ev := range batch {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if err := s.deps.MarketObserver.ObserveMark(ctx, ev.Instrument, ev.Bar.Close, t); err != nil {
 			return fmt.Errorf("backtest: scheduler: observing market for %s at %s: %w", ev.Instrument, t, err)
+		}
+		listing, err := s.deps.Resolver.ResolveInstrument(ev.Instrument, s.deps.Account.Reference().Broker, "")
+		if err != nil {
+			return fmt.Errorf("backtest: scheduler: resolving %s for intrabar advance at %s: %w", ev.Instrument, t, err)
+		}
+		if err := s.deps.IntrabarAdvancer.AdvanceBar(ctx, listing, ev.Bar.Open, ev.Bar.High, ev.Bar.Low, ev.Bar.Close, t); err != nil {
+			return fmt.Errorf("backtest: scheduler: advancing intrabar state for %s at %s: %w", ev.Instrument, t, err)
 		}
 	}
 

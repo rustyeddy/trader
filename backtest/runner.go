@@ -154,6 +154,9 @@ func (p RunnerParams) validate() error {
 	if _, ok := p.Account.(MarketObserver); !ok {
 		return fmt.Errorf("%w: account must implement MarketObserver for a mark-to-market equity curve (issue #219)", ErrInvalidRunnerParams)
 	}
+	if _, ok := p.Account.(IntrabarAdvancer); !ok {
+		return fmt.Errorf("%w: account must implement IntrabarAdvancer for resting Limit/Stop order triggering (issue #338)", ErrInvalidRunnerParams)
+	}
 	if p.Strategy == nil {
 		return fmt.Errorf("%w: strategy must be set", ErrInvalidRunnerParams)
 	}
@@ -299,15 +302,17 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		return Result{}, fmt.Errorf("backtest: runner: constructing input builder: %w", err)
 	}
 	sched, err := NewScheduler(SchedulerDeps{
-		Replay:         replay,
-		Strategy:       p.Strategy,
-		Clock:          p.Clock,
-		Pipeline:       p.Pipeline,
-		Account:        p.Account,
-		Builder:        builder,
-		Journal:        jrnl,
-		RunID:          runID,
-		MarketObserver: p.Account.(MarketObserver), // validated in RunnerParams.validate
+		Replay:           replay,
+		Strategy:         p.Strategy,
+		Clock:            p.Clock,
+		Pipeline:         p.Pipeline,
+		Account:          p.Account,
+		Builder:          builder,
+		Journal:          jrnl,
+		RunID:            runID,
+		MarketObserver:   p.Account.(MarketObserver), // validated in RunnerParams.validate
+		Resolver:         p.Resolver,
+		IntrabarAdvancer: p.Account.(IntrabarAdvancer), // validated in RunnerParams.validate
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("backtest: runner: constructing scheduler: %w", err)

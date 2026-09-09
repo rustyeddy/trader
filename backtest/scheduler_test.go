@@ -155,6 +155,7 @@ type schedulerHarness struct {
 	ids       *id.Generator
 	eurusd    instrument.Listing
 	gbpusd    instrument.Listing
+	resolver  instrument.Resolver
 }
 
 func newSchedulerHarness(t *testing.T, start time.Time) schedulerHarness {
@@ -177,13 +178,20 @@ func newSchedulerHarness(t *testing.T, start time.Time) schedulerHarness {
 	})
 	require.NoError(t, err)
 
+	eurusd := simListing(t, "EUR", "USD", "EUR_USD")
+	gbpusd := simListing(t, "GBP", "USD", "GBP_USD")
+	resolver := instrument.NewMemoryResolver()
+	require.NoError(t, resolver.Register(eurusd))
+	require.NoError(t, resolver.Register(gbpusd))
+
 	return schedulerHarness{
 		broker:    b,
 		accountID: accountID,
 		clockObj:  c,
 		ids:       ids,
-		eurusd:    simListing(t, "EUR", "USD", "EUR_USD"),
-		gbpusd:    simListing(t, "GBP", "USD", "GBP_USD"),
+		eurusd:    eurusd,
+		gbpusd:    gbpusd,
+		resolver:  resolver,
 	}
 }
 
@@ -309,6 +317,8 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 	require.NoError(t, err)
 	marketObserver, ok := acc.(backtest.MarketObserver)
 	require.True(t, ok, "sim account must implement backtest.MarketObserver")
+	intrabarAdvancer, ok := acc.(backtest.IntrabarAdvancer)
+	require.True(t, ok, "sim account must implement backtest.IntrabarAdvancer")
 
 	ids2 := id.NewGenerator(h.clockObj, id.NewDeterministic(3, 4))
 	factory := strategy.NewIntentFactory(h.clockObj, ids2, id.Source("scheduler-test"))
@@ -332,9 +342,11 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 			riskFraction:    num.MustParseRate("0.01"),
 			adverseDistance: num.MustParsePrice("0.01000"),
 		},
-		Journal:        journal.Discard(),
-		RunID:          mustSchedulerRunID(t, ids2),
-		MarketObserver: marketObserver,
+		Journal:          journal.Discard(),
+		RunID:            mustSchedulerRunID(t, ids2),
+		MarketObserver:   marketObserver,
+		Resolver:         h.resolver,
+		IntrabarAdvancer: intrabarAdvancer,
 	}
 }
 
@@ -1245,4 +1257,102 @@ func TestScheduler_RunRejectsEventForUndeclaredRequirement(t *testing.T) {
 	err = sched.Run(context.Background())
 	require.ErrorIs(t, err, backtest.ErrInvalidSchedulerDeps)
 	require.Equal(t, 0, strat.callCount(), "an undeclared event must be rejected before OnBar is ever called for it")
+}
+
+// intrabarStopTriggerStrategy is issue #338's own acceptance-criterion
+// fixture: enter short on EUR/USD's first bar, then — once the entry
+// has actually filled (view shows an open position) — place a
+// protective Buy Stop just above the still-rising fixture price via a
+// single order.IntentAdjustStop. It never touches sim.Broker or
+// adapters/broker/sim directly, and it never places a second stop or
+// re-enters after being stopped out: whether Scheduler's own
+// IntrabarAdvancer wiring subsequently triggers that resting stop, with
+// no test-side Broker.Advance call anywhere, is exactly what
+// TestScheduler_IntrabarAdvancerTriggersRestingStop below proves.
+type intrabarStopTriggerStrategy struct {
+	requirements []strategy.DataRequirement
+	intents      strategy.IntentFactory
+	instID       instrument.ID
+	entered      bool
+	stopPlaced   bool
+}
+
+func (s *intrabarStopTriggerStrategy) Describe() strategy.Descriptor {
+	return strategy.Descriptor{Name: "intrabar-stop-trigger", Version: "test", Requirements: s.requirements}
+}
+
+func (s *intrabarStopTriggerStrategy) Start(ctx context.Context, env strategy.Environment) error {
+	s.intents = env.Intents
+	return nil
+}
+
+func (s *intrabarStopTriggerStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	if !ev.Instrument.Equal(s.instID) {
+		return nil, nil
+	}
+	if !s.entered {
+		s.entered = true
+		in, err := s.intents.Enter(ev.Instrument, order.Sell)
+		if err != nil {
+			return nil, err
+		}
+		return []order.Intent{in}, nil
+	}
+	if s.stopPlaced {
+		// Deliberately inert from here on, including after the stop
+		// closes the position: this fixture proves one trigger, not a
+		// repeating strategy.
+		return nil, nil
+	}
+	open := false
+	for _, p := range view.Account().Positions() {
+		if p.Listing.InstrumentID().Equal(s.instID) {
+			open = true
+		}
+	}
+	if !open {
+		return nil, nil
+	}
+	s.stopPlaced = true
+	stop := num.MustParsePrice("1.10065")
+	in, err := s.intents.AdjustStop(ev.Instrument, stop)
+	if err != nil {
+		return nil, err
+	}
+	return []order.Intent{in}, nil
+}
+
+// TestScheduler_IntrabarAdvancerTriggersRestingStop is issue #338's own
+// acceptance criterion: a resting protective Stop order placed through
+// the ordinary strategy-intent pipeline actually triggers during a real
+// Scheduler.Run, with no test-side call to sim.Broker.Advance anywhere
+// in this test. Before this issue, Scheduler never invoked
+// IntrabarAdvancer at all (deferred gap documented in Scheduler's own
+// doc comment) — the resting stop below would have placed and then
+// silently never fired, leaving the short position open through the
+// end of the run.
+//
+// The fixture's own EUR/USD H1 bars (schedulerSpan) rise monotonically
+// bid_h 1.10070 -> 1.10085 -> 1.10100 -> 1.10115, so a short position's
+// protective Buy Stop at 1.10065 (above the entry bar's own high,
+// comfortably below the next bar's) is guaranteed to be breached — by
+// bar 2's High, intrabar rather than by a gap (bar 2's own Open,
+// 1.10060, is still below the stop).
+func TestScheduler_IntrabarAdvancerTriggersRestingStop(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &intrabarStopTriggerStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t)}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "Scheduler's own IntrabarAdvancer wiring must have triggered the resting protective stop and closed the short position")
+	assert.Empty(t, snap.OpenOrders(), "the triggered stop order must no longer be resting")
 }
