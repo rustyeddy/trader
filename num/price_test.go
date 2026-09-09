@@ -235,6 +235,78 @@ func TestPriceDivisibleByZeroStep(t *testing.T) {
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
 
+// TestPriceRoundDown covers issue #340's own motivating case (a
+// trailing-stop computation landing on a sub-cent value against a
+// real SPY price) alongside ordinary exact-multiple and boundary
+// cases.
+func TestPriceRoundDown(t *testing.T) {
+	tests := []struct {
+		name string
+		p    string
+		tick string
+		want string
+	}{
+		{name: "issue #340's own motivating case", p: "368.964", tick: "0.01", want: "368.96"},
+		{name: "already an exact multiple", p: "1.25", tick: "0.25", want: "1.25"},
+		{name: "zero rounds to zero", p: "0", tick: "0.01", want: "0"},
+		{name: "less than one tick rounds to zero", p: "0.005", tick: "0.01", want: "0"},
+		{name: "fine-grained FX tick", p: "1.08453", tick: "0.00010", want: "1.08450"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := MustParsePrice(tt.p)
+			tick := MustParsePrice(tt.tick)
+			got, err := p.RoundDown(tick)
+			require.NoError(t, err)
+			assert.True(t, got.Equal(MustParsePrice(tt.want)), "got %s, want %s", got, tt.want)
+			ok, err := got.DivisibleBy(tick)
+			require.NoError(t, err)
+			assert.True(t, ok, "result must itself be tick-aligned")
+		})
+	}
+}
+
+func TestPriceRoundDownZeroTick(t *testing.T) {
+	p := MustParsePrice("1.00")
+	_, err := p.RoundDown(Price{})
+	require.ErrorIs(t, err, ErrDivideByZero)
+}
+
+// TestPriceRoundUp is RoundDown's mirror image, rounding toward
+// positive infinity instead of toward zero.
+func TestPriceRoundUp(t *testing.T) {
+	tests := []struct {
+		name string
+		p    string
+		tick string
+		want string
+	}{
+		{name: "sub-cent value rounds up to the next cent", p: "368.964", tick: "0.01", want: "368.97"},
+		{name: "already an exact multiple", p: "1.25", tick: "0.25", want: "1.25"},
+		{name: "zero rounds to zero", p: "0", tick: "0.01", want: "0"},
+		{name: "less than one tick rounds up to one tick", p: "0.005", tick: "0.01", want: "0.01"},
+		{name: "fine-grained FX tick", p: "1.08453", tick: "0.00010", want: "1.08460"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := MustParsePrice(tt.p)
+			tick := MustParsePrice(tt.tick)
+			got, err := p.RoundUp(tick)
+			require.NoError(t, err)
+			assert.True(t, got.Equal(MustParsePrice(tt.want)), "got %s, want %s", got, tt.want)
+			ok, err := got.DivisibleBy(tick)
+			require.NoError(t, err)
+			assert.True(t, ok, "result must itself be tick-aligned")
+		})
+	}
+}
+
+func TestPriceRoundUpZeroTick(t *testing.T) {
+	p := MustParsePrice("1.00")
+	_, err := p.RoundUp(Price{})
+	require.ErrorIs(t, err, ErrDivideByZero)
+}
+
 // TestPriceFloat64 proves Float64 (ADR-045) converts to the same
 // float64 value Go's own compiler produces for the identical decimal
 // literal — the correctly-rounded float64 nearest that decimal value,

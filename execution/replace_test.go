@@ -36,6 +36,30 @@ func TestPlanReplace_RatchetsExistingStop(t *testing.T) {
 	assert.Equal(t, intent.Metadata.EventID, result.Request.Metadata.CausationID)
 }
 
+// TestPlanReplace_RoundsMisalignedStopPriceToTick is issue #340's own
+// regression for the ratchet path (see
+// TestPlanAdjustStop_RoundsMisalignedStopPriceToTick for Plan's own
+// initial-placement path): a ratcheted stop price that is not an
+// exact multiple of the listing's tick size must round down, not be
+// rejected.
+func TestPlanReplace_RoundsMisalignedStopPriceToTick(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t, deps.IDs)
+	pos := mustPosition(t, accountID, listing, order.Long, "1000")
+	existing := mustRestingStopOrder(t, deps.IDs, accountID, listing, order.Sell, "1000", "1.05000")
+	snap := mustSnapshotWithOpenOrders(t, accountID, listing, []order.Position{pos}, []order.Order{existing})
+	intent := mustAdjustStopIntentAt(t, deps.IDs, listing.InstrumentID(), "1.060007")
+
+	result, err := p.PlanReplace(context.Background(), ReplaceInput{Intent: intent, Listing: listing, Account: snap})
+	require.NoError(t, err)
+	require.NotNil(t, result.Request.NewStopPrice)
+	assert.Equal(t, "1.06", result.Request.NewStopPrice.String(), "must round down to the listing's own tick size, not reject")
+}
+
 // TestPlanReplace_SyncsQuantityWhenPositionGrew is PR #337 review's
 // own concern, addressed directly: issue #336's own non-goals scoped
 // in exactly this — "quantity-changing replaces beyond what's needed

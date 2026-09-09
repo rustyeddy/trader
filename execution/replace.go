@@ -140,6 +140,16 @@ func (p *planner) PlanReplace(ctx context.Context, in ReplaceInput) (ReplaceResu
 		newQuantity = &currentQty
 	}
 
+	// Round the caller-computed StopPrice to the listing's own tick
+	// size, exactly like Plan's own IntentAdjustStop case (issue #340)
+	// — existing.Request.Side is the resting order's own protective
+	// side, which findRestingStopOrder already guaranteed still
+	// protects the current position.
+	newStopPrice, err := roundStopPriceToTick(*intent.StopPrice, existing.Request.Side, in.Listing)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+
 	eventID, err := id.GenerateEventID(p.deps.IDs)
 	if err != nil {
 		return ReplaceResult{}, err
@@ -148,7 +158,7 @@ func (p *planner) PlanReplace(ctx context.Context, in ReplaceInput) (ReplaceResu
 	req, err := order.NewReplaceRequest(order.ReplaceRequest{
 		OrderID:      existing.Request.OrderID,
 		NewQuantity:  newQuantity,
-		NewStopPrice: intent.StopPrice,
+		NewStopPrice: &newStopPrice,
 		Metadata: id.Metadata{
 			EventID:       eventID,
 			CorrelationID: intent.Metadata.CorrelationID,

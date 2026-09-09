@@ -265,8 +265,17 @@ func mustTargetExposureIntent(t *testing.T, gen *id.Generator, instID instrument
 
 func mustAdjustStopIntent(t *testing.T, gen *id.Generator, instID instrument.ID) order.Intent {
 	t.Helper()
+	return mustAdjustStopIntentAt(t, gen, instID, "1.05000")
+}
+
+// mustAdjustStopIntentAt is mustAdjustStopIntent with a caller-chosen
+// StopPrice — needed by issue #340's own rounding tests, which
+// deliberately supply a price that is not a multiple of the listing's
+// tick size.
+func mustAdjustStopIntentAt(t *testing.T, gen *id.Generator, instID instrument.ID, stopPrice string) order.Intent {
+	t.Helper()
 	corrID := mustCorrelationID(t, gen)
-	sp := num.MustParsePrice("1.05000")
+	sp := num.MustParsePrice(stopPrice)
 	in, err := order.NewIntent(order.Intent{
 		IntentID:   mustIntentID(t, gen),
 		Kind:       order.IntentAdjustStop,

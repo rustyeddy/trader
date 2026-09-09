@@ -109,6 +109,29 @@ func planAdjustStop(acc account.Snapshot, listing instrument.Listing) (order.Sid
 	return side, qty, nil
 }
 
+// roundStopPriceToTick rounds price to listing's own tick size, in the
+// direction that never makes the protective stop side places more
+// aggressive/tighter than what the caller (a strategy computing a
+// derived price — a fraction of a high-water mark, an ATR multiple,
+// and so on) actually asked for (issue #340): a Sell stop protects a
+// long from below, so rounding it further down gives the position
+// more room, never less, than requested; a Buy stop protects a short
+// from above, so rounding it further up does the same. This is the one
+// place execution rounds a caller-supplied price at all — every other
+// price (Enter/Exit/TargetExposure never carry one; a strategy that
+// already supplies an exact, tick-aligned StopPrice sees this round to
+// itself, a no-op) — matching num's own "nothing silently rounded"
+// convention: the direction and the fact that rounding happens at all
+// are both explicit and documented here, not folded invisibly into
+// order.NewProposal/order.NewReplaceRequest's own strict validation.
+func roundStopPriceToTick(price num.Price, side order.Side, listing instrument.Listing) (num.Price, error) {
+	tick := listing.Spec().TickSize()
+	if side == order.Buy {
+		return price.RoundUp(tick)
+	}
+	return price.RoundDown(tick)
+}
+
 // findRestingStopOrder returns acc's own resting (non-terminal),
 // ReduceOnly Stop order for listing's instrument, if any — the signal
 // execution.Plan/PlanReplace and pipeline.Pipeline use to decide
