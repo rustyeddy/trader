@@ -224,9 +224,10 @@ func (p Price) RoundDown(tick Price) (Price, error) {
 // ceil(p/tick) x tick. See RoundDown's own doc comment for the shared
 // rationale and Price's non-negative-by-construction assumption;
 // RoundUp differs only in rounding toward positive infinity instead of
-// toward zero — the direction needed when rounding must never make a
-// protective Buy stop (which protects a short position from above)
-// less aggressive than what the caller computed.
+// toward zero — the direction needed so a protective Buy stop (which
+// protects a short position from above) is never rounded into being
+// more aggressive/tighter than what the caller computed: moving it
+// further up gives the position strictly more room, never less.
 //
 // RoundUp reports ErrDivideByZero when tick is zero. A p that is
 // already an exact multiple of tick rounds to itself, exactly like

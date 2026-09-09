@@ -60,6 +60,32 @@ func TestPlanReplace_RoundsMisalignedStopPriceToTick(t *testing.T) {
 	assert.Equal(t, "1.06", result.Request.NewStopPrice.String(), "must round down to the listing's own tick size, not reject")
 }
 
+// TestPlanReplace_RoundsMisalignedStopPriceToTick_ShortPosition is
+// the symmetric case for a short position's protective Buy stop
+// (owner review on PR #341): PlanReplace derives its rounding
+// direction from existing.Request.Side, not by recomputing the
+// position's own side, so this locks down that plumbing too — the
+// ratchet path must round up, exactly like Plan's own initial-
+// placement path already proves for a short position
+// (TestPlanAdjustStop_RoundsMisalignedStopPriceToTick_ShortPosition).
+func TestPlanReplace_RoundsMisalignedStopPriceToTick_ShortPosition(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t, deps.IDs)
+	pos := mustPosition(t, accountID, listing, order.Short, "1000")
+	existing := mustRestingStopOrder(t, deps.IDs, accountID, listing, order.Buy, "1000", "1.06000")
+	snap := mustSnapshotWithOpenOrders(t, accountID, listing, []order.Position{pos}, []order.Order{existing})
+	intent := mustAdjustStopIntentAt(t, deps.IDs, listing.InstrumentID(), "1.050003")
+
+	result, err := p.PlanReplace(context.Background(), ReplaceInput{Intent: intent, Listing: listing, Account: snap})
+	require.NoError(t, err)
+	require.NotNil(t, result.Request.NewStopPrice)
+	assert.Equal(t, "1.05001", result.Request.NewStopPrice.String(), "must round up to the listing's own tick size, not reject")
+}
+
 // TestPlanReplace_SyncsQuantityWhenPositionGrew is PR #337 review's
 // own concern, addressed directly: issue #336's own non-goals scoped
 // in exactly this — "quantity-changing replaces beyond what's needed
