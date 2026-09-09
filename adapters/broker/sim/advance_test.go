@@ -177,6 +177,34 @@ func TestAdvanceBuyStopFillsAtOpenOnAdverseGap(t *testing.T) {
 	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.10500")), "an adverse gap must fill at the worse open, not the requested stop")
 }
 
+// TestAdvanceBuyStopGapFillRoundsOffTickOpenUp is issue #343's own
+// regression: a gap fill's price is the observation's own raw Open
+// (stopTriggerPrice's own gap rule), which real split-adjusted
+// historical data can carry off-tick — this must round up (a Buy
+// fill), not reject the fill outright.
+func TestAdvanceBuyStopGapFillRoundsOffTickOpenUp(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustStopRequest(t, deps.IDs, accountID, order.Buy, "1000", "1.10000")
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	obs := mustObservation(t, mustEurUsdListing(t), "1.105003", "1.10800", "1.10300", "1.10600", barTime)
+	require.NoError(t, b.Advance(ctx, obs))
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1)
+	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.10501")),
+		"an off-tick gap Open must round up for a Buy fill, not be rejected")
+}
+
 func TestAdvanceBuyStopFillsAtStopOnNormalTouch(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
@@ -219,6 +247,34 @@ func TestAdvanceSellStopFillsAtOpenOnAdverseGap(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, snap.Positions(), 1)
 	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.09500")))
+}
+
+// TestAdvanceSellStopGapFillRoundsOffTickOpenDown mirrors
+// TestAdvanceBuyStopGapFillRoundsOffTickOpenUp for the Sell side
+// (owner review on PR #344, issue #343's own stated acceptance
+// coverage): an off-tick adverse-gap Open must round down for a Sell
+// fill (the account receives less), not be rejected.
+func TestAdvanceSellStopGapFillRoundsOffTickOpenDown(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustStopRequest(t, deps.IDs, accountID, order.Sell, "1000", "1.10000")
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	obs := mustObservation(t, mustEurUsdListing(t), "1.095007", "1.09800", "1.09200", "1.09600", barTime)
+	require.NoError(t, b.Advance(ctx, obs))
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1)
+	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.09500")),
+		"an off-tick gap Open must round down for a Sell fill, not be rejected")
 }
 
 func TestAdvanceSellStopFillsAtStopOnNormalTouch(t *testing.T) {

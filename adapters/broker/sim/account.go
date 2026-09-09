@@ -536,6 +536,20 @@ func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcom
 // purchase should leave equity roughly unchanged, not book the full
 // notional as an immediate loss; see the design discussion on issue
 // #152).
+// roundFillPriceToTick rounds price to listing's own tick size, in
+// the conservative direction for side: Buy rounds up (the simulated
+// account pays more), Sell rounds down (the account receives less) —
+// so rounding a real, off-tick historical observation to a
+// representable price never advantages the backtest (issue #343).
+// See buildFill's own call site for why this is unconditional, not
+// limited to a specific order type or triggering path.
+func roundFillPriceToTick(price num.Price, side order.Side, tick num.Price) (num.Price, error) {
+	if side == order.Buy {
+		return price.RoundUp(tick)
+	}
+	return price.RoundDown(tick)
+}
+
 func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, causationID id.EventID, sequence uint64) (fillOutcome, error) {
 	req := o.Request
 	key := keyForListing(req.Listing)
@@ -556,15 +570,45 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 
 	fillQty := *o.AcceptedQuantity
 
+	// Round the base price to the listing's own tick size before
+	// anything else touches it (issue #343): price may be a raw
+	// Observation.Open (a triggered Stop/Limit order's own gap-fill
+	// price, ADR-026's stopTriggerPrice/limitTriggerPrice) or a
+	// Deps.Prices-supplied market-order price, and either source can
+	// legitimately carry sub-cent precision against real split-
+	// adjusted historical data (ADR-052) with no tick-size guarantee
+	// at all — unlike a strategy-requested stop price, which
+	// execution's own roundStopPriceToTick already rounds before it
+	// ever reaches here (ADR-056). Without this step, order.NewFill's
+	// own strict tick-size validation below would simply reject the
+	// fill outright the moment real data landed off-tick, which for a
+	// multi-decade daily-bar run is the common case, not an edge one.
+	//
+	// The rounding direction is conservative and side-dependent, not
+	// "nearest": a Buy fill rounds up (costs the simulated account
+	// more), a Sell fill rounds down (the account receives less) — so
+	// rounding a real, off-tick historical price to a representable
+	// one never advantages the backtest. This is a different direction
+	// rule from roundStopPriceToTick's own "never tighter than
+	// requested," which optimizes for a different question (has the
+	// strategy's own request been honored, not "is this fill
+	// generous").
+	rounded, err := roundFillPriceToTick(price, req.Side, req.Listing.Spec().TickSize())
+	if err != nil {
+		return fillOutcome{}, fmt.Errorf("%w: rounding fill price to tick size: %w", order.ErrInvalidFill, err)
+	}
+	price = rounded
+
 	// Slippage (issue #153, M3-10) only ever adjusts a market-type
 	// execution's price: a plain Market order, or a Stop that has
 	// already resolved its own trigger/gap price (ADR-026) and become
 	// one. A Limit fill is a price guarantee by definition and must
 	// never be adjusted, so it is never offered to deps.Slippage at
 	// all. The pipeline is: base price (Deps.Prices, or the
-	// observation trigger/gap rules) -> slippage -> final execution
-	// price, used for everything from here on — the Fill itself,
-	// position/PnL accounting, the new mark, and (below) commission.
+	// observation trigger/gap rules) -> tick rounding (above) ->
+	// slippage -> final execution price, used for everything from here
+	// on — the Fill itself, position/PnL accounting, the new mark, and
+	// (below) commission.
 	if deps.Slippage != nil && (req.Type == order.Market || req.Type == order.Stop) {
 		adjusted, err := deps.Slippage.Slippage(req.Listing, req.Side, fillQty, price)
 		if err != nil {

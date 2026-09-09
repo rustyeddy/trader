@@ -164,6 +164,7 @@ the original decided, use full supersession instead.
 | 054 | Order replacement in the execution/risk pipeline (in adr-054-execution-order-replacement.org) | Accepted |
 | 055 | Wiring ADR-026 resting-order triggering into backtest.Scheduler (in adr-055-scheduler-intrabar-advance.org) | Accepted |
 | 056 | Rounding a computed stop price to the listing's tick size (in adr-056-price-round-to-tick.org) | Accepted |
+| 057 | Rounding every simulated fill price to the listing's tick size (in adr-057-sim-fill-price-tick-rounding.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —

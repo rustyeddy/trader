@@ -89,6 +89,54 @@ func TestBuildFillDefaultsToExactPriceAndNoFee(t *testing.T) {
 	assert.True(t, snap.Equity().Equal(usd("10000")), "no commission charged")
 }
 
+// TestBuildFillRoundsOffTickPriceForBuy is issue #343's own regression:
+// a Deps.Prices-supplied price that is not a multiple of the listing's
+// tick size must be rounded, not rejected — up (costing the account
+// more) for a Buy fill.
+func TestBuildFillRoundsOffTickPriceForBuy(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	deps.Prices = fixedPriceSource{"EUR_USD": num.MustParsePrice("1.100003")}
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1)
+	require.NotNil(t, snap.Positions()[0].AvgPrice)
+	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.10001")), "a Buy fill must round an off-tick price up, not reject it")
+}
+
+// TestBuildFillRoundsOffTickPriceForSell mirrors the above for a Sell
+// fill, which must round down (receiving less), not up.
+func TestBuildFillRoundsOffTickPriceForSell(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	deps.Prices = fixedPriceSource{"EUR_USD": num.MustParsePrice("1.100003")}
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Sell, "1000")
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1)
+	require.NotNil(t, snap.Positions()[0].AvgPrice)
+	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.10000")), "a Sell fill must round an off-tick price down, not reject it")
+}
+
 func TestBuildFillAppliesSlippageToMarketOrder(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()

@@ -1,0 +1,136 @@
+#+TITLE: Rounding Every Simulated Fill Price to the Listing's Tick Size ADR-057
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+* Context
+
+Issue #343, discovered while running a real walk-forward parameter
+sweep for =strategy/smatrend= against decades of real Stooq SPY/QQQ
+history (the experiment phase following issue #335/EQS-01 and its own
+ADR-056 tick-rounding fix): runs failed constantly with
+
+#+BEGIN_EXAMPLE
+backtest: scheduler: advancing intrabar state for etf:ARCA:SPY at
+2011-11-25...: order: invalid fill: instrument: invalid spec:
+price 91.1038 is not a multiple of tick size 0.01
+#+END_EXAMPLE
+
+=adapters/broker/sim='s =accountState.buildFill= only ever validated
+(and, had one been present, only ever gave a slippage model the
+opportunity to also round) a fill price when a =SlippageModel= was
+configured — the =deps.Slippage != nil= branch calls
+=req.Listing.Spec().ValidatePrice= on the slippage-adjusted price, but
+only inside that branch. With no slippage model configured (a common,
+valid setup — every =smatrend= sweep run in this session used none),
+the incoming =price= parameter flowed straight into =order.NewFill=
+with no rounding or validation step of its own, and =order.NewFill='s
+strict tick-size check rejected it outright the instant real data
+landed off-tick.
+
+This is a different, more general gap than ADR-056 (issue #340), which
+rounded the *stop price a strategy requests* inside =execution=.
+ADR-056's fix does nothing for the *actual fill price* the simulated
+broker itself computes: for a triggered Stop/Limit order that gaps
+through, =stopTriggerPrice=/=limitTriggerPrice= (=advance.go=) return
+the bar's own raw =Observation.Open= directly as the fill price — and
+real split-adjusted historical equity data (ADR-052) can legitimately
+carry sub-cent precision on *any* bar, not a rare edge case. Every
+caller composing a =FillPriceSource= for an ordinary market-order fill
+already had to work around this individually by pre-rounding its own
+returned price (both =research-runs/eqs-01= and the walk-forward sweep
+driver did this) — but there was no such workaround available for the
+gap-fill-at-Open path at all, since it bypasses =Deps.Prices= entirely
+and is wholly internal to =sim.Broker.Advance=.
+
+* Decision
+
+=accountState.buildFill= now rounds its incoming =price= parameter to
+=req.Listing.Spec().TickSize()= unconditionally, via a new small
+helper:
+
+#+BEGIN_SRC go
+func roundFillPriceToTick(price num.Price, side order.Side, tick num.Price) (num.Price, error) {
+    if side == order.Buy {
+        return price.RoundUp(tick)
+    }
+    return price.RoundDown(tick)
+}
+#+END_SRC
+
+This runs as the very first step inside =buildFill=, before the
+existing slippage step — so slippage (when configured) always adjusts
+an already tick-aligned base price, and every fill =buildFill=
+constructs is rounded identically regardless of its source: a
+=Deps.Prices=-supplied market-order price, or a triggered Stop/Limit
+order's own trigger/gap price (ADR-026).
+
+The rounding direction is deliberately *conservative and side-
+dependent*, not "nearest": a =Buy= fill rounds up (the simulated
+account pays more), a =Sell= fill rounds down (the account receives
+less). Rounding a real, off-tick historical price to a representable
+one this way can never advantage the backtest — the simulated result
+is never better than what a real, tick-aligned execution would have
+been. This is a *different* direction rule from ADR-056's own
+=roundStopPriceToTick=, which optimizes for a different question
+("has the strategy's own requested stop level been honored, never
+tightened") rather than "is this fill generous." The two rules are not
+in tension: ADR-056 rounds a *request* before it becomes a resting
+order; this ADR rounds the *actual execution price* once a fill
+happens, and they can each independently apply to the same order's
+lifecycle (a rounded resting stop price, later triggered and its own
+gap-fill price rounded again by this ADR's own rule).
+
+* Consequences
+
+- Every fill the simulated broker constructs — market-order fills and
+  triggered Stop/Limit trigger/gap fills alike — is now guaranteed
+  tick-aligned before reaching =order.NewFill=, with no slippage model
+  required to get there.
+- A =FillPriceSource= implementation no longer needs to pre-round its
+  own returned price as a workaround; the rounding is now centralized
+  where the fill is actually constructed. Existing callers that
+  already did this (=research-runs/eqs-01=, the EQS-01 walk-forward
+  sweep driver) are unaffected — their own rounding was already a
+  no-op once this fix landed, since the price they hand back was
+  already aligned.
+- New regression tests: =TestBuildFillRoundsOffTickPriceForBuy=/
+  =_ForSell= (market-order fills) and
+  =TestAdvanceBuyStopGapFillRoundsOffTickOpenUp= (the triggered-
+  gap-fill path, issue #343's own real =91.1038=-shaped case).  Every
+  pre-existing =adapters/broker/sim= test passed unmodified, confirming
+  this is additive for a caller whose fixture prices already happened
+  to be tick-aligned.
+- The real EQS-01 walk-forward sweep can now run its full grid without
+  a tick-size fill rejection.
+
+* Alternatives Considered
+
+- *Only validate/round inside the existing slippage branch, requiring
+  every composition root to configure at least a no-op
+  =SlippageModel= to get tick alignment.* Rejected: this makes
+  correctness depend on an unrelated, optional dependency being
+  present for a reason that has nothing to do with slippage, and is
+  exactly the shape of bug this issue found in practice.
+- *Push the rounding responsibility onto every =FillPriceSource=
+  implementation instead of fixing it in =buildFill=.* Rejected: this
+  works for market-order fills (every caller in this codebase already
+  does it, as a workaround) but is not available at all for the
+  triggered Stop/Limit gap-fill path, which never calls
+  =FillPriceSource= — the bug is fundamentally inside
+  =adapters/broker/sim= itself, not in any caller's own composition.
+- *Round to nearest instead of a conservative, side-dependent
+  direction.* Rejected per the same reasoning ADR-056 already
+  established for stop-price rounding: "nearest" can make either
+  side's fill better than a real execution would have been, roughly
+  half the time, which a backtest should never do; conservative
+  rounding never does.
+- *Widen =order.NewFill='s own strict validation to silently round
+  instead of rejecting.* Rejected for the identical reason ADR-056
+  rejected the analogous option for =order.NewProposal=/
+  =order.NewReplaceRequest=: =order='s own validation is used by every
+  caller across the codebase, most of which have deliberately chosen
+  strict rejection as the correct behavior for a price that did not
+  come from an intentional, already-considered computation.
