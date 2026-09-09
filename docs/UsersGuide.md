@@ -77,23 +77,33 @@ two positional arguments and shares the same flag set.
 
 **Usage:** `trader data <subcommand> INSTRUMENT INTERVAL --from ... --to ...`
 
-INSTRUMENT is a plain symbol (e.g. `EURUSD`); INTERVAL is one of the values
-listed under `backtest run` below.
+INSTRUMENT is a plain symbol. For the default `oanda` provider (or any FX
+provider) it is a 6-letter FX pair, e.g. `EURUSD`. For a non-FX provider such
+as `alpaca` it is an equity or ETF ticker, e.g. `AAPL` or `SPY` — `--exchange`
+and `--kind` are then both **required**, since a bare ticker does not name
+its own listing exchange or asset kind the way an FX pair's symbol does.
+INTERVAL is one of the values listed under `backtest run` below.
 
 ### Shared `data` flags
 
-| Flag               | Default                                | Meaning                                               |
-|--------------------|----------------------------------------|-------------------------------------------------------|
-| `--from`           | —                                      | range start (`YYYY-MM-DD` or RFC3339), **required**   |
-| `--to`             | —                                      | range end (`YYYY-MM-DD` or RFC3339), **required**     |
-| `--format`         | `table`                                | `table` or `json`                                     |
-| `--provider`       | `oanda`                                | canonical dataset provider name                       |
-| `--raw-root`       | `$XDG_DATA_HOME/trader/raw/<provider>` | raw provider archive root                             |
-| `--store-root`     | `$XDG_DATA_HOME/trader/data`           | canonical data store root                             |
-| `--oanda-base-url` | —                                      | OANDA API base URL; required only for `sync`/`update` |
+| Flag                | Default                                | Meaning                                                                  |
+|---------------------|-----------------------------------------|---------------------------------------------------------------------------|
+| `--from`            | —                                      | range start (`YYYY-MM-DD` or RFC3339), **required**                     |
+| `--to`              | —                                      | range end (`YYYY-MM-DD` or RFC3339), **required**                       |
+| `--format`          | `table`                                | `table` or `json`                                                       |
+| `--provider`        | `oanda`                                | canonical dataset provider name (e.g. `oanda`, `alpaca`)                |
+| `--raw-root`        | `$XDG_DATA_HOME/trader/raw/<provider>` | raw provider archive root                                                |
+| `--store-root`      | `$XDG_DATA_HOME/trader/data`           | canonical data store root                                                |
+| `--oanda-base-url`  | —                                      | OANDA API base URL; required only for `sync`/`update`                   |
+| `--alpaca-base-url` | `https://data.alpaca.markets`          | Alpaca Market Data API base URL; only used with `--provider alpaca`     |
+| `--exchange`        | —                                      | listing exchange (e.g. `ARCA`, `NASDAQ`); required for a non-FX provider |
+| `--kind`            | —                                      | `equity` or `etf`; required for a non-FX provider                       |
 
 The OANDA API token itself is never a flag — set the `TRADER_OANDA_TOKEN`
-environment variable instead.
+environment variable instead. Likewise, Alpaca's key ID and secret key are
+never flags — set `TRADER_ALPACA_KEY_ID` and `TRADER_ALPACA_SECRET_KEY`
+instead. Neither provider's secret belongs in shell history or a process
+command line.
 
 ### `trader data bars INSTRUMENT INTERVAL`
 
@@ -111,7 +121,14 @@ available — read-only, performs no acquisition or building.
 ### `trader data sync INSTRUMENT INTERVAL`
 
 Acquires raw provider data for the requested range. Requires
-`--oanda-base-url` and `TRADER_OANDA_TOKEN`.
+`--oanda-base-url` and `TRADER_OANDA_TOKEN` for the default `oanda`
+provider, or `TRADER_ALPACA_KEY_ID`/`TRADER_ALPACA_SECRET_KEY` (plus
+`--exchange`/`--kind`) for `--provider alpaca`:
+
+```sh
+trader data sync SPY D1 --provider alpaca --exchange ARCA --kind etf \
+  --from 2024-01-01 --to 2024-02-01
+```
 
 ### `trader data build INSTRUMENT INTERVAL`
 
@@ -350,8 +367,10 @@ Concretely, per command:
   `--type`, `--price`, `--adverse-distance`, `--format`, ...) is flag
   only.
 
-One credential is environment-only and has no flag at all:
+These credentials are environment-only and have no flag at all:
 
-| Variable             | Meaning                                                   |
-|----------------------|-----------------------------------------------------------|
-| `TRADER_OANDA_TOKEN` | OANDA API token, required for `trader data sync`/`update` |
+| Variable                   | Meaning                                                          |
+|-----------------------------|-------------------------------------------------------------------|
+| `TRADER_OANDA_TOKEN`        | OANDA API token, required for `trader data sync`/`update`       |
+| `TRADER_ALPACA_KEY_ID`      | Alpaca API key ID, required (with the secret key below) for `trader data sync`/`update --provider alpaca` |
+| `TRADER_ALPACA_SECRET_KEY`  | Alpaca API secret key, required (with the key ID above) for `trader data sync`/`update --provider alpaca` |

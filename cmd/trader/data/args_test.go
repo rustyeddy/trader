@@ -105,3 +105,76 @@ func TestResolveDatasetRequest_BuildsRequestAndRegistersListing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "EURUSD", listing.Symbol())
 }
+
+// newTestDataContextForProvider mirrors newTestDataCmdContext for a
+// non-FX provider (issue #331).
+func newTestDataContextForProvider(provider string) dataContext {
+	return dataContext{
+		Service:  nil, // not needed for request-resolution tests
+		Resolver: instrument.NewMemoryResolver(),
+		Provider: provider,
+	}
+}
+
+// TestRegisterRequestedInstrument_Equity is issue #331's own
+// acceptance criterion: CLI-level coverage for at least one equity
+// symbol registered under a non-FX provider.
+func TestRegisterRequestedInstrument_Equity(t *testing.T) {
+	dc := newTestDataContextForProvider("alpaca")
+	id, err := registerRequestedInstrument(dc, "AAPL", datasetArgFlags{exchange: "NASDAQ", kind: "equity"})
+	require.NoError(t, err)
+	require.False(t, id.IsZero())
+
+	listing, err := dc.Resolver.ResolveInstrument(id, "alpaca", "")
+	require.NoError(t, err)
+	require.Equal(t, "AAPL", listing.Symbol())
+	require.Equal(t, "NASDAQ", listing.Venue())
+}
+
+// TestRegisterRequestedInstrument_ETF is issue #331's own acceptance
+// criterion: CLI-level coverage for at least one ETF symbol.
+// "etf" is matched case-insensitively, and "ETF" here also exercises
+// that.
+func TestRegisterRequestedInstrument_ETF(t *testing.T) {
+	dc := newTestDataContextForProvider("alpaca")
+	id, err := registerRequestedInstrument(dc, "SPY", datasetArgFlags{exchange: "ARCA", kind: "ETF"})
+	require.NoError(t, err)
+	require.False(t, id.IsZero())
+
+	listing, err := dc.Resolver.ResolveInstrument(id, "alpaca", "")
+	require.NoError(t, err)
+	require.Equal(t, "SPY", listing.Symbol())
+	require.Equal(t, "ARCA", listing.Venue())
+}
+
+func TestRegisterRequestedInstrument_RequiresExchangeForNonFX(t *testing.T) {
+	dc := newTestDataContextForProvider("alpaca")
+	_, err := registerRequestedInstrument(dc, "SPY", datasetArgFlags{kind: "etf"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--exchange is required")
+}
+
+func TestRegisterRequestedInstrument_RequiresKindForNonFX(t *testing.T) {
+	dc := newTestDataContextForProvider("alpaca")
+	_, err := registerRequestedInstrument(dc, "SPY", datasetArgFlags{exchange: "ARCA"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--kind is required")
+}
+
+func TestRegisterRequestedInstrument_RejectsInvalidKind(t *testing.T) {
+	dc := newTestDataContextForProvider("alpaca")
+	_, err := registerRequestedInstrument(dc, "SPY", datasetArgFlags{exchange: "ARCA", kind: "future"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `invalid --kind "future"`)
+}
+
+// TestRegisterRequestedInstrument_OANDAIgnoresExchangeAndKind proves
+// the FX path is unaffected by #331's new flags: an FX provider
+// resolves via the pre-existing RegisterFXInstrument path regardless
+// of whether --exchange/--kind happen to be set.
+func TestRegisterRequestedInstrument_OANDAIgnoresExchangeAndKind(t *testing.T) {
+	dc := newTestDataContextForProvider("oanda")
+	id, err := registerRequestedInstrument(dc, "EURUSD", datasetArgFlags{})
+	require.NoError(t, err)
+	require.False(t, id.IsZero())
+}
