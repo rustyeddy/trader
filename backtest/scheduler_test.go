@@ -155,6 +155,7 @@ type schedulerHarness struct {
 	ids       *id.Generator
 	eurusd    instrument.Listing
 	gbpusd    instrument.Listing
+	resolver  instrument.Resolver
 }
 
 func newSchedulerHarness(t *testing.T, start time.Time) schedulerHarness {
@@ -177,13 +178,20 @@ func newSchedulerHarness(t *testing.T, start time.Time) schedulerHarness {
 	})
 	require.NoError(t, err)
 
+	eurusd := simListing(t, "EUR", "USD", "EUR_USD")
+	gbpusd := simListing(t, "GBP", "USD", "GBP_USD")
+	resolver := instrument.NewMemoryResolver()
+	require.NoError(t, resolver.Register(eurusd))
+	require.NoError(t, resolver.Register(gbpusd))
+
 	return schedulerHarness{
 		broker:    b,
 		accountID: accountID,
 		clockObj:  c,
 		ids:       ids,
-		eurusd:    simListing(t, "EUR", "USD", "EUR_USD"),
-		gbpusd:    simListing(t, "GBP", "USD", "GBP_USD"),
+		eurusd:    eurusd,
+		gbpusd:    gbpusd,
+		resolver:  resolver,
 	}
 }
 
@@ -309,6 +317,8 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 	require.NoError(t, err)
 	marketObserver, ok := acc.(backtest.MarketObserver)
 	require.True(t, ok, "sim account must implement backtest.MarketObserver")
+	intrabarAdvancer, ok := acc.(backtest.IntrabarAdvancer)
+	require.True(t, ok, "sim account must implement backtest.IntrabarAdvancer")
 
 	ids2 := id.NewGenerator(h.clockObj, id.NewDeterministic(3, 4))
 	factory := strategy.NewIntentFactory(h.clockObj, ids2, id.Source("scheduler-test"))
@@ -332,9 +342,10 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 			riskFraction:    num.MustParseRate("0.01"),
 			adverseDistance: num.MustParsePrice("0.01000"),
 		},
-		Journal:        journal.Discard(),
-		RunID:          mustSchedulerRunID(t, ids2),
-		MarketObserver: marketObserver,
+		Journal:          journal.Discard(),
+		RunID:            mustSchedulerRunID(t, ids2),
+		MarketObserver:   marketObserver,
+		IntrabarAdvancer: intrabarAdvancer,
 	}
 }
 
@@ -1245,4 +1256,148 @@ func TestScheduler_RunRejectsEventForUndeclaredRequirement(t *testing.T) {
 	err = sched.Run(context.Background())
 	require.ErrorIs(t, err, backtest.ErrInvalidSchedulerDeps)
 	require.Equal(t, 0, strat.callCount(), "an undeclared event must be rejected before OnBar is ever called for it")
+}
+
+// intrabarStopTriggerStrategy is issue #338's own acceptance-criterion
+// fixture: enter short on EUR/USD's first bar, then — once the entry
+// has actually filled (view shows an open position) — place a
+// protective Buy Stop just above the still-rising fixture price via a
+// single order.IntentAdjustStop. It never touches sim.Broker or
+// adapters/broker/sim directly, and it never places a second stop or
+// re-enters after being stopped out: whether Scheduler's own
+// IntrabarAdvancer wiring subsequently triggers that resting stop, with
+// no test-side Broker.Advance call anywhere, is exactly what
+// TestScheduler_IntrabarAdvancerTriggersRestingStop below proves.
+type intrabarStopTriggerStrategy struct {
+	requirements []strategy.DataRequirement
+	intents      strategy.IntentFactory
+	instID       instrument.ID
+	stopPrice    string
+	entered      bool
+	stopPlaced   bool
+}
+
+func (s *intrabarStopTriggerStrategy) Describe() strategy.Descriptor {
+	return strategy.Descriptor{Name: "intrabar-stop-trigger", Version: "test", Requirements: s.requirements}
+}
+
+func (s *intrabarStopTriggerStrategy) Start(ctx context.Context, env strategy.Environment) error {
+	s.intents = env.Intents
+	return nil
+}
+
+func (s *intrabarStopTriggerStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	if !ev.Instrument.Equal(s.instID) {
+		return nil, nil
+	}
+	if !s.entered {
+		s.entered = true
+		in, err := s.intents.Enter(ev.Instrument, order.Sell)
+		if err != nil {
+			return nil, err
+		}
+		return []order.Intent{in}, nil
+	}
+	if s.stopPlaced {
+		// Deliberately inert from here on, including after the stop
+		// closes the position: this fixture proves one trigger, not a
+		// repeating strategy.
+		return nil, nil
+	}
+	open := false
+	for _, p := range view.Account().Positions() {
+		if p.Listing.InstrumentID().Equal(s.instID) {
+			open = true
+		}
+	}
+	if !open {
+		return nil, nil
+	}
+	s.stopPlaced = true
+	stop := num.MustParsePrice(s.stopPrice)
+	in, err := s.intents.AdjustStop(ev.Instrument, stop)
+	if err != nil {
+		return nil, err
+	}
+	return []order.Intent{in}, nil
+}
+
+// TestScheduler_IntrabarAdvancerTriggersRestingStop is issue #338's own
+// acceptance criterion: a resting protective Stop order placed through
+// the ordinary strategy-intent pipeline actually triggers during a real
+// Scheduler.Run, with no test-side call to sim.Broker.Advance anywhere
+// in this test. Before this issue, Scheduler never invoked
+// IntrabarAdvancer at all (deferred gap documented in Scheduler's own
+// doc comment) — the resting stop below would have placed and then
+// silently never fired, leaving the short position open through the
+// end of the run.
+//
+// The fixture's own EUR/USD H1 bars (schedulerSpan) rise monotonically
+// bid_h 1.10070 -> 1.10085 -> 1.10100 -> 1.10115, so a short position's
+// protective Buy Stop at 1.10065 (above the entry bar's own high,
+// comfortably below the next bar's) is guaranteed to be breached — by
+// bar 2's High, intrabar rather than by a gap (bar 2's own Open,
+// 1.10060, is still below the stop).
+func TestScheduler_IntrabarAdvancerTriggersRestingStop(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &intrabarStopTriggerStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), stopPrice: "1.10065"}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "Scheduler's own IntrabarAdvancer wiring must have triggered the resting protective stop and closed the short position")
+	assert.Empty(t, snap.OpenOrders(), "the triggered stop order must no longer be resting")
+
+	// PR #339 review: prove the triggered fill was actually drained and
+	// collected, not merely reflected in account state — the entry
+	// (short) fill plus the stop-triggered (closing) fill, in that
+	// order, with the closing fill priced at the resting stop price
+	// itself (1.10065), an ordinary intrabar trigger, not a gap.
+	fills := sched.Fills()
+	require.Len(t, fills, 2, "both the entry fill and the stop-triggered exit fill must have been drained")
+	assert.Equal(t, order.Sell, fills[0].Side, "the entry fill")
+	assert.Equal(t, order.Buy, fills[1].Side, "the stop-triggered closing fill")
+	assert.Equal(t, "1.10065", fills[1].Price.String(), "an intrabar trigger fills at the resting stop price, not the bar's Open")
+}
+
+// TestScheduler_IntrabarAdvancerFillsAtOpenOnGap is PR #339 review's own
+// third finding: issue #338 requires the Scheduler-driven path to
+// preserve ADR-026's gap-through-open fill rule, not only the ordinary
+// intrabar-trigger case TestScheduler_IntrabarAdvancerTriggersRestingStop
+// already covers. It reuses the identical fixture and strategy, only
+// with the protective stop placed at 1.10055 — below bar 2's own Open
+// (1.10060) — so the stop is already breached the instant it becomes
+// resting, before any intrabar movement: a gap, not a touch. ADR-026
+// requires a gap fill at the bar's own (worse) Open, never at the
+// requested stop price.
+func TestScheduler_IntrabarAdvancerFillsAtOpenOnGap(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &intrabarStopTriggerStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), stopPrice: "1.10055"}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "the gapped-through stop must still have closed the short position")
+	assert.Empty(t, snap.OpenOrders())
+
+	fills := sched.Fills()
+	require.Len(t, fills, 2)
+	assert.Equal(t, order.Buy, fills[1].Side, "the stop-triggered closing fill")
+	assert.Equal(t, "1.1006", fills[1].Price.String(), "a gap-through fill must use the bar's own (worse) Open, 1.10060, never the requested stop price 1.10055")
 }

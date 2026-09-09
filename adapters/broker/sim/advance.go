@@ -92,6 +92,28 @@ func (h *accountHandle) ObserveMark(ctx context.Context, instrumentID instrument
 	return nil
 }
 
+// AdvanceBar implements backtest.IntrabarAdvancer (issue #338) —
+// satisfied structurally, without this package importing backtest, the
+// same convention ObserveMark already follows. Unlike ObserveMark,
+// AdvanceBar evaluates this account's own resting Limit/Stop orders
+// against the full bar (ADR-026): it delegates directly to
+// accountState.advance, the same method Broker.Advance itself calls,
+// scoped here to this one account/listing rather than every account
+// this Broker owns.
+func (h *accountHandle) AdvanceBar(ctx context.Context, listing instrument.Listing, open, high, low, close num.Price, at time.Time) error {
+	if h.broker.isClosed() {
+		return brokerpkg.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	obs := Observation{Listing: listing, Open: open, High: high, Low: low, Close: close, Time: at}
+	if err := obs.validate(); err != nil {
+		return err
+	}
+	return h.state.advance(ctx, h.broker.deps, obs)
+}
+
 // observeMark revalues every position s holds for instrumentID
 // (regardless of provider/venue — s is already scoped to one account,
 // and this package's own convention, matching InputBuilder's default
