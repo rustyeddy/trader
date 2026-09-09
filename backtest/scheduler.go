@@ -144,19 +144,26 @@ type SchedulerDeps struct {
 	// See MarketObserver's own doc comment for why this is required,
 	// not optional.
 	MarketObserver MarketObserver
-	// Resolver resolves an emitted event's own instrument.ID to the
-	// broker-side Listing IntrabarAdvancer needs (issue #338) — the
-	// same resolution direction ResolverInputBuilder already performs
-	// for submitted intents, needed here independently because
-	// IntrabarAdvancer must run against every batch's own bars whether
-	// or not the strategy emitted anything this bar.
-	Resolver instrument.Resolver
 	// IntrabarAdvancer advances each batch's own bars through the
 	// broker's resting Limit/Stop order trigger machinery (ADR-026,
 	// issue #338), closing the gap this type's own package doc
 	// previously described as deferred: without it, a resting
 	// protective stop (order.IntentAdjustStop, issues #336/#337) places
 	// and ratchets correctly but never actually fills.
+	//
+	// Scheduler never resolves a Listing of its own to drive this: PR
+	// #339 review found that an unconditional per-bar
+	// Resolver.ResolveInstrument(..., venue="") call could return
+	// ErrAmbiguousSymbol for an instrument with more than one tradable
+	// listing per provider, purely from Scheduler advancing a bar no
+	// intent had ever been submitted against. Instead Scheduler reuses
+	// the exact Listing InputBuilder.Build already resolved the one
+	// and only time that matters — at submission — caching it per
+	// instrument in submit, and calling IntrabarAdvancer in Phase 3
+	// only for an instrument with a cached Listing (see runBatch). An
+	// instrument with no submission yet has no possible resting order,
+	// so skipping it is not a gap, only avoided, unnecessary
+	// resolution.
 	IntrabarAdvancer IntrabarAdvancer
 }
 
@@ -187,9 +194,6 @@ func (d SchedulerDeps) validate() error {
 	}
 	if d.MarketObserver == nil {
 		return fmt.Errorf("%w: market observer must be set", ErrInvalidSchedulerDeps)
-	}
-	if d.Resolver == nil {
-		return fmt.Errorf("%w: resolver must be set", ErrInvalidSchedulerDeps)
 	}
 	if d.IntrabarAdvancer == nil {
 		return fmt.Errorf("%w: intrabar advancer must be set", ErrInvalidSchedulerDeps)
@@ -352,6 +356,14 @@ type Scheduler struct {
 	// keyed the same way.
 	queued map[requirementKey][]order.Intent
 
+	// listingsByInstrument caches the exact Listing InputBuilder.Build
+	// resolved for each instrument the first (and every subsequent)
+	// time an intent for it was actually submitted — see submit and
+	// IntrabarAdvancer's own doc comment for why Phase 3 reuses this
+	// instead of resolving its own, potentially ambiguous, Listing per
+	// bar (PR #339 review).
+	listingsByInstrument map[instrument.ID]instrument.Listing
+
 	// lastBrokerSeq is the highest broker.Event.Sequence already
 	// journaled/collected, across the account's whole event stream —
 	// see drainAndJournal's own doc comment.
@@ -387,11 +399,12 @@ func NewScheduler(deps SchedulerDeps) (*Scheduler, error) {
 	}
 
 	return &Scheduler{
-		deps:           deps,
-		warmupRequired: warmupRequired,
-		barsSeen:       make(map[requirementKey]int, len(requirements)),
-		history:        make(map[requirementKey][]marketdata.Bar, len(requirements)),
-		queued:         make(map[requirementKey][]order.Intent),
+		deps:                 deps,
+		warmupRequired:       warmupRequired,
+		barsSeen:             make(map[requirementKey]int, len(requirements)),
+		history:              make(map[requirementKey][]marketdata.Bar, len(requirements)),
+		queued:               make(map[requirementKey][]order.Intent),
+		listingsByInstrument: make(map[instrument.ID]instrument.Listing),
 	}, nil
 }
 
@@ -550,20 +563,27 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 	// action — including any resting Stop/Limit order IntrabarAdvancer
 	// just triggered — not last batch's stale state.
 	//
-	// IntrabarAdvancer runs against the resolved Listing with this
-	// bar's own full OHLC, using whatever stop/limit price is already
-	// resting from *prior* bars only: Phase 2 already flushed this
-	// batch's own newly-eligible intents (a ratchet queued from the
-	// prior bar's OnBar, for example) before this loop runs, so the
-	// order IntrabarAdvancer evaluates here already reflects that
-	// flush — issue #335's own "use the stop level established from
-	// prior information" no-lookahead requirement — while this bar's
-	// own OnBar call (which might ratchet again from *this* bar's
-	// data) has not run yet. MarketObserver still runs too (issue
-	// #338's own scope decision: kept alongside, not replaced by
-	// IntrabarAdvancer, which already revalues marks as part of its
-	// own broker-side operation — redundant but harmless, not a
-	// correctness concern).
+	// IntrabarAdvancer runs against the Listing cached in
+	// listingsByInstrument the last time an intent for this instrument
+	// was actually submitted (see submit and SchedulerDeps.
+	// IntrabarAdvancer's own doc comment for why Phase 3 never resolves
+	// its own Listing). An instrument with no cached Listing yet has
+	// never been submitted against, so it can have no resting order —
+	// IntrabarAdvancer is skipped for it, not a gap.
+	//
+	// It uses whatever stop/limit price is already resting from *prior*
+	// bars only: Phase 2 already flushed this batch's own
+	// newly-eligible intents (a ratchet queued from the prior bar's
+	// OnBar, for example) before this loop runs, so the order
+	// IntrabarAdvancer evaluates here already reflects that flush —
+	// issue #335's own "use the stop level established from prior
+	// information" no-lookahead requirement — while this bar's own
+	// OnBar call (which might ratchet again from *this* bar's data) has
+	// not run yet. MarketObserver still runs too, for every event
+	// regardless of a cached Listing (issue #338's own scope decision:
+	// kept alongside, not replaced by IntrabarAdvancer, which already
+	// revalues marks as part of its own broker-side operation —
+	// redundant but harmless when both run, not a correctness concern).
 	for _, ev := range batch {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -571,13 +591,26 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		if err := s.deps.MarketObserver.ObserveMark(ctx, ev.Instrument, ev.Bar.Close, t); err != nil {
 			return fmt.Errorf("backtest: scheduler: observing market for %s at %s: %w", ev.Instrument, t, err)
 		}
-		listing, err := s.deps.Resolver.ResolveInstrument(ev.Instrument, s.deps.Account.Reference().Broker, "")
-		if err != nil {
-			return fmt.Errorf("backtest: scheduler: resolving %s for intrabar advance at %s: %w", ev.Instrument, t, err)
+		listing, ok := s.listingsByInstrument[ev.Instrument]
+		if !ok {
+			continue
 		}
 		if err := s.deps.IntrabarAdvancer.AdvanceBar(ctx, listing, ev.Bar.Open, ev.Bar.High, ev.Bar.Low, ev.Bar.Close, t); err != nil {
 			return fmt.Errorf("backtest: scheduler: advancing intrabar state for %s at %s: %w", ev.Instrument, t, err)
 		}
+	}
+
+	// IntrabarAdvancer can trigger a resting order and produce real
+	// broker Order/Fill/Account events (PR #339 review) — drain and
+	// journal them now, once per batch, so the frozen snapshot below,
+	// s.fills, and the journal all agree causally about what happened
+	// at t before this bar's own OnBar call runs. drainAndJournal is
+	// itself an incremental, watermark-based no-op when nothing new
+	// triggered (see its own doc comment), so this is safe to call
+	// unconditionally every batch, not only when a trigger is known to
+	// have occurred.
+	if err := s.drainAndJournal(ctx); err != nil {
+		return err
 	}
 
 	frozen, err := s.deps.Account.Snapshot(ctx)
@@ -711,6 +744,13 @@ func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strat
 	if err != nil {
 		return fmt.Errorf("backtest: scheduler: building pipeline input for intent %s: %w", intent.IntentID, err)
 	}
+	// Cache the resolved Listing regardless of whether Submit below
+	// ultimately succeeds or is risk-rejected: it is the same Listing
+	// a subsequent resting order for this instrument would be
+	// submitted against, and Phase 3's IntrabarAdvancer call needs it
+	// (see IntrabarAdvancer's own doc comment) whether or not *this*
+	// particular intent was accepted.
+	s.listingsByInstrument[intent.Instrument] = in.Listing
 
 	result, submitErr := s.deps.Pipeline.Submit(ctx, in)
 	rejected := errors.Is(submitErr, pipeline.ErrRejected)
@@ -785,7 +825,10 @@ func (s *Scheduler) journalRecord(ctx context.Context, rec journal.Record) error
 //
 // Called once per submit (so broker-side entries interleave with the
 // Intent/Proposal/Decision/Request that caused them in true execution
-// order, not batched at the end of the run), it reuses the same
+// order, not batched at the end of the run) and once more per batch
+// after Phase 3's IntrabarAdvancer calls (issue #338, PR #339 review —
+// a triggered resting order produces real broker events with no
+// preceding submit call of its own to drain them), it reuses the same
 // broker.FiniteEventReader capability Runner's trade derivation relies
 // on elsewhere, opening a fresh reader from the beginning of the
 // account's log every time and skipping anything at or below

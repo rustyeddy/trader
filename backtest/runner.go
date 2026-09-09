@@ -310,8 +310,7 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		Builder:          builder,
 		Journal:          jrnl,
 		RunID:            runID,
-		MarketObserver:   p.Account.(MarketObserver), // validated in RunnerParams.validate
-		Resolver:         p.Resolver,
+		MarketObserver:   p.Account.(MarketObserver),   // validated in RunnerParams.validate
 		IntrabarAdvancer: p.Account.(IntrabarAdvancer), // validated in RunnerParams.validate
 	})
 	if err != nil {

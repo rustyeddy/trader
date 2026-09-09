@@ -345,7 +345,6 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 		Journal:          journal.Discard(),
 		RunID:            mustSchedulerRunID(t, ids2),
 		MarketObserver:   marketObserver,
-		Resolver:         h.resolver,
 		IntrabarAdvancer: intrabarAdvancer,
 	}
 }
@@ -1273,6 +1272,7 @@ type intrabarStopTriggerStrategy struct {
 	requirements []strategy.DataRequirement
 	intents      strategy.IntentFactory
 	instID       instrument.ID
+	stopPrice    string
 	entered      bool
 	stopPlaced   bool
 }
@@ -1314,7 +1314,7 @@ func (s *intrabarStopTriggerStrategy) OnBar(ctx context.Context, ev strategy.Bar
 		return nil, nil
 	}
 	s.stopPlaced = true
-	stop := num.MustParsePrice("1.10065")
+	stop := num.MustParsePrice(s.stopPrice)
 	in, err := s.intents.AdjustStop(ev.Instrument, stop)
 	if err != nil {
 		return nil, err
@@ -1344,7 +1344,7 @@ func TestScheduler_IntrabarAdvancerTriggersRestingStop(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &intrabarStopTriggerStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t)}
+	strat := &intrabarStopTriggerStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), stopPrice: "1.10065"}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -1355,4 +1355,49 @@ func TestScheduler_IntrabarAdvancerTriggersRestingStop(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, snap.Positions(), "Scheduler's own IntrabarAdvancer wiring must have triggered the resting protective stop and closed the short position")
 	assert.Empty(t, snap.OpenOrders(), "the triggered stop order must no longer be resting")
+
+	// PR #339 review: prove the triggered fill was actually drained and
+	// collected, not merely reflected in account state — the entry
+	// (short) fill plus the stop-triggered (closing) fill, in that
+	// order, with the closing fill priced at the resting stop price
+	// itself (1.10065), an ordinary intrabar trigger, not a gap.
+	fills := sched.Fills()
+	require.Len(t, fills, 2, "both the entry fill and the stop-triggered exit fill must have been drained")
+	assert.Equal(t, order.Sell, fills[0].Side, "the entry fill")
+	assert.Equal(t, order.Buy, fills[1].Side, "the stop-triggered closing fill")
+	assert.Equal(t, "1.10065", fills[1].Price.String(), "an intrabar trigger fills at the resting stop price, not the bar's Open")
+}
+
+// TestScheduler_IntrabarAdvancerFillsAtOpenOnGap is PR #339 review's own
+// third finding: issue #338 requires the Scheduler-driven path to
+// preserve ADR-026's gap-through-open fill rule, not only the ordinary
+// intrabar-trigger case TestScheduler_IntrabarAdvancerTriggersRestingStop
+// already covers. It reuses the identical fixture and strategy, only
+// with the protective stop placed at 1.10055 — below bar 2's own Open
+// (1.10060) — so the stop is already breached the instant it becomes
+// resting, before any intrabar movement: a gap, not a touch. ADR-026
+// requires a gap fill at the bar's own (worse) Open, never at the
+// requested stop price.
+func TestScheduler_IntrabarAdvancerFillsAtOpenOnGap(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &intrabarStopTriggerStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), stopPrice: "1.10055"}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "the gapped-through stop must still have closed the short position")
+	assert.Empty(t, snap.OpenOrders())
+
+	fills := sched.Fills()
+	require.Len(t, fills, 2)
+	assert.Equal(t, order.Buy, fills[1].Side, "the stop-triggered closing fill")
+	assert.Equal(t, "1.1006", fills[1].Price.String(), "a gap-through fill must use the bar's own (worse) Open, 1.10060, never the requested stop price 1.10055")
 }
