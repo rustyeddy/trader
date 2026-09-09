@@ -33,12 +33,13 @@ func decisionPtr() *risk.Decision {
 		},
 	}
 }
-func requestPtr(v order.Request) *order.Request       { return &v }
-func orderPtr(v order.Order) *order.Order             { return &v }
-func fillPtr(v order.Fill) *order.Fill                { return &v }
-func accountPtr(v account.Snapshot) *account.Snapshot { return &v }
-func statusPtr(v broker.Status) *broker.Status        { return &v }
-func tradePtr(v order.Trade) *order.Trade             { return &v }
+func requestPtr(v order.Request) *order.Request                      { return &v }
+func replaceRequestPtr(v order.ReplaceRequest) *order.ReplaceRequest { return &v }
+func orderPtr(v order.Order) *order.Order                            { return &v }
+func fillPtr(v order.Fill) *order.Fill                               { return &v }
+func accountPtr(v account.Snapshot) *account.Snapshot                { return &v }
+func statusPtr(v broker.Status) *broker.Status                       { return &v }
+func tradePtr(v order.Trade) *order.Trade                            { return &v }
 
 func mustWriter(t *testing.T) (*jsonl.Writer, string) {
 	t.Helper()
@@ -77,6 +78,7 @@ func TestWriterReaderRoundTripsEveryKind(t *testing.T) {
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindProposal, Proposal: proposalPtr(mustProposal(t))},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindDecision, Decision: decisionPtr()},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindRequest, Request: requestPtr(mustRequest(t))},
+		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindReplaceRequest, ReplaceRequest: replaceRequestPtr(mustReplaceRequest(t))},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindOrder, Order: orderPtr(mustWorkingOrder(t))},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindFill, Fill: fillPtr(mustFill(t))},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindAccount, Account: accountPtr(mustSnapshot(t))},
@@ -86,7 +88,7 @@ func TestWriterReaderRoundTripsEveryKind(t *testing.T) {
 			Strategy: "ema-cross",
 			Values:   map[string]string{"fast_ema": "1.10245", "slow_ema": "1.10198", "cross": "bullish", "action": "enter-long"},
 		}},
-		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindRunCompleted, RunCompleted: &journal.RunCompleted{RunID: runID, EntryCount: 11}},
+		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindRunCompleted, RunCompleted: &journal.RunCompleted{RunID: runID, EntryCount: 12}},
 	}
 
 	for _, rec := range records {
@@ -105,14 +107,17 @@ func TestWriterReaderRoundTripsEveryKind(t *testing.T) {
 	// Spot-check a few fields survive the round trip faithfully.
 	assert.Equal(t, records[1].Intent.IntentID, entries[1].Intent.IntentID)
 	assert.Equal(t, records[1].Intent.Instrument, entries[1].Intent.Instrument)
-	assert.True(t, records[6].Fill.Price.Equal(entries[6].Fill.Price))
-	assert.Equal(t, records[6].Fill.Listing.Symbol(), entries[6].Fill.Listing.Symbol())
-	assert.True(t, records[7].Account.Equity().Equal(entries[7].Account.Equity()))
-	assert.Equal(t, records[8].Status.State, entries[8].Status.State)
-	assert.Equal(t, records[9].Trade.Listing.InstrumentID().String(), entries[9].Trade.Listing.InstrumentID().String())
-	assert.Equal(t, records[10].Signal.Strategy, entries[10].Signal.Strategy)
-	assert.Equal(t, records[10].Signal.Values, entries[10].Signal.Values)
-	assert.Equal(t, records[10].Metadata.CorrelationID, entries[10].Metadata.CorrelationID)
+	assert.Equal(t, records[5].ReplaceRequest.OrderID, entries[5].ReplaceRequest.OrderID)
+	require.NotNil(t, entries[5].ReplaceRequest.NewStopPrice)
+	assert.True(t, records[5].ReplaceRequest.NewStopPrice.Equal(*entries[5].ReplaceRequest.NewStopPrice))
+	assert.True(t, records[7].Fill.Price.Equal(entries[7].Fill.Price))
+	assert.Equal(t, records[7].Fill.Listing.Symbol(), entries[7].Fill.Listing.Symbol())
+	assert.True(t, records[8].Account.Equity().Equal(entries[8].Account.Equity()))
+	assert.Equal(t, records[9].Status.State, entries[9].Status.State)
+	assert.Equal(t, records[10].Trade.Listing.InstrumentID().String(), entries[10].Trade.Listing.InstrumentID().String())
+	assert.Equal(t, records[11].Signal.Strategy, entries[11].Signal.Strategy)
+	assert.Equal(t, records[11].Signal.Values, entries[11].Signal.Values)
+	assert.Equal(t, records[11].Metadata.CorrelationID, entries[11].Metadata.CorrelationID)
 }
 
 func TestWriterReaderRoundTripsRejectedOrder(t *testing.T) {

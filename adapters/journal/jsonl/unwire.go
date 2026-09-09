@@ -167,6 +167,16 @@ func fromRequestWire(w requestWire) (order.Request, error) {
 	return order.Request{Proposal: proposal, OrderID: w.OrderID}, nil
 }
 
+func fromReplaceRequestWire(w replaceRequestWire) (order.ReplaceRequest, error) {
+	return order.NewReplaceRequest(order.ReplaceRequest{
+		OrderID:       w.OrderID,
+		NewQuantity:   w.NewQuantity,
+		NewLimitPrice: w.NewLimitPrice,
+		NewStopPrice:  w.NewStopPrice,
+		Metadata:      w.Metadata,
+	})
+}
+
 func fromOrderWire(w orderWire) (order.Order, error) {
 	req, err := fromRequestWire(w.Request)
 	if err != nil {
@@ -362,6 +372,15 @@ func fromEntryWire(w entryWire) (journal.Entry, error) {
 			return journal.Entry{}, err
 		}
 		rec.Request = &v
+	case journal.KindReplaceRequest:
+		if w.ReplaceRequest == nil {
+			return journal.Entry{}, fmt.Errorf("%w: kind replace-request missing replace_request payload", ErrCorruptEntry)
+		}
+		v, err := fromReplaceRequestWire(*w.ReplaceRequest)
+		if err != nil {
+			return journal.Entry{}, err
+		}
+		rec.ReplaceRequest = &v
 	case journal.KindOrder:
 		if w.Order == nil {
 			return journal.Entry{}, fmt.Errorf("%w: kind order missing order payload", ErrCorruptEntry)
@@ -439,6 +458,8 @@ func parseKind(s string) (journal.Kind, error) {
 		return journal.KindDecision, nil
 	case "request":
 		return journal.KindRequest, nil
+	case "replace-request":
+		return journal.KindReplaceRequest, nil
 	case "order":
 		return journal.KindOrder, nil
 	case "fill":

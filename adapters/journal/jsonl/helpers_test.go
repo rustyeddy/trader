@@ -123,6 +123,18 @@ func mustRequest(t *testing.T) order.Request {
 	return r
 }
 
+func mustReplaceRequest(t *testing.T) order.ReplaceRequest {
+	t.Helper()
+	sp := num.MustParsePrice("1.06000")
+	r, err := order.NewReplaceRequest(order.ReplaceRequest{
+		OrderID:      mustOrderID(t),
+		NewStopPrice: &sp,
+		Metadata:     id.Metadata{EventID: mustEventID(t), CorrelationID: mustCorrelationID(t)},
+	})
+	require.NoError(t, err)
+	return r
+}
+
 func mustWorkingOrder(t *testing.T) order.Order {
 	t.Helper()
 	return mustWorkingOrderFor(t, mustAccountID(t))

@@ -81,8 +81,15 @@ type PlanResult struct {
 // describes: the returned Proposal's Metadata.CorrelationID equals
 // Intent.Metadata.CorrelationID, and Metadata.CausationID equals
 // Intent.Metadata.EventID.
+// Planner also plans order replacement (issue #336): PlanReplace,
+// alongside Plan. Both are documented on Planner itself rather than
+// split across two interfaces because they share one determinism
+// contract and one implementation (planner) — see PlanReplace's own
+// doc comment for why replacement needed a distinct method rather
+// than a Plan(IntentAdjustStop) case for every situation.
 type Planner interface {
 	Plan(ctx context.Context, in PlanInput) (PlanResult, error)
+	PlanReplace(ctx context.Context, in ReplaceInput) (ReplaceResult, error)
 }
 
 // checkPlanInput validates in's fields, independent of whether

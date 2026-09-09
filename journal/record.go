@@ -46,18 +46,19 @@ type Record struct {
 	Metadata id.Metadata
 	Kind     Kind
 
-	RunStarted   *RunStarted
-	Intent       *order.Intent
-	Proposal     *order.Proposal
-	Decision     *risk.Decision
-	Request      *order.Request
-	Order        *order.Order
-	Fill         *order.Fill
-	Account      *account.Snapshot
-	Status       *broker.Status
-	Trade        *order.Trade
-	Signal       *Signal
-	RunCompleted *RunCompleted
+	RunStarted     *RunStarted
+	Intent         *order.Intent
+	Proposal       *order.Proposal
+	Decision       *risk.Decision
+	Request        *order.Request
+	ReplaceRequest *order.ReplaceRequest
+	Order          *order.Order
+	Fill           *order.Fill
+	Account        *account.Snapshot
+	Status         *broker.Status
+	Trade          *order.Trade
+	Signal         *Signal
+	RunCompleted   *RunCompleted
 }
 
 // NewRecord validates and returns a Record. RunID must be non-zero,
@@ -88,6 +89,9 @@ func NewRecord(r Record) (Record, error) {
 		populated++
 	}
 	if r.Request != nil {
+		populated++
+	}
+	if r.ReplaceRequest != nil {
 		populated++
 	}
 	if r.Order != nil {
@@ -127,6 +131,8 @@ func NewRecord(r Record) (Record, error) {
 		ok = r.Decision != nil
 	case KindRequest:
 		ok = r.Request != nil
+	case KindReplaceRequest:
+		ok = r.ReplaceRequest != nil
 	case KindOrder:
 		ok = r.Order != nil
 	case KindFill:

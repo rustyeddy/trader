@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
+	"github.com/rustyeddy/trader/tradertest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,6 +127,82 @@ func mustSnapshot(t *testing.T, accountID id.AccountID, listing instrument.Listi
 	})
 	require.NoError(t, err)
 	return snap
+}
+
+// mustSnapshotWithOpenOrders is mustSnapshot's counterpart for the
+// IntentAdjustStop/PlanReplace tests (issue #336), which additionally
+// need a resting order on the account — mustSnapshot's own variadic
+// positions-only signature has no room for that without breaking
+// every existing call site.
+func mustSnapshotWithOpenOrders(t *testing.T, accountID id.AccountID, listing instrument.Listing, positions []order.Position, openOrders []order.Order) account.Snapshot {
+	t.Helper()
+	snap, err := account.NewSnapshot(account.SnapshotParams{
+		AccountID:       accountID,
+		Broker:          listing.Provider(),
+		Currency:        num.MustParseCurrency("USD"),
+		AsOf:            testStart,
+		CashBalances:    []num.Money{num.MustParseMoney("10000", num.MustParseCurrency("USD"))},
+		Equity:          num.MustParseMoney("10000", num.MustParseCurrency("USD")),
+		BuyingPower:     num.MustParseMoney("10000", num.MustParseCurrency("USD")),
+		MarginUsed:      num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		MarginAvailable: num.MustParseMoney("10000", num.MustParseCurrency("USD")),
+		RealizedPnL:     num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		UnrealizedPnL:   num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		Fees:            num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		Financing:       num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		Positions:       positions,
+		OpenOrders:      openOrders,
+	})
+	require.NoError(t, err)
+	return snap
+}
+
+// mustRestingStopOrder builds a working (non-terminal), ReduceOnly Stop
+// order.Order for accountID/listing — the fixture the "already has a
+// resting protective stop" branch of Plan(IntentAdjustStop)/
+// PlanReplace needs, at whatever stopPrice the test wants the
+// *existing* order to carry (PlanReplace's job is moving it to a *new*
+// one). See mustNonProtectiveStopOrder for a fixture that deliberately
+// does *not* qualify as a protective stop (PR #337 review).
+func mustRestingStopOrder(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, stopPrice string) order.Order {
+	t.Helper()
+	return mustStopOrder(t, gen, accountID, listing, side, quantity, stopPrice, true)
+}
+
+// mustNonProtectiveStopOrder builds a resting Stop order that
+// findRestingStopOrder must *not* treat as this instrument's
+// protective stop — either because reduceOnly is false (it could
+// increase, not only reduce, the position) or because side is the
+// side that would open exposure rather than close it (PR #337
+// review's own "verify its side protects the current position, and
+// require ReduceOnly" request).
+func mustNonProtectiveStopOrder(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, stopPrice string, reduceOnly bool) order.Order {
+	t.Helper()
+	return mustStopOrder(t, gen, accountID, listing, side, quantity, stopPrice, reduceOnly)
+}
+
+func mustStopOrder(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, stopPrice string, reduceOnly bool) order.Order {
+	t.Helper()
+	sp := num.MustParsePrice(stopPrice)
+	proposal, err := order.NewProposal(order.Proposal{
+		Listing:     listing,
+		AccountID:   accountID,
+		Side:        side,
+		Type:        order.Stop,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity(quantity),
+		StopPrice:   &sp,
+		ReduceOnly:  reduceOnly,
+		Metadata:    id.Metadata{EventID: mustEventID(t, gen), CorrelationID: mustCorrelationID(t, gen)},
+	})
+	require.NoError(t, err)
+	orderID, err := id.GenerateOrderID(gen)
+	require.NoError(t, err)
+	req, err := order.NewRequest(proposal, orderID)
+	require.NoError(t, err)
+	o, err := tradertest.NewOrder(tradertest.OrderParams{Request: req})
+	require.NoError(t, err)
+	return o
 }
 
 func mustPosition(t *testing.T, accountID id.AccountID, listing instrument.Listing, side order.PositionSide, quantity string) order.Position {

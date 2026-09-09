@@ -93,3 +93,78 @@ func opposite(s order.Side) order.Side {
 	}
 	return order.Buy
 }
+
+// planAdjustStop determines the Side and Quantity a protective stop
+// order for acc's entire current position in listing needs — the same
+// closing side/quantity planExit computes (a protective stop is, in
+// the end, a conditional exit), but reported as ErrNoPositionToProtect
+// rather than ErrNoPositionToExit when there is nothing to protect, so
+// a caller debugging an IntentAdjustStop failure sees an error that
+// actually names what it was trying to do.
+func planAdjustStop(acc account.Snapshot, listing instrument.Listing) (order.Side, num.Quantity, error) {
+	side, qty, err := planExit(acc, listing)
+	if err != nil {
+		return 0, num.Quantity{}, ErrNoPositionToProtect
+	}
+	return side, qty, nil
+}
+
+// findRestingStopOrder returns acc's own resting (non-terminal),
+// ReduceOnly Stop order for listing's instrument, if any — the signal
+// execution.Plan/PlanReplace and pipeline.Pipeline use to decide
+// between "place the initial protective stop" (Plan) and "ratchet the
+// existing one" (PlanReplace).
+//
+// This means "protective stop," not merely "some Stop order that
+// happens to exist" (PR #337 review): ReduceOnly is required (matching
+// exactly what Plan itself always sets when it places one — see its
+// own IntentAdjustStop case), and, when acc currently holds a position
+// in listing's instrument, the order's Side must be the side that
+// actually protects it (opposite the position's own side — the same
+// side planAdjustStop itself would compute). An order.Order whose Side
+// no longer matches — for example a stale Sell stop left over from a
+// long position that has since reversed to short — is not treated as
+// this instrument's protective stop; Plan will plan a fresh one for
+// the new position instead. Reconciling or canceling that orphaned
+// order is not attempted here: #335's own strategy design never
+// reverses a position without a full exit first, so this is a known,
+// documented limitation for a case the current consumer cannot
+// actually produce, not a silently accepted general bug.
+//
+// With no open position at all, Side is not constrained — there is no
+// protective side to check against, and planAdjustStop itself already
+// rejects an IntentAdjustStop with no position via
+// ErrNoPositionToProtect before either Plan or PlanReplace would ever
+// depend on what this function returns in that case.
+func findRestingStopOrder(acc account.Snapshot, listing instrument.Listing) (order.Order, bool) {
+	var wantSide order.Side
+	haveWantSide := false
+	if pos, ok := findPosition(acc, listing); ok {
+		switch pos.Side {
+		case order.Long:
+			wantSide, haveWantSide = order.Sell, true
+		case order.Short:
+			wantSide, haveWantSide = order.Buy, true
+		}
+	}
+
+	for _, o := range acc.OpenOrders() {
+		if o.Status.Terminal() {
+			continue
+		}
+		if o.Request.Type != order.Stop {
+			continue
+		}
+		if !o.Request.ReduceOnly {
+			continue
+		}
+		if !o.Request.Listing.InstrumentID().Equal(listing.InstrumentID()) {
+			continue
+		}
+		if haveWantSide && o.Request.Side != wantSide {
+			continue
+		}
+		return o, true
+	}
+	return order.Order{}, false
+}

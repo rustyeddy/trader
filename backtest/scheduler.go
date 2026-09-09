@@ -638,6 +638,19 @@ func (s *Scheduler) allWarm() bool {
 // failure at any step aborts the run immediately, exactly like any
 // other Scheduler failure: Runner never returns a successful Result
 // alongside a silently incomplete journal.
+//
+// When result.Replace is populated (issue #336/#337: an
+// order.IntentAdjustStop that ratcheted an already-resting order),
+// Proposal/Decision/Request never applied to this intent in the first
+// place — journaling them would record three hollow, zero-valued
+// entries and silently discard the actual ReplaceRequest. This branch
+// journals journal.KindReplaceRequest instead, then falls straight
+// through to the identical drainAndJournal call every other path also
+// ends with: the sim broker's own Replace already emits a real
+// EventKindOrder event for the resulting order-state change (issue
+// #337's own PR verified this), so drainAndJournal needs no changes to
+// pick it up as the authoritative record, exactly as it already does
+// for a new order's own acceptance.
 func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strategy.BarEvent) error {
 	if err := s.journalRecord(ctx, journal.Record{
 		RunID:    s.deps.RunID,
@@ -664,6 +677,19 @@ func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strat
 	}
 
 	corr := intent.Metadata.CorrelationID
+
+	if result.Replace != nil {
+		if err := s.journalRecord(ctx, journal.Record{
+			RunID:          s.deps.RunID,
+			Metadata:       id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+			Kind:           journal.KindReplaceRequest,
+			ReplaceRequest: &result.Replace.Request,
+		}); err != nil {
+			return err
+		}
+		return s.drainAndJournal(ctx)
+	}
+
 	if err := s.journalRecord(ctx, journal.Record{
 		RunID:    s.deps.RunID,
 		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},

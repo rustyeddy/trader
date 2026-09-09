@@ -1,0 +1,269 @@
+#+TITLE: Order Replacement in the Execution/Risk Pipeline ADR-054
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+* Context
+
+Issue #336 asks for =order.IntentAdjustStop= to actually be executable
+through Trader's normal strategy/execution/risk/broker pipeline, so a
+strategy can establish and ratchet a protective stop order (for
+example a trailing stop). Discovered while scoping issue #335 (a
+baseline SMA-trend equity strategy with a 10% trailing stop): the
+strategy layer already had everything needed to *express* this —
+=strategy.IntentFactory.AdjustStop=, =order.Type= including =Stop=,
+=order.ReplaceRequest=/=ReplaceResult=, and =broker.Account.Replace= —
+and the simulated broker (=adapters/broker/sim=) already had real,
+working =Stop=-order support end to end: =Submit= accepts a
+=Stop=-type request with =StopPrice=, =Replace= supports
+=NewStopPrice=, and =Advance='s intrabar fill logic (=stopTriggerPrice=,
+=IntrabarPolicy=) already handles gap-through and intrabar-trigger
+fills deterministically.
+
+But the seam connecting a strategy's =IntentAdjustStop= to any of that
+did not exist. =execution.Planner.Plan= explicitly did not support
+=order.IntentAdjustStop= (=ErrUnsupportedIntentKind=) and, more
+generally, always planned a Market/GTC order regardless of
+=Intent.Kind= — there was no path from any intent to a =Stop=-type
+proposal at all, for either initial placement or replacement. This was
+a deliberate deferral, recorded in =execution/doc.go= at the time:
+modifying an existing protective stop is conceptually a *replacement*
+proposal, "a distinct vocabulary this package does not define yet,
+deferred until a real consumer needs it." Issue #336 is that consumer.
+
+=pipeline.Pipeline= (which composes =risk.Sizer= + =execution.Planner=
++ =risk.Engine= + =broker.Broker=, ADR-006) was built entirely around
+one path: =Proposal -> risk.Decision -> order.Request -> order.Order=
+(new-order submission). There was no replacement-shaped path anywhere
+in it.
+
+* Decision
+
+** Two distinct cases, not one
+
+An =IntentAdjustStop= means two genuinely different things depending
+on whether a resting stop order already exists for the instrument:
+
+- *Initial placement* (no resting stop yet): this is, in the end, a
+  new order — a =Stop=-type, =ReduceOnly= Proposal sized to close the
+  account's entire current position, at the intent's =StopPrice=. It
+  fits the *existing* =Plan=/=Proposal= vocabulary exactly, so
+  =execution.Planner.Plan= now handles it directly, alongside
+  =IntentEnter=/=IntentExit=/=IntentTargetExposure=, through the
+  identical =pipeline.Pipeline.Submit=/=Evaluate= path, unchanged.
+
+- *Ratcheting an existing stop*: this is a genuine replacement of an
+  order that already exists, not a new one. =Plan= detects this case
+  (a resting, non-terminal =Stop= order already exists for the
+  instrument) and reports the new sentinel =ErrExistingStopOrder=
+  rather than attempting to plan a second, redundant stop order.
+  =pipeline.Pipeline.Evaluate= treats that specific error as a dispatch
+  signal (via =errors.Is=, not an =Intent.Kind= check performed twice
+  in two places) and calls the new =Planner.PlanReplace= method
+  instead, which returns a validated =order.ReplaceRequest= naming the
+  existing order and its new =StopPrice=.
+
+=Planner= gains =PlanReplace= as a second method on the same interface
+=Plan= lives on, not a separate interface: both share one determinism
+contract (see =Plan='s own doc comment) and one implementation
+(=planner=), and =PlanReplace= is meaningless without =Plan= already
+having decided initial placement doesn't apply.
+
+=PlanReplace= supports only =order.IntentAdjustStop=, and always sets
+=NewStopPrice= on the =ReplaceRequest= it builds. It also sets
+=NewQuantity= — but only to resynchronize the stop's own quantity with
+the account's *current* position size, when that has changed since the
+resting order was last placed or replaced (PR #337 review: the
+original version of this decision never set =NewQuantity= at all,
+which meant a stop order's own quantity could silently drift out of
+sync with a position that grew after the stop was first placed — a
+100-unit position that grew to 150 would leave only 100 units
+protected). It never sets =NewLimitPrice=, and never sets =NewQuantity=
+for any reason *other* than that resynchronization — this package's one
+real consumer (a trailing-stop-style strategy) never independently
+resizes a position through =IntentAdjustStop=; whatever grew or shrank
+the position already went through its own =IntentEnter=/
+=IntentTargetExposure= intent and its own risk evaluation. Limit-price
+replacement specifically is not invented here speculatively, matching
+the exact restraint the original =IntentAdjustStop= deferral was itself
+an instance of. A future consumer that genuinely needs independent,
+position-sizing-driven quantity replacement (not merely staying in
+sync with a position already sized elsewhere) is new, real scope for a
+later decision, not an extension of this one.
+
+=findRestingStopOrder= (the lookup both =Plan= and =PlanReplace= use to
+decide whether a protective stop already exists) means exactly that —
+"protective stop" — not "any resting =Stop= order for this
+instrument" (PR #337 review): it requires =ReduceOnly=, and, whenever
+the account currently holds a position, requires the order's own
+=Side= to be the side that actually closes that position. An order
+that fails either check (for example a stale =Stop= left resting after
+a position fully reversed) is invisible to this lookup; =Plan= would
+place a fresh protective stop for the current position rather than
+mistake the stale order for it, or =PlanReplace= would correctly report
+=ErrNoRestingStopOrder=. Reconciling or canceling a genuinely orphaned
+order this leaves behind is not attempted here — #335's own strategy
+design never reverses a position without a full exit first, so no
+current consumer can actually produce that case; it is a documented
+limitation, not a silently accepted general bug.
+
+** =pipeline.Result= gains a second, mutually exclusive shape
+
+=Result= gains a =Replace *ReplaceOutcome= field
+(=ReplaceOutcome{ Request order.ReplaceRequest; Result
+order.ReplaceResult }=), populated *instead of*
+=Proposal=/=Decision=/=Request=/=Order= when =Evaluate= took the
+replacement path. This was chosen over either splitting =Submit= into
+two differently-named entry points, or returning a different result
+type from a different method: =backtest.Scheduler= and every other
+caller in the codebase call =Pipeline.Submit= uniformly, once per
+intent, with no branching on =Intent.Kind= today — introducing a
+second entry point would have required every existing caller to learn
+a new dispatch rule for exactly the one intent kind that needs it.
+Keeping =Submit=/=Evaluate= as the single entry point, and letting
+=Result= carry either shape, preserves that "the caller does not need
+to know what kind of intent this is" property =strategy.Strategy=
+implementations already rely on (=emacross= hands every kind to the
+same =IntentFactory=-produced values without special-casing any of
+them downstream).
+
+The consequence a caller must respect: =Result.Decision='s zero value
+is =Allowed: false=, which must never be misread as "risk rejected
+this" on the replacement path, where risk was never evaluated at all
+(see below). A caller must check =Replace != nil= first. This is
+documented directly on =Result='s own doc comment, not left implicit.
+
+** Risk evaluation is deliberately skipped for this replacement
+
+=risk.Engine= is not consulted on the replacement path, including when
+=PlanReplace= sets =NewQuantity= to resynchronize the stop with the
+account's current position size. The reasoning is not "quantity never
+changes here" (it can, see above) but that this specific quantity
+change is never an independent exposure decision: it only ever brings
+a *protective* order back into agreement with a position size some
+other, already risk-evaluated intent (=IntentEnter=/
+=IntentTargetExposure=, each planned through the ordinary =Plan=/
+=risk.Engine= path in full) already produced. The account's actual
+notional exposure does not change on this path at all — only how much
+of the *already-approved* exposure the resting stop order currently
+covers. No existing =risk.Rule= inspects =StopPrice= either. There is
+also no new =Proposal= to evaluate on this path: =risk.Input.Proposal=
+expects a candidate new order, and synthesizing one to represent "the
+account's exposure after this replacement" would not change under any
+existing Rule, since exposure itself is unchanged.
+
+This is a scoped decision about *this* replacement — a =StopPrice=
+ratchet, optionally paired with resynchronizing =NewQuantity= to an
+already-approved position size — not a general "replacements skip
+risk" policy. A future replacement that changes exposure independently
+(not merely re-stating a size some other, already-evaluated intent
+already produced) would need real risk consideration before being
+added — this ADR does not pre-approve that.
+
+** Journaling/correlation
+
+Neither =execution= nor =pipeline= journal anything themselves — that
+remains a strategy's own responsibility via =strategy.Environment.Journal=,
+exactly as =strategy/emacross='s own =recordSignal= already
+demonstrates for its crossover signals. This decision's own scope
+covers preserving the correlation chain ADR-005 already requires:
+=PlanReplace='s =order.ReplaceRequest.Metadata= sets =CorrelationID=
+from =Intent.Metadata.CorrelationID= and =CausationID= from
+=Intent.Metadata.EventID=, identically to every other stage's own
+Metadata construction.
+
+A real caller does journal =pipeline.Result=, though, and PR #337
+review caught that this decision's first draft had not accounted for
+that: =backtest.Scheduler.submit= unconditionally journaled
+=KindProposal=/=KindDecision=/=KindRequest= after every
+=Pipeline.Submit= call, using =Result.Proposal=/=Decision=/=Request= —
+all three zero-valued on the replacement path. Journaling a zero-valued
+=order.Proposal= does not merely lose information; its zero-valued
+nested =Money=/=Currency= fields fail to marshal at all, so the
+original gap was a real run-time journaling *failure* on any replace,
+not only a silent loss of detail.
+
+=journal= gains a new =KindReplaceRequest= (=Record.ReplaceRequest=),
+following =KindRequest='s own shape and validation pattern, with no
+corresponding "=KindReplaceDecision=": there is no Decision to journal
+for a path that was never risk-evaluated (the decision above). The
+JSONL adapter (=adapters/journal/jsonl=) gained the matching wire
+struct and round-trip coverage. =backtest.Scheduler.submit= now
+branches on =Result.Replace != nil= and journals
+=KindReplaceRequest= instead of the new-order triple, then falls
+through to the same =drainAndJournal= call every path ends with — the
+simulated broker's =Replace= already emits a real =EventKindOrder=
+event for the resulting order-state change, so =drainAndJournal= needed
+no changes to keep picking up the authoritative outcome, exactly as it
+already does for a new order's own acceptance.
+
+A strategy that wants to journal its own stop-adjustment decisions (the
+way #335's trailing-stop strategy will) can correlate them against this
+same chain the way =emacross= already correlates its reversal intents.
+
+* Consequences
+
+- A strategy can now place and ratchet a real protective stop order
+  through the same =strategy.IntentFactory.AdjustStop= ->
+  =pipeline.Pipeline.Submit= path used for every other intent kind,
+  with the actual intrabar/gap fill precision determined by
+  =adapters/broker/sim.Broker.Advance='s existing, already-correct
+  logic — not reimplemented at the strategy layer.
+- =Result= now has two mutually exclusive populated shapes. Every
+  caller inspecting a =Result= for a call that might have been an
+  =IntentAdjustStop= must check =Replace= first.
+- =Planner= is a two-method interface now, not one; any future
+  alternative =Planner= implementation must implement both.
+- Quantity-changing or limit-price replacement remains unimplemented
+  and unplanned-for; a future issue needing it must design its own
+  risk treatment rather than assume this decision's =StopPrice=-only
+  skip extends to it.
+- =journal.Kind= grew a new value (=KindReplaceRequest=), and every
+  caller that already journals =pipeline.Result= generically (today,
+  only =backtest.Scheduler=) must branch on =Result.Replace= the same
+  way =Scheduler.submit= now does — a future new caller of
+  =Pipeline.Submit= that journals results needs to account for this
+  from the start, not discover it the way this decision's own first
+  draft did.
+
+* Alternatives Considered
+
+- *A single =Plan= method returning either a Proposal or a
+  Replace-shaped result via a union/variant return type.* Rejected:
+  =PlanResult=/=ReplaceResult= are used in genuinely different
+  contexts (a new proposal flows into =risk.Engine=; a replacement does
+  not), and forcing every =Plan= caller to type-switch on every call,
+  including the three intent kinds that can never produce a
+  replacement, would spread the special case wider than confining it
+  to =IntentAdjustStop='s own two call sites.
+- *=NewLimitPrice= replacement built now, since the type already
+  supports it.* Rejected as speculative: this issue's one real
+  consumer never needs it, and =execution/doc.go='s own history is a
+  direct lesson against inventing unused vocabulary ahead of a real
+  need. (=NewQuantity=, unlike =NewLimitPrice=, ended up genuinely
+  needed — not for independent position-sizing, but to keep a
+  protective stop's own quantity from silently drifting out of sync
+  with the position it protects; see above.)
+- *Leaving the protective stop's own quantity unsynchronized with the
+  account's current position size.* This was the original version of
+  this decision, and PR #337 review correctly identified it as a real
+  gap, not a deliberate scope boundary: issue #336's own non-goals
+  already scoped a position-sync-driven quantity change *in*
+  ("quantity-changing replaces *beyond* what's needed to keep a
+  protective stop's quantity in sync with the current position size"
+  are out of scope), so leaving the stop under-protecting a grown
+  position was an implementation gap against this decision's own
+  stated scope, not a considered alternative worth preserving.
+- *Full =risk.Engine= re-evaluation on every replacement, synthesizing
+  a "resulting" Proposal.* Rejected: no existing Rule reads
+  =StopPrice=, so this would add real complexity (a proposal that
+  does not correspond to any order actually being submitted) to
+  evaluate against rules that could never object.
+- *Splitting =Pipeline.Submit= into =Submit=/=SubmitReplace=, requiring
+  callers to dispatch on =Intent.Kind= themselves.* Rejected: every
+  existing caller (=backtest.Scheduler= in particular) calls =Submit=
+  uniformly today; requiring kind-aware dispatch at every call site
+  would leak an internal distinction into orchestration code that
+  currently, correctly, does not need to know it.
