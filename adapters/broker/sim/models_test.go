@@ -109,6 +109,7 @@ func TestBuildFillRoundsOffTickPriceForBuy(t *testing.T) {
 
 	snap, err := acc.Snapshot(ctx)
 	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1)
 	require.NotNil(t, snap.Positions()[0].AvgPrice)
 	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.10001")), "a Buy fill must round an off-tick price up, not reject it")
 }
@@ -131,6 +132,7 @@ func TestBuildFillRoundsOffTickPriceForSell(t *testing.T) {
 
 	snap, err := acc.Snapshot(ctx)
 	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1)
 	require.NotNil(t, snap.Positions()[0].AvgPrice)
 	assert.True(t, snap.Positions()[0].AvgPrice.Equal(num.MustParsePrice("1.10000")), "a Sell fill must round an off-tick price down, not reject it")
 }

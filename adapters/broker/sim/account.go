@@ -595,7 +595,7 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 	// generous").
 	rounded, err := roundFillPriceToTick(price, req.Side, req.Listing.Spec().TickSize())
 	if err != nil {
-		return fillOutcome{}, fmt.Errorf("%w: rounding fill price to tick size: %v", order.ErrInvalidFill, err)
+		return fillOutcome{}, fmt.Errorf("%w: rounding fill price to tick size: %w", order.ErrInvalidFill, err)
 	}
 	price = rounded
 
