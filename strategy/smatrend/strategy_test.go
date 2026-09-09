@@ -24,11 +24,6 @@ import (
 
 var testStart = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
-// referenceConfig is EQS-01's own reference configuration: SMA(200),
-// 10% trailing stop. Most tests use a much shorter SMA period so a
-// fixture doesn't need 200+ bars.
-var referenceConfig = Config{SMAPeriod: 200, TrailingStopPercent: num.MustParseRate("0.10")}
-
 // fakeView is a minimal strategy.View test double.
 type fakeView struct {
 	snap account.Snapshot
