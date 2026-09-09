@@ -162,6 +162,24 @@ func toRequestWire(r order.Request) requestWire {
 	return requestWire{Proposal: toProposalWire(r.Proposal), OrderID: r.OrderID}
 }
 
+type replaceRequestWire struct {
+	OrderID       id.OrderID    `json:"order_id"`
+	NewQuantity   *num.Quantity `json:"new_quantity,omitempty"`
+	NewLimitPrice *num.Price    `json:"new_limit_price,omitempty"`
+	NewStopPrice  *num.Price    `json:"new_stop_price,omitempty"`
+	Metadata      id.Metadata   `json:"metadata"`
+}
+
+func toReplaceRequestWire(r order.ReplaceRequest) replaceRequestWire {
+	return replaceRequestWire{
+		OrderID:       r.OrderID,
+		NewQuantity:   r.NewQuantity,
+		NewLimitPrice: r.NewLimitPrice,
+		NewStopPrice:  r.NewStopPrice,
+		Metadata:      r.Metadata,
+	}
+}
+
 type rejectionWire struct {
 	Reason     string `json:"reason"`
 	Detail     string `json:"detail,omitempty"`
@@ -352,18 +370,19 @@ type entryWire struct {
 	Metadata id.Metadata `json:"metadata"`
 	Kind     string      `json:"kind"`
 
-	RunStarted   *runStartedWire   `json:"run_started,omitempty"`
-	Intent       *intentWire       `json:"intent,omitempty"`
-	Proposal     *proposalWire     `json:"proposal,omitempty"`
-	Decision     *decisionWire     `json:"decision,omitempty"`
-	Request      *requestWire      `json:"request,omitempty"`
-	Order        *orderWire        `json:"order,omitempty"`
-	Fill         *fillWire         `json:"fill,omitempty"`
-	Account      *accountWire      `json:"account,omitempty"`
-	Status       *statusWire       `json:"status,omitempty"`
-	Trade        *tradeWire        `json:"trade,omitempty"`
-	Signal       *signalWire       `json:"signal,omitempty"`
-	RunCompleted *runCompletedWire `json:"run_completed,omitempty"`
+	RunStarted     *runStartedWire     `json:"run_started,omitempty"`
+	Intent         *intentWire         `json:"intent,omitempty"`
+	Proposal       *proposalWire       `json:"proposal,omitempty"`
+	Decision       *decisionWire       `json:"decision,omitempty"`
+	Request        *requestWire        `json:"request,omitempty"`
+	ReplaceRequest *replaceRequestWire `json:"replace_request,omitempty"`
+	Order          *orderWire          `json:"order,omitempty"`
+	Fill           *fillWire           `json:"fill,omitempty"`
+	Account        *accountWire        `json:"account,omitempty"`
+	Status         *statusWire         `json:"status,omitempty"`
+	Trade          *tradeWire          `json:"trade,omitempty"`
+	Signal         *signalWire         `json:"signal,omitempty"`
+	RunCompleted   *runCompletedWire   `json:"run_completed,omitempty"`
 }
 
 // toEntryWire converts entry to its JSON wire shape. Only the payload
@@ -386,6 +405,9 @@ func toEntryWire(e journal.Entry) entryWire {
 	case journal.KindRequest:
 		v := toRequestWire(*e.Request)
 		w.Request = &v
+	case journal.KindReplaceRequest:
+		v := toReplaceRequestWire(*e.ReplaceRequest)
+		w.ReplaceRequest = &v
 	case journal.KindOrder:
 		v := toOrderWire(*e.Order)
 		w.Order = &v

@@ -26,6 +26,16 @@ const (
 	// KindRequest reports a risk-approved, broker-neutral order.Request.
 	// Record.Request is populated.
 	KindRequest
+	// KindReplaceRequest reports an execution.Planner-produced
+	// order.ReplaceRequest for an order.IntentAdjustStop that ratcheted
+	// an already-resting order (issue #336/#337) — pipeline.Result's own
+	// "Replace, not Proposal/Decision/Request" outcome shape for that
+	// path. Record.ReplaceRequest is populated. There is no
+	// corresponding KindReplaceDecision: a StopPrice-only replace is
+	// not risk-evaluated at all (ADR-054), so there is no Decision to
+	// journal for it, unlike KindRequest's own Proposal/Decision
+	// predecessors on the new-order path.
+	KindReplaceRequest
 	// KindOrder reports an authoritative order.Order lifecycle change,
 	// as observed from the broker's own event stream — never derived
 	// from a pipeline.Result, so it is never journaled twice for the
@@ -73,6 +83,8 @@ func (k Kind) String() string {
 		return "decision"
 	case KindRequest:
 		return "request"
+	case KindReplaceRequest:
+		return "replace-request"
 	case KindOrder:
 		return "order"
 	case KindFill:
@@ -94,7 +106,7 @@ func (k Kind) String() string {
 
 func (k Kind) valid() bool {
 	switch k {
-	case KindRunStarted, KindIntent, KindProposal, KindDecision, KindRequest,
+	case KindRunStarted, KindIntent, KindProposal, KindDecision, KindRequest, KindReplaceRequest,
 		KindOrder, KindFill, KindAccount, KindStatus, KindTrade, KindSignal, KindRunCompleted:
 		return true
 	default:

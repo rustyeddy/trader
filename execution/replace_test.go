@@ -108,6 +108,40 @@ func TestPlanReplace_RejectsUnconstructedListing(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidPlanInput)
 }
 
+// TestPlanReplace_RejectsUnconstructedAccount mirrors
+// TestPlanRejectsUnconstructedAccount for PlanReplace (PR #337 review).
+func TestPlanReplace_RejectsUnconstructedAccount(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	intent := mustAdjustStopIntent(t, deps.IDs, listing.InstrumentID())
+
+	_, err = p.PlanReplace(context.Background(), ReplaceInput{Intent: intent, Listing: listing})
+	require.ErrorIs(t, err, ErrInvalidPlanInput)
+}
+
+// TestPlanReplace_RejectsListingProviderAccountBrokerMismatch mirrors
+// TestPlanRejectsListingProviderAccountBrokerMismatch for PlanReplace
+// (PR #337 review): a Listing whose provider does not match the
+// account's own broker must be rejected before ever reaching the
+// resting-order lookup, the same as Plan already requires.
+func TestPlanReplace_RejectsListingProviderAccountBrokerMismatch(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	simListing := mustEurUsdListingForProvider(t, "sim")
+	otherListing := mustEurUsdListingForProvider(t, "alpaca")
+	accountID := mustAccountID(t, deps.IDs)
+	snap := mustSnapshot(t, accountID, simListing) // Broker() == "sim"
+	intent := mustAdjustStopIntent(t, deps.IDs, otherListing.InstrumentID())
+
+	_, err = p.PlanReplace(context.Background(), ReplaceInput{Intent: intent, Listing: otherListing, Account: snap})
+	require.ErrorIs(t, err, ErrInvalidPlanInput)
+}
+
 // TestPlanReplace_HonorsContextCancellation matches Plan's own
 // cancellation contract.
 func TestPlanReplace_HonorsContextCancellation(t *testing.T) {

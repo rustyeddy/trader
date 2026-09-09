@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/id"
@@ -40,7 +41,15 @@ type ReplaceResult struct {
 
 // checkReplaceInput validates in's fields shared by every
 // ReplaceInput consumer, independent of Intent.Kind-specific
-// requirements PlanReplace itself still enforces.
+// requirements PlanReplace itself still enforces. Mirrors
+// checkPlanInput's own validation exactly (PR #337 review: an earlier
+// version of this function skipped the Account-construction and
+// Listing/Account provider-consistency checks checkPlanInput already
+// enforces, so calling PlanReplace directly — bypassing
+// pipeline.Pipeline, which happens to validate this itself before ever
+// reaching PlanReplace — could misclassify a genuinely invalid input as
+// ErrNoRestingStopOrder, or let a provider mismatch slip through
+// unnoticed).
 func checkReplaceInput(in ReplaceInput) (order.Intent, error) {
 	intent, err := order.NewIntent(in.Intent)
 	if err != nil {
@@ -52,6 +61,13 @@ func checkReplaceInput(in ReplaceInput) (order.Intent, error) {
 	if !in.Listing.InstrumentID().Equal(intent.Instrument) {
 		return order.Intent{}, fmt.Errorf("%w: listing instrument %s does not match intent instrument %s",
 			ErrInvalidPlanInput, in.Listing.InstrumentID(), intent.Instrument)
+	}
+	if in.Account.AccountID().IsZero() {
+		return order.Intent{}, fmt.Errorf("%w: account must be constructed", ErrInvalidPlanInput)
+	}
+	if !strings.EqualFold(in.Listing.Provider(), in.Account.Broker()) {
+		return order.Intent{}, fmt.Errorf("%w: listing provider %q does not match account broker %q",
+			ErrInvalidPlanInput, in.Listing.Provider(), in.Account.Broker())
 	}
 	return intent, nil
 }

@@ -130,15 +130,41 @@ not pre-approve that.
 Neither =execution= nor =pipeline= journal anything themselves — that
 remains a strategy's own responsibility via =strategy.Environment.Journal=,
 exactly as =strategy/emacross='s own =recordSignal= already
-demonstrates for its crossover signals. What this issue's own scope
-covers is preserving the correlation chain ADR-005 already requires:
+demonstrates for its crossover signals. This decision's own scope
+covers preserving the correlation chain ADR-005 already requires:
 =PlanReplace='s =order.ReplaceRequest.Metadata= sets =CorrelationID=
 from =Intent.Metadata.CorrelationID= and =CausationID= from
 =Intent.Metadata.EventID=, identically to every other stage's own
-Metadata construction. A strategy that wants to journal its own
-stop-adjustment decisions (the way #335's trailing-stop strategy will)
-can correlate them against that chain the same way =emacross= already
-correlates its reversal intents.
+Metadata construction.
+
+A real caller does journal =pipeline.Result=, though, and PR #337
+review caught that this decision's first draft had not accounted for
+that: =backtest.Scheduler.submit= unconditionally journaled
+=KindProposal=/=KindDecision=/=KindRequest= after every
+=Pipeline.Submit= call, using =Result.Proposal=/=Decision=/=Request= —
+all three zero-valued on the replacement path. Journaling a zero-valued
+=order.Proposal= does not merely lose information; its zero-valued
+nested =Money=/=Currency= fields fail to marshal at all, so the
+original gap was a real run-time journaling *failure* on any replace,
+not only a silent loss of detail.
+
+=journal= gains a new =KindReplaceRequest= (=Record.ReplaceRequest=),
+following =KindRequest='s own shape and validation pattern, with no
+corresponding "=KindReplaceDecision=": there is no Decision to journal
+for a path that was never risk-evaluated (the decision above). The
+JSONL adapter (=adapters/journal/jsonl=) gained the matching wire
+struct and round-trip coverage. =backtest.Scheduler.submit= now
+branches on =Result.Replace != nil= and journals
+=KindReplaceRequest= instead of the new-order triple, then falls
+through to the same =drainAndJournal= call every path ends with — the
+simulated broker's =Replace= already emits a real =EventKindOrder=
+event for the resulting order-state change, so =drainAndJournal= needed
+no changes to keep picking up the authoritative outcome, exactly as it
+already does for a new order's own acceptance.
+
+A strategy that wants to journal its own stop-adjustment decisions (the
+way #335's trailing-stop strategy will) can correlate them against this
+same chain the way =emacross= already correlates its reversal intents.
 
 * Consequences
 
@@ -157,6 +183,13 @@ correlates its reversal intents.
   and unplanned-for; a future issue needing it must design its own
   risk treatment rather than assume this decision's =StopPrice=-only
   skip extends to it.
+- =journal.Kind= grew a new value (=KindReplaceRequest=), and every
+  caller that already journals =pipeline.Result= generically (today,
+  only =backtest.Scheduler=) must branch on =Result.Replace= the same
+  way =Scheduler.submit= now does — a future new caller of
+  =Pipeline.Submit= that journals results needs to account for this
+  from the start, not discover it the way this decision's own first
+  draft did.
 
 * Alternatives Considered
 
