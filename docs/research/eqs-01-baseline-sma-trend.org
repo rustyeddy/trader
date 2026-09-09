@@ -1,0 +1,184 @@
+#+TITLE: EQS-01: Baseline SMA(200) + 10% Trailing-Stop Equity Trend Strategy
+#+STARTUP: overview indent
+
+* Purpose
+
+Issue #335 (EQS-01) asks for Trader's first simple, longer-hold equity
+trend-following strategy, implemented as a deterministic, backtestable
+baseline through Trader's existing =strategy=/=execution=/=risk=/
+=backtest= abstractions — not as a claim that this particular
+SMA(200)/10% configuration is a good trading strategy. This document
+records the implementation (=strategy/smatrend=) and the required
+initial backtest against the canonical SPY D1 dataset.
+
+* Strategy Rules (as implemented)
+
+- Compute a simple moving average over =SMAPeriod= daily closes
+  (=indicator.SMA=, no signal possible before it is =Ready=).
+- Enter long only on a genuine cross-above: the previous completed
+  close was at or below its SMA, and the current completed close is
+  strictly above it. Continuously remaining above the SMA never
+  re-triggers an entry — only the moment of an actual cross does
+  (=crossState=, =strategy/smatrend/crossstate.go=).
+- Execution happens on the next tradable session (Trader's own
+  next-bar-open fill-eligibility rule, issue #214) — never the same
+  close that produced the signal.
+- Long-only, one position at a time.
+- Once long, maintain a high-water mark from each bar's own High and
+  a monotonically non-decreasing trailing stop at
+  =TrailingStopPercent= below it (10% by reference configuration),
+  expressed as an =order.IntentAdjustStop= the normal execution/risk/
+  broker pipeline places and ratchets (issues #336/#337, ADR-054).
+- The strategy itself never evaluates its own stop trigger: by the
+  time =OnBar= observes a bar, =backtest.Scheduler='s own
+  =IntrabarAdvancer= wiring (issue #338, ADR-055) has already advanced
+  the broker's resting-order machinery (ADR-026) against that exact
+  bar, using only the stop level a prior bar established — so a
+  survived-the-bar position is observed exactly as a survived position,
+  with no lookahead.
+- Exit happens only through that trailing stop. A close back below the
+  SMA does not exit the position on its own.
+- After a stop exit, the strategy requires a fresh cross-above (not
+  merely "still above the SMA") before re-entering — a structural
+  consequence of feeding the cross-state machine unconditionally every
+  ready bar, not a separately coded rule.
+
+See =strategy/smatrend='s own package doc comment and
+=strategy.go=/=crossstate.go= for the implementation, and its test
+suite (=strategy_test.go=, =regression_test.go=) for direct coverage
+of every rule above, including warm-up, no-lookahead, gap-through-stop
+behavior, and no-automatic-reentry.
+
+* Architecture Notes
+
+Implementing this strategy against real data surfaced two genuine,
+narrowly-scoped gaps in the surrounding execution machinery — neither
+specific to =smatrend=, both fixed as their own issues before this
+backtest could run to completion:
+
+- *Issue #338* (ADR-055): =backtest.Scheduler= never called the
+  simulated broker's own per-bar resting-order-trigger machinery at
+  all — a documented, deferred gap. Without it, the trailing stop this
+  strategy depends on entirely would place and ratchet correctly and
+  then silently never fire.
+- *Issue #340* (ADR-056): a strategy-computed stop price (90% of an
+  arbitrary high-water mark) routinely lands on a sub-cent value that
+  =execution= correctly rejected as not tick-aligned. Fixed by adding
+  =num.Price.RoundDown=/=RoundUp= and rounding a computed
+  =IntentAdjustStop= price to the listing's own tick size in
+  =execution=, in the direction that never makes the stop more
+  aggressive than what the strategy computed.
+
+Both are recorded as their own ADRs and were merged ahead of this
+backtest.
+
+* Initial Backtest
+
+** Dataset and Provenance
+
+- Instrument: SPY (=etf:ARCA:SPY=)
+- Interval: D1
+- Provider: Alpaca (issue #297/#323, ADR-050/052), via
+  =marketdata.Manager=
+- Requested span: 2015-01-01 through 2026-09-01
+- *Actual data span*: 2018-11-01 through 2026-08-31 (~7.83 years) —
+  Alpaca's own free/IEX-tier historical coverage for SPY does not
+  extend back to 2015; the monthly partitions before late 2018
+  resolved with zero records. This backtest therefore covers the
+  actual available window, not the full requested one.
+- Dataset revision hashes for every monthly partition are recorded in
+  the full Org report (=report.org=, generated alongside this
+  document — see "Reproducing this run" below); each is a genuine,
+  content-derived =marketdata.Manifest= revision, not a placeholder.
+
+** Configuration
+
+- =SMAPeriod=: 200
+- =TrailingStopPercent=: 0.10 (stop rests at 90% of the high-water
+  mark)
+- =RiskFraction=: 0.01 (1% of equity risked per trade)
+- =AdverseDistance=: $20 (fixed, non-optimized sizing input — EQS-01
+  explicitly puts sizing optimization out of scope; this is in the
+  right neighborhood for SPY's own price level over the run, not
+  tuned to it)
+- Starting capital: $100,000
+- Fill model: real next-bar-open canonical prices (no slippage/
+  commission model configured — "none"/"none")
+
+** Results
+
+| Metric                    | Value                     |
+|---------------------------+----------------------------|
+| Trades (closed)           | 5                          |
+| Open position at run end  | 1 (opened 2025-05-13)      |
+| Total return              | 8.52%                      |
+| CAGR                      | 1.05%                      |
+| Max drawdown              | 5.72%                      |
+| Win rate                  | 40% (2 wins, 3 losses)     |
+| Average win               | $2,963.04                 |
+| Average loss              | -$2,131.55                |
+| Expectancy                | -$93.71 per trade          |
+| Profit factor             | 0.93                       |
+| Average holding period    | 178.6 days                 |
+| Exposure                  | 47.8% of the run           |
+
+*** Completed trades
+
+| Opened     | Closed     | Realized PnL |
+|------------+------------+--------------|
+| 2022-02-01 | 2022-02-24 | -$1,982.50   |
+| 2022-03-23 | 2022-04-27 | -$1,520.96   |
+| 2022-12-01 | 2023-10-26 | $225.60      |
+| 2023-11-03 | 2025-03-13 | $5,700.48    |
+| 2025-03-25 | 2025-04-04 | -$2,891.19   |
+
+One position remained open at the end of the run (opened 2025-05-13),
+contributing unrealized PnL to Final Equity but not to the closed-trade
+statistics above.
+
+*** Buy-and-hold comparison (same span)
+
+| Metric | Strategy | SPY buy-and-hold |
+|--------+----------+-------------------|
+| Total return | 8.52% | 182.35% |
+| CAGR | 1.05% | 14.17% |
+
+** Interpretation
+
+Over the actually available ~7.83-year window (which happens to
+include the 2022 bear market, the 2023-2024 recovery, and the 2025
+volatility), this baseline configuration is dramatically outperformed
+by simply buying and holding SPY. Its trailing stop repeatedly exits
+during ordinary corrections (three of five trades lose money, average
+loss exceeding average win frequency), then requires a fresh cross
+above a 200-day average to re-enter — losing much of the subsequent
+recovery before re-entering. This is exactly the known weak point of a
+long moving-average trend-following system with a comparatively tight
+trailing stop in a market that spends much of its time in a strong
+secular uptrend: it protects capital during real drawdowns but gives
+back a large share of the recovery waiting for a fresh signal.
+
+This is not a claim that trend-following or SMA/trailing-stop systems
+are broken — only that *this specific, untuned baseline configuration*
+underperforms buy-and-hold over *this specific, data-limited window*.
+Per EQS-01's own explicit scope, no parameter optimization (SMA
+length, trailing-stop percentage, or sizing) was performed, and none
+should be inferred as a next step from this result alone without a
+separate, explicitly-scoped research issue.
+
+** Reproducing this run
+
+The run itself lives in =research-runs/eqs-01/= (gitignored, per this
+repository's existing convention for throwaway research scripts — see
+=research-runs/mr-04= for precedent). From that directory:
+
+#+BEGIN_SRC sh
+go run .
+#+END_SRC
+
+It requires a real Alpaca paper-account credential pair at
+=~/.config/alpaca/profiles/paper.yaml= (=api_key=/=secret_key= fields
+— the same convention =marketdata/alpaca_smoke_test.go= already
+establishes) and live network access to fetch historical data. It
+prints the summary table above to stdout and writes the full Org
+backtest report to =report.org= in that same directory.
