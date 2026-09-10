@@ -210,6 +210,17 @@ type tradeLogRow struct {
 	ReturnPercent       float64 `json:"return_percent"` // net PnL / (entry price * quantity), 0 if still open
 	HoldingDays         float64 `json:"holding_days"`   // 0 if still open
 	StillOpenAtFoldEnd  bool    `json:"still_open_at_fold_end"`
+	// OOSEntry is true when OpenedAt itself falls within [testStart,
+	// testEnd) — a genuine entry decision made using only
+	// out-of-sample data. false means this trade was opened during
+	// the fold's own training portion and carried across testStart
+	// still open, contributing to this fold's own TestReturn/
+	// TestMaxDrawdown (foldSummary) without itself being an
+	// OOS-generated signal (PR #357 review) — still recorded here
+	// (with its own real, pre-test entry date/price) so every
+	// position that contributes to a fold's OOS result appears in the
+	// trade log exactly once.
+	OOSEntry bool `json:"oos_entry"`
 }
 
 // weightedFillPrice returns the quantity-weighted average Price
@@ -471,7 +482,19 @@ func foldTradeRows(t *testing.T, tsp string, fold int, testStart, testEnd time.T
 	var rows []tradeLogRow
 
 	appendRow := func(tr order.Trade, stillOpen bool) {
-		if tr.OpenedAt.Before(testStart) || !tr.OpenedAt.Before(testEnd) {
+		// Overlap, not "opened during OOS" (PR #357 review): a trade
+		// opened during this fold's own training portion but carried
+		// open across testStart contributes real PnL/drawdown to this
+		// fold's own TestReturn/TestMaxDrawdown (the strategy runs
+		// continuously through train+test) and must be represented
+		// here too, or the trade log would silently fail to explain
+		// part of the fold's own reported OOS result. A trade that
+		// opened AND fully closed entirely within training never
+		// touches the test window at all and is correctly excluded.
+		if !tr.OpenedAt.Before(testEnd) {
+			return
+		}
+		if !stillOpen && tr.ClosedAt.Before(testStart) {
 			return
 		}
 		entryPrice, qty, err := weightedFillPrice(t, tr.EntryFillIDs, fills)
@@ -491,6 +514,7 @@ func foldTradeRows(t *testing.T, tsp string, fold int, testStart, testEnd time.T
 			RealizedPnL:         mustParseFloatWF(t, fieldsFirst(tr.RealizedPnL.String())),
 			Costs:               mustParseFloatWF(t, fieldsFirst(tr.Costs.String())),
 			StillOpenAtFoldEnd:  stillOpen,
+			OOSEntry:            !tr.OpenedAt.Before(testStart),
 		}
 		row.NetPnL = row.RealizedPnL - row.Costs
 
@@ -524,24 +548,31 @@ func foldTradeRows(t *testing.T, tsp string, fold int, testStart, testEnd time.T
 	return rows
 }
 
+// writeTradeLogCSV writes rows to path, checking every failure mode a
+// durable research artifact needs to actually surface (PR #357
+// review): Write, Flush (via w.Error(), the only way encoding/csv
+// reports a flush-time failure), and Close are all checked explicitly
+// — none of gofmt's usual io.Writer/io.Closer shortcuts that silently
+// swallow a write or close error, which for a file this test's own
+// caller treats as the durable baseline could otherwise corrupt or
+// truncate it without any test failure ever reporting that.
 func writeTradeLogCSV(t *testing.T, path string, rows []tradeLogRow) {
 	t.Helper()
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatalf("create %s: %v", path, err)
 	}
-	defer func() { _ = f.Close() }()
 
 	w := csv.NewWriter(f)
-	defer w.Flush()
 
 	header := []string{
 		"trailing_stop_percent", "fold", "test_start", "test_end",
 		"opened_at", "closed_at", "side", "quantity",
 		"entry_price", "exit_price", "realized_pnl", "costs", "net_pnl",
-		"return_percent", "holding_days", "still_open_at_fold_end",
+		"return_percent", "holding_days", "still_open_at_fold_end", "oos_entry",
 	}
 	if err := w.Write(header); err != nil {
+		_ = f.Close()
 		t.Fatalf("write csv header: %v", err)
 	}
 	for _, r := range rows {
@@ -555,9 +586,20 @@ func writeTradeLogCSV(t *testing.T, path string, rows []tradeLogRow) {
 			strconv.FormatFloat(r.ReturnPercent, 'f', 6, 64),
 			strconv.FormatFloat(r.HoldingDays, 'f', 1, 64),
 			strconv.FormatBool(r.StillOpenAtFoldEnd),
+			strconv.FormatBool(r.OOSEntry),
 		}
 		if err := w.Write(record); err != nil {
+			_ = f.Close()
 			t.Fatalf("write csv row: %v", err)
 		}
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		_ = f.Close()
+		t.Fatalf("flush csv %s: %v", path, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close csv %s: %v", path, err)
 	}
 }
