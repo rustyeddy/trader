@@ -288,18 +288,28 @@ func weightedFillPrice(t *testing.T, fillIDs []id.FillID, fills map[id.FillID]or
 // (smatrend_probation_simple_fullarchive_test.go): an anchor frozen
 // once for a multi-decade span drifts too far from later prices.
 //
-// Every closed out-of-sample trade — one whose OpenedAt falls within
-// that specific fold's own [testStart, testEnd) window, a genuine
-// entry decision made using only data available up to that point —
-// is written to a CSV trade log. Known limitation, the same shape as
-// eqs01WFFoldResult's own documented SMA-warmup asymmetry: a trade
-// opened very close to a fold's own testEnd may not close before that
-// fold's run ends; it is recorded as still-open for that fold and is
-// independently re-entered and evaluated as part of the *next* fold's
-// own training window, but since its own OpenedAt then falls in that
-// next fold's train portion (not test), it is not recorded a second
-// time — meaning a small number of trades that span a fold boundary
-// may appear in this log as "still open" without their own eventual
+// Every trade overlapping that specific fold's own [testStart,
+// testEnd) OOS window — OpenedAt before testEnd, and either still
+// open or ClosedAt at/after testStart — is written to a CSV trade
+// log, so every position contributing to a fold's own TestReturn/
+// TestMaxDrawdown is represented exactly once (PR #357 review). The
+// tradeLogRow.OOSEntry column distinguishes the two cases this
+// predicate admits: true for a genuine entry decision made during
+// OOS (OpenedAt itself falls within the window), false for a
+// position opened during the fold's own training portion and simply
+// carried open across testStart, recorded with its own real,
+// pre-test entry date/price rather than pretending it was an
+// OOS-generated signal.
+//
+// Known limitation, the same shape as eqs01WFFoldResult's own
+// documented SMA-warmup asymmetry: a trade opened very close to a
+// fold's own testEnd may not close before that fold's run ends; it
+// is recorded as still-open for that fold and is independently
+// re-entered and evaluated as part of the *next* fold's own training
+// window, but since its own OpenedAt then falls in that next fold's
+// train portion (not test), it is not recorded a second time —
+// meaning a small number of trades that span a fold boundary may
+// appear in this log as "still open" without their own eventual
 // close ever being recorded. This is judged an acceptable limitation
 // for a baseline trade log (not a rigorous, gap-free trade census);
 // flagged explicitly rather than silently accepted.
