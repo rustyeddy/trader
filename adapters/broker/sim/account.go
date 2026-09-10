@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -26,6 +27,30 @@ type positionKey struct {
 
 func keyForListing(l instrument.Listing) positionKey {
 	return positionKey{instrumentID: l.InstrumentID(), provider: l.Provider(), venue: l.Venue()}
+}
+
+// reducibleQuantity reports how much of position a ReduceOnly order
+// for side may legally reduce (issue #352): zero when there is no
+// position at all, or when the position's Side does not oppose side —
+// a Sell can only reduce a Long position, a Buy can only reduce a
+// Short one. The zero value (num.Quantity{}, IsZero() true) is a safe,
+// valid "nothing" for every caller of this function to check, matching
+// num.Quantity's own zero-value convention.
+func reducibleQuantity(position order.Position, hasPosition bool, side order.Side) num.Quantity {
+	if !hasPosition {
+		return num.Quantity{}
+	}
+	switch side {
+	case order.Sell:
+		if position.Side == order.Long {
+			return position.Quantity
+		}
+	case order.Buy:
+		if position.Side == order.Short {
+			return position.Quantity
+		}
+	}
+	return num.Quantity{}
 }
 
 // accountState is one simulated account's mutable state, independently
@@ -459,6 +484,20 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 	}
 
 	outcome, err := h.state.buildFill(h.broker.deps, o, price, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+	if errors.Is(err, ErrReduceOnlyNothingToReduce) {
+		// Issue #352: a ReduceOnly market order (o was just accepted
+		// above, not yet stored) with nothing left to reduce is
+		// canceled instead of filled — never silently dropped, and
+		// never allowed to open/increase/reverse a position.
+		pendingEvent, canceledEvent, canceled, cancelErr := h.state.buildInternalCancellation(h.broker.deps, o, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+		if cancelErr != nil {
+			return order.Order{}, cancelErr
+		}
+		h.state.orders[req.OrderID] = cloneOrder(canceled)
+		h.state.asOf = now
+		h.state.commitEvents(acceptEvent, pendingEvent, canceledEvent)
+		return canceled, nil
+	}
 	if err != nil {
 		return order.Order{}, err
 	}
@@ -569,6 +608,39 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 	}
 
 	fillQty := *o.AcceptedQuantity
+
+	// ReduceOnly enforcement (issue #352): checked here, in buildFill
+	// itself, because this is the one path both Submit's market-order
+	// fill and accountState.advance's resting Limit/Stop trigger
+	// share — the two places two independent ReduceOnly orders against
+	// the same position (a resting protective stop, and a later direct
+	// exit) can each reach a fill. Two live ReduceOnly orders against
+	// one position is never prevented upstream (see #352's own
+	// discussion of a possible future OCO/order-group concept), so
+	// this is the backstop that makes reversing a position from a
+	// ReduceOnly fill structurally impossible regardless of how many
+	// such orders exist or what order they trigger in.
+	if req.ReduceOnly {
+		existing, hasExisting := s.positions[key]
+		reducible := reducibleQuantity(existing, hasExisting, req.Side)
+		if reducible.IsZero() {
+			return fillOutcome{}, ErrReduceOnlyNothingToReduce
+		}
+		// Clamped, never rejected outright, when the position is
+		// smaller than what this order was sized for: this keeps the
+		// core invariant (a ReduceOnly fill never reverses or exceeds
+		// the standing position) unconditionally true. The resulting
+		// order is left StatusPartiallyFilled/Working for whatever
+		// quantity remains unfilled rather than atomically canceling
+		// that remainder — a real brokerage refinement tracked
+		// separately (issue #352's own follow-up), not a safety gap:
+		// the remainder can never itself cause an overfill, since any
+		// later attempt to fill it re-enters this same check against
+		// whatever is reducible at that time.
+		if fillQty.Cmp(reducible) > 0 {
+			fillQty = reducible
+		}
+	}
 
 	// Round the base price to the listing's own tick size before
 	// anything else touches it (issue #343): price may be a raw
@@ -705,6 +777,61 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 		realizedPnL: realizedPnLAfter,
 		fees:        feesAfter,
 	}, nil
+}
+
+// buildInternalCancellation transitions o (StatusWorking or
+// StatusPartiallyFilled) to StatusCanceled entirely on the broker's
+// own initiative — issue #352's own resolution for
+// ErrReduceOnlyNothingToReduce, where a stale ReduceOnly order (most
+// often a protective stop left resting after the position it
+// protected already closed some other way) triggers with nothing
+// left to legally reduce and must be retired rather than filled.
+//
+// Unlike Cancel (cancel_replace.go), there is no external
+// order.CancelRequest here — a fresh EventID generated from deps.IDs
+// stands in for one, so this reuses order.ApplyCancelRequest/
+// ApplyCancelResult, the exact same two-event StatusPendingCancel ->
+// StatusCanceled sequence Cancel itself produces, rather than
+// inventing a second cancellation code path. sequence/sequence+1 are
+// the two events' own Sequence values; the caller commits them (and
+// the resulting order) only once every other part of its own
+// transaction has also succeeded, matching every other builder in
+// this file.
+func (s *accountState) buildInternalCancellation(deps Deps, o order.Order, causationID id.EventID, sequence uint64) (brokerpkg.Event, brokerpkg.Event, order.Order, error) {
+	cancelEventID, err := id.GenerateEventID(deps.IDs)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
+	}
+	now := deps.Clock.Now()
+	cancelReq := order.CancelRequest{OrderID: o.Request.OrderID, Metadata: id.Metadata{EventID: cancelEventID, CausationID: causationID, Timestamp: now}}
+
+	pending, err := order.ApplyCancelRequest(o, cancelReq)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
+	}
+	pendingEvent, err := s.buildOrderEvent(deps, pending, causationID, sequence)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
+	}
+
+	result, err := order.NewCancelResult(order.CancelResult{
+		OrderID:  o.Request.OrderID,
+		Status:   order.StatusCanceled,
+		Metadata: id.Metadata{CausationID: cancelEventID, Timestamp: now},
+	})
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
+	}
+	canceled, err := order.ApplyCancelResult(pending, result)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
+	}
+	canceledEvent, err := s.buildOrderEvent(deps, canceled, pendingEvent.Metadata.EventID, sequence+1)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
+	}
+
+	return pendingEvent, canceledEvent, canceled, nil
 }
 
 // Cancel and Replace implement broker.Account; see cancel_replace.go
