@@ -72,6 +72,21 @@ var (
 	episodeBreakoutWindows   = []int{2, 3, 5, 10}
 )
 
+// naNSafeFloat64 is a float64 whose MarshalJSON emits `null` instead
+// of erroring on encoding/json's own hard rejection of a literal NaN
+// (PR #359 review: episodeSummary's top-N episode lists are
+// json.Marshal'd directly, and a genuinely NaN CaptureRatio —
+// whenever MaxDefensiveAdvantage is zero — would otherwise fail the
+// whole write).
+type naNSafeFloat64 float64
+
+func (f naNSafeFloat64) MarshalJSON() ([]byte, error) {
+	if math.IsNaN(float64(f)) {
+		return []byte("null"), nil
+	}
+	return json.Marshal(float64(f))
+}
+
 // episodeRow is one completed exit/re-entry episode's own full
 // record — issue #354's own required column set (further decline,
 // re-entry vs exit, rebound, defensive-advantage capture), a simple,
@@ -100,7 +115,11 @@ type episodeRow struct {
 	ReboundBeforeReEntryPct float64 `json:"rebound_before_reentry_pct"`
 	MaxDefensiveAdvantage   float64 `json:"max_defensive_advantage"`
 	CapturedAdvantage       float64 `json:"captured_advantage"`
-	CaptureRatio            float64 `json:"capture_ratio"` // NaN (empty in CSV) if MaxDefensiveAdvantage is zero
+	// CaptureRatio is NaN (empty in CSV, null in JSON via
+	// naNSafeFloat64 — encoding/json rejects a literal NaN outright,
+	// PR #359 review) whenever MaxDefensiveAdvantage is zero (the
+	// post-exit low never traded below the exit price at all).
+	CaptureRatio naNSafeFloat64 `json:"capture_ratio"`
 
 	// Classification is "good-defensive-exit" or "whipsaw" — a simple
 	// threshold (FurtherDeclinePct > 1%), deliberately not tuned
@@ -109,11 +128,20 @@ type episodeRow struct {
 
 	// Candidate re-entry features, captured at the post-exit-low bar
 	// and at the actual re-entry bar (issue #354's own "Candidate
-	// re-entry features to record" list). SMA200Distance/SMA20/SMA50
-	// are (Close-SMA)/SMA; empty/omitted (NaN) wherever the series is
-	// not yet warmed up — never the case for a bar late enough in the
-	// dataset for this strategy to have already made a first entry,
-	// but guarded regardless since this is a general-purpose helper.
+	// re-entry features to record" list). SMA200Distance is normalized,
+	// (Close-SMA200)/SMA200 — this strategy's own regime gate is
+	// SMA200-relative, so a normalized distance is the more directly
+	// comparable feature across episodes at very different price
+	// levels. SMA20/SMA50 are raw price levels, not normalized
+	// distances (PR #359 review corrected an earlier, inaccurate
+	// version of this comment that claimed otherwise) — left as
+	// absolute levels since issue #354 does not ask for these two to
+	// be normalized and a raw level is directly comparable to Close on
+	// a chart overlay. The main loop below asserts none of these are
+	// ever actually NaN (SMA200/ATR14 both require far fewer bars of
+	// warmup than this strategy's own SMA(200) entry gate already
+	// guarantees), rather than silently allowing an unwarmed value to
+	// reach the output.
 	AtPostExitLowSMA200Distance   float64 `json:"at_post_exit_low_sma200_distance"`
 	AtPostExitLowSMA20            float64 `json:"at_post_exit_low_sma20"`
 	AtPostExitLowSMA50            float64 `json:"at_post_exit_low_sma50"`
@@ -353,9 +381,20 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 	all = append(all, resp.Trades...)
 	all = append(all, resp.OpenTrades...)
 	sort.Slice(all, func(i, j int) bool { return all[i].OpenedAt.Before(all[j].OpenedAt) })
+	// A real overlap check (PR #359 review): comparing consecutive
+	// OpenedAt values after sorting by OpenedAt is tautologically
+	// true and can never fail. The real invariant this long-only,
+	// single-position strategy must honor is that a closed trade's
+	// own ClosedAt never falls after the next trade's OpenedAt, and a
+	// still-open trade (ClosedAt zero) must be the very last entry in
+	// the timeline.
 	for i := 1; i < len(all); i++ {
-		if all[i].OpenedAt.Before(all[i-1].OpenedAt) {
-			t.Fatalf("trade %d opened before trade %d despite sort (%s < %s): this strategy is long-only single-position, trades must not overlap", i, i-1, all[i].OpenedAt, all[i-1].OpenedAt)
+		prev := all[i-1]
+		if prev.ClosedAt.IsZero() {
+			t.Fatalf("trade %d (opened %s) is still open but trade %d (opened %s) opened after it: this strategy is long-only single-position, a still-open trade must be the last entry", i-1, prev.OpenedAt, i, all[i].OpenedAt)
+		}
+		if all[i].OpenedAt.Before(prev.ClosedAt) {
+			t.Fatalf("trade %d (opened %s) overlaps trade %d (closed %s): this strategy is long-only single-position, trades must not overlap", i, all[i].OpenedAt, i-1, prev.ClosedAt)
 		}
 	}
 
@@ -416,9 +455,9 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 		}
 		maxAdvantage := exitPriceF - lowF
 		capturedAdvantage := exitPriceF - reentryPriceF
-		captureRatio := math.NaN()
+		captureRatio := naNSafeFloat64(math.NaN())
 		if maxAdvantage != 0 {
-			captureRatio = capturedAdvantage / maxAdvantage
+			captureRatio = naNSafeFloat64(capturedAdvantage / maxAdvantage)
 		}
 
 		classification := "good-defensive-exit"
@@ -426,13 +465,22 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 			classification = "whipsaw"
 		}
 
+		// DaysFlat is elapsed *calendar* days between the exit fill and
+		// the re-entry fill (next.OpenedAt.Sub(tr.ClosedAt)), matching
+		// the same unit every CandidateXDaysEarlier value already uses
+		// (PR #359 review) — not a count of intervening trading bars,
+		// which for a multi-year episode understates the real elapsed
+		// time by roughly the weekend/holiday fraction of the span
+		// (Episode 11's own 1182 trading bars span 1716 calendar days).
+		daysFlat := int(math.Round(next.OpenedAt.Sub(tr.ClosedAt).Hours() / 24))
+
 		row := episodeRow{
 			Episode:                 len(rows),
 			ExitDate:                tr.ClosedAt.Format("2006-01-02"),
 			ExitPrice:               exitPriceF,
 			ReEntryDate:             next.OpenedAt.Format("2006-01-02"),
 			ReEntryPrice:            reentryPriceF,
-			DaysFlat:                reentryIdx - exitIdx - 1,
+			DaysFlat:                daysFlat,
 			PostExitLowDate:         bars[lowIdx].Time.Format("2006-01-02"),
 			PostExitLow:             lowF,
 			FurtherDeclinePct:       furtherDeclinePct,
@@ -449,6 +497,17 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 			AtPostExitLowATR14:            atr14[lowIdx],
 			AtPostExitLowHighestHighSince: highestHighInRange(bars, exitIdx, lowIdx).Float64(),
 
+			// AtReEntry* is captured at reentryIdx — the bar the
+			// re-entry order actually fills on (next.OpenedAt), one bar
+			// *after* the signal bar (reentryIdx-1) whose Close actually
+			// decided the re-entry (next-bar-open fill convention, see
+			// this test's own doc comment). This is deliberate: it
+			// describes market state at the moment the position opened,
+			// not the state that caused the decision. A caller building
+			// a real-time candidate rule from these fields should use
+			// the signal bar (reentryIdx-1) instead, or it will include
+			// one bar of hindsight relative to the actual decision
+			// point (PR #359 review).
 			AtReEntrySMA200Distance:   smaDistance(bars[reentryIdx].Close.Float64(), sma200[reentryIdx]),
 			AtReEntrySMA20:            sma20[reentryIdx],
 			AtReEntrySMA50:            sma50[reentryIdx],
@@ -461,12 +520,28 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 			CandidateReboundTriggerDate:  map[float64]string{},
 			CandidateReboundDaysEarlier:  map[float64]float64{},
 		}
+		for _, v := range []float64{
+			row.AtPostExitLowSMA200Distance, row.AtPostExitLowATR14,
+			row.AtReEntrySMA200Distance, row.AtReEntryATR14,
+		} {
+			if math.IsNaN(v) {
+				t.Fatalf("episode %d: a candidate feature computed NaN despite this strategy only ever entering after SMA(200)/ATR(14) warmup — this should be unreachable; investigate rather than silently propagating NaN into the output", len(rows))
+			}
+		}
 
 		// Candidate rule first-trigger scan, over the bars where the
-		// strategy is genuinely flat and a signal there would fill at
-		// the *next* bar's open (flatFrom..flatTo inclusive; empty
-		// when reentryIdx == exitIdx+1, meaning zero flat bars).
-		flatFrom, flatTo := exitIdx+1, reentryIdx-1
+		// strategy is genuinely flat and could generate a signal
+		// (flatFrom..flatTo inclusive). flatFrom is the exit bar
+		// itself, not exitIdx+1 (PR #359 review): onExit and onFlat
+		// both run against the same bar the position is first observed
+		// flat on (see strategy/smatrend/strategy.go's own OnBar), so
+		// the exit bar is itself already a valid flat/signal bar whose
+		// own Close can trigger a fill at the *next* bar's open —
+		// exactly the DaysFlat==0 case where re-entry happens the very
+		// next bar. Empty (flatFrom>flatTo) only when reentryIdx ==
+		// exitIdx, which cannot happen since reentryIdx>exitIdx is
+		// already checked above.
+		flatFrom, flatTo := exitIdx, reentryIdx-1
 
 		triggerDate := func(signalIdx int) (string, float64) {
 			if signalIdx < 0 {
@@ -482,7 +557,33 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 		})
 		row.CandidateAboveSMATriggerDate, row.CandidateAboveSMADaysEarlier = triggerDate(aboveSMAIdx)
 
-		reclaimIdx := candidateFirstTrigger(flatFrom, flatTo, func(j int) bool {
+		// reclaimIdx compares against exitPrice — the reconstructed
+		// real broker fill price — not strategy/smatrend.onExit's own
+		// internal reference level (directExitReference or lastStop,
+		// which can differ from the fill price, most visibly for a
+		// gap-through stop). PR #359 review correctly flagged this as
+		// a real discrepancy; it is a deliberate, documented
+		// approximation rather than a fix, matching this file's own
+		// stated decision not to reconstruct the strategy's internal
+		// stop state independently (see this test's own doc comment)
+		// — doing so here would create exactly the second source of
+		// truth that decision already rejected. CandidateReclaimExit-
+		// MatchesActual should be read with that caveat: a mismatch
+		// may reflect this approximation, the SMA regime gate (see
+		// this test's own doc comment), or both.
+		//
+		// This candidate alone starts scanning at exitIdx+1, not
+		// flatFrom (==exitIdx): the real onExit/onFlat sequence can
+		// legitimately compare exitIdx's own Close against a reference
+		// level fixed *before* that bar's price action (lastStop/
+		// directExitReference, both established on an earlier bar),
+		// but exitPrice here is derived *from* exitIdx's own fill —
+		// comparing Close > exitPrice on the very same bar that
+		// produced exitPrice is circular, not a real same-bar signal
+		// evaluation, and was observed to make this candidate trigger
+		// almost immediately (the day after exit) for most episodes
+		// once flatFrom briefly included exitIdx here too.
+		reclaimIdx := candidateFirstTrigger(exitIdx+1, flatTo, func(j int) bool {
 			return bars[j].Close.Cmp(exitPrice) > 0
 		})
 		row.CandidateReclaimExitTriggerDate, row.CandidateReclaimExitDaysEarlier = triggerDate(reclaimIdx)
@@ -530,17 +631,8 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 
 	writeEpisodeCSV(t, filepath.Join(fullArchiveSMATrendEpisodeOutputDir, "spy-exit-reentry-episodes.csv"), rows)
 	writeEpisodeSummary(t, filepath.Join(fullArchiveSMATrendEpisodeOutputDir, "spy-episode-summary.json"), rows)
-	renderEpisodeCharts(t, fullArchiveSMATrendEpisodeOutputDir, bars, rows, exitReentryEpisodeStopSeries(rows))
+	renderEpisodeCharts(t, fullArchiveSMATrendEpisodeOutputDir, bars, sma200, rows)
 }
-
-// exitReentryEpisodeStopSeries is a placeholder returning nil: this
-// diagnostic does not reconstruct the strategy's own resting-stop
-// level series (ProbationStop/TrailingStop), since issue #354 does
-// not ask for it and reconstructing it independently of the real
-// ExitRule's own internal state risks silently disagreeing with what
-// actually governed each trade. Episode charts render Close price and
-// entry/exit/trough markers only.
-func exitReentryEpisodeStopSeries([]episodeRow) []chart.LevelPoint { return nil }
 
 // writeEpisodeCSV writes rows to path, one row per episode, flattening
 // each candidate rule's own per-parameter trigger date/days-earlier
@@ -589,7 +681,7 @@ func writeEpisodeCSV(t *testing.T, path string, rows []episodeRow) {
 			fmt.Sprintf("%d", r.Episode), r.ExitDate, ff(r.ExitPrice), r.ReEntryDate, ff(r.ReEntryPrice), fmt.Sprintf("%d", r.DaysFlat),
 			r.PostExitLowDate, ff(r.PostExitLow),
 			ff(r.FurtherDeclinePct), ff(r.ReEntryVsExitPct), ff(r.ReboundBeforeReEntryPct),
-			ff(r.MaxDefensiveAdvantage), ff(r.CapturedAdvantage), ff(r.CaptureRatio), r.Classification,
+			ff(r.MaxDefensiveAdvantage), ff(r.CapturedAdvantage), ff(float64(r.CaptureRatio)), r.Classification,
 			ff(r.AtPostExitLowSMA200Distance), ff(r.AtPostExitLowSMA20), ff(r.AtPostExitLowSMA50),
 			ff(r.AtPostExitLowATR14), ff(r.AtPostExitLowHighestHighSince),
 			ff(r.AtReEntrySMA200Distance), ff(r.AtReEntrySMA20), ff(r.AtReEntrySMA50),
@@ -650,6 +742,14 @@ type episodeSummary struct {
 	// further decline (clearest defensive value).
 	HighestReboundGivenBack     []episodeRow `json:"highest_rebound_given_back"`
 	BestDefensiveExitsByDecline []episodeRow `json:"best_defensive_exits_by_decline"`
+	// WhipsawsByReboundGivenBack is HighestReboundGivenBack filtered
+	// to Classification=="whipsaw" only (PR #359 review): the
+	// unfiltered lists above are explicitly not restricted by
+	// Classification (several of their own episodes are
+	// "good-defensive-exit"), so this is the durable, separate view
+	// issue #354's own acceptance criterion asks for — "useful
+	// defensive exits and whipsaws can be inspected separately."
+	WhipsawsByReboundGivenBack []episodeRow `json:"whipsaws_by_rebound_given_back"`
 
 	// Question 6: for each candidate rule, how often it would have
 	// triggered strictly earlier than the actual re-entry, and the
@@ -698,7 +798,17 @@ func writeEpisodeSummary(t *testing.T, path string, rows []episodeRow) {
 	s.WhipsawPct = float64(s.WhipsawCount) / float64(len(rows))
 	s.MeanReboundBeforeReEntryPct = reboundSum / float64(len(rows))
 	sort.Float64s(reboundVals)
-	s.MedianReboundBeforeReEntryPct = reboundVals[len(reboundVals)/2]
+	// The mean of the two middle values for an even-length list, not
+	// simply the upper-middle element (PR #359 review): the prior
+	// version was correct only for an odd rows count and silently
+	// biased for even (37 rows today, but this is meant to stay
+	// reproducible as the dataset grows).
+	mid := len(reboundVals) / 2
+	if len(reboundVals)%2 == 0 {
+		s.MedianReboundBeforeReEntryPct = (reboundVals[mid-1] + reboundVals[mid]) / 2
+	} else {
+		s.MedianReboundBeforeReEntryPct = reboundVals[mid]
+	}
 
 	sortedByRebound := append([]episodeRow(nil), rows...)
 	sort.Slice(sortedByRebound, func(i, j int) bool {
@@ -709,6 +819,14 @@ func writeEpisodeSummary(t *testing.T, path string, rows []episodeRow) {
 		n = len(sortedByRebound)
 	}
 	s.HighestReboundGivenBack = sortedByRebound[:n]
+
+	var whipsawsSorted []episodeRow
+	for _, r := range sortedByRebound {
+		if r.Classification == "whipsaw" {
+			whipsawsSorted = append(whipsawsSorted, r)
+		}
+	}
+	s.WhipsawsByReboundGivenBack = whipsawsSorted
 
 	sortedByDecline := append([]episodeRow(nil), rows...)
 	sort.Slice(sortedByDecline, func(i, j int) bool {
@@ -769,12 +887,27 @@ func writeEpisodeSummary(t *testing.T, path string, rows []episodeRow) {
 
 // renderEpisodeCharts renders one chart.RenderEpisode PNG per episode
 // in the highest-rebound-given-back and best-defensive-exit top-5
-// lists (issue
-// #354's own "notes on any candidate earlier re-entry signals that
-// visibly stand out" is easiest to assess visually), each windowed to
-// roughly 30 bars before the exit through 30 bars after the re-entry
-// (clipped to the dataset's own bounds).
-func renderEpisodeCharts(t *testing.T, dir string, bars []marketdata.Bar, rows []episodeRow, stops []chart.LevelPoint) {
+// lists (issue #354's own "notes on any candidate earlier re-entry
+// signals that visibly stand out" is easiest to assess visually),
+// each windowed to roughly 30 bars before the exit through 30 bars
+// after the re-entry (clipped to the dataset's own bounds).
+//
+// Exit/re-entry markers plot the reconstructed real fill prices
+// (r.ExitPrice/r.ReEntryPrice), not the bar's own Close (PR #359
+// review: for a stop exit in particular, Close can differ materially
+// from the fill/stop price, and plotting Close would visually
+// disagree with the episode's own numeric table). The chart also
+// overlays SMA200 (this strategy's own regime gate) and, where
+// distinct from the actual re-entry date, a hypothetical marker for
+// the above-sma and reclaim-exit-price candidate triggers — priced at
+// that signal bar's own Close, since there is no real fill for a
+// candidate that never actually happened — so a claim in the written
+// report about a candidate's own timing is directly checkable against
+// the chart rather than only against the CSV/JSON (PR #359 review:
+// the report's Episode 11 discussion previously claimed the
+// above-sma trigger was "visible directly on the episode chart" when
+// the chart contained no SMA or candidate-trigger data at all).
+func renderEpisodeCharts(t *testing.T, dir string, bars []marketdata.Bar, sma200 []float64, rows []episodeRow) {
 	t.Helper()
 	if len(rows) == 0 {
 		return
@@ -807,15 +940,25 @@ func renderEpisodeCharts(t *testing.T, dir string, bars []marketdata.Bar, rows [
 			}
 			window := bars[from : to+1]
 
-			markers := []chart.Marker{
-				{Time: bars[exitIdx].Time, Price: bars[exitIdx].Close, Kind: chart.MarkerExit, Label: fmt.Sprintf("exit %s", r.Classification)},
-				{Time: mustParseDate(t, r.PostExitLowDate), Price: num.MustParsePrice(fmt.Sprintf("%.4f", r.PostExitLow)), Kind: chart.MarkerTrough, Label: "post-exit low"},
-				{Time: bars[reentryIdx].Time, Price: bars[reentryIdx].Close, Kind: chart.MarkerReentry, Label: "re-entry"},
+			var smaOverlay []chart.LevelPoint
+			for i := from; i <= to; i++ {
+				if math.IsNaN(sma200[i]) {
+					continue
+				}
+				smaOverlay = append(smaOverlay, chart.LevelPoint{Time: bars[i].Time, Price: num.MustParsePrice(fmt.Sprintf("%.4f", sma200[i]))})
 			}
+
+			markers := []chart.Marker{
+				{Time: bars[exitIdx].Time, Price: num.MustParsePrice(fmt.Sprintf("%.4f", r.ExitPrice)), Kind: chart.MarkerExit, Label: fmt.Sprintf("exit %s", r.Classification)},
+				{Time: mustParseDate(t, r.PostExitLowDate), Price: num.MustParsePrice(fmt.Sprintf("%.4f", r.PostExitLow)), Kind: chart.MarkerTrough, Label: "post-exit low"},
+				{Time: bars[reentryIdx].Time, Price: num.MustParsePrice(fmt.Sprintf("%.4f", r.ReEntryPrice)), Kind: chart.MarkerReentry, Label: "re-entry"},
+			}
+			markers = append(markers, candidateTriggerMarkers(t, bars, r)...)
 
 			in := chart.EpisodeInput{
 				Title:   fmt.Sprintf("Episode %d: exit %s -> reentry %s (%s)", r.Episode, r.ExitDate, r.ReEntryDate, r.Classification),
 				Bars:    window,
+				SMA:     smaOverlay,
 				Markers: markers,
 			}
 			path := filepath.Join(dir, fmt.Sprintf("%s-episode-%d.png", prefix, r.Episode))
@@ -835,6 +978,33 @@ func renderEpisodeCharts(t *testing.T, dir string, bars []marketdata.Bar, rows [
 
 	render("highest-rebound-given-back", byRebound)
 	render("best-defensive-exit", byDecline)
+}
+
+// candidateTriggerMarkers returns one hypothetical chart.Marker for
+// each of the above-sma and reclaim-exit-price candidate triggers
+// r already recorded, priced at that trigger bar's own Close (there
+// is no real fill for a candidate that never actually happened) and
+// skipped entirely whenever the candidate never triggered or its
+// trigger date coincides with the actual re-entry date (nothing
+// distinct to show). Reuses chart.MarkerReentry's own glyph — this
+// package has no dedicated "hypothetical signal" MarkerKind — with a
+// Label that makes clear it is hypothetical, not a real fill.
+func candidateTriggerMarkers(t *testing.T, bars []marketdata.Bar, r episodeRow) []chart.Marker {
+	t.Helper()
+	var markers []chart.Marker
+	add := func(label, dateStr string) {
+		if dateStr == "" || dateStr == r.ReEntryDate {
+			return
+		}
+		idx := indexOfBarTime(bars, mustParseDate(t, dateStr))
+		if idx < 0 {
+			return
+		}
+		markers = append(markers, chart.Marker{Time: bars[idx].Time, Price: bars[idx].Close, Kind: chart.MarkerReentry, Label: label})
+	}
+	add("above-sma signal (hypothetical)", r.CandidateAboveSMATriggerDate)
+	add("reclaim-exit-price signal (hypothetical)", r.CandidateReclaimExitTriggerDate)
+	return markers
 }
 
 func mustParseDate(t *testing.T, s string) time.Time {

@@ -3,7 +3,7 @@
 
 * Purpose
 
-Issue #354 asks, before changing =strategy/smatrend="=s re-entry logic
+Issue #354 asks, before changing =strategy/smatrend='s re-entry logic
 again, for a diagnostic study of every completed exit/re-entry episode
 in the current SMA Long Hold ("probation-trend") playbook run against
 real SPY history: what did the market actually do while the strategy
@@ -27,16 +27,16 @@ established baseline:
 - ~TrailingStopPercent~: 0.10
 - ~ReEntryRuleName~: ~"reclaim-exit-price"~
 
-Position sizing is conservative and fixed (=RiskFraction=0.01=,
-=AdverseDistance=$20=, never re-anchored) — this diagnostic reads only
+Position sizing is conservative and fixed (~RiskFraction~: 0.01,
+~AdverseDistance~: $20, never re-anchored) — this diagnostic reads only
 each trade's entry/exit price and timestamp, never its quantity or
 PnL, so sizing realism is irrelevant as long as it never distorts a
 fill price. A real =journal.Recorder= is wired so each trade's own
 entry/exit fill price can be reconstructed (=order.Trade= stores only
-=FillID=\ s, never price directly).
+=EntryFillIDs=/=ExitFillIDs=, never price directly).
 
 An *episode* is one closed trade immediately followed by another
-entry, whichever that next entry's own eventual fate. A final exit
+entry, whichever fate that next entry itself eventually meets. A final exit
 with no subsequent re-entry before the dataset ends is not a
 "completed" episode and is excluded (issue #354's own acceptance
 criterion). Post-exit low is the lowest Low from the exit bar itself
@@ -105,7 +105,7 @@ Median rebound given back (3.4%) and mean (9.6%) disagree by nearly 3x
 two episodes account for the overwhelming majority of both "days flat"
 and "rebound given back" in the whole 21-year sample.
 
-*** Episode 11: 2007-12-27 exit -> 2012-09-07 re-entry (1182 days flat)
+*** Episode 11: 2007-12-27 exit -> 2012-09-07 re-entry (1716 days flat)
 
 Episode chart (rendered via the new =chart= package, ADR-058):
 =/srv/trading/sweeps/smatrend-episode-analysis/highest-rebound-given-back-episode-11.png=
@@ -134,7 +134,7 @@ from the CSV/JSON artifacts below.
   issue #354 asks this diagnostic to surface before any rule is
   adopted, not after.
 
-*** Episode 33: 2022-04-11 exit -> 2023-06-13 re-entry (293 days flat)
+*** Episode 33: 2022-04-11 exit -> 2023-06-13 re-entry (428 days flat)
 
 - Exit $417.91's near-cousin, later in the sample: further decline
   *20.4%*, rebound given back before re-entry *26.1%*.
@@ -144,10 +144,15 @@ from the CSV/JSON artifacts below.
 
 Removing just these two episodes from the mean-rebound-given-back
 calculation would collapse the mean far closer to the median —
-confirming that the "lost CAGR" this playbook gives back is
-concentrated in a small number of long flat periods after major
-declines, not spread evenly across all 37 episodes (issue #354's own
-research question 5).
+confirming that the rebound this playbook gives back before
+re-entering is concentrated in a small number of long flat periods
+after major declines, not spread evenly across all 37 episodes (issue
+#354's own research question 5). This diagnostic does not compute
+per-episode P&L or CAGR (it deliberately reads only entry/exit price
+and timestamp, not quantity — see Method), so this finding is
+specifically about the rebound-given-back metric, not a direct measure
+of foregone CAGR; a real accounting of "lost CAGR" would need its own
+controlled backtest with real position sizing (PR #359 review).
 
 ** Candidate re-entry signals: earlier, but not necessarily better
 
@@ -161,7 +166,7 @@ research question 5).
 | ~breakout-5~        |             10/37 |                              227.2 |
 | ~rebound-5%~        |             10/37 |                              238.2 |
 | ~breakout-10~       |              7/37 |                              318.7 |
-| ~above-sma~         |              4/37 |                              469.0 |
+| ~above-sma~         |              5/37 |                              375.8 |
 
 Two observations:
 
@@ -187,23 +192,28 @@ risk, not just an earlier trigger date.
 
 * Full Data
 
-- Per-episode CSV (37 rows, every column issue #354 asks for plus the
-  candidate-rule trigger comparisons):
-  =/srv/trading/sweeps/smatrend-episode-analysis/spy-exit-reentry-episodes.csv=
+- *Per-episode CSV, committed*: =docs/research/eq-354-episodes.csv= —
+  all 37 rows, every column issue #354 asks for plus the candidate-rule
+  trigger comparisons, so the "one row per episode" report and full
+  sorted views this issue's own acceptance criteria ask for survive a
+  fresh checkout without depending on private =/srv/...= files (PR
+  #359 review). This mirrors the precedent already set by
+  =docs/research/mr-04-per-instrument-results.csv=: derived per-row
+  analysis results (dates, percentages) are committed research output,
+  distinct from the raw market-data archive they were computed from,
+  which stays private.
 - Aggregate summary JSON (this document's own headline numbers, plus
   the full sorted "highest rebound given back" / "best defensive
-  exits" top-10 lists):
-  =/srv/trading/sweeps/smatrend-episode-analysis/spy-episode-summary.json=
-- Episode charts (PNG, via the new =chart= package, ADR-058) for the
-  top 5 episodes by rebound-given-back and by further-decline:
-  =/srv/trading/sweeps/smatrend-episode-analysis/{highest-rebound-given-back,best-defensive-exit}-episode-*.png=
-
-None of these are committed to this repository (private research
-output, matching every other ~fullarchive~ driver's own convention);
-regenerate them locally via
-=go test -tags fullarchive ./marketdata/ -run TestSMATrendProbationTrendEpisodeAnalysis=
-after editing this file's own local output-directory and SPY CSV path
-constants.
+  exits" / "whipsaws by rebound given back" top-N lists) and the
+  episode chart PNGs (via the new =chart= package, ADR-058) are *not*
+  committed — private research output at
+  =/srv/trading/sweeps/smatrend-episode-analysis/=, matching every
+  other ~fullarchive~ driver's own convention for bulk/derived
+  artifacts (as opposed to the compact per-row CSV table above).
+  Regenerate both locally via
+  =go test -tags fullarchive ./marketdata/ -run TestSMATrendProbationTrendEpisodeAnalysis=
+  after editing this file's own local output-directory and SPY CSV
+  path constants.
 
 * Answers to Issue #354's Own Research Questions
 
@@ -219,10 +229,14 @@ constants.
    defensive exits?* 32.4% whipsaw, 67.6% good defensive exit by this
    analysis's own simple, un-tuned threshold.
 5. *Is most of the lost CAGR concentrated in a small number of long
-   flat periods / sharp rebounds?* Yes — Episodes 11 (2007-2012,
-   1182 days flat) and 33 (2022-2023, 293 days flat) alone dominate
-   both the days-flat and rebound-given-back distributions; every
-   other episode is flat for 56 days or fewer.
+   flat periods / sharp rebounds?* This diagnostic cannot directly
+   measure lost CAGR (no per-episode P&L or quantity is computed — see
+   Method), but its own rebound-given-back proxy says yes: Episodes 11
+   (2007-2012, 1716 calendar days flat) and 33 (2022-2023, 428
+   calendar days flat) alone dominate both the days-flat and
+   rebound-given-back distributions; every other episode is flat for
+   83 calendar days or fewer. Confirming the CAGR question itself
+   needs a real, separately sized backtest.
 6. *Does a simple earlier signal appear promising before another
    parameter sweep?* Not unambiguously. Every candidate rule triggers
    earlier than the real strategy in a meaningful minority of
@@ -242,12 +256,19 @@ Per issue #354's own explicit scope boundary, none of the candidate
 rules above were folded into an optimized strategy here. Candidate
 follow-up experiments, each as its own issue:
 
-- A real backtest of ~breakout-2~ or ~breakout-3~ as ~ReEntryRuleName~
-  (already implemented, =strategy/smatrend/reentryrule.go=), since
-  these show meaningfully earlier average re-entry without the
-  ~above-sma~ candidate's demonstrated whipsaw risk.
-- The same for one or two ~rebound-X%~ threshold, which is not yet an
-  implemented ~ReEntryRule~ and would need one.
+- A real backtest of a 2- or 3-bar breakout re-entry, since these show
+  meaningfully earlier average re-entry without the ~above-sma~
+  candidate's demonstrated whipsaw risk. Note this needs new code: the
+  existing =strategy/smatrend/reentryrule.go= ~"breakout"~ rule tracks
+  the highest High *since the exit* with no configurable N-bar
+  lookback window at all — it is not the same rule this diagnostic's
+  ~breakout-2~/~breakout-3~ candidates simulate, and the registry has
+  no ~"breakout-2"~/~"breakout-3"~ entries to select (PR #359 review
+  caught an earlier draft of this section incorrectly claiming
+  otherwise). A real experiment needs a new, N-parameterized
+  ~ReEntryRule~ implementation first.
+- The same for one or two ~rebound-X%~ thresholds, which are likewise
+  not yet an implemented ~ReEntryRule~ and would need one.
 - Any such experiment should report full P&L, drawdown, and trade
   count against the same SPY history and the existing
   ~probation-trend~ walk-forward baseline

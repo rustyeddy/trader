@@ -25,20 +25,25 @@ var (
 	buyHoldColor   = color.RGBA{R: 0x7f, G: 0x7f, B: 0x7f, A: 0xff} // gray
 )
 
+// markerStyle's own Radius and colors were increased from an earlier,
+// harder-to-read revision (Radius 4pt, half-saturated colors) after
+// PR #359 review: research chart markers need to read clearly at a
+// glance, not merely be present. Colors are now fully saturated
+// (0xff, not 0x99/0xcc) and Radius is 6pt.
 func markerStyle(kind MarkerKind) draw.GlyphStyle {
-	base := draw.GlyphStyle{Radius: vg.Points(4)}
+	base := draw.GlyphStyle{Radius: vg.Points(6)}
 	switch kind {
 	case MarkerEntry:
-		base.Color = color.RGBA{G: 0x99, A: 0xff}
+		base.Color = color.RGBA{G: 0xaa, A: 0xff} // dark green
 		base.Shape = draw.TriangleGlyph{}
 	case MarkerExit:
-		base.Color = color.RGBA{R: 0xcc, A: 0xff}
+		base.Color = color.RGBA{R: 0xff, A: 0xff} // red
 		base.Shape = draw.CrossGlyph{}
 	case MarkerReentry:
-		base.Color = color.RGBA{B: 0xcc, A: 0xff}
+		base.Color = color.RGBA{B: 0xff, A: 0xff} // blue
 		base.Shape = draw.CircleGlyph{}
 	case MarkerTrough:
-		base.Color = color.RGBA{R: 0xe3, G: 0x8f, B: 0x22, A: 0xff}
+		base.Color = color.RGBA{R: 0xcc, G: 0x66, B: 0x00, A: 0xff} // dark amber
 		base.Shape = draw.PlusGlyph{}
 	default:
 		base.Color = color.Black
