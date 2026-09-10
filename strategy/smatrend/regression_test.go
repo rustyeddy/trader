@@ -215,8 +215,20 @@ func smatrendFixtureSpan(t *testing.T) marketdata.TimeRange {
 // service/backtest.Service composition path with SMAPeriod=3 (so an
 // 11-bar fixture is enough to warm up and still leave room for two
 // full trailing-stop episodes) and a 10% trailing stop, matching
-// EQS-01's own reference TrailingStopPercent.
+// EQS-01's own reference TrailingStopPercent, using the default
+// exit/re-entry rules (issue #347's own DefaultExitRuleName/
+// DefaultReEntryRuleName).
 func runSMATrendFixture(t *testing.T) (svcbacktest.RunResponse, *memoryRecorder) {
+	t.Helper()
+	return runSMATrendFixtureWithConfig(t, smatrend.Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10")})
+}
+
+// runSMATrendFixtureWithConfig is runSMATrendFixture generalized over
+// the full smatrend.Config (issue #347), so a non-default
+// ExitRuleName/ReEntryRuleName combination can be exercised through
+// the exact same real M4/M5 composition path rather than a second,
+// parallel fixture.
+func runSMATrendFixtureWithConfig(t *testing.T, cfg smatrend.Config) (svcbacktest.RunResponse, *memoryRecorder) {
 	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t, "oanda")))
@@ -253,8 +265,7 @@ func runSMATrendFixture(t *testing.T) (svcbacktest.RunResponse, *memoryRecorder)
 	svc, err := svcbacktest.New(manager, simResolver, factory, nil)
 	require.NoError(t, err)
 
-	strat, err := smatrend.New(simListing.InstrumentID(), marketdata.D1,
-		smatrend.Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10")})
+	strat, err := smatrend.New(simListing.InstrumentID(), marketdata.D1, cfg)
 	require.NoError(t, err)
 
 	resp, err := svc.Run(ctx, svcbacktest.RunRequest{
@@ -345,4 +356,53 @@ func TestSMATrend_EndToEndRegression(t *testing.T) {
 
 	assert.Empty(t, resp.OpenTrades, "the gap-through stop must have closed the second episode's position, not left it open")
 	assert.Empty(t, resp.Account.Positions())
+}
+
+// TestSMATrend_BreakoutReEntryChangesRealOutcome is issue #347's own
+// required end-to-end proof that a non-default rule combination
+// actually changes behavior through the real pipeline, not merely in
+// an isolated unit test. It runs the identical fixture
+// TestSMATrend_EndToEndRegression uses, with ReEntryRuleName:
+// "breakout" instead of the default "fresh-cross".
+//
+// On the real fixture, the bar-7 stop exit seeds the breakout rule's
+// since-exit high at bar 7's own High (1.26, oanda bid_h) — higher
+// than every subsequent bar's Close through the end of the fixture
+// (bars 8-11 close at 1.05, 1.20, 1.20, and 1.02). The default
+// fresh-cross rule instead re-enters on bar 9 (a genuine cross back
+// above the SMA) and is stopped out again by bar 11's gap-through
+// open, producing two closed trades. The breakout rule, with the
+// exact same market data, never re-enters at all: exactly one closed
+// trade and a flat account at the end of the run.
+func TestSMATrend_BreakoutReEntryChangesRealOutcome(t *testing.T) {
+	resp, rec := runSMATrendFixtureWithConfig(t, smatrend.Config{
+		SMAPeriod:           3,
+		TrailingStopPercent: num.MustParseRate("0.10"),
+		ReEntryRuleName:     "breakout",
+	})
+
+	// Exactly one enter-long signal: the bar-4 cross. No second
+	// enter-long, unlike the default rule's bar-9 re-entry.
+	signals := rec.kinds(journal.KindSignal)
+	var enters int
+	for _, s := range signals {
+		if s.Signal.Values["action"] == "enter-long" {
+			enters++
+		}
+		assert.Equal(t, "breakout", s.Signal.Values["reentry_rule"])
+	}
+	assert.Equal(t, 1, enters, "the breakout rule must never find a close above the post-exit high in this fixture")
+
+	// Only the first episode's entry and stop-exit fill — two fills
+	// total, not TestSMATrend_EndToEndRegression's four.
+	require.Len(t, rec.kinds(journal.KindFill), 2)
+
+	require.Len(t, resp.Trades, 1, "the breakout rule must leave only the first trailing-stop episode closed")
+	trade := resp.Trades[0]
+	tradeCmp, err := trade.RealizedPnL.Cmp(num.MustParseMoney("0", num.MustParseCurrency("USD")))
+	require.NoError(t, err)
+	assert.True(t, tradeCmp > 0, "bought at 1.115, stopped out at 1.17: must be profitable, got %s", trade.RealizedPnL)
+
+	assert.Empty(t, resp.OpenTrades, "no re-entry ever occurred, so no open trade can exist at the end of the run")
+	assert.Empty(t, resp.Account.Positions(), "the account must remain flat for the rest of the fixture")
 }

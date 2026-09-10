@@ -180,8 +180,11 @@ func (h *testHarness) onBar(barNum int, b bar) ([]order.Intent, time.Time) {
 	// smatrend's own Enter-only-ever-opens-long, AdjustStop-never-
 	// changes-side vocabulary.
 	for _, in := range intents {
-		if in.Kind == order.IntentEnter {
+		switch in.Kind {
+		case order.IntentEnter:
 			h.side = order.Long
+		case order.IntentExit:
+			h.side = order.Flat
 		}
 	}
 	return intents, barTime
@@ -191,6 +194,29 @@ func TestNew_RejectsInvalidConfig(t *testing.T) {
 	listing := mustListing(t)
 	_, err := New(listing.InstrumentID(), marketdata.D1, Config{SMAPeriod: 0, TrailingStopPercent: num.MustParseRate("0.10")})
 	require.Error(t, err)
+}
+
+func TestNew_RejectsUnknownExitRuleName(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ExitRuleName: "not-a-real-rule"})
+	require.Error(t, err)
+}
+
+func TestNew_RejectsUnknownReEntryRuleName(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ReEntryRuleName: "not-a-real-rule"})
+	require.Error(t, err)
+}
+
+// TestNew_SMACrossExitRuleDoesNotRequireTrailingStopPercent proves
+// TrailingStopPercent's own Validate check is skipped for any
+// ExitRule other than "trailing-stop" (issue #347): a zero-value
+// TrailingStopPercent, which would fail Validate under the default
+// rule, must be accepted under "sma-cross".
+func TestNew_SMACrossExitRuleDoesNotRequireTrailingStopPercent(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{SMAPeriod: 3, ExitRuleName: "sma-cross"})
+	require.NoError(t, err)
 }
 
 func TestStrategy_StartRejectsJournalWithoutRunID(t *testing.T) {
@@ -304,7 +330,15 @@ func TestStrategy_OnePositionAtATime(t *testing.T) {
 // the harness ready for bar 6 onward.
 func enterLong(t *testing.T) *testHarness {
 	t.Helper()
-	h := newTestHarness(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10")})
+	return enterLongWithConfig(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10")})
+}
+
+// enterLongWithConfig is enterLong parameterized by cfg, for a test
+// that needs a non-default ExitRuleName/ReEntryRuleName while
+// otherwise reusing the identical warm-up/entry fixture.
+func enterLongWithConfig(t *testing.T, cfg Config) *testHarness {
+	t.Helper()
+	h := newTestHarness(t, cfg)
 	for i, c := range []float64{100, 100, 100, 99} {
 		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
 	}
@@ -476,4 +510,155 @@ func mustRunID(t *testing.T) id.RunID {
 	runID, err := id.GenerateRunID(ids)
 	require.NoError(t, err)
 	return runID
+}
+
+// TestStrategy_ReclaimExitPriceReEntersWithoutFreshCross is issue
+// #347's own central proof: with ReEntryRuleName "reclaim-exit-price"
+// configured, the strategy re-enters purely because price closes back
+// above the level it was stopped out at — even on the very same bar
+// the stop triggers, and even though price never dipped back below
+// the SMA at all (so under the default "fresh-cross" rule, no
+// re-entry would ever have been possible without a later genuine
+// cross).
+func TestStrategy_ReclaimExitPriceReEntersWithoutFreshCross(t *testing.T) {
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ReEntryRuleName: "reclaim-exit-price"})
+	h.onBar(6, bar{open: 103, high: 110, low: 102, close: 105}) // ratchets stop to 99 (90% of 110)
+
+	h.triggerStop() // as if a broker-side intrabar wick to 99 stopped it out, closing well above that
+
+	// This bar's own Close (104) remains above the SMA the whole time
+	// (no fresh cross), yet is above the 99 exit price the stop
+	// triggered at.
+	intents, _ := h.onBar(7, bar{open: 100, high: 106, low: 99, close: 104})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind, "reclaim-exit-price must re-enter without any fresh SMA cross")
+}
+
+// TestStrategy_ReclaimExitPriceDoesNotEnterBelowExitPrice proves the
+// rule does not fire merely because price is moving upward — it must
+// actually close back above the specific exit price.
+func TestStrategy_ReclaimExitPriceDoesNotEnterBelowExitPrice(t *testing.T) {
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ReEntryRuleName: "reclaim-exit-price"})
+	h.onBar(6, bar{open: 103, high: 110, low: 102, close: 105}) // ratchets stop to 99
+	h.triggerStop()
+
+	intents, _ := h.onBar(7, bar{open: 95, high: 98, low: 90, close: 96}) // close (96) still below the 99 exit price
+	assert.Empty(t, intents, "must not re-enter before price actually reclaims the exit price")
+}
+
+// TestStrategy_BreakoutReEntryRequiresExceedingSinceExitHigh proves
+// the breakout rule is genuinely stricter than reclaim-exit-price: a
+// close that reclaims the old exit price but has not yet exceeded the
+// high observed since the exit must not enter.
+func TestStrategy_BreakoutReEntryRequiresExceedingSinceExitHigh(t *testing.T) {
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ReEntryRuleName: "breakout"})
+	h.onBar(6, bar{open: 103, high: 110, low: 102, close: 105}) // ratchets stop to 99
+	h.triggerStop()
+
+	// Exit bar's own High (106) seeds sinceExitHigh. This bar's close
+	// (104) is above the 99 exit price but below that 106 high.
+	intents, _ := h.onBar(7, bar{open: 100, high: 106, low: 99, close: 104})
+	assert.Empty(t, intents, "reclaiming the exit price alone must not be enough for the breakout rule")
+
+	// A later bar closing above the since-exit high does enter.
+	intents, _ = h.onBar(8, bar{open: 105, high: 108, low: 104, close: 107})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind)
+}
+
+// TestStrategy_ReEntryGatedByAboveSMAEvenForNonDefaultRule is the SMA
+// Long Hold playbook's own re-entry invariant (PR #348 review): after
+// a stop-out, a configured ReEntryRule only ever gets to decide *how*
+// to resume within the still-bullish (above-SMA) regime — it can
+// never fire while price is below the SMA, regardless of which rule
+// is configured. Below the SMA, only a fresh cross re-enters, exactly
+// as if fresh-cross were configured.
+//
+// reclaim-exit-price is used here specifically because, taken alone
+// (ignoring the SMA), it would otherwise re-enter purely on reclaiming
+// the exit price even while price sits below the SMA — this test
+// proves the central gate in onFlat overrides that.
+func TestStrategy_ReEntryGatedByAboveSMAEvenForNonDefaultRule(t *testing.T) {
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ReEntryRuleName: "reclaim-exit-price"})
+	h.onBar(6, bar{open: 103, high: 110, low: 102, close: 105}) // ratchets stop to 99
+	h.triggerStop()
+
+	// Close (100) reclaims the 99 exit price, but SMA(bar4,5,6) = 102
+	// puts this bar below the SMA — the central gate must block entry
+	// even though reclaim-exit-price's own logic alone would allow it.
+	intents, _ := h.onBar(7, bar{open: 98, high: 101, low: 97, close: 100})
+	assert.Empty(t, intents, "must not re-enter below the SMA even though the exit price was reclaimed")
+
+	// A later bar with a genuine fresh cross back above the SMA still
+	// re-enters normally.
+	intents, _ = h.onBar(8, bar{open: 100, high: 105, low: 99, close: 104})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind, "a fresh cross above the SMA must still re-enter regardless of the configured ReEntryRule")
+}
+
+// ambiguousExitRule is a test double proving Strategy.onLong rejects
+// an ExitRule that returns both ExitNow and NewStop set on the same
+// decision (PR #348 review): ExitDecision's own doc comment requires
+// these to be mutually exclusive, and a well-behaved implementation
+// can never trigger this path on its own — hence registering a
+// deliberately misbehaving fake rather than finding a real rule that
+// does it.
+type ambiguousExitRule struct{}
+
+func (ambiguousExitRule) OnEntry(marketdata.Bar) {}
+
+func (ambiguousExitRule) OnLongBar(bar marketdata.Bar, _ float64) (ExitDecision, error) {
+	stop := bar.Close
+	return ExitDecision{ExitNow: true, NewStop: &stop}, nil
+}
+
+func TestStrategy_OnLongRejectsAmbiguousExitDecision(t *testing.T) {
+	exitRuleRegistry["test-ambiguous-exit"] = func(Config) (ExitRule, error) { return ambiguousExitRule{}, nil }
+	defer delete(exitRuleRegistry, "test-ambiguous-exit")
+
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, ExitRuleName: "test-ambiguous-exit", ReEntryRuleName: "fresh-cross"})
+
+	event, view, _ := h.buildBar(6, bar{open: 103, high: 110, low: 102, close: 105})
+	_, err := h.strategy.OnBar(context.Background(), event, view)
+	require.Error(t, err, "an ExitRule returning both ExitNow and NewStop must be rejected, not silently resolved")
+}
+
+// TestStrategy_SMACrossExitCapturesDecisionBarCloseAsReEntryReference
+// is PR #348 review's required proof for the sma-cross +
+// reclaim-exit-price combination: the re-entry reference price must
+// come from the bar that actually decided the exit (bar 6, close 90),
+// not the later bar the exit is first observed Flat on (bar 7, close
+// 95) — which bears no relationship to why the position closed. Using
+// bar 7's own close as the reference would also be self-referential
+// on this very bar (a value can never compare strictly greater than
+// itself), so the bug's symptom is that no immediate re-entry is ever
+// possible on the observing bar even when price has clearly already
+// recovered above the real decision level.
+func TestStrategy_SMACrossExitCapturesDecisionBarCloseAsReEntryReference(t *testing.T) {
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, ExitRuleName: "sma-cross", ReEntryRuleName: "reclaim-exit-price"})
+
+	// SMA(bar4,5,6) = (99+102+90)/3 = 97, close (90) at/below it: the
+	// sma-cross rule decides to exit right here, on this bar, with
+	// this bar's own close (90) as the only meaningful reference level
+	// — there is no resting stop to fall back on.
+	intents, _ := h.onBar(6, bar{open: 95, high: 96, low: 89, close: 90})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentExit, intents[0].Kind)
+
+	// Bar 7 is the first bar the exit is observed Flat on. SMA(bar5,6,7)
+	// = (102+90+95)/3 = 95.67, close (95) below it, so the central
+	// above-SMA gate alone would already block entry here regardless
+	// of the reference price — this assertion is not yet the proof.
+	intents, _ = h.onBar(7, bar{open: 92, high: 97, low: 91, close: 95})
+	assert.Empty(t, intents, "below the SMA on bar 7 regardless of reference price")
+
+	// Bar 8: SMA(bar6,7,8) = (90+95+93)/3 = 92.667, close (93) above
+	// it — the central gate now permits the rule to decide. With the
+	// correct reference (90, bar 6's decision close), 93 > 90 must
+	// enter. The bug this replaces used bar 7's own close (95) as the
+	// reference instead, under which 93 > 95 is false and this
+	// assertion would fail.
+	intents, _ = h.onBar(8, bar{open: 94, high: 98, low: 92, close: 93})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind, "must reclaim against the decision bar's own close (90), not the later observing bar's close (95)")
 }

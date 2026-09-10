@@ -20,15 +20,19 @@ import (
 const Name = "sma-trend"
 
 // Version distinguishes revisions of this strategy's own logic.
-const Version = "v0"
+const Version = "v1"
 
 // Strategy is the SMA-trend baseline strategy.Strategy implementation
-// (issue #335, EQS-01). It owns one indicator.SMA instance, the
-// cross-above state machine that interprets it, and the trailing-stop
-// bookkeeping (high-water mark, current stop level) that governs the
-// only exit this strategy ever takes. See the package doc comment for
-// the exact semantics, and docs/research/eqs-01-baseline-sma-trend.org
-// for the reference SPY configuration and backtest results.
+// (issue #335, EQS-01), extended with pluggable exit/re-entry rules
+// (issue #347). It owns one indicator.SMA instance, the cross-above
+// state machine that interprets it, and delegates the protective exit
+// while long (ExitRule) and the re-entry decision after a stop-out
+// (ReEntryRule) to whichever implementations Config names. See the
+// package doc comment for the exact semantics, and
+// docs/research/eqs-01-baseline-sma-trend.org for the reference SPY
+// configuration and backtest results (from before issue #347's rule
+// pluggability existed — those results used the DefaultExitRuleName/
+// DefaultReEntryRuleName rules, unchanged by this revision).
 //
 // Strategy is not safe for concurrent use, and not reusable across
 // runs: construct a fresh Strategy (via New) for each run, matching
@@ -39,21 +43,40 @@ type Strategy struct {
 	interval     marketdata.Interval
 	config       Config
 
-	// retainFraction is 1 - config.TrailingStopPercent, computed once
-	// at construction (Config.Validate already guarantees it cannot
-	// error) rather than recomputed every bar.
-	retainFraction num.Rate
-
 	sma   *indicator.SMA
 	cross crossState
 
-	// highWaterMark and stopPrice are nil until the first bar a Long
-	// position is observed (see resetTrailingState); both are cleared
-	// the moment the position returns to Flat, so a later re-entry
-	// starts a fresh trailing episode rather than resuming stale state
-	// from a previous one.
-	highWaterMark *num.Price
-	stopPrice     *num.Price
+	exitRule    ExitRule
+	reEntryRule ReEntryRule
+
+	// everExited is false until the first exit (however triggered) has
+	// occurred. The very first entry ever always uses the cross-
+	// above-SMA trigger directly, never reEntryRule — see onFlat.
+	everExited bool
+	// sideLastBar records this instrument's own position side as
+	// observed on the *previous* OnBar call, so a transition (Flat->Long
+	// or Long->Flat) can be detected exactly once, on the bar it
+	// actually happens, rather than re-triggering OnEntry/OnExit on
+	// every subsequent bar spent in the same side. The zero value,
+	// order.Flat, is correct before the first OnBar call.
+	sideLastBar order.PositionSide
+	// lastStop is exitRule's own most recently returned NewStop, kept
+	// here so onExit can hand it to reEntryRule.OnExit as "the level
+	// this strategy was protecting at" the moment a broker-triggered
+	// stop exit is observed — see ReEntryRule.OnExit's own doc comment
+	// for why this is deliberately the rule's last-known intended
+	// stop, not necessarily the real broker fill price. Always nil for
+	// an ExitRule (like sma-cross) that never places a resting stop;
+	// see directExitReference for that case instead.
+	lastStop *num.Price
+	// directExitReference is the bar Close observed at the exact
+	// moment onLong emitted a direct order.IntentExit (ExitDecision.
+	// ExitNow), captured here because the bar onExit later observes
+	// Flat on (the fill bar) is not the bar that made the exit
+	// decision and its Close is not a meaningful reference level (PR
+	// #348 review). nil whenever the most recent exit was a
+	// broker-triggered stop instead, in which case lastStop is used.
+	directExitReference *num.Price
 
 	intents strategy.IntentFactory
 	journal journal.Recorder // nil unless env.Journal was set
@@ -61,7 +84,8 @@ type Strategy struct {
 }
 
 // New returns a Strategy trading instrumentID on interval, configured
-// by config. It returns config's own Validate error, if any.
+// by config. It returns config's own Validate error, if any, or an
+// error from constructing config's own named ExitRule/ReEntryRule.
 func New(instrumentID instrument.ID, interval marketdata.Interval, config Config) (*Strategy, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -70,16 +94,21 @@ func New(instrumentID instrument.ID, interval marketdata.Interval, config Config
 	if err != nil {
 		return nil, err
 	}
-	retain, err := config.StopFraction()
+	exitRule, err := exitRuleRegistry[config.exitRuleName()](config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("smatrend: constructing exit rule %q: %w", config.exitRuleName(), err)
+	}
+	reEntryRule, err := reEntryRuleRegistry[config.reEntryRuleName()](config)
+	if err != nil {
+		return nil, fmt.Errorf("smatrend: constructing reentry rule %q: %w", config.reEntryRuleName(), err)
 	}
 	return &Strategy{
-		instrumentID:   instrumentID,
-		interval:       interval,
-		config:         config,
-		retainFraction: retain,
-		sma:            sma,
+		instrumentID: instrumentID,
+		interval:     interval,
+		config:       config,
+		sma:          sma,
+		exitRule:     exitRule,
+		reEntryRule:  reEntryRule,
 	}, nil
 }
 
@@ -147,8 +176,16 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 
 	switch side {
 	case order.Flat:
-		return s.onFlat(ctx, event, crossedAbove, close, smaValue)
+		if s.sideLastBar == order.Long {
+			s.onExit(event.Bar)
+		}
+		s.sideLastBar = order.Flat
+		return s.onFlat(ctx, event, crossedAbove, aboveSMA, close, smaValue)
 	case order.Long:
+		if s.sideLastBar != order.Long {
+			s.exitRule.OnEntry(event.Bar)
+		}
+		s.sideLastBar = order.Long
 		return s.onLong(ctx, event, close, smaValue)
 	case order.Short:
 		// smatrend never emits a Sell Enter/TargetExposure intent, so a
@@ -163,14 +200,52 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 	}
 }
 
-// onFlat handles a bar observed with no open position: a fresh
-// cross-above enters long; anything else, including continuously
-// remaining above the SMA after a stop exit, does nothing (EQS-01's
-// own "require a fresh cross" rule, enforced by crossState itself —
-// see its own doc comment).
-func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedAbove bool, close, smaValue float64) ([]order.Intent, error) {
-	s.resetTrailingState()
-	if !crossedAbove {
+// onExit notifies reEntryRule that a position just closed — whether
+// via a broker-triggered stop (ADR-026) or a direct
+// ExitRule.ExitNow — using the best available reference level for
+// the exit price (see ReEntryRule.OnExit's own doc comment for why
+// this is a reference level, not necessarily a real fill price):
+// directExitReference when the most recent exit was a direct
+// IntentExit (captured at the exact bar that decided it, not the
+// later bar this exit is observed on), else lastStop when it was a
+// broker-triggered stop, else — only possible for a custom ExitRule
+// that manages neither — exitBar's own Close as a last resort. Called
+// exactly once per exit, from OnBar's own Flat-transition detection.
+func (s *Strategy) onExit(exitBar marketdata.Bar) {
+	exitPrice := exitBar.Close
+	switch {
+	case s.directExitReference != nil:
+		exitPrice = *s.directExitReference
+	case s.lastStop != nil:
+		exitPrice = *s.lastStop
+	}
+	s.reEntryRule.OnExit(exitPrice, exitBar)
+	s.everExited = true
+	s.lastStop = nil
+	s.directExitReference = nil
+}
+
+// onFlat handles a bar observed with no open position. The very first
+// entry ever (before onExit has ever run) always requires a fresh
+// cross above the SMA. Every entry after that is gated by aboveSMA
+// (the SMA Long Hold playbook's own re-entry invariant, PR #348
+// review): while price remains below the SMA, only a fresh cross
+// re-enters, regardless of the configured ReEntryRule — there is
+// nothing to "reclaim" or "break out of" in a regime this strategy
+// does not consider bullish yet. Only once price is back above the
+// SMA does reEntryRule get to decide how, within that regime, to
+// resume (issue #347).
+func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedAbove, aboveSMA bool, close, smaValue float64) ([]order.Intent, error) {
+	var enter bool
+	switch {
+	case !s.everExited:
+		enter = crossedAbove
+	case aboveSMA:
+		enter = s.reEntryRule.ShouldEnter(ReEntryContext{Bar: event.Bar, CrossedAboveSMA: crossedAbove})
+	default:
+		enter = crossedAbove
+	}
+	if !enter {
 		return nil, nil
 	}
 
@@ -178,7 +253,7 @@ func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedA
 	if err != nil {
 		return nil, err
 	}
-	if err := s.recordSignal(ctx, event, close, smaValue, "enter-long", []order.Intent{in}); err != nil {
+	if err := s.recordSignal(ctx, event, close, smaValue, "enter-long", nil, []order.Intent{in}); err != nil {
 		return nil, err
 	}
 	return []order.Intent{in}, nil
@@ -187,68 +262,68 @@ func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedA
 // onLong handles a bar observed with an open long position that
 // survived the bar (see OnBar's own doc comment for why any stop
 // trigger against this bar's own price action has already resolved by
-// this point): ratchet the high-water mark from this bar's own High,
-// and — only if the resulting stop level is strictly higher than the
-// last one this Strategy itself placed — emit an AdjustStop intent.
-// The monotonic-upward-only guarantee is enforced right here: a lower
-// or equal computed stop simply emits nothing, never a downward
-// adjustment.
+// this point): delegate to exitRule for whatever protective action
+// (if any) it decides, then translate that decision into the
+// corresponding intent.
 func (s *Strategy) onLong(ctx context.Context, event strategy.BarEvent, close, smaValue float64) ([]order.Intent, error) {
-	high := event.Bar.High
-	if s.highWaterMark == nil || high.Cmp(*s.highWaterMark) > 0 {
-		s.highWaterMark = &high
-	}
-
-	newStop, err := s.highWaterMark.MulRate(s.retainFraction)
+	decision, err := s.exitRule.OnLongBar(event.Bar, smaValue)
 	if err != nil {
-		return nil, fmt.Errorf("smatrend: computing trailing stop from high-water mark: %w", err)
+		return nil, fmt.Errorf("smatrend: exit rule: %w", err)
+	}
+	if decision.ExitNow && decision.NewStop != nil {
+		return nil, fmt.Errorf("smatrend: exit rule %q returned an ambiguous decision: ExitNow and NewStop are mutually exclusive", s.config.exitRuleName())
 	}
 
-	if s.stopPrice != nil && newStop.Cmp(*s.stopPrice) <= 0 {
+	if decision.ExitNow {
+		in, err := s.intents.Exit(s.instrumentID)
+		if err != nil {
+			return nil, err
+		}
+		// Captured now, at the exact bar that decided the exit — not
+		// the later bar onExit observes Flat on, whose own Close bears
+		// no relationship to why this position closed (PR #348 review).
+		exitClose := event.Bar.Close
+		s.directExitReference = &exitClose
+		if err := s.recordSignal(ctx, event, close, smaValue, "exit-now", nil, []order.Intent{in}); err != nil {
+			return nil, err
+		}
+		return []order.Intent{in}, nil
+	}
+
+	if decision.NewStop == nil {
 		return nil, nil
 	}
 
-	in, err := s.intents.AdjustStop(s.instrumentID, newStop)
+	in, err := s.intents.AdjustStop(s.instrumentID, *decision.NewStop)
 	if err != nil {
 		return nil, err
 	}
-	s.stopPrice = &newStop
+	s.lastStop = decision.NewStop
 
-	if err := s.recordSignal(ctx, event, close, smaValue, "adjust-stop", []order.Intent{in}); err != nil {
+	if err := s.recordSignal(ctx, event, close, smaValue, "adjust-stop", decision.NewStop, []order.Intent{in}); err != nil {
 		return nil, err
 	}
 	return []order.Intent{in}, nil
-}
-
-// resetTrailingState clears the high-water mark and current stop
-// level, so a later re-entry starts a fresh trailing episode rather
-// than resuming stale state from a previous one. Safe to call when
-// already clear (the common case, before any position has ever been
-// held).
-func (s *Strategy) resetTrailingState() {
-	s.highWaterMark = nil
-	s.stopPrice = nil
 }
 
 // recordSignal journals one KindSignal decision-evidence record for
 // this bar, if a Journal was configured (an Environment built for a
 // test that doesn't need decision evidence may leave it nil).
 // CorrelationID is the emitted intents' own.
-func (s *Strategy) recordSignal(ctx context.Context, event strategy.BarEvent, close, smaValue float64, action string, intents []order.Intent) error {
+func (s *Strategy) recordSignal(ctx context.Context, event strategy.BarEvent, close, smaValue float64, action string, stopPrice *num.Price, intents []order.Intent) error {
 	if s.journal == nil {
 		return nil
 	}
 
 	values := map[string]string{
-		"close":  strconv.FormatFloat(close, 'f', -1, 64),
-		"sma":    strconv.FormatFloat(smaValue, 'f', -1, 64),
-		"action": action,
+		"close":        strconv.FormatFloat(close, 'f', -1, 64),
+		"sma":          strconv.FormatFloat(smaValue, 'f', -1, 64),
+		"action":       action,
+		"exit_rule":    s.config.exitRuleName(),
+		"reentry_rule": s.config.reEntryRuleName(),
 	}
-	if s.highWaterMark != nil {
-		values["high_water_mark"] = s.highWaterMark.String()
-	}
-	if s.stopPrice != nil {
-		values["stop_price"] = s.stopPrice.String()
+	if stopPrice != nil {
+		values["stop_price"] = stopPrice.String()
 	}
 
 	var corr id.CorrelationID
