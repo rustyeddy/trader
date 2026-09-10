@@ -52,6 +52,11 @@ func TestStrategyNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T)
 		"github.com/rustyeddy/trader/service",
 		"github.com/rustyeddy/trader/cmd",
 		"github.com/rustyeddy/trader/adapters",
+		// Issue #355: a strategy must remain as unaware of how — or
+		// whether — its own decisions are ever charted as it is of a
+		// broker; chart/boundary_test.go enforces the mirror-image
+		// direction.
+		"github.com/rustyeddy/trader/chart",
 	}
 
 	entries, err := os.ReadDir(".")
