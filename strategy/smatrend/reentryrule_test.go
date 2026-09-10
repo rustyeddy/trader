@@ -9,8 +9,8 @@ import (
 	"github.com/rustyeddy/trader/num"
 )
 
-func TestReEntryRuleRegistry_KnowsAllThreeNames(t *testing.T) {
-	for _, name := range []string{"fresh-cross", "reclaim-exit-price", "breakout"} {
+func TestReEntryRuleRegistry_KnowsAllFourNames(t *testing.T) {
+	for _, name := range []string{"fresh-cross", "reclaim-exit-price", "breakout", "above-sma"} {
 		_, ok := reEntryRuleRegistry[name]
 		assert.True(t, ok, name)
 	}
@@ -56,4 +56,19 @@ func TestBreakoutReEntryRule_EntersOnCloseAboveSinceExitHighFromPriorBarsOnly(t 
 	// enter (confirming the update actually took effect and this rule
 	// tracks a real ratcheting high, not a one-shot exit-bar value).
 	assert.False(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "106", "109", "105", "108")}))
+}
+
+// TestAboveSMAReEntryRule_AlwaysEntersRelyingEntirelyOnTheCentralGate
+// proves aboveSMAReEntryRule has no condition of its own at all
+// (issue #349/#350 review): unlike every other ReEntryRule, it must
+// return true unconditionally, since the central above-SMA regime
+// gate in Strategy.onFlat is the only thing standing between "flat"
+// and "re-entered" for this rule.
+func TestAboveSMAReEntryRule_AlwaysEntersRelyingEntirelyOnTheCentralGate(t *testing.T) {
+	rule, err := newAboveSMAReEntryRule(Config{})
+	require.NoError(t, err)
+	rule.OnExit(num.MustParsePrice("100"), mustBar(t, "102", "103", "99", "100"))
+
+	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "50", "51", "49", "50"), CrossedAboveSMA: false}))
+	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "200", "201", "199", "200"), CrossedAboveSMA: true}))
 }

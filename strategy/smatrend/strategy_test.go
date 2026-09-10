@@ -91,6 +91,12 @@ type testHarness struct {
 	ids       *id.Generator
 	accountID id.AccountID
 	side      order.PositionSide
+	// avgPrice overrides the harness-tracked position's own AvgPrice
+	// (tradertest.PositionParams' own "1.10000" default otherwise) —
+	// needed by any test exercising probationTrendExitRule's trail-
+	// activation threshold, which is computed directly from the real
+	// AvgPrice Strategy reads via currentPositionAvgPrice (issue #349).
+	avgPrice string
 }
 
 func newTestHarness(t *testing.T, config Config) *testHarness {
@@ -146,6 +152,7 @@ func (h *testHarness) buildBar(barNum int, b bar) (strategy.BarEvent, strategy.V
 			AccountID: h.accountID,
 			Listing:   h.listing,
 			Side:      h.side,
+			AvgPrice:  h.avgPrice,
 		})
 		require.NoError(h.t, err)
 		position = &p
@@ -210,12 +217,75 @@ func TestNew_RejectsUnknownReEntryRuleName(t *testing.T) {
 
 // TestNew_SMACrossExitRuleDoesNotRequireTrailingStopPercent proves
 // TrailingStopPercent's own Validate check is skipped for any
-// ExitRule other than "trailing-stop" (issue #347): a zero-value
-// TrailingStopPercent, which would fail Validate under the default
-// rule, must be accepted under "sma-cross".
+// ExitRule other than "trailing-stop"/"probation-trend" (issue #347):
+// a zero-value TrailingStopPercent, which would fail Validate under
+// the default rule, must be accepted under "sma-cross".
 func TestNew_SMACrossExitRuleDoesNotRequireTrailingStopPercent(t *testing.T) {
 	listing := mustListing(t)
 	_, err := New(listing.InstrumentID(), marketdata.D1, Config{SMAPeriod: 3, ExitRuleName: "sma-cross"})
+	require.NoError(t, err)
+}
+
+func TestNew_RejectsUnknownInitialEntryModeName(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), InitialEntryModeName: "not-a-real-mode"})
+	require.Error(t, err)
+}
+
+func TestNew_AboveSMAInitialEntryMode(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), InitialEntryModeName: "above-sma"})
+	require.NoError(t, err)
+}
+
+// TestNew_ProbationTrendRequiresTrailingStopPercent proves
+// "probation-trend" is treated the same as "trailing-stop" for
+// TrailingStopPercent's own bounds check (issue #349): its TRENDING
+// phase reuses the identical stop-fraction math.
+func TestNew_ProbationTrendRequiresTrailingStopPercent(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+	})
+	require.Error(t, err, "probation-trend needs TrailingStopPercent for its own trending phase")
+}
+
+func TestNew_ProbationTrendRejectsNonPositiveInitialStopBelowSMA(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		TrailingStopPercent: num.MustParseRate("0.10"),
+		InitialStopBelowSMA: num.MustParseRate("0"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+	})
+	require.Error(t, err)
+}
+
+func TestNew_ProbationTrendRejectsNonPositiveTrailActivationGain(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		TrailingStopPercent: num.MustParseRate("0.10"),
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0"),
+	})
+	require.Error(t, err)
+}
+
+func TestNew_ProbationTrendAcceptsValidConfig(t *testing.T) {
+	listing := mustListing(t)
+	_, err := New(listing.InstrumentID(), marketdata.D1, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		TrailingStopPercent: num.MustParseRate("0.10"),
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+	})
 	require.NoError(t, err)
 }
 
@@ -605,7 +675,7 @@ func TestStrategy_ReEntryGatedByAboveSMAEvenForNonDefaultRule(t *testing.T) {
 // does it.
 type ambiguousExitRule struct{}
 
-func (ambiguousExitRule) OnEntry(marketdata.Bar) {}
+func (ambiguousExitRule) OnEntry(marketdata.Bar, num.Price) {}
 
 func (ambiguousExitRule) OnLongBar(bar marketdata.Bar, _ float64) (ExitDecision, error) {
 	stop := bar.Close
@@ -661,4 +731,203 @@ func TestStrategy_SMACrossExitCapturesDecisionBarCloseAsReEntryReference(t *test
 	intents, _ = h.onBar(8, bar{open: 94, high: 98, low: 92, close: 93})
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.IntentEnter, intents[0].Kind, "must reclaim against the decision bar's own close (90), not the later observing bar's close (95)")
+}
+
+// TestStrategy_InitialEntryModeFreshCrossWaitsIndefinitelyWhenStartingAboveSMA
+// documents issue #349 review's own motivating startup gap under the
+// default "fresh-cross" InitialEntryMode: crossState's own zero value
+// (have=false) means the very first bar the SMA becomes ready can
+// never itself report a cross, and if price is already above the SMA
+// on that bar and simply stays there, no later bar reports one
+// either — so a run or live session starting mid-trend never enters
+// at all under this mode.
+func TestStrategy_InitialEntryModeFreshCrossWaitsIndefinitelyWhenStartingAboveSMA(t *testing.T) {
+	h := newTestHarness(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10")})
+
+	// SMA becomes ready at bar 3 (=101), close (102) already above it
+	// — but crossState.have is false on this very call, so
+	// crossedAbove is false regardless.
+	for i, c := range []float64{100, 101, 102, 103, 104} {
+		intents, _ := h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
+		assert.Empty(t, intents, "fresh-cross must never enter while price only ever rises above the SMA without first dipping back below it")
+	}
+}
+
+// TestStrategy_InitialEntryModeAboveSMAEntersOnFirstReadyBarAboveSMA
+// proves the "above-sma" InitialEntryMode (issue #349 review) fixes
+// exactly the gap the previous test documents: it enters on the very
+// first bar the SMA is ready and price is already above it, with no
+// cross required at all.
+func TestStrategy_InitialEntryModeAboveSMAEntersOnFirstReadyBarAboveSMA(t *testing.T) {
+	h := newTestHarness(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), InitialEntryModeName: "above-sma"})
+
+	h.onBar(1, bar{open: 100, high: 100, low: 100, close: 100})
+	h.onBar(2, bar{open: 101, high: 101, low: 101, close: 101})
+	// SMA ready this bar: (100+101+102)/3 = 101, close (102) above it.
+	intents, _ := h.onBar(3, bar{open: 102, high: 102, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind, "above-sma must enter on the very first ready bar above the SMA, without requiring a fresh cross")
+}
+
+// TestStrategy_ProbationTrendFullLifecyclePhaseTransitions is issue
+// #349's own central end-to-end proof, driving Strategy through a
+// complete FLAT->PROBATION->TRENDING cycle, a stop-out back to FLAT,
+// and a fresh re-entry — asserting Strategy.Phase() (not any
+// ExitRule-internal field) at every step, per PR #348/#349 review's
+// explicit requirement that Probation/Trending be first-class and
+// queryable from Strategy itself.
+func TestStrategy_ProbationTrendFullLifecyclePhaseTransitions(t *testing.T) {
+	h := newTestHarness(t, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		ReEntryRuleName:     "fresh-cross",
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+		TrailingStopPercent: num.MustParseRate("0.10"),
+	})
+	assert.Equal(t, PhaseFlat, h.strategy.Phase())
+
+	for i, c := range []float64{100, 100, 100, 99} {
+		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
+	}
+	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	h.side = order.Long
+	h.avgPrice = "102" // the real fill price this episode entered at; activation threshold = 102 * 1.05 = 107.1
+
+	assert.Equal(t, PhaseFlat, h.strategy.Phase(), "OnEntry has not yet been observed — this was only the entry-decision bar")
+
+	// Bar 6: first bar observed Long — OnEntry seeds Probation.
+	// sma(99,102,102)=101, stop=101*0.99=99.99.
+	intents, _ = h.onBar(6, bar{open: 103, high: 105, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
+	assert.Equal(t, "99.99", intents[0].StopPrice.String())
+	assert.Equal(t, PhaseProbation, h.strategy.Phase())
+
+	// Bar 7: still below the 107.1 activation threshold.
+	// sma(102,102,105)=103, stop=103*0.99=101.97.
+	intents, _ = h.onBar(7, bar{open: 104, high: 110, low: 103, close: 105})
+	require.Len(t, intents, 1)
+	assert.Equal(t, "101.97", intents[0].StopPrice.String())
+	assert.Equal(t, PhaseProbation, h.strategy.Phase())
+
+	// Bar 8: close (108) reaches the 107.1 activation threshold.
+	// sma(102,105,108)=105, stop=105*0.99=103.95 (still probation
+	// math on this same bar). High (108) is below the 110 high-water
+	// mark bar 7 already set, so it stays 110.
+	intents, _ = h.onBar(8, bar{open: 106, high: 108, low: 105, close: 108})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
+	assert.Equal(t, "103.95", intents[0].StopPrice.String(), "the activation bar itself must still use probation math")
+	assert.Equal(t, PhaseTrending, h.strategy.Phase(), "the transition takes effect immediately after this bar")
+
+	// Bar 9: now genuinely Trending. Deep below any plausible SMA
+	// (immune) with a lower High (90) than the 110 high-water mark bar
+	// 7 already set — TRENDING's own raw formula (110*0.90=99) would
+	// actually *loosen* protection below the 103.95 probation stop
+	// bar 8 already placed, so the never-loosen handoff (issue #349
+	// review) must emit nothing here, leaving that 103.95 resting stop
+	// in place untouched.
+	intents, _ = h.onBar(9, bar{open: 80, high: 90, low: 45, close: 50})
+	assert.Empty(t, intents, "TRENDING's own raw stop (99) is below the 103.95 probation stop already in place and must never loosen it")
+	assert.Equal(t, PhaseTrending, h.strategy.Phase())
+
+	// Bar 10: a genuine new high-water mark (130, since entry) finally
+	// pushes TRENDING's own formula (130*0.90=117) past that 103.95
+	// floor — normal ratcheting resumes once it actually earns it.
+	// Close stays low (55) deliberately: TRENDING is immune to the SMA
+	// entirely, so this also keeps the SMA itself low for the
+	// following bars, letting a real fresh cross re-enter later
+	// without an outsized High permanently skewing it.
+	intents, _ = h.onBar(10, bar{open: 60, high: 130, low: 55, close: 55})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentAdjustStop, intents[0].Kind)
+	assert.Equal(t, "117", intents[0].StopPrice.String())
+	assert.Equal(t, PhaseTrending, h.strategy.Phase())
+
+	// The trailing stop triggers (broker-side, ADR-026) — Strategy
+	// itself has not yet processed this; Phase() still reports
+	// Trending until the next OnBar call actually observes Flat.
+	h.triggerStop()
+
+	// Two flat bars staying below the SMA: fresh-cross re-entry must
+	// wait.
+	intents, _ = h.onBar(11, bar{open: 45, high: 48, low: 38, close: 40})
+	assert.Empty(t, intents)
+	assert.Equal(t, PhaseFlat, h.strategy.Phase())
+
+	// A genuine fresh cross back above the SMA re-enters.
+	intents, _ = h.onBar(12, bar{open: 45, high: 72, low: 44, close: 70})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	h.side = order.Long
+	h.avgPrice = "70"
+	assert.Equal(t, PhaseFlat, h.strategy.Phase(), "still only the entry-decision bar")
+
+	// The re-entry's own first Long bar must start a fresh Probation
+	// episode: no stale high-water mark, activation, or trend-stop
+	// floor carried over from the first episode (whose high-water
+	// mark had reached 130 and whose trend-stop floor had reached
+	// 117). close (72) stays under the fresh 70*1.05=73.5 activation
+	// threshold, so this also confirms activation is computed from
+	// the new episode's own entry price, not the old one.
+	intents, _ = h.onBar(13, bar{open: 71, high: 73, low: 70, close: 72})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
+	assert.Equal(t, PhaseProbation, h.strategy.Phase(), "a fresh re-entry must start in Probation, never stale Trending")
+	assert.Less(t, intents[0].StopPrice.Cmp(num.MustParsePrice("99")), 0, "the fresh probation stop must be nowhere near the old episode's stop levels")
+}
+
+// TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar is PR
+// #350 review's own required proof for the "above-sma" ReEntryRule
+// (issue #349/#350): a stop-out whose bar still closes above the SMA
+// must re-enter immediately on that very same bar — not wait for a
+// fresh cross or a reclaim/breakout threshold — relying entirely on
+// the central above-SMA gate, and that re-entry must start a genuine
+// fresh PROBATION episode.
+func TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar(t *testing.T) {
+	h := newTestHarness(t, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		ReEntryRuleName:     "above-sma",
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+		TrailingStopPercent: num.MustParseRate("0.10"),
+	})
+
+	for i, c := range []float64{100, 100, 100, 99} {
+		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
+	}
+	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	h.side = order.Long
+	h.avgPrice = "102"
+
+	// Bar 6: first Long bar, Probation stop placed at 99.99.
+	intents, _ = h.onBar(6, bar{open: 103, high: 105, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	assert.Equal(t, "99.99", intents[0].StopPrice.String())
+	assert.Equal(t, PhaseProbation, h.strategy.Phase())
+
+	// A broker-side stop-out (ADR-026) — as if the resting 99.99 stop
+	// were touched intrabar — but this bar's own Close (105) recovers
+	// back above the SMA (103): "stop-out while still above the SMA,"
+	// exactly the case above-sma exists for.
+	h.triggerStop()
+	intents, _ = h.onBar(7, bar{open: 100, high: 106, low: 99, close: 105})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind, "above-sma must re-enter on the very next eligible flat bar, with no fresh cross or reclaim/breakout threshold required")
+	h.side = order.Long
+	h.avgPrice = "105"
+
+	// The re-entry's own first Long bar must start a fresh Probation
+	// episode.
+	intents, _ = h.onBar(8, bar{open: 104, high: 107, low: 103, close: 106})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
+	assert.Equal(t, "103.29", intents[0].StopPrice.String())
+	assert.Equal(t, PhaseProbation, h.strategy.Phase(), "re-entry must start a fresh Probation episode, never stale Trending")
 }

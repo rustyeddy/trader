@@ -20,8 +20,8 @@ type ReEntryContext struct {
 
 // ReEntryRule decides, once per bar while flat, whether to re-enter —
 // but only ever *after* at least one prior exit (issue #347). The
-// very first entry (before any exit has ever occurred) always uses
-// the cross-above-SMA trigger directly, never a configured
+// very first entry ever (before any exit has ever occurred) is
+// instead governed by InitialEntryRule, never a configured
 // ReEntryRule: there is nothing yet to "reclaim" or "break out of."
 // See Strategy.onFlat for exactly where that split happens.
 type ReEntryRule interface {
@@ -49,6 +49,7 @@ var reEntryRuleRegistry = map[string]func(Config) (ReEntryRule, error){
 	"fresh-cross":        newFreshCrossReEntryRule,
 	"reclaim-exit-price": newReclaimExitPriceReEntryRule,
 	"breakout":           newBreakoutReEntryRule,
+	"above-sma":          newAboveSMAReEntryRule,
 }
 
 // freshCrossReEntryRule is EQS-01's own original, only re-entry
@@ -115,3 +116,21 @@ func (r *breakoutReEntryRule) ShouldEnter(ctx ReEntryContext) bool {
 	}
 	return enter
 }
+
+// aboveSMAReEntryRule re-enters on the first eligible flat bar with no
+// further condition of its own at all (issue #349/#350 review): the
+// SMA Long Hold playbook's own "AboveSMA" re-entry mode. It relies
+// entirely on the central above-SMA regime gate Strategy.onFlat
+// already enforces before any ReEntryRule is even consulted — by the
+// time ShouldEnter runs, price is already known to be back above the
+// SMA, so this rule's own meaning is simply "re-enter immediately once
+// the bullish regime resumes, without waiting for a fresh cross or a
+// reclaim/breakout threshold." Stateless: OnExit does nothing, since
+// this rule tracks no state of its own relative to the exit at all.
+type aboveSMAReEntryRule struct{}
+
+func newAboveSMAReEntryRule(Config) (ReEntryRule, error) { return aboveSMAReEntryRule{}, nil }
+
+func (aboveSMAReEntryRule) OnExit(num.Price, marketdata.Bar) {}
+
+func (aboveSMAReEntryRule) ShouldEnter(ReEntryContext) bool { return true }
