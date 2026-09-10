@@ -30,6 +30,12 @@ func TestEmacrossNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T)
 		"github.com/rustyeddy/trader/service",
 		"github.com/rustyeddy/trader/cmd",
 		"github.com/rustyeddy/trader/adapters",
+		// A strategy must remain as unaware of how — or whether — its
+		// own decisions are ever charted as it is of a broker
+		// (issue #355's own explicit "strategies must remain unaware
+		// of rendering" constraint, mirroring chart's own reverse
+		// guard, chart/boundary_test.go).
+		"github.com/rustyeddy/trader/chart",
 	}
 
 	entries, err := os.ReadDir(".")

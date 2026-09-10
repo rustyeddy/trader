@@ -1,0 +1,185 @@
+#+title: ADR-058: A chart research package for deterministic static backtest visualization
+#+startup: overview
+
+* Status
+
+Accepted.
+
+* Context
+
+Issue #355 asks for deterministic static chart generation so
+SMA Long Hold research (issue #349, the =probation-trend= =ExitRule=)
+can be visually inspected: entries/exits, whether a defensive exit
+was a genuine save or a whipsaw, how far price continued adversely
+after an exit, how much rebound occurred before re-entry, and whether
+PROBATION or TRENDING drove a given exit. This is meant to directly
+support issue #354's own post-exit/whipsaw analysis.
+
+This is the first charting capability anywhere in this codebase, and
+the architecture document's own "ADR review for any new top-level
+public package" mechanism
+(=docs/arch/trader-framework-architecture.org=, "Enforce dependency
+direction mechanically in CI") applies: a new top-level package and a
+new external rendering dependency are both being introduced here.
+
+Two design questions needed settling before implementation: where
+this capability lives in the existing package map, and which
+rendering library to depend on.
+
+* Decision
+
+** A new top-level =chart= package, at the research/reporting tier
+
+=chart= sits alongside =journal= and =report= in
+=package-boundaries.org='s own preliminary package map — a
+reusable-by-a-future-=live=-session, backtest-agnostic research/
+reporting concern, not a =backtest=-owned subpackage. Like =report=,
+it consumes plain values a caller has already assembled
+(=marketdata.Bar=, and caller-converted price/equity samples) rather
+than importing =backtest=, =journal=, or =strategy= types directly —
+this keeps =chart= usable from a future =live= session's own research
+tooling without ever needing a backtest-shaped result to exist.
+
+The architecture document's own strategy/broker invariant ("Strategies
+never receive or call a broker") has a direct visual-tooling
+analogue, made explicit in issue #355 itself: "Strategies must remain
+unaware of rendering." =chart/boundary_test.go= enforces this
+mechanically in both directions — =chart= itself may never import
+=strategy=, =broker=, =execution=, =risk=, =pipeline=, =backtest=,
+=service=, =cmd=, or =adapters=; and =strategy=,
+=strategy/emacross=, and =strategy/smatrend='s own existing boundary
+tests were each extended with =chart= as an additional forbidden
+import, so a strategy can never import =chart= either.
+
+** =gonum.org/v1/plot= as the rendering library
+
+=gonum.org/v1/plot= (actively maintained, pure Go, no cgo) was chosen
+over hand-rolling raster/vector drawing (too much surface for a "do
+not build a large generic charting framework before proving the
+required overlays" first pass) and over a JavaScript-based charting
+approach (would violate the architecture document's own "no
+dependency on network services" and introduce a runtime this codebase
+has no other use for). Two properties specifically matter for this
+package's own determinism requirement:
+
+- It embeds its own fonts (=codeberg.org/go-fonts/liberation=)
+  rather than depending on whatever fonts happen to be installed on
+  the host, so identical input produces byte-identical output
+  regardless of machine.
+- It natively supports both PNG (raster) and SVG (vector) output
+  through the same =Plot.WriterTo(width, height, format)= call,
+  satisfying issue #355's own "PNG output works, SVG output works, or
+  is explicitly split into a small follow-up" acceptance criterion
+  without needing the follow-up at all.
+
+=chart='s own public API never exposes a =gonum.org/v1/plot= type
+directly (the architecture document's own "do not expose vendor SDK
+types from Trader's core APIs" rule, applied here exactly as it
+already applies to a broker or data-provider adapter): every
+exported chart-facing type (=Series=, =LevelPoint=, =Marker=,
+=MarkerKind=, =OverviewInput=, =EpisodeInput=, =EquityInput=,
+=EquityPoint=) is a plain Trader-owned value built from
+=marketdata=/=num=/=time= types, with only =Format= and =Size= as
+=chart='s own small, render-facing types.
+
+** =EquityPoint= is a distinct type from =LevelPoint=, not a shared one
+
+=LevelPoint{Time, Price num.Price}= backs the SMA/probation-stop/
+trailing-stop overlays — all genuinely market prices. An account's
+equity is =num.Money=, not =num.Price=; reusing =LevelPoint= for an
+equity curve would let a chart silently plot a currency amount on
+axes and overlays meant for a market price, exactly the "accidental
+use of a price as ... money" ADR-004 introduced separate exact types
+to prevent. =EquityPoint{Time, Value float64}= is a distinct type
+instead — plain =float64=, matching =indicator='s own established
+analytical-float64 convention for a display/research tier, since
+=num.Money= has no =Float64()= conversion boundary today the way
+ADR-045 gave =num.Price= one. The caller converts its own
+authoritative =num.Money= equity value explicitly (for example via
+=Money.String()= and =strconv.ParseFloat=, the same pattern
+=smatrend_probation_simple_fullarchive_test.go='s own
+=mustParseFloatWF=/=fieldsFirst= combination already established)
+before building an =EquityPoint=.
+
+** Close-price line charts, not OHLC/candlesticks, for this first pass
+
+=gonum.org/v1/plot='s own =plotter= package has no built-in OHLC/
+candlestick plotter, and issue #355's own acceptance criteria allow
+"price bars or Close series" for the episode chart and only ever say
+"price / Close" for the overview chart. A Close-price line is the
+simplest faithful representation satisfying every required overlay
+(SMA, probation stop, trailing stop, markers) without building a
+custom OHLC plotter — full candlestick rendering is left as a named
+follow-up (issue #355's own "do not build a large generic charting
+framework before proving the required overlays" guidance), not a gap
+in this decision.
+
+** Three renderers, no generic multi-chart framework
+
+=RenderOverview=, =RenderEpisode=, and =RenderEquity= are three
+independent functions, each taking its own typed =*Input= struct and
+a =Format=, sharing construction internals (=newPricePlot=,
+=addMarkers=, =writePlot=) through unexported helpers rather than a
+public generic "chart spec" abstraction — issue #355's own explicit
+scope: three concrete chart types now, not a generic framework ahead
+of proving what overlays research actually needs.
+
+* Consequences
+
+- A new external dependency tree lands in =go.mod= /=go.sum=
+  (=gonum.org/v1/plot= and its own transitive font/PDF/SVG
+  dependencies) — the first rendering dependency this codebase has
+  ever needed.
+- Every renderer is a pure function of its own =*Input= value: no
+  clock, environment, or filesystem read inside =chart= itself,
+  verified directly by a determinism test per renderer (identical
+  input rendered twice, asserted byte-identical) rather than merely
+  claimed.
+- A strategy package gains no path to influence how — or whether —
+  its own decisions are ever charted, mechanically enforced the same
+  way =strategy='s own broker/execution/risk isolation already is.
+- =chart= has no test-suite dependency on real backtest/journal data
+  yet; the adapter that builds an =OverviewInput=/=EpisodeInput= from
+  a real =backtest.Result=/=journal.Record= stream for
+  =strategy/smatrend= specifically is the next, separate piece of
+  work issue #355 itself anticipates ("chart generation should be
+  reusable across strategies even if the first implementation is
+  tailored to SMA Long Hold").
+- OHLC/candlestick rendering, interactive zoom/hover, indicator
+  toggling, an HTML dashboard, and order-lifecycle (OCO) visualization
+  all remain explicit, named follow-ups per issue #355's own "Follow-
+  ups, not required initially" section — none of them are addressed
+  by this ADR.
+
+* Alternatives Considered
+
+- *A =report/chart= subpackage instead of a new top-level =chart=
+  package.* Considered, since issue #355 itself describes "a
+  research/report/chart layer." Rejected: =report= already has its
+  own stable, narrow purpose (Org/text/JSON renderers over a
+  =backtest.Result=-derived model, ADR-038) and importing =backtest=-
+  shaped types; nesting =chart= under it would either force =chart=
+  to inherit that dependency (undesirable — a future =live= session
+  should be able to chart without a =backtest.Result= existing) or
+  require carving out an import-cycle-free split inside one package
+  that a new top-level package avoids for free.
+- *A hand-rolled drawing package (using =fogleman/gg= or Go's own
+  =image/draw=) instead of a charting library.* Rejected for this
+  first pass: axis layout, tick generation, legends, and line/scatter
+  plotting are exactly the "large generic charting framework" issue
+  #355 says not to build ahead of proving the required overlays;
+  =gonum.org/v1/plot= already solves the general 2D-plot-layout
+  problem correctly and deterministically.
+- *A JavaScript/HTML-canvas-based interactive chart (e.g. embedding
+  lightweight-charts, already familiar from other research tooling in
+  this environment) as the first implementation.* Rejected: issue
+  #355 explicitly scopes interactive/HTML dashboards as a later
+  follow-up, and a browser-rendered chart cannot satisfy "no
+  dependency on network services" or "deterministic output for
+  identical inputs" as cleanly as a static, embedded-font Go renderer
+  can.
+- *Reusing =LevelPoint= (=num.Price=-backed) for the equity curve
+  instead of a distinct =EquityPoint=.* Rejected: see the =EquityPoint=
+  decision above — conflating a market price and an account's money
+  value in one type is exactly what ADR-004's separate exact numeric
+  types exist to prevent, even at this display/research tier.

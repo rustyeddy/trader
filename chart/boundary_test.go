@@ -1,4 +1,4 @@
-package smatrend
+package chart
 
 import (
 	"go/parser"
@@ -11,16 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSmatrendNeverImportsRuntimeApplicationOrTransportPackages is
-// issue #335 (EQS-01)'s own architectural guard, mirroring
-// strategy/emacross/boundary_test.go's identical pattern: a concrete
-// strategy implementation must remain as broker/execution/risk/
-// backtest-adapter neutral as the strategy contract it implements
-// (ADR-005). It parses every non-test .go file's own import block
-// directly, per file, rather than a package-level `go list` that would
-// merge every file's imports together.
-func TestSmatrendNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T) {
+// TestChartNeverImportsStrategyRuntimeOrApplicationPackages is issue
+// #355's own architectural guard, mirroring strategy/smatrend/
+// boundary_test.go's identical pattern (and, per doc.go's own note,
+// enforcing the mirror-image invariant: chart is a research/
+// reporting-tier package like report and journal, and must remain as
+// unaware of a strategy's own decision logic, broker/execution/risk
+// wiring, and application/transport composition as those packages
+// are of it). It parses every non-test .go file's own import block
+// directly, per file, rather than a package-level `go list` that
+// would merge every file's imports together.
+func TestChartNeverImportsStrategyRuntimeOrApplicationPackages(t *testing.T) {
 	forbiddenRoots := []string{
+		"github.com/rustyeddy/trader/strategy",
 		"github.com/rustyeddy/trader/broker",
 		"github.com/rustyeddy/trader/execution",
 		"github.com/rustyeddy/trader/risk",
@@ -29,12 +32,6 @@ func TestSmatrendNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T)
 		"github.com/rustyeddy/trader/service",
 		"github.com/rustyeddy/trader/cmd",
 		"github.com/rustyeddy/trader/adapters",
-		// A strategy must remain as unaware of how — or whether — its
-		// own decisions are ever charted as it is of a broker
-		// (issue #355's own explicit "strategies must remain unaware
-		// of rendering" constraint, mirroring chart's own reverse
-		// guard, chart/boundary_test.go).
-		"github.com/rustyeddy/trader/chart",
 	}
 
 	entries, err := os.ReadDir(".")
