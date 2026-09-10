@@ -148,7 +148,25 @@ func (smaCrossExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDec
 // condition still computes and ratchets its stop under the
 // *previous* phase's own rule first — a same-bar activation must
 // never retrospectively tighten or loosen the stop that bar itself
-// already decided.
+// already decided. The handoff itself never loosens protection either
+// (issue #349 review): TRENDING's own ratchet floor starts at
+// whatever level PROBATION last protected, so if TRENDING's own
+// high-water-mark formula would imply a lower stop than that, nothing
+// is emitted until it genuinely ratchets past it — see onProbationBar.
+//
+// Known limitation (PR #350 review): the entry fill bar itself is not
+// protected by this rule's own intended probation stop at all. That
+// stop is only computed and emitted as an AdjustStop intent on the
+// bar OnBar first observes the fresh Long position, but by then
+// backtest.Scheduler's own broker-side resting-order machinery has
+// already resolved that same bar's own intrabar price action (see
+// Strategy.OnBar's own doc comment) — the emitted stop only becomes a
+// checked resting order starting the *following* bar. Solving this
+// needs an execution/pipeline capability (an entry submitted
+// atomically with its own protective stop) this codebase does not
+// have yet; see regression_test.go's own
+// TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation for a
+// regression-locked proof against a real fixture.
 //
 // Phase reports this rule's own current lifecycle state; Strategy
 // mirrors it via Strategy.Phase (see phase.go) so it is directly
@@ -238,6 +256,19 @@ func (r *probationTrendExitRule) onProbationBar(bar marketdata.Bar, smaValue flo
 	}
 	if bar.Close.Cmp(threshold) >= 0 {
 		r.phase = PhaseTrending
+		// Never-loosen handoff (issue #349 review): the high-water-mark
+		// trailing stop computed from TRENDING's own formula can land
+		// below the level PROBATION already protected (a wider trailing
+		// percentage against a high-water mark that hasn't run up much
+		// yet). Seeding TRENDING's own ratchet floor at the last
+		// protected probation level — never nil here, since the early
+		// return above for an SMA-cross exit is the only path that
+		// reaches this point without first setting r.probationStop —
+		// means onTrendingBar's existing ratchet-only comparison simply
+		// emits nothing until its own HWM-derived stop actually exceeds
+		// that floor, exactly like a normal missed ratchet. Graduating
+		// out of PROBATION never increases dollar risk on the position.
+		r.trendStop = r.probationStop
 	}
 	return decision, nil
 }

@@ -64,7 +64,7 @@
 //     indefinitely for a pullback-and-recross merely because the run
 //     happened to start mid-trend.
 //
-// A fourth built-in ExitRule, "probation-trend" (issue #349), governs
+// A third built-in ExitRule, "probation-trend" (issue #349), governs
 // the SMA Long Hold playbook's own three-state position lifecycle —
 // FLAT, PROBATION, and TRENDING — exposed as Strategy.Phase rather
 // than staying private to the rule (see phase.go): a freshly entered

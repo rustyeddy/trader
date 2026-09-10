@@ -147,7 +147,7 @@ func TestProbationTrendExitRule_ActivatesOnCloseGainThresholdWithoutRetroactivel
 	// shaped (104*0.99=102.96), not the wildly different trending
 	// value (high-water-mark 130*0.90=117) activation would imply if
 	// it applied retroactively to this same bar.
-	decision, err := rule.OnLongBar(mustBar(t, "104", "102", "103", "105"), 104)
+	decision, err := rule.OnLongBar(mustBar(t, "103", "106", "102", "105"), 104)
 	require.NoError(t, err)
 	assert.False(t, decision.ExitNow)
 	require.NotNil(t, decision.NewStop)
@@ -160,11 +160,48 @@ func TestProbationTrendExitRule_ActivatesOnCloseGainThresholdWithoutRetroactivel
 	// must reflect that still-standing 130 high-water mark, proving it
 	// survived the probation->trending boundary intact:
 	// 130 * 0.90 = 117.
-	decision, err = rule.OnLongBar(mustBar(t, "60", "105", "55", "50"), 200)
+	decision, err = rule.OnLongBar(mustBar(t, "60", "105", "45", "50"), 200)
 	require.NoError(t, err)
 	assert.False(t, decision.ExitNow, "trending phase is immune to a close under the SMA")
 	require.NotNil(t, decision.NewStop)
 	assert.Equal(t, "117", decision.NewStop.String(), "must use the high-water mark set back during probation, not just since activation")
+}
+
+// TestProbationTrendExitRule_HandoffNeverLoosensProtection proves the
+// PROBATION->TRENDING handoff policy issue #349's review settled on
+// ("never-loosen"): TRENDING's own raw high-water-mark formula can
+// imply a lower stop than PROBATION already protected (a wide
+// trailing percentage against a high-water mark that hasn't run up
+// much since activation), and the handoff must never actually loosen
+// protection to that lower value — it must simply emit nothing until
+// TRENDING's own ratchet genuinely earns a level above what PROBATION
+// already had in place.
+func TestProbationTrendExitRule_HandoffNeverLoosensProtection(t *testing.T) {
+	rule := newProbationTrendRuleForTest(t)
+	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"))
+
+	// Activates this bar: sma=104, close=105 >= 100*1.05=105
+	// threshold. Probation stop = 104*0.99 = 102.96.
+	decision, err := rule.OnLongBar(mustBar(t, "103", "105", "102", "105"), 104)
+	require.NoError(t, err)
+	require.NotNil(t, decision.NewStop)
+	assert.Equal(t, "102.96", decision.NewStop.String())
+	assert.Equal(t, PhaseTrending, rule.Phase())
+
+	// Now genuinely trending. A modest new high-water mark (110) would
+	// imply 110*0.90=99 under TRENDING's own raw formula — below the
+	// 102.96 already protected. Nothing must be emitted.
+	decision, err = rule.OnLongBar(mustBar(t, "80", "110", "50", "60"), 200)
+	require.NoError(t, err)
+	assert.Nil(t, decision.NewStop, "must never loosen from 102.96 down to 99")
+
+	// A high-water mark large enough (130) that 130*0.90=117 finally
+	// exceeds 102.96: normal ratcheting resumes once it's genuinely
+	// earned.
+	decision, err = rule.OnLongBar(mustBar(t, "80", "130", "50", "60"), 200)
+	require.NoError(t, err)
+	require.NotNil(t, decision.NewStop)
+	assert.Equal(t, "117", decision.NewStop.String())
 }
 
 // TestProbationTrendExitRule_TrendingStopRatchetsMonotonicallyUpward

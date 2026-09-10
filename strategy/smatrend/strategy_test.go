@@ -824,13 +824,27 @@ func TestStrategy_ProbationTrendFullLifecyclePhaseTransitions(t *testing.T) {
 	assert.Equal(t, PhaseTrending, h.strategy.Phase(), "the transition takes effect immediately after this bar")
 
 	// Bar 9: now genuinely Trending. Deep below any plausible SMA
-	// (immune) with a lower High (90) than the 110 set back on bar 7
-	// during probation — the stop must still reflect that 110
-	// high-water mark: 110 * 0.90 = 99.
+	// (immune) with a lower High (90) than the 110 high-water mark bar
+	// 7 already set — TRENDING's own raw formula (110*0.90=99) would
+	// actually *loosen* protection below the 103.95 probation stop
+	// bar 8 already placed, so the never-loosen handoff (issue #349
+	// review) must emit nothing here, leaving that 103.95 resting stop
+	// in place untouched.
 	intents, _ = h.onBar(9, bar{open: 80, high: 90, low: 45, close: 50})
+	assert.Empty(t, intents, "TRENDING's own raw stop (99) is below the 103.95 probation stop already in place and must never loosen it")
+	assert.Equal(t, PhaseTrending, h.strategy.Phase())
+
+	// Bar 10: a genuine new high-water mark (130, since entry) finally
+	// pushes TRENDING's own formula (130*0.90=117) past that 103.95
+	// floor — normal ratcheting resumes once it actually earns it.
+	// Close stays low (55) deliberately: TRENDING is immune to the SMA
+	// entirely, so this also keeps the SMA itself low for the
+	// following bars, letting a real fresh cross re-enter later
+	// without an outsized High permanently skewing it.
+	intents, _ = h.onBar(10, bar{open: 60, high: 130, low: 55, close: 55})
 	require.Len(t, intents, 1)
-	assert.Equal(t, order.IntentAdjustStop, intents[0].Kind, "trending phase is immune to a close under the SMA")
-	assert.Equal(t, "99", intents[0].StopPrice.String(), "must reflect the high-water mark set back during probation, not merely since activation")
+	assert.Equal(t, order.IntentAdjustStop, intents[0].Kind)
+	assert.Equal(t, "117", intents[0].StopPrice.String())
 	assert.Equal(t, PhaseTrending, h.strategy.Phase())
 
 	// The trailing stop triggers (broker-side, ADR-026) — Strategy
@@ -840,12 +854,12 @@ func TestStrategy_ProbationTrendFullLifecyclePhaseTransitions(t *testing.T) {
 
 	// Two flat bars staying below the SMA: fresh-cross re-entry must
 	// wait.
-	intents, _ = h.onBar(10, bar{open: 45, high: 48, low: 38, close: 40})
+	intents, _ = h.onBar(11, bar{open: 45, high: 48, low: 38, close: 40})
 	assert.Empty(t, intents)
 	assert.Equal(t, PhaseFlat, h.strategy.Phase())
 
 	// A genuine fresh cross back above the SMA re-enters.
-	intents, _ = h.onBar(11, bar{open: 45, high: 72, low: 44, close: 70})
+	intents, _ = h.onBar(12, bar{open: 45, high: 72, low: 44, close: 70})
 	require.Len(t, intents, 1)
 	require.Equal(t, order.IntentEnter, intents[0].Kind)
 	h.side = order.Long
@@ -853,14 +867,15 @@ func TestStrategy_ProbationTrendFullLifecyclePhaseTransitions(t *testing.T) {
 	assert.Equal(t, PhaseFlat, h.strategy.Phase(), "still only the entry-decision bar")
 
 	// The re-entry's own first Long bar must start a fresh Probation
-	// episode: no stale high-water mark or activation state carried
-	// over from the first episode (whose high-water mark had reached
-	// 110). close (72) stays under the fresh 70*1.05=73.5 activation
+	// episode: no stale high-water mark, activation, or trend-stop
+	// floor carried over from the first episode (whose high-water
+	// mark had reached 130 and whose trend-stop floor had reached
+	// 117). close (72) stays under the fresh 70*1.05=73.5 activation
 	// threshold, so this also confirms activation is computed from
 	// the new episode's own entry price, not the old one.
-	intents, _ = h.onBar(12, bar{open: 71, high: 73, low: 70, close: 72})
+	intents, _ = h.onBar(13, bar{open: 71, high: 73, low: 70, close: 72})
 	require.Len(t, intents, 1)
 	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
 	assert.Equal(t, PhaseProbation, h.strategy.Phase(), "a fresh re-entry must start in Probation, never stale Trending")
-	assert.Less(t, intents[0].StopPrice.Cmp(num.MustParsePrice("99")), 0, "the fresh probation stop must be nowhere near the old episode's 99 trending stop")
+	assert.Less(t, intents[0].StopPrice.Cmp(num.MustParsePrice("99")), 0, "the fresh probation stop must be nowhere near the old episode's stop levels")
 }

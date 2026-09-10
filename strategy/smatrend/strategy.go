@@ -51,8 +51,10 @@ type Strategy struct {
 	initialEntryRule InitialEntryRule
 
 	// everExited is false until the first exit (however triggered) has
-	// occurred. The very first entry ever always uses the cross-
-	// above-SMA trigger directly, never reEntryRule — see onFlat.
+	// occurred. The very first entry ever is governed by
+	// initialEntryRule (not necessarily a fresh SMA cross — see
+	// InitialEntryRule's own doc comment), never reEntryRule — see
+	// onFlat.
 	everExited bool
 	// sideLastBar records this instrument's own position side as
 	// observed on the *previous* OnBar call, so a transition (Flat->Long

@@ -406,3 +406,54 @@ func TestSMATrend_BreakoutReEntryChangesRealOutcome(t *testing.T) {
 	assert.Empty(t, resp.OpenTrades, "no re-entry ever occurred, so no open trade can exist at the end of the run")
 	assert.Empty(t, resp.Account.Positions(), "the account must remain flat for the rest of the fixture")
 }
+
+// TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation documents
+// a known limitation of the "probation-trend" ExitRule raised in PR
+// #350 review, using the exact same real EURUSD bars
+// TestSMATrend_EndToEndRegression exercises: bar 5 (2024-01-12, the
+// entry fill bar) has Low 1.10000 and SMA(bar3,4,5)=1.11667, so the
+// intended probation stop — 1.11667 * (1-0.01) = 1.1055 — is breached
+// intrabar on this very bar, yet its Close (1.15000) recovers back
+// above the SMA.
+//
+// The playbook's own intent is that this should stop the position out
+// intrabar. It does not, for a real sequencing reason rather than a
+// bug in the stop math itself: Strategy only ever observes a fresh
+// Long position — and therefore only ever computes and emits its
+// first protective stop — on the bar *after* the entry decision (the
+// fill bar itself), but backtest.Scheduler's own broker-side
+// resting-order machinery has already resolved that fill bar's own
+// intrabar price action *before* OnBar ever runs for it (see
+// Strategy.OnBar's own doc comment). The AdjustStop intent bar 5's own
+// OnBar call emits only becomes a resting order checked against
+// intrabar price action starting bar 6 onward. Every other ExitRule
+// in this package has the identical gap; "probation-trend" simply
+// makes it matter most, since its whole purpose is a *tight* stop
+// immediately after entry.
+//
+// Solving this needs an execution/pipeline capability this codebase
+// does not have yet — submitting a protective stop atomically with
+// the entry order itself, rather than one bar later — which is out of
+// scope for issue #349's current implementation pass. This test
+// exists so the gap is proven and regression-locked rather than
+// silently assumed away: if a future change to Strategy or the
+// pipeline closes this gap, this test's own assertion (that the
+// position survives bar 5 unprotected) will fail and must be updated
+// deliberately, not accidentally.
+func TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation(t *testing.T) {
+	resp, _ := runSMATrendFixtureWithConfig(t, smatrend.Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		ReEntryRuleName:     "fresh-cross",
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+		TrailingStopPercent: num.MustParseRate("0.10"),
+	})
+
+	bar5Fill := time.Date(2024, time.January, 12, 22, 0, 0, 0, time.UTC)
+	require.NotEmpty(t, resp.Trades, "the position must have closed eventually for this run to produce a trade at all")
+	first := resp.Trades[0]
+	assert.True(t, first.OpenedAt.Equal(bar5Fill), "got %s", first.OpenedAt)
+	assert.True(t, first.ClosedAt.After(bar5Fill),
+		"known limitation: the position must survive bar 5's own intrabar Low (1.10000), which breaches the 1.1055 probation stop that same bar's SMA implies — the resting stop is not active until the following bar")
+}
