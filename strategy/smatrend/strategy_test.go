@@ -879,3 +879,55 @@ func TestStrategy_ProbationTrendFullLifecyclePhaseTransitions(t *testing.T) {
 	assert.Equal(t, PhaseProbation, h.strategy.Phase(), "a fresh re-entry must start in Probation, never stale Trending")
 	assert.Less(t, intents[0].StopPrice.Cmp(num.MustParsePrice("99")), 0, "the fresh probation stop must be nowhere near the old episode's stop levels")
 }
+
+// TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar is PR
+// #350 review's own required proof for the "above-sma" ReEntryRule
+// (issue #349/#350): a stop-out whose bar still closes above the SMA
+// must re-enter immediately on that very same bar — not wait for a
+// fresh cross or a reclaim/breakout threshold — relying entirely on
+// the central above-SMA gate, and that re-entry must start a genuine
+// fresh PROBATION episode.
+func TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar(t *testing.T) {
+	h := newTestHarness(t, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		ReEntryRuleName:     "above-sma",
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+		TrailingStopPercent: num.MustParseRate("0.10"),
+	})
+
+	for i, c := range []float64{100, 100, 100, 99} {
+		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
+	}
+	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	h.side = order.Long
+	h.avgPrice = "102"
+
+	// Bar 6: first Long bar, Probation stop placed at 99.99.
+	intents, _ = h.onBar(6, bar{open: 103, high: 105, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	assert.Equal(t, "99.99", intents[0].StopPrice.String())
+	assert.Equal(t, PhaseProbation, h.strategy.Phase())
+
+	// A broker-side stop-out (ADR-026) — as if the resting 99.99 stop
+	// were touched intrabar — but this bar's own Close (105) recovers
+	// back above the SMA (103): "stop-out while still above the SMA,"
+	// exactly the case above-sma exists for.
+	h.triggerStop()
+	intents, _ = h.onBar(7, bar{open: 100, high: 106, low: 99, close: 105})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind, "above-sma must re-enter on the very next eligible flat bar, with no fresh cross or reclaim/breakout threshold required")
+	h.side = order.Long
+	h.avgPrice = "105"
+
+	// The re-entry's own first Long bar must start a fresh Probation
+	// episode.
+	intents, _ = h.onBar(8, bar{open: 104, high: 107, low: 103, close: 106})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
+	assert.Equal(t, "103.29", intents[0].StopPrice.String())
+	assert.Equal(t, PhaseProbation, h.strategy.Phase(), "re-entry must start a fresh Probation episode, never stale Trending")
+}

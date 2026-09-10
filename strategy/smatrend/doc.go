@@ -33,8 +33,9 @@
 //     "trailing-stop", is smatrend's own original behavior: track the
 //     high-water mark and ratchet a monotonic (never-decreasing) stop
 //     level, never exiting because price merely falls back below the
-//     SMA. "sma-cross" is the one other built-in: exit outright once
-//     the close is at or below the SMA, with no resting stop at all.
+//     SMA. "sma-cross" exits outright once the close is at or below
+//     the SMA, with no resting stop at all — see below for the third
+//     built-in, "probation-trend".
 //   - ReEntryRule (Config.ReEntryRuleName) decides, once per bar while
 //     flat, above the SMA, and after at least one prior exit, whether
 //     to re-enter — gated centrally by Strategy itself (issue #349
@@ -48,7 +49,13 @@
 //     above the level the strategy exited at, without waiting for the
 //     SMA to catch up. "breakout" re-enters as soon as the close
 //     exceeds the highest High observed since the exit, independent
-//     of the old exit level.
+//     of the old exit level. "above-sma" re-enters on the very first
+//     eligible flat bar with no further condition of its own: since
+//     the central gate has already confirmed price is back above the
+//     SMA before this rule is even consulted, its own meaning is
+//     simply "resume immediately once the bullish regime returns,"
+//     without waiting for a fresh cross or a reclaim/breakout
+//     threshold.
 //   - InitialEntryRule (Config.InitialEntryModeName) decides, once
 //     per bar while flat and before this strategy has ever held or
 //     exited a position, whether to make its very first entry (issue
