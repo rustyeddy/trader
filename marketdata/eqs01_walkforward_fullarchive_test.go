@@ -117,10 +117,43 @@ const (
 	eqs01WFStepBars  = 252
 
 	eqs01WFStartingCapital  = "100000"
-	eqs01WFRiskFraction     = "0.01"
-	eqs01WFAdversePercent   = 0.05 // 5% of the fold's own train-start price — see AdverseDistance's own doc note below.
 	eqs01WFMinDrawdownFloor = 0.01 // Calmar-ratio denominator floor, avoiding a near-zero-drawdown blowup.
 )
+
+// eqs01WFSizingMode is one (RiskFraction, AdversePercent) sizing
+// policy this sweep runs the full walk-forward protocol under.
+// risk.FixedFractionSizer computes quantity as (equity x
+// RiskFraction) / (AdverseDistance x multiplier), so notional exposure
+// when a position is open works out to equity x (RiskFraction /
+// AdversePercent) — a Sizer never sees the current market price
+// directly (risk.SizeInput carries no price field at all, by design:
+// sizing is meant to be a pure function of equity/risk-fraction/stop-
+// distance, not of price), so "full notional" exposure is reached
+// indirectly, by choosing RiskFraction and AdversePercent whose ratio
+// is 1.0, rather than by writing a second Sizer implementation.
+//
+// riskManaged is EQS-01's own original, non-optimized reference
+// sizing (1% risk, 5% assumed adverse distance) — deliberately
+// conservative, and deliberately not comparable to a 100%-invested
+// buy-and-hold baseline on its own (a real user asked exactly this
+// question after the first version of this sweep's results: "are
+// these using the same size lots?" — they were not). fullNotional
+// targets the same ~100% equity notional deployment buy-and-hold
+// itself uses whenever a position is open, making that comparison
+// fair; it is not a realistic trading configuration (a 100%-of-equity
+// single-instrument position with no assumed stop distance for sizing
+// purposes is not something a real account should run), only a
+// deliberately constructed baseline for this one comparison.
+type eqs01WFSizingMode struct {
+	Name           string
+	RiskFraction   num.Rate
+	AdversePercent float64
+}
+
+var eqs01WFSizingModes = []eqs01WFSizingMode{
+	{Name: "risk-managed", RiskFraction: num.MustParseRate("0.01"), AdversePercent: 0.05},
+	{Name: "full-notional", RiskFraction: num.MustParseRate("1"), AdversePercent: 1.0},
+}
 
 // eqs01WFGridSMAPeriods/TrailingStopPercents are the frozen 6x5 = 30
 // combination parameter grid, exactly as authorized: SMAPeriod and
@@ -174,6 +207,7 @@ type eqs01WFFoldResult struct {
 // including the training-only prefix would not be a fair comparison).
 type eqs01WFInstrumentSummary struct {
 	Instrument       string              `json:"instrument"`
+	SizingMode       string              `json:"sizing_mode"`
 	Folds            []eqs01WFFoldResult `json:"folds"`
 	WalkForwardStart time.Time           `json:"walk_forward_start"`
 	WalkForwardEnd   time.Time           `json:"walk_forward_end"`
@@ -344,21 +378,24 @@ func TestEQS01WalkForward(t *testing.T) {
 			continue
 		}
 
-		summary := runEQS01WalkForwardForInstrument(t, ctx, inst)
-		summaries = append(summaries, summary)
+		setup := setupEQS01WalkForwardInstrument(t, ctx, inst)
+		for _, mode := range eqs01WFSizingModes {
+			summary := runEQS01WalkForwardFolds(t, ctx, inst, setup, mode)
+			summaries = append(summaries, summary)
 
-		out, err := json.MarshalIndent(summary, "", "  ")
-		if err != nil {
-			t.Fatalf("marshal %s summary: %v", inst.Symbol, err)
+			out, err := json.MarshalIndent(summary, "", "  ")
+			if err != nil {
+				t.Fatalf("marshal %s/%s summary: %v", inst.Symbol, mode.Name, err)
+			}
+			outPath := filepath.Join(fullArchiveEQS01OutputDir, inst.Symbol+"-"+mode.Name+"-walkforward.json")
+			if err := os.WriteFile(outPath, out, 0o644); err != nil {
+				t.Fatalf("write %s: %v", outPath, err)
+			}
+			t.Logf("%s/%s: wrote %d folds to %s", inst.Symbol, mode.Name, len(summary.Folds), outPath)
+			t.Logf("%s/%s: chained OOS return=%.2f%% CAGR=%.2f%% vs buy-and-hold return=%.2f%% CAGR=%.2f%%",
+				inst.Symbol, mode.Name, summary.ChainedOOSReturn*100, summary.ChainedOOSCAGR*100,
+				summary.BuyAndHoldReturn*100, summary.BuyAndHoldCAGR*100)
 		}
-		outPath := filepath.Join(fullArchiveEQS01OutputDir, inst.Symbol+"-walkforward.json")
-		if err := os.WriteFile(outPath, out, 0o644); err != nil {
-			t.Fatalf("write %s: %v", outPath, err)
-		}
-		t.Logf("%s: wrote %d folds to %s", inst.Symbol, len(summary.Folds), outPath)
-		t.Logf("%s: chained OOS return=%.2f%% CAGR=%.2f%% vs buy-and-hold return=%.2f%% CAGR=%.2f%%",
-			inst.Symbol, summary.ChainedOOSReturn*100, summary.ChainedOOSCAGR*100,
-			summary.BuyAndHoldReturn*100, summary.BuyAndHoldCAGR*100)
 	}
 
 	if len(summaries) == 0 {
@@ -366,7 +403,20 @@ func TestEQS01WalkForward(t *testing.T) {
 	}
 }
 
-func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eqs01WFInstrument) eqs01WFInstrumentSummary {
+// eqs01WFSetup holds one instrument's own canonical data and broker-
+// side registration, built once and reused across every sizing
+// mode's own full walk-forward run — none of this setup is sizing-
+// mode-dependent, so repeating it per mode would just re-import and
+// re-build the identical canonical data.
+type eqs01WFSetup struct {
+	mgr         *marketdata.Manager
+	simResolver instrument.Resolver
+	simID       instrument.ID
+	bars        []marketdata.Bar
+	priceByTime map[time.Time]marketdata.Bar
+}
+
+func setupEQS01WalkForwardInstrument(t *testing.T, ctx context.Context, inst eqs01WFInstrument) eqs01WFSetup {
 	t.Helper()
 
 	rawRoot := t.TempDir()
@@ -458,8 +508,22 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 		t.Fatalf("%s: sim-provider instrument ID %s does not match data-provider instrument ID %s (both registrations must resolve to the identical economic instrument)", inst.Symbol, simID, instID)
 	}
 
+	return eqs01WFSetup{mgr: mgr, simResolver: simResolver, simID: simID, bars: bars, priceByTime: priceByTime}
+}
+
+// runEQS01WalkForwardFolds runs the full walk-forward protocol for
+// inst under one sizing mode, reusing setup's already-built canonical
+// data. See eqs01WFSizingMode's own doc comment for why mode alone —
+// not a second Sizer implementation — is what varies between a
+// realistic risk-managed run and the fully-comparable-to-buy-and-hold
+// one.
+func runEQS01WalkForwardFolds(t *testing.T, ctx context.Context, inst eqs01WFInstrument, setup eqs01WFSetup, mode eqs01WFSizingMode) eqs01WFInstrumentSummary {
+	t.Helper()
+	mgr, simResolver, simID, bars, priceByTime := setup.mgr, setup.simResolver, setup.simID, setup.bars, setup.priceByTime
+	label := inst.Symbol + "/" + mode.Name
+
 	startingCapital := num.MustParseMoney(eqs01WFStartingCapital, num.MustParseCurrency("USD"))
-	riskFraction := num.MustParseRate(eqs01WFRiskFraction)
+	riskFraction := mode.RiskFraction
 
 	var folds []eqs01WFFoldResult
 	numFolds := (len(bars) - eqs01WFTrainBars) / eqs01WFStepBars
@@ -484,16 +548,16 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 
 		trainSpan, err := marketdata.NewTimeRange(trainStart, trainEndExclusive)
 		if err != nil {
-			t.Fatalf("%s: fold %d: train NewTimeRange: %v", inst.Symbol, i, err)
+			t.Fatalf("%s: fold %d: train NewTimeRange: %v", label, i, err)
 		}
 		combinedSpan, err := marketdata.NewTimeRange(trainStart, testEndExclusive)
 		if err != nil {
-			t.Fatalf("%s: fold %d: combined NewTimeRange: %v", inst.Symbol, i, err)
+			t.Fatalf("%s: fold %d: combined NewTimeRange: %v", label, i, err)
 		}
 
-		adverseDistance, err := bars[trainStartIdx].Open.MulRate(num.MustParseRate(fmt.Sprintf("%.8f", eqs01WFAdversePercent)))
+		adverseDistance, err := bars[trainStartIdx].Open.MulRate(num.MustParseRate(fmt.Sprintf("%.8f", mode.AdversePercent)))
 		if err != nil {
-			t.Fatalf("%s: fold %d: computing adverse distance: %v", inst.Symbol, i, err)
+			t.Fatalf("%s: fold %d: computing adverse distance: %v", label, i, err)
 		}
 
 		trainYears := trainEndExclusive.Sub(trainStart).Hours() / 24 / 365.25
@@ -508,7 +572,7 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 				cfg := smatrend.Config{SMAPeriod: smaPeriod, TrailingStopPercent: num.MustParseRate(tsp)}
 				resp, err := runEQS01WFBacktest(ctx, mgr, simResolver, simID, trainSpan, cfg, startingCapital, riskFraction, adverseDistance, priceByTime)
 				if err != nil {
-					t.Logf("%s: fold %d: train combo sma=%d tsp=%s: %v (skipped)", inst.Symbol, i, smaPeriod, tsp, err)
+					t.Logf("%s: fold %d: train combo sma=%d tsp=%s: %v (skipped)", label, i, smaPeriod, tsp, err)
 					continue
 				}
 				cagr := cagrFromReturn(mustParseFloatWF(t, resp.Metrics.NetReturn().String()), trainYears)
@@ -524,14 +588,14 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 			}
 		}
 		if bestTrailingStop == "" {
-			t.Logf("%s: fold %d: every combo failed on the train window; skipping fold", inst.Symbol, i)
+			t.Logf("%s: fold %d: every combo failed on the train window; skipping fold", label, i)
 			continue
 		}
 
 		winningCfg := smatrend.Config{SMAPeriod: bestSMAPeriod, TrailingStopPercent: num.MustParseRate(bestTrailingStop)}
 		resp, err := runEQS01WFBacktest(ctx, mgr, simResolver, simID, combinedSpan, winningCfg, startingCapital, riskFraction, adverseDistance, priceByTime)
 		if err != nil {
-			t.Logf("%s: fold %d: OOS run with winning combo sma=%d tsp=%s failed: %v (skipping fold)", inst.Symbol, i, bestSMAPeriod, bestTrailingStop, err)
+			t.Logf("%s: fold %d: OOS run with winning combo sma=%d tsp=%s failed: %v (skipping fold)", label, i, bestSMAPeriod, bestTrailingStop, err)
 			continue
 		}
 
@@ -540,7 +604,7 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 		baselineEquity, ok1 := equityCurveAt(resp.EquityCurve, baselineTime)
 		finalEquity, ok2 := equityCurveAt(resp.EquityCurve, finalTime)
 		if !ok1 || !ok2 {
-			t.Fatalf("%s: fold %d: could not locate baseline/final equity-curve points at %s/%s", inst.Symbol, i, baselineTime, finalTime)
+			t.Fatalf("%s: fold %d: could not locate baseline/final equity-curve points at %s/%s", label, i, baselineTime, finalTime)
 		}
 
 		testReturn := finalEquity/baselineEquity - 1
@@ -573,7 +637,7 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 			TestTradeCount:              testTrades,
 		})
 		t.Logf("%s: fold %d [%s,%s)->[%s,%s): selected sma=%d tsp=%s (train CAGR=%.2f%% maxDD=%.2f%% calmar=%.3f) -> OOS return=%.2f%% CAGR=%.2f%% maxDD=%.2f%% trades=%d",
-			inst.Symbol, i,
+			label, i,
 			trainStart.Format("2006-01-02"), trainEndExclusive.Format("2006-01-02"),
 			testStart.Format("2006-01-02"), testEndExclusive.Format("2006-01-02"),
 			bestSMAPeriod, bestTrailingStop, bestTrainCAGR*100, bestTrainMaxDD*100, bestScore,
@@ -581,7 +645,7 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 	}
 
 	if len(folds) == 0 {
-		t.Fatalf("%s: no folds completed", inst.Symbol)
+		t.Fatalf("%s: no folds completed", label)
 	}
 
 	chainedReturn := 1.0
@@ -602,11 +666,11 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 	// #346 review).
 	bhStartPrice, ok1 := priceByTime[wfStart]
 	if !ok1 {
-		t.Fatalf("%s: no canonical bar at walk-forward start %s", inst.Symbol, wfStart)
+		t.Fatalf("%s: no canonical bar at walk-forward start %s", label, wfStart)
 	}
 	lastIdx := sort.Search(len(bars), func(i int) bool { return !bars[i].Time.Before(wfEnd) }) - 1
 	if lastIdx < 0 {
-		t.Fatalf("%s: no canonical bar before walk-forward end %s", inst.Symbol, wfEnd)
+		t.Fatalf("%s: no canonical bar before walk-forward end %s", label, wfEnd)
 	}
 	bhEndBar := bars[lastIdx]
 	bhReturn := mustParseFloatWF(t, bhEndBar.Close.String())/mustParseFloatWF(t, bhStartPrice.Close.String()) - 1
@@ -615,6 +679,7 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 
 	return eqs01WFInstrumentSummary{
 		Instrument:       inst.Symbol,
+		SizingMode:       mode.Name,
 		Folds:            folds,
 		WalkForwardStart: wfStart,
 		WalkForwardEnd:   wfEnd,
