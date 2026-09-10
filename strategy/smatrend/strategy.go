@@ -46,8 +46,9 @@ type Strategy struct {
 	sma   *indicator.SMA
 	cross crossState
 
-	exitRule    ExitRule
-	reEntryRule ReEntryRule
+	exitRule         ExitRule
+	reEntryRule      ReEntryRule
+	initialEntryRule InitialEntryRule
 
 	// everExited is false until the first exit (however triggered) has
 	// occurred. The very first entry ever always uses the cross-
@@ -102,13 +103,18 @@ func New(instrumentID instrument.ID, interval marketdata.Interval, config Config
 	if err != nil {
 		return nil, fmt.Errorf("smatrend: constructing reentry rule %q: %w", config.reEntryRuleName(), err)
 	}
+	initialEntryRule, err := initialEntryRuleRegistry[config.initialEntryModeName()](config)
+	if err != nil {
+		return nil, fmt.Errorf("smatrend: constructing initial entry rule %q: %w", config.initialEntryModeName(), err)
+	}
 	return &Strategy{
-		instrumentID: instrumentID,
-		interval:     interval,
-		config:       config,
-		sma:          sma,
-		exitRule:     exitRule,
-		reEntryRule:  reEntryRule,
+		instrumentID:     instrumentID,
+		interval:         interval,
+		config:           config,
+		sma:              sma,
+		exitRule:         exitRule,
+		reEntryRule:      reEntryRule,
+		initialEntryRule: initialEntryRule,
 	}, nil
 }
 
@@ -117,6 +123,31 @@ func New(instrumentID instrument.ID, interval marketdata.Interval, config Config
 // without keeping a second copy of the same values.
 func (s *Strategy) Config() Config {
 	return s.config
+}
+
+// phaseReporter is implemented by an ExitRule that tracks its own
+// explicit Probation/Trending lifecycle (currently only
+// probationTrendExitRule); every other ExitRule has no such
+// distinction.
+type phaseReporter interface{ Phase() Phase }
+
+// Phase reports this Strategy's own current lifecycle phase (issue
+// #349): always PhaseFlat while no position is open, and otherwise
+// whatever the configured ExitRule itself reports through the
+// optional phaseReporter capability — PhaseFlat for any ExitRule with
+// no Probation/Trending distinction of its own (trailing-stop,
+// sma-cross), and the real state for "probation-trend". Exposed so
+// Probation/Trending is a first-class, queryable concept for
+// journaling, debugging, and tests, rather than private state hidden
+// inside one ExitRule implementation (PR #348/#349 review).
+func (s *Strategy) Phase() Phase {
+	if s.sideLastBar != order.Long {
+		return PhaseFlat
+	}
+	if pr, ok := s.exitRule.(phaseReporter); ok {
+		return pr.Phase()
+	}
+	return PhaseFlat
 }
 
 // Describe implements strategy.Strategy. WarmupBars equals SMAPeriod:
@@ -183,7 +214,11 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 		return s.onFlat(ctx, event, crossedAbove, aboveSMA, close, smaValue)
 	case order.Long:
 		if s.sideLastBar != order.Long {
-			s.exitRule.OnEntry(event.Bar)
+			entryPrice, err := currentPositionAvgPrice(view, s.instrumentID)
+			if err != nil {
+				return nil, fmt.Errorf("smatrend: reading entry price: %w", err)
+			}
+			s.exitRule.OnEntry(event.Bar, entryPrice)
 		}
 		s.sideLastBar = order.Long
 		return s.onLong(ctx, event, close, smaValue)
@@ -226,20 +261,21 @@ func (s *Strategy) onExit(exitBar marketdata.Bar) {
 }
 
 // onFlat handles a bar observed with no open position. The very first
-// entry ever (before onExit has ever run) always requires a fresh
-// cross above the SMA. Every entry after that is gated by aboveSMA
-// (the SMA Long Hold playbook's own re-entry invariant, PR #348
-// review): while price remains below the SMA, only a fresh cross
-// re-enters, regardless of the configured ReEntryRule — there is
-// nothing to "reclaim" or "break out of" in a regime this strategy
-// does not consider bullish yet. Only once price is back above the
-// SMA does reEntryRule get to decide how, within that regime, to
-// resume (issue #347).
+// entry ever (before onExit has ever run) is governed by
+// initialEntryRule (issue #349 review) — not necessarily a fresh
+// cross, see InitialEntryRule's own doc comment. Every entry after
+// that is gated by aboveSMA (the SMA Long Hold playbook's own
+// re-entry invariant, PR #348 review): while price remains below the
+// SMA, only a fresh cross re-enters, regardless of the configured
+// ReEntryRule — there is nothing to "reclaim" or "break out of" in a
+// regime this strategy does not consider bullish yet. Only once price
+// is back above the SMA does reEntryRule get to decide how, within
+// that regime, to resume (issue #347).
 func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedAbove, aboveSMA bool, close, smaValue float64) ([]order.Intent, error) {
 	var enter bool
 	switch {
 	case !s.everExited:
-		enter = crossedAbove
+		enter = s.initialEntryRule.ShouldEnter(InitialEntryContext{CrossedAboveSMA: crossedAbove, AboveSMA: aboveSMA})
 	case aboveSMA:
 		enter = s.reEntryRule.ShouldEnter(ReEntryContext{Bar: event.Bar, CrossedAboveSMA: crossedAbove})
 	default:
@@ -253,7 +289,7 @@ func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedA
 	if err != nil {
 		return nil, err
 	}
-	if err := s.recordSignal(ctx, event, close, smaValue, "enter-long", nil, []order.Intent{in}); err != nil {
+	if err := s.recordSignal(ctx, event, close, smaValue, PhaseFlat, "enter-long", nil, []order.Intent{in}); err != nil {
 		return nil, err
 	}
 	return []order.Intent{in}, nil
@@ -266,6 +302,11 @@ func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedA
 // (if any) it decides, then translate that decision into the
 // corresponding intent.
 func (s *Strategy) onLong(ctx context.Context, event strategy.BarEvent, close, smaValue float64) ([]order.Intent, error) {
+	// Captured before OnLongBar runs: a same-bar Probation->Trending
+	// activation must not make this bar's own journaled phase look
+	// like the decision was made under the new phase (issue #349).
+	phase := s.Phase()
+
 	decision, err := s.exitRule.OnLongBar(event.Bar, smaValue)
 	if err != nil {
 		return nil, fmt.Errorf("smatrend: exit rule: %w", err)
@@ -284,7 +325,7 @@ func (s *Strategy) onLong(ctx context.Context, event strategy.BarEvent, close, s
 		// no relationship to why this position closed (PR #348 review).
 		exitClose := event.Bar.Close
 		s.directExitReference = &exitClose
-		if err := s.recordSignal(ctx, event, close, smaValue, "exit-now", nil, []order.Intent{in}); err != nil {
+		if err := s.recordSignal(ctx, event, close, smaValue, phase, "exit-now", nil, []order.Intent{in}); err != nil {
 			return nil, err
 		}
 		return []order.Intent{in}, nil
@@ -300,7 +341,7 @@ func (s *Strategy) onLong(ctx context.Context, event strategy.BarEvent, close, s
 	}
 	s.lastStop = decision.NewStop
 
-	if err := s.recordSignal(ctx, event, close, smaValue, "adjust-stop", decision.NewStop, []order.Intent{in}); err != nil {
+	if err := s.recordSignal(ctx, event, close, smaValue, phase, "adjust-stop", decision.NewStop, []order.Intent{in}); err != nil {
 		return nil, err
 	}
 	return []order.Intent{in}, nil
@@ -308,9 +349,14 @@ func (s *Strategy) onLong(ctx context.Context, event strategy.BarEvent, close, s
 
 // recordSignal journals one KindSignal decision-evidence record for
 // this bar, if a Journal was configured (an Environment built for a
-// test that doesn't need decision evidence may leave it nil).
-// CorrelationID is the emitted intents' own.
-func (s *Strategy) recordSignal(ctx context.Context, event strategy.BarEvent, close, smaValue float64, action string, stopPrice *num.Price, intents []order.Intent) error {
+// test that doesn't need decision evidence may leave it nil). phase
+// is the caller's own already-captured Strategy.Phase() (issue #349):
+// callers capture it before invoking any exitRule method that might
+// itself transition phase for the *next* bar, so a same-bar
+// Probation->Trending activation is never journaled as though the
+// decision were already made under the new phase. CorrelationID is
+// the emitted intents' own.
+func (s *Strategy) recordSignal(ctx context.Context, event strategy.BarEvent, close, smaValue float64, phase Phase, action string, stopPrice *num.Price, intents []order.Intent) error {
 	if s.journal == nil {
 		return nil
 	}
@@ -321,6 +367,7 @@ func (s *Strategy) recordSignal(ctx context.Context, event strategy.BarEvent, cl
 		"action":       action,
 		"exit_rule":    s.config.exitRuleName(),
 		"reentry_rule": s.config.reEntryRuleName(),
+		"phase":        phase.String(),
 	}
 	if stopPrice != nil {
 		values["stop_price"] = stopPrice.String()
@@ -361,4 +408,22 @@ func currentPositionSide(view strategy.View, instID instrument.ID) order.Positio
 		}
 	}
 	return order.Flat
+}
+
+// currentPositionAvgPrice returns the real average fill price of
+// instID's open position (issue #349 review's explicit preference
+// for the actual entry/fill price over a signal-bar approximation),
+// read directly from the account snapshot's own Position.AvgPrice.
+// Only ever called on the bar OnBar first observes order.Long, when
+// order.NewPosition's own invariant guarantees AvgPrice is non-nil.
+func currentPositionAvgPrice(view strategy.View, instID instrument.ID) (num.Price, error) {
+	for _, p := range view.Account().Positions() {
+		if p.Listing.InstrumentID().Equal(instID) {
+			if p.AvgPrice == nil {
+				return num.Price{}, fmt.Errorf("smatrend: long position for %s has no AvgPrice", instID)
+			}
+			return *p.AvgPrice, nil
+		}
+	}
+	return num.Price{}, fmt.Errorf("smatrend: no open position found for %s", instID)
 }

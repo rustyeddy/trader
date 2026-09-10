@@ -2,6 +2,7 @@ package smatrend
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -39,8 +40,14 @@ type ExitRule interface {
 	// OnEntry is called exactly once, on the first bar a fresh long
 	// position is observed, so the rule can initialize any state
 	// relative to this specific position (for example seeding a
-	// high-water mark from the entry bar's own High).
-	OnEntry(entryBar marketdata.Bar)
+	// high-water mark from the entry bar's own High). entryPrice is
+	// the position's real average fill price, read from the account's
+	// own Position (issue #349 review) — not a signal-bar
+	// approximation — for a rule whose trigger depends on gain from
+	// entry (for example probationTrendExitRule's trail activation).
+	// A rule with no such dependency (trailingStopExitRule,
+	// smaCrossExitRule) simply ignores it.
+	OnEntry(entryBar marketdata.Bar, entryPrice num.Price)
 	// OnLongBar is called once per bar while long, after the position
 	// has survived the bar. smaValue is the strategy's own current
 	// SMA value, supplied for a rule whose trigger depends on it (for
@@ -53,8 +60,9 @@ type ExitRule interface {
 // new ExitRule is a new small type plus one entry here — never a
 // change to Strategy's own control flow (issue #347).
 var exitRuleRegistry = map[string]func(Config) (ExitRule, error){
-	"trailing-stop": newTrailingStopExitRule,
-	"sma-cross":     newSMACrossExitRule,
+	"trailing-stop":   newTrailingStopExitRule,
+	"sma-cross":       newSMACrossExitRule,
+	"probation-trend": newProbationTrendExitRule,
 }
 
 // trailingStopExitRule is EQS-01's own original, only exit mechanism
@@ -76,7 +84,7 @@ func newTrailingStopExitRule(cfg Config) (ExitRule, error) {
 	return &trailingStopExitRule{retainFraction: retain}, nil
 }
 
-func (r *trailingStopExitRule) OnEntry(entryBar marketdata.Bar) {
+func (r *trailingStopExitRule) OnEntry(entryBar marketdata.Bar, _ num.Price) {
 	high := entryBar.High
 	r.highWaterMark = &high
 	r.lastStop = nil
@@ -112,7 +120,7 @@ func newSMACrossExitRule(Config) (ExitRule, error) {
 	return smaCrossExitRule{}, nil
 }
 
-func (smaCrossExitRule) OnEntry(marketdata.Bar) {}
+func (smaCrossExitRule) OnEntry(marketdata.Bar, num.Price) {}
 
 func (smaCrossExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDecision, error) {
 	// bar.Close.Float64() is ADR-045's explicit exact-to-analytical
@@ -122,4 +130,184 @@ func (smaCrossExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDec
 		return ExitDecision{ExitNow: true}, nil
 	}
 	return ExitDecision{}, nil
+}
+
+// probationTrendExitRule implements the SMA Long Hold playbook's full
+// FLAT->PROBATION->TRENDING lifecycle (issue #349) as one ExitRule: a
+// tight protective stop just below the SMA, plus an independent
+// SMA-cross override, until the position's gain from its own entry
+// (real average fill price) reaches Config.TrailActivationGain — at
+// which point it activates a monotonic trailing stop off the
+// high-water mark since entry, and the SMA no longer has any exit
+// power at all.
+//
+// Activation is evaluated on the completed Close only, never the
+// High, against the real fill price OnEntry is given (issue #349
+// review's explicit preference), and only takes effect starting the
+// *next* OnLongBar call: the bar that first satisfies the activation
+// condition still computes and ratchets its stop under the
+// *previous* phase's own rule first — a same-bar activation must
+// never retrospectively tighten or loosen the stop that bar itself
+// already decided.
+//
+// Phase reports this rule's own current lifecycle state; Strategy
+// mirrors it via Strategy.Phase (see phase.go) so it is directly
+// observable/testable rather than staying private to this one rule.
+type probationTrendExitRule struct {
+	belowSMA       num.Rate // Config.InitialStopBelowSMA
+	activationGain num.Rate // Config.TrailActivationGain
+	retainFraction num.Rate // Config.StopFraction() — same TrailingStopPercent trailing-stop already uses
+
+	phase         Phase
+	entryPrice    num.Price
+	highWaterMark *num.Price
+	probationStop *num.Price
+	trendStop     *num.Price
+}
+
+func newProbationTrendExitRule(cfg Config) (ExitRule, error) {
+	retain, err := cfg.StopFraction()
+	if err != nil {
+		return nil, err
+	}
+	return &probationTrendExitRule{
+		belowSMA:       cfg.InitialStopBelowSMA,
+		activationGain: cfg.TrailActivationGain,
+		retainFraction: retain,
+	}, nil
+}
+
+// Phase implements the optional phaseReporter capability strategy.go
+// reads from.
+func (r *probationTrendExitRule) Phase() Phase { return r.phase }
+
+func (r *probationTrendExitRule) OnEntry(entryBar marketdata.Bar, entryPrice num.Price) {
+	r.phase = PhaseProbation
+	r.entryPrice = entryPrice
+	high := entryBar.High
+	r.highWaterMark = &high
+	r.probationStop = nil
+	r.trendStop = nil
+}
+
+func (r *probationTrendExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDecision, error) {
+	// The high-water mark is tracked every bar regardless of phase:
+	// the playbook's own trailing stop, once activated, is based on
+	// the highest price reached since entry, not merely since
+	// activation.
+	if r.highWaterMark == nil || bar.High.Cmp(*r.highWaterMark) > 0 {
+		high := bar.High
+		r.highWaterMark = &high
+	}
+
+	switch r.phase {
+	case PhaseProbation:
+		return r.onProbationBar(bar, smaValue)
+	case PhaseTrending:
+		return r.onTrendingBar()
+	default:
+		return ExitDecision{}, fmt.Errorf("smatrend: probation-trend exit rule invoked outside an active phase (%s)", r.phase)
+	}
+}
+
+func (r *probationTrendExitRule) onProbationBar(bar marketdata.Bar, smaValue float64) (ExitDecision, error) {
+	// The SMA-cross override is independent of the protective stop:
+	// exit outright, exactly like smaCrossExitRule, rather than
+	// waiting for the (much tighter) stop to be touched.
+	if bar.Close.Float64() <= smaValue {
+		return ExitDecision{ExitNow: true}, nil
+	}
+
+	stop, err := probationStopFromSMA(smaValue, r.belowSMA)
+	if err != nil {
+		return ExitDecision{}, fmt.Errorf("smatrend: computing probation stop: %w", err)
+	}
+
+	var decision ExitDecision
+	if r.probationStop == nil || stop.Cmp(*r.probationStop) > 0 {
+		r.probationStop = &stop
+		decision = ExitDecision{NewStop: &stop}
+	}
+
+	// Activation is checked after this bar's own stop decision above
+	// (issue #349 review): the phase transition only takes effect
+	// starting the next OnLongBar call, never this one.
+	threshold, err := activationThreshold(r.entryPrice, r.activationGain)
+	if err != nil {
+		return ExitDecision{}, fmt.Errorf("smatrend: computing trail activation threshold: %w", err)
+	}
+	if bar.Close.Cmp(threshold) >= 0 {
+		r.phase = PhaseTrending
+	}
+	return decision, nil
+}
+
+func (r *probationTrendExitRule) onTrendingBar() (ExitDecision, error) {
+	// r.highWaterMark is always non-nil here: OnEntry seeds it and
+	// OnLongBar's own unconditional update runs before this is ever
+	// reached.
+	stop, err := r.highWaterMark.MulRate(r.retainFraction)
+	if err != nil {
+		return ExitDecision{}, fmt.Errorf("smatrend: computing trailing stop from high-water mark: %w", err)
+	}
+	if r.trendStop != nil && stop.Cmp(*r.trendStop) <= 0 {
+		return ExitDecision{}, nil
+	}
+	r.trendStop = &stop
+	return ExitDecision{NewStop: &stop}, nil
+}
+
+// activationThreshold returns entryPrice * (1 + gain), fully in the
+// exact num domain — no float64 involved, since both entryPrice and
+// gain are already exact.
+func activationThreshold(entryPrice num.Price, gain num.Rate) (num.Price, error) {
+	one := num.MustParseRate("1")
+	factor, err := one.Add(gain)
+	if err != nil {
+		return num.Price{}, err
+	}
+	return entryPrice.MulRate(factor)
+}
+
+// probationStopFromSMA returns smaValue * (1 - belowSMA) as an exact
+// num.Price.
+func probationStopFromSMA(smaValue float64, belowSMA num.Rate) (num.Price, error) {
+	smaPrice, err := priceFromFloat64(smaValue)
+	if err != nil {
+		return num.Price{}, fmt.Errorf("converting sma value to price: %w", err)
+	}
+	one := num.MustParseRate("1")
+	retain, err := one.Sub(belowSMA)
+	if err != nil {
+		return num.Price{}, err
+	}
+	return smaPrice.MulRate(retain)
+}
+
+// priceFromFloat64 constructs a num.Price from an analytical float64
+// result — needed here because indicator.SMA's own Value() is
+// float64 (ADR-004's own sanctioned analytical domain), and the
+// playbook's probation stop is defined directly in terms of the SMA
+// value itself, not a bar's already-exact High/Close/Open/Low the
+// way every other ExitRule computes its stop.
+//
+// ADR-045 sanctions an analytical float64 becoming authoritative
+// again "through the normal checked, quantized, semantically-
+// validated construction path" but adds no float64-to-exact
+// constructor itself, instead pointing at "round to the listing's
+// tick size, then construct via the type's own constructor" — an
+// option unavailable here, since a strategy.Strategy implementation
+// has no instrument.Listing/tick-size access at all (ADR-056 records
+// this exact gap and resolves it one layer downstream instead:
+// execution rounds any strategy-supplied AdjustStop price to the
+// listing's tick before submission). This quantizes to num.Price's
+// own native 1e8 scale via formatted decimal text — the same
+// precision num.ParsePrice already accepts as input, adding no false
+// precision beyond what float64 actually carried — rather than
+// leaving the SMA value itself unquantized. This is the first case in
+// this codebase needing this specific (float64 to exact) direction of
+// conversion; flagged explicitly for architecture review in issue
+// #349's own PR rather than treated as a fully settled boundary.
+func priceFromFloat64(f float64) (num.Price, error) {
+	return num.ParsePrice(strconv.FormatFloat(f, 'f', 8, 64))
 }

@@ -36,23 +36,59 @@
 //     SMA. "sma-cross" is the one other built-in: exit outright once
 //     the close is at or below the SMA, with no resting stop at all.
 //   - ReEntryRule (Config.ReEntryRuleName) decides, once per bar while
-//     flat and after at least one prior exit, whether to re-enter. The
-//     very first entry ever always requires a fresh SMA cross-above,
-//     regardless of which ReEntryRule is configured — there is
-//     nothing yet to "reclaim" or "break out of." The default,
-//     "fresh-cross", is smatrend's own original behavior: require
-//     another fresh cross-above, the same trigger the first entry
-//     uses. "reclaim-exit-price" re-enters as soon as the close moves
-//     back above the level the strategy exited at, without waiting
-//     for the SMA to catch up. "breakout" re-enters as soon as the
-//     close exceeds the highest High observed since the exit,
-//     independent of the old exit level.
+//     flat, above the SMA, and after at least one prior exit, whether
+//     to re-enter — gated centrally by Strategy itself (issue #349
+//     review): while price remains below the SMA, only a fresh cross
+//     re-enters, regardless of which ReEntryRule is configured, since
+//     a rule governs *how* to resume within a still-bullish regime, not
+//     whether to override it. The default, "fresh-cross", is
+//     smatrend's own original behavior: require another fresh
+//     cross-above, the same trigger the first entry uses.
+//     "reclaim-exit-price" re-enters as soon as the close moves back
+//     above the level the strategy exited at, without waiting for the
+//     SMA to catch up. "breakout" re-enters as soon as the close
+//     exceeds the highest High observed since the exit, independent
+//     of the old exit level.
+//   - InitialEntryRule (Config.InitialEntryModeName) decides, once
+//     per bar while flat and before this strategy has ever held or
+//     exited a position, whether to make its very first entry (issue
+//     #349 review) — a separate decision from ReEntryRule, which only
+//     ever governs an entry that follows a prior exit. The default,
+//     "fresh-cross", is smatrend's own original startup behavior:
+//     wait for a genuine cross above the SMA, even if a run or live
+//     session starts already above it (crossState's own zero value
+//     means the very first ready bar can never itself report a
+//     cross). "above-sma" instead enters on the first bar the SMA is
+//     ready and price is already above it, with no cross required —
+//     intended for a long-hold strategy that should not wait
+//     indefinitely for a pullback-and-recross merely because the run
+//     happened to start mid-trend.
+//
+// A fourth built-in ExitRule, "probation-trend" (issue #349), governs
+// the SMA Long Hold playbook's own three-state position lifecycle —
+// FLAT, PROBATION, and TRENDING — exposed as Strategy.Phase rather
+// than staying private to the rule (see phase.go): a freshly entered
+// position starts in PROBATION, protected by a tight stop just below
+// the SMA (Config.InitialStopBelowSMA) plus an independent SMA-cross
+// override, until its gain from its own real average fill price
+// reaches Config.TrailActivationGain, at which point it transitions
+// to TRENDING and switches to the ordinary high-water-mark trailing
+// stop (Config.TrailingStopPercent, the same field "trailing-stop"
+// uses) — the SMA no longer has any exit power once TRENDING. A
+// same-bar activation never retroactively changes that bar's own
+// already-decided stop; the transition takes effect starting the next
+// bar. Every re-entry (via ReEntryRule/InitialEntryRule) restarts a
+// fresh PROBATION episode with no carried-over high-water mark or
+// activation state from a prior episode — except the high-water mark
+// itself is tracked continuously "since entry" within one episode, so
+// a spike observed during PROBATION still governs the TRENDING stop
+// after activation.
 //
 // New rules are a new small type plus one registry entry in
-// exitrule.go/reentryrule.go — never a change to Strategy's own
-// control flow. See exitrule.go and reentryrule.go for the exact
+// exitrule.go/reentryrule.go/initialentryrule.go — never a change to
+// Strategy's own control flow. See those files for the exact
 // contracts and docs/research/eqs-01-baseline-sma-trend.org for the
 // reference SPY configuration and backtest results (predating issue
-// #347's rule pluggability — that reference run used the default
+// #347/#349's rule pluggability — that reference run used the default
 // rules above, unchanged by this revision).
 package smatrend
