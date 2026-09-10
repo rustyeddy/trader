@@ -256,6 +256,24 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 		}
 
 		outcome, err := s.buildFill(deps, t.order, t.price, id.EventID{}, s.nextSequence+1)
+		if errors.Is(err, ErrReduceOnlyNothingToReduce) {
+			// Issue #352's own exact reproduction: a resting
+			// ReduceOnly Stop/Limit (most often a protective stop)
+			// triggers against this observation, but the position it
+			// was meant to protect already closed some other way
+			// (for example a same-bar or earlier direct exit) —
+			// canceled here instead of filled, rather than reversing
+			// the account into a position on the wrong side.
+			pendingEvent, canceledEvent, canceled, cancelErr := s.buildInternalCancellation(deps, t.order, id.EventID{}, s.nextSequence+1)
+			if cancelErr != nil {
+				errs = append(errs, fmt.Errorf("order %s: canceling stale reduce-only order: %w", t.order.Request.OrderID, cancelErr))
+				continue
+			}
+			s.orders[t.order.Request.OrderID] = cloneOrder(canceled)
+			s.asOf = deps.Clock.Now()
+			s.commitEvents(pendingEvent, canceledEvent)
+			continue
+		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("order %s: %w", t.order.Request.OrderID, err))
 			continue
@@ -263,7 +281,7 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 
 		s.commitFill(t.order.Request.Listing, outcome)
 		s.asOf = deps.Clock.Now()
-		s.commitEvents(outcome.fillEvent, outcome.filledEvent)
+		s.commitEvents(append([]brokerpkg.Event{outcome.fillEvent, outcome.filledEvent}, outcome.extraEvents...)...)
 	}
 
 	return errors.Join(errs...)

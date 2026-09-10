@@ -34,3 +34,15 @@ var ErrAmbiguousIntrabarOrder = errors.New("sim: observation would trigger more 
 // before any other part of a fill is built, rather than left to
 // surface as a num.ErrCurrencyMismatch deep inside PnL accounting.
 var ErrUnsupportedSettlementCurrency = errors.New("sim: listing settlement currency does not match account currency")
+
+// ErrReduceOnlyNothingToReduce reports that a ReduceOnly order (issue
+// #352) has nothing left to legally reduce at the moment it would
+// otherwise fill: either there is no open position for its listing at
+// all, or the standing position's Side does not oppose the order's
+// own Side (a Sell can only reduce a Long; a Buy can only reduce a
+// Short). buildFill returns this instead of ever applying such a
+// fill — a ReduceOnly order must never open, increase, or reverse a
+// position (order.Proposal.ReduceOnly's own documented contract). The
+// caller (Submit, accountState.advance) cancels the order instead of
+// filling it; buildFill performs no mutation when returning this.
+var ErrReduceOnlyNothingToReduce = errors.New("sim: reduce-only order has nothing left to reduce")
