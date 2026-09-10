@@ -61,12 +61,22 @@ type Strategy struct {
 	// order.Flat, is correct before the first OnBar call.
 	sideLastBar order.PositionSide
 	// lastStop is exitRule's own most recently returned NewStop, kept
-	// here so onFlat can hand it to reEntryRule.OnExit as "the level
-	// this strategy was protecting at" the moment a position exits —
-	// see ReEntryRule.OnExit's own doc comment for why this is
-	// deliberately the rule's last-known intended stop, not
-	// necessarily the real broker fill price.
+	// here so onExit can hand it to reEntryRule.OnExit as "the level
+	// this strategy was protecting at" the moment a broker-triggered
+	// stop exit is observed — see ReEntryRule.OnExit's own doc comment
+	// for why this is deliberately the rule's last-known intended
+	// stop, not necessarily the real broker fill price. Always nil for
+	// an ExitRule (like sma-cross) that never places a resting stop;
+	// see directExitReference for that case instead.
 	lastStop *num.Price
+	// directExitReference is the bar Close observed at the exact
+	// moment onLong emitted a direct order.IntentExit (ExitDecision.
+	// ExitNow), captured here because the bar onExit later observes
+	// Flat on (the fill bar) is not the bar that made the exit
+	// decision and its Close is not a meaningful reference level (PR
+	// #348 review). nil whenever the most recent exit was a
+	// broker-triggered stop instead, in which case lastStop is used.
+	directExitReference *num.Price
 
 	intents strategy.IntentFactory
 	journal journal.Recorder // nil unless env.Journal was set
@@ -170,7 +180,7 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 			s.onExit(event.Bar)
 		}
 		s.sideLastBar = order.Flat
-		return s.onFlat(ctx, event, crossedAbove, close, smaValue)
+		return s.onFlat(ctx, event, crossedAbove, aboveSMA, close, smaValue)
 	case order.Long:
 		if s.sideLastBar != order.Long {
 			s.exitRule.OnEntry(event.Bar)
@@ -192,31 +202,48 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 
 // onExit notifies reEntryRule that a position just closed — whether
 // via a broker-triggered stop (ADR-026) or a direct
-// ExitRule.ExitNow — using exitRule's own last-known intended stop
-// level as the exit price (see ReEntryRule.OnExit's own doc comment
-// for why). Called exactly once per exit, from OnBar's own
-// Flat-transition detection.
+// ExitRule.ExitNow — using the best available reference level for
+// the exit price (see ReEntryRule.OnExit's own doc comment for why
+// this is a reference level, not necessarily a real fill price):
+// directExitReference when the most recent exit was a direct
+// IntentExit (captured at the exact bar that decided it, not the
+// later bar this exit is observed on), else lastStop when it was a
+// broker-triggered stop, else — only possible for a custom ExitRule
+// that manages neither — exitBar's own Close as a last resort. Called
+// exactly once per exit, from OnBar's own Flat-transition detection.
 func (s *Strategy) onExit(exitBar marketdata.Bar) {
 	exitPrice := exitBar.Close
-	if s.lastStop != nil {
+	switch {
+	case s.directExitReference != nil:
+		exitPrice = *s.directExitReference
+	case s.lastStop != nil:
 		exitPrice = *s.lastStop
 	}
 	s.reEntryRule.OnExit(exitPrice, exitBar)
 	s.everExited = true
 	s.lastStop = nil
+	s.directExitReference = nil
 }
 
 // onFlat handles a bar observed with no open position. The very first
 // entry ever (before onExit has ever run) always requires a fresh
-// cross above the SMA; every entry after that delegates to
-// reEntryRule instead (issue #347) — see ReEntryRule's own doc
-// comment for why the split happens exactly here.
-func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedAbove bool, close, smaValue float64) ([]order.Intent, error) {
+// cross above the SMA. Every entry after that is gated by aboveSMA
+// (the SMA Long Hold playbook's own re-entry invariant, PR #348
+// review): while price remains below the SMA, only a fresh cross
+// re-enters, regardless of the configured ReEntryRule — there is
+// nothing to "reclaim" or "break out of" in a regime this strategy
+// does not consider bullish yet. Only once price is back above the
+// SMA does reEntryRule get to decide how, within that regime, to
+// resume (issue #347).
+func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedAbove, aboveSMA bool, close, smaValue float64) ([]order.Intent, error) {
 	var enter bool
-	if !s.everExited {
+	switch {
+	case !s.everExited:
 		enter = crossedAbove
-	} else {
+	case aboveSMA:
 		enter = s.reEntryRule.ShouldEnter(ReEntryContext{Bar: event.Bar, CrossedAboveSMA: crossedAbove})
+	default:
+		enter = crossedAbove
 	}
 	if !enter {
 		return nil, nil
@@ -243,12 +270,20 @@ func (s *Strategy) onLong(ctx context.Context, event strategy.BarEvent, close, s
 	if err != nil {
 		return nil, fmt.Errorf("smatrend: exit rule: %w", err)
 	}
+	if decision.ExitNow && decision.NewStop != nil {
+		return nil, fmt.Errorf("smatrend: exit rule %q returned an ambiguous decision: ExitNow and NewStop are mutually exclusive", s.config.exitRuleName())
+	}
 
 	if decision.ExitNow {
 		in, err := s.intents.Exit(s.instrumentID)
 		if err != nil {
 			return nil, err
 		}
+		// Captured now, at the exact bar that decided the exit — not
+		// the later bar onExit observes Flat on, whose own Close bears
+		// no relationship to why this position closed (PR #348 review).
+		exitClose := event.Bar.Close
+		s.directExitReference = &exitClose
 		if err := s.recordSignal(ctx, event, close, smaValue, "exit-now", nil, []order.Intent{in}); err != nil {
 			return nil, err
 		}

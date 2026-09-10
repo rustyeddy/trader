@@ -8,15 +8,22 @@ import (
 )
 
 // ExitDecision is what an ExitRule returns for one bar while long.
+// NewStop and ExitNow are mutually exclusive: a rule must never set
+// both on the same decision. Strategy.onLong treats this as a
+// contract violation (an error, not a silent pick-one), since a rule
+// that both requests an immediate exit and a stop adjustment has not
+// actually decided anything.
 type ExitDecision struct {
 	// NewStop, if non-nil, requests placing/ratcheting the protective
 	// stop to this price via order.IntentAdjustStop — the mechanism
-	// every ExitRule that manages a resting stop uses.
+	// every ExitRule that manages a resting stop uses. Must be nil
+	// whenever ExitNow is true.
 	NewStop *num.Price
 	// ExitNow, if true, requests an immediate order.IntentExit
 	// instead — for a rule whose own trigger condition is not itself
 	// expressible as a resting broker-side stop (for example "close
-	// crosses back below the SMA").
+	// crosses back below the SMA"). Must be false whenever NewStop is
+	// non-nil.
 	ExitNow bool
 }
 

@@ -13,13 +13,16 @@
 // already carries.
 //
 // Unlike strategy/emacross, smatrend is deliberately asymmetric and
-// long-only: it never opens a short position. Its own trailing-stop
-// trigger detection is not smatrend's own responsibility at all: the
-// resting order.IntentAdjustStop it places is triggered by the real
-// broker-side machinery (ADR-026, wired into backtest.Scheduler by
-// issue #338), so by the time OnBar observes a bar, any stop hit
-// against that bar's own price action has already closed the position
-// in the account snapshot smatrend reads through strategy.View.
+// long-only: it never opens a short position. When the configured
+// ExitRule manages a resting stop (the default, "trailing-stop" —
+// see below; "sma-cross" places no resting stop at all and instead
+// exits directly), that trigger detection is not smatrend's own
+// responsibility: the resting order.IntentAdjustStop it places is
+// triggered by the real broker-side machinery (ADR-026, wired into
+// backtest.Scheduler by issue #338), so by the time OnBar observes a
+// bar, any stop hit against that bar's own price action has already
+// closed the position in the account snapshot smatrend reads through
+// strategy.View.
 //
 // Both what closes a long position and what re-opens one after an
 // exit are pluggable (issue #347), each behind a small interface

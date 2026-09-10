@@ -95,10 +95,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("smatrend: sma period must be positive, got %d", c.SMAPeriod)
 	}
 	if _, ok := exitRuleRegistry[c.exitRuleName()]; !ok {
-		return fmt.Errorf("smatrend: unknown exit_rule %q", c.ExitRuleName)
+		return fmt.Errorf("smatrend: unknown exit_rule %q", c.exitRuleName())
 	}
 	if _, ok := reEntryRuleRegistry[c.reEntryRuleName()]; !ok {
-		return fmt.Errorf("smatrend: unknown reentry_rule %q", c.ReEntryRuleName)
+		return fmt.Errorf("smatrend: unknown reentry_rule %q", c.reEntryRuleName())
 	}
 	if c.exitRuleName() == "trailing-stop" {
 		if c.TrailingStopPercent.Sign() <= 0 {
