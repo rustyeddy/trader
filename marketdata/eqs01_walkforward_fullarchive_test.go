@@ -45,7 +45,9 @@ package marketdata_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -212,10 +214,16 @@ func mustParseFloatWF(t *testing.T, s string) float64 {
 // eqs01WFPriceSource is a real (not fixed-value) simbroker.
 // FillPriceSource, keyed by a clock.Simulated: for whatever instant
 // clock currently reports, it returns that instant's own canonical bar
-// Open, rounded down to the listing's own tick size (issue #340's own
-// consumer-side rounding responsibility — real split-adjusted
-// historical equity data can legitimately carry sub-cent precision,
-// ADR-052).
+// Open, unrounded. Real split-adjusted historical equity data can
+// legitimately carry sub-cent precision (ADR-052), but this source
+// deliberately does not pre-round it: sim.Broker's own buildFill
+// already rounds every fill price to the listing's tick size,
+// conservatively and side-dependent (ADR-057) — Buy rounds up, Sell
+// rounds down. Pre-rounding down here unconditionally, regardless of
+// side, would make a Buy fill non-conservative (PR #346 review): the
+// broker's own RoundUp would then be a no-op against an
+// already-floored value, silently filling every Buy at a price at or
+// below the true one instead of at or above it.
 type eqs01WFPriceSource struct {
 	clock *clock.Simulated
 	bars  map[time.Time]marketdata.Bar
@@ -231,7 +239,7 @@ func (s *eqs01WFPriceSource) Price(listing instrument.Listing, side order.Side) 
 	if !ok {
 		return num.Price{}, fmt.Errorf("no canonical bar for %s at %s", listing.Symbol(), now)
 	}
-	return bar.Open.RoundDown(listing.Spec().TickSize())
+	return bar.Open, nil
 }
 
 // eqs01WFEnvironmentFactory builds the real M4 pipeline (fixed-
@@ -240,9 +248,7 @@ func (s *eqs01WFPriceSource) Price(listing instrument.Listing, side order.Side) 
 // strategy/emacross/execution_test.go's and research-runs/eqs-01's own
 // identical composition.
 type eqs01WFEnvironmentFactory struct {
-	prices          map[time.Time]marketdata.Bar
-	riskFraction    num.Rate
-	adverseDistance num.Price
+	prices map[time.Time]marketdata.Bar
 }
 
 func (f eqs01WFEnvironmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.EnvironmentRequest) (svcbacktest.Environment, error) {
@@ -414,15 +420,18 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 	if err != nil {
 		t.Fatalf("%s: Bars: %v", inst.Symbol, err)
 	}
+	defer func() { _ = reader.Close() }()
 	var bars []marketdata.Bar
 	for {
 		b, err := reader.Next(ctx)
 		if err != nil {
-			break
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("%s: Bars.Next: %v", inst.Symbol, err)
 		}
 		bars = append(bars, b)
 	}
-	_ = reader.Close()
 	if len(bars) == 0 {
 		t.Fatalf("%s: no bars returned", inst.Symbol)
 	}
@@ -585,13 +594,23 @@ func runEQS01WalkForwardForInstrument(t *testing.T, ctx context.Context, inst eq
 	wfYears := wfEnd.Sub(wfStart).Hours() / 24 / 365.25
 	chainedCAGR := cagrFromReturn(chainedReturn, wfYears)
 
+	// The buy-and-hold comparison must cover exactly the same span the
+	// chained walk-forward curve does — the last bar *strictly before*
+	// wfEnd (the final fold's own TestEnd, half-open), not the
+	// dataset's own absolute last bar, which can extend past wfEnd
+	// whenever leftover bars remain after the last complete fold (PR
+	// #346 review).
 	bhStartPrice, ok1 := priceByTime[wfStart]
-	bhEndBar := bars[len(bars)-1]
 	if !ok1 {
 		t.Fatalf("%s: no canonical bar at walk-forward start %s", inst.Symbol, wfStart)
 	}
+	lastIdx := sort.Search(len(bars), func(i int) bool { return !bars[i].Time.Before(wfEnd) }) - 1
+	if lastIdx < 0 {
+		t.Fatalf("%s: no canonical bar before walk-forward end %s", inst.Symbol, wfEnd)
+	}
+	bhEndBar := bars[lastIdx]
 	bhReturn := mustParseFloatWF(t, bhEndBar.Close.String())/mustParseFloatWF(t, bhStartPrice.Close.String()) - 1
-	bhYears := bhEndBar.Time.Sub(wfStart).Hours() / 24 / 365.25
+	bhYears := wfEnd.Sub(wfStart).Hours() / 24 / 365.25
 	bhCAGR := cagrFromReturn(bhReturn, bhYears)
 
 	return eqs01WFInstrumentSummary{
@@ -612,7 +631,7 @@ func runEQS01WFBacktest(ctx context.Context, mgr *marketdata.Manager, simResolve
 	span marketdata.TimeRange, cfg smatrend.Config, startingCapital num.Money, riskFraction num.Rate, adverseDistance num.Price,
 	priceByTime map[time.Time]marketdata.Bar) (svcbacktest.RunResponse, error) {
 
-	factory := eqs01WFEnvironmentFactory{prices: priceByTime, riskFraction: riskFraction, adverseDistance: adverseDistance}
+	factory := eqs01WFEnvironmentFactory{prices: priceByTime}
 	svc, err := svcbacktest.New(mgr, simResolver, factory, nil)
 	if err != nil {
 		return svcbacktest.RunResponse{}, err
