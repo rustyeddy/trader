@@ -159,6 +159,20 @@ var eqs01WFSizingModes = []eqs01WFSizingMode{
 // combination parameter grid, exactly as authorized: SMAPeriod and
 // TrailingStopPercent, the two parameters EQS-01 (issue #335) itself
 // explicitly left untuned.
+//
+// Known, documented limitation (owner review on PR #346, not fixed in
+// this pass — the owner's own review did not require blocking on it):
+// every train run starts each candidate SMA cold from trainStart, so
+// SMA(50) becomes tradable much earlier inside the fixed 1260-bar
+// train window than SMA(300) does — the longer-period candidates
+// effectively get fewer usable training/trading bars than the shorter
+// ones. This can bias Calmar-ratio selection somewhat toward shorter
+// SMA periods, and should be kept in mind when reading the parameter-
+// selection-stability results below (SMA 50/100 selected more often
+// than SMA 250/300). A cleaner protocol would prepend a common
+// warmup prefix of at least the maximum grid SMA period to every
+// train run, computing training metrics only over the intended
+// 1260-bar interval — left for a future revision of this sweep.
 var eqs01WFGridSMAPeriods = []int{50, 100, 150, 200, 250, 300}
 var eqs01WFGridTrailingStopPercents = []string{"0.05", "0.075", "0.10", "0.15", "0.20"}
 
@@ -195,7 +209,19 @@ type eqs01WFFoldResult struct {
 	TestReturn      float64 `json:"test_return"`
 	TestCAGR        float64 `json:"test_cagr"`
 	TestMaxDrawdown float64 `json:"test_max_drawdown"`
-	TestTradeCount  int     `json:"test_trade_count"`
+
+	// EnteredTestWithOpenPosition, TestEntriesOpened, and TestExits
+	// replace what used to be one TestTradeCount field (owner review
+	// on PR #346): the OOS run deliberately starts at TrainStart, not
+	// TestStart, so strategy/account state carries naturally across
+	// the boundary — a position opened during training can still be
+	// open through part or all of the test year, generating real OOS
+	// P&L while a naive "entries opened on/after TestStart" count
+	// would report zero. All three together make a fold's own test-
+	// window activity unambiguous instead of misleadingly labeled.
+	EnteredTestWithOpenPosition bool `json:"entered_test_with_open_position"`
+	TestEntriesOpened           int  `json:"test_entries_opened"`
+	TestExits                   int  `json:"test_exits"`
 }
 
 // eqs01WFInstrumentSummary aggregates one instrument's own chained,
@@ -567,13 +593,25 @@ func runEQS01WalkForwardFolds(t *testing.T, ctx context.Context, inst eqs01WFIns
 		var bestTrailingStop string
 		var bestTrainCAGR, bestTrainMaxDD float64
 
+		// Every combo in this grid is expected to be a valid,
+		// executable configuration; a backtest failure here is a real
+		// bug (in the driver, the strategy, or the pipeline), not an
+		// expected outcome (owner review on PR #346). Absorbing it as
+		// a skip would let it silently shrink the optimizer's own
+		// candidate set for this fold — and, worse, skipping an entire
+		// fold below would silently drop a year from the chained
+		// result while wfStart/wfEnd still spanned across it, making
+		// the chained CAGR and buy-and-hold comparison inconsistent
+		// with what was actually evaluated. If a future grid
+		// legitimately contains an invalid combination, exclude it
+		// explicitly before running, rather than absorbing the
+		// failure here.
 		for _, smaPeriod := range eqs01WFGridSMAPeriods {
 			for _, tsp := range eqs01WFGridTrailingStopPercents {
 				cfg := smatrend.Config{SMAPeriod: smaPeriod, TrailingStopPercent: num.MustParseRate(tsp)}
 				resp, err := runEQS01WFBacktest(ctx, mgr, simResolver, simID, trainSpan, cfg, startingCapital, riskFraction, adverseDistance, priceByTime)
 				if err != nil {
-					t.Logf("%s: fold %d: train combo sma=%d tsp=%s: %v (skipped)", label, i, smaPeriod, tsp, err)
-					continue
+					t.Fatalf("%s: fold %d: train combo sma=%d tsp=%s: %v", label, i, smaPeriod, tsp, err)
 				}
 				cagr := cagrFromReturn(mustParseFloatWF(t, resp.Metrics.NetReturn().String()), trainYears)
 				maxDD := mustParseFloatWF(t, resp.Metrics.MaxDrawdown().String())
@@ -588,15 +626,13 @@ func runEQS01WalkForwardFolds(t *testing.T, ctx context.Context, inst eqs01WFIns
 			}
 		}
 		if bestTrailingStop == "" {
-			t.Logf("%s: fold %d: every combo failed on the train window; skipping fold", label, i)
-			continue
+			t.Fatalf("%s: fold %d: every combo scored -Inf on the train window (should be unreachable: every combo above either sets bestScore or fails fatally)", label, i)
 		}
 
 		winningCfg := smatrend.Config{SMAPeriod: bestSMAPeriod, TrailingStopPercent: num.MustParseRate(bestTrailingStop)}
 		resp, err := runEQS01WFBacktest(ctx, mgr, simResolver, simID, combinedSpan, winningCfg, startingCapital, riskFraction, adverseDistance, priceByTime)
 		if err != nil {
-			t.Logf("%s: fold %d: OOS run with winning combo sma=%d tsp=%s failed: %v (skipping fold)", label, i, bestSMAPeriod, bestTrailingStop, err)
-			continue
+			t.Fatalf("%s: fold %d: OOS run with winning combo sma=%d tsp=%s: %v", label, i, bestSMAPeriod, bestTrailingStop, err)
 		}
 
 		baselineTime := bars[testStartIdx-1].Time
@@ -612,10 +648,33 @@ func runEQS01WalkForwardFolds(t *testing.T, ctx context.Context, inst eqs01WFIns
 		testCAGR := cagrFromReturn(testReturn, testYears)
 		testMaxDD := maxDrawdownSince(resp.EquityCurve, baselineTime)
 
-		testTrades := 0
+		// enteredWithOpenPosition/entriesOpened/exits together replace
+		// the old single "trade count" (owner review on PR #346): a
+		// position opened during training can still be open exactly
+		// at testStart (real OOS P&L with zero "entries" inside the
+		// test window), and an exit counted here may belong to a
+		// trade whose own entry predates testStart entirely — see
+		// eqs01WFFoldResult's own doc comment.
+		enteredWithOpenPosition := false
+		entriesOpened := 0
+		exits := 0
 		for _, tr := range resp.Trades {
+			if tr.OpenedAt.Before(testStart) && !tr.ClosedAt.Before(testStart) {
+				enteredWithOpenPosition = true
+			}
 			if !tr.OpenedAt.Before(testStart) {
-				testTrades++
+				entriesOpened++
+			}
+			if !tr.ClosedAt.Before(testStart) {
+				exits++
+			}
+		}
+		for _, tr := range resp.OpenTrades {
+			if tr.OpenedAt.Before(testStart) {
+				enteredWithOpenPosition = true
+			}
+			if !tr.OpenedAt.Before(testStart) {
+				entriesOpened++
 			}
 		}
 
@@ -634,14 +693,16 @@ func runEQS01WalkForwardFolds(t *testing.T, ctx context.Context, inst eqs01WFIns
 			TestReturn:                  testReturn,
 			TestCAGR:                    testCAGR,
 			TestMaxDrawdown:             testMaxDD,
-			TestTradeCount:              testTrades,
+			EnteredTestWithOpenPosition: enteredWithOpenPosition,
+			TestEntriesOpened:           entriesOpened,
+			TestExits:                   exits,
 		})
-		t.Logf("%s: fold %d [%s,%s)->[%s,%s): selected sma=%d tsp=%s (train CAGR=%.2f%% maxDD=%.2f%% calmar=%.3f) -> OOS return=%.2f%% CAGR=%.2f%% maxDD=%.2f%% trades=%d",
+		t.Logf("%s: fold %d [%s,%s)->[%s,%s): selected sma=%d tsp=%s (train CAGR=%.2f%% maxDD=%.2f%% calmar=%.3f) -> OOS return=%.2f%% CAGR=%.2f%% maxDD=%.2f%% enteredOpen=%v entries=%d exits=%d",
 			label, i,
 			trainStart.Format("2006-01-02"), trainEndExclusive.Format("2006-01-02"),
 			testStart.Format("2006-01-02"), testEndExclusive.Format("2006-01-02"),
 			bestSMAPeriod, bestTrailingStop, bestTrainCAGR*100, bestTrainMaxDD*100, bestScore,
-			testReturn*100, testCAGR*100, testMaxDD*100, testTrades)
+			testReturn*100, testCAGR*100, testMaxDD*100, enteredWithOpenPosition, entriesOpened, exits)
 	}
 
 	if len(folds) == 0 {
