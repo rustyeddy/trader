@@ -92,8 +92,8 @@ func (f naNSafeFloat64) MarshalJSON() ([]byte, error) {
 // re-entry vs exit, rebound, defensive-advantage capture), a simple,
 // explicitly-not-tuned classification, candidate re-entry features at
 // the post-exit low and at the actual re-entry bar, and — for each
-// candidate re-entry rule issue #354 names — the date that rule would
-// have triggered a hypothetical re-entry fill, purely as a
+// candidate re-entry rule issue #354 names — the signal date that
+// rule's own condition would first have become true, purely as a
 // first-trigger comparison against what actually happened. No
 // candidate rule's hypothetical trigger is ever turned into a second,
 // simulated P&L in this issue; that is explicitly deferred to a
@@ -156,10 +156,18 @@ type episodeRow struct {
 	AtReEntryLowestLowSince   float64 `json:"at_reentry_lowest_low_since_exit"`
 
 	// Candidate rule first-trigger comparisons. Each *TriggerDate is
-	// empty and *DaysEarlier is 0 when the candidate never triggered
-	// before the actual re-entry (including the trivial case of zero
-	// flat bars between exit and re-entry, where no candidate had any
-	// bar to evaluate at all).
+	// the *signal* bar's own date — the bar whose own condition
+	// actually became true — not the date a hypothetical order from
+	// that signal would fill on (PR #359 rereview corrected an
+	// earlier version that returned the fill date under this same
+	// name). *DaysEarlier is still computed from the hypothetical
+	// *fill* time (one bar after the signal, matching this codebase's
+	// own next-bar-open convention), so it stays directly comparable
+	// to ReEntryDate/OpenedAt, which are themselves fill times. Both
+	// are empty/0 when the candidate never triggered before the
+	// actual re-entry (including the trivial case of zero flat bars
+	// between exit and re-entry, where no candidate had any bar to
+	// evaluate at all).
 	CandidateAboveSMATriggerDate      string  `json:"candidate_above_sma_trigger_date"`
 	CandidateAboveSMADaysEarlier      float64 `json:"candidate_above_sma_days_earlier"`
 	CandidateReclaimExitTriggerDate   string  `json:"candidate_reclaim_exit_trigger_date"`
@@ -543,13 +551,35 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 		// already checked above.
 		flatFrom, flatTo := exitIdx, reentryIdx-1
 
+		// triggerDate returns the *signal* bar's own date — the bar
+		// whose own condition actually became true, not the bar a
+		// hypothetical order from that signal would fill on (PR #359
+		// rereview: an earlier version returned the fill date here
+		// while documenting/labeling it as a "trigger"/"signal" date,
+		// a real semantics mismatch that made a chart marker plot a
+		// fill-bar Close under a "signal" label). DaysEarlier is still
+		// computed from the hypothetical *fill* time
+		// (bars[signalIdx+1], next-bar-open, matching every real
+		// order in this codebase), since that is the fair, apples-to-
+		// apples comparison against next.OpenedAt (also a fill time).
 		triggerDate := func(signalIdx int) (string, float64) {
 			if signalIdx < 0 {
 				return "", 0
 			}
+			signalTime := bars[signalIdx].Time
 			fillTime := bars[signalIdx+1].Time
 			daysEarlier := next.OpenedAt.Sub(fillTime).Hours() / 24
-			return fillTime.Format("2006-01-02"), daysEarlier
+			return signalTime.Format("2006-01-02"), daysEarlier
+		}
+		// triggerFillDate is the hypothetical fill date alone (no
+		// signal date), used only for the reclaim-exit-price
+		// matches-actual comparison below, which must compare like
+		// with like: next.OpenedAt is itself a fill time.
+		triggerFillDate := func(signalIdx int) string {
+			if signalIdx < 0 {
+				return ""
+			}
+			return bars[signalIdx+1].Time.Format("2006-01-02")
 		}
 
 		aboveSMAIdx := candidateFirstTrigger(flatFrom, flatTo, func(j int) bool {
@@ -588,7 +618,7 @@ func TestSMATrendProbationTrendEpisodeAnalysis(t *testing.T) {
 		})
 		row.CandidateReclaimExitTriggerDate, row.CandidateReclaimExitDaysEarlier = triggerDate(reclaimIdx)
 		reclaimTotal++
-		if fd, _ := triggerDate(reclaimIdx); fd == row.ReEntryDate {
+		if triggerFillDate(reclaimIdx) == row.ReEntryDate {
 			reclaimMatches++
 			row.CandidateReclaimExitMatchesActual = true
 		}
@@ -991,15 +1021,36 @@ func renderEpisodeCharts(t *testing.T, dir string, bars []marketdata.Bar, sma200
 // Label that makes clear it is hypothetical, not a real fill.
 func candidateTriggerMarkers(t *testing.T, bars []marketdata.Bar, r episodeRow) []chart.Marker {
 	t.Helper()
+
+	// The actual re-entry's own signal bar (one bar before the actual
+	// fill, ReEntryDate) — a candidate is skipped when its own signal
+	// date coincides with this, since there is nothing distinct to
+	// show (PR #359 rereview: *TriggerDate is now a signal date, not
+	// a fill date, so this comparison must be against the actual
+	// re-entry's own signal date too, not against ReEntryDate itself).
+	var actualSignalTime time.Time
+	if reentryIdx := indexOfBarTime(bars, mustParseDate(t, r.ReEntryDate)); reentryIdx > 0 {
+		actualSignalTime = bars[reentryIdx-1].Time
+	}
+
 	var markers []chart.Marker
 	add := func(label, dateStr string) {
-		if dateStr == "" || dateStr == r.ReEntryDate {
+		if dateStr == "" {
 			return
 		}
-		idx := indexOfBarTime(bars, mustParseDate(t, dateStr))
+		signalTime := mustParseDate(t, dateStr)
+		if !actualSignalTime.IsZero() && signalTime.Equal(actualSignalTime) {
+			return
+		}
+		idx := indexOfBarTime(bars, signalTime)
 		if idx < 0 {
 			return
 		}
+		// Plotted at the signal bar's own Close (PR #359 rereview's
+		// preferred "signal marker" option): the research question
+		// this diagnostic asks is "when would this observable
+		// condition have fired," not "what would the hypothetical
+		// fill have looked like."
 		markers = append(markers, chart.Marker{Time: bars[idx].Time, Price: bars[idx].Close, Kind: chart.MarkerReentry, Label: label})
 	}
 	add("above-sma signal (hypothetical)", r.CandidateAboveSMATriggerDate)

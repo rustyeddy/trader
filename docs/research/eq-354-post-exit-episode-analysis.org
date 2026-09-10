@@ -124,9 +124,9 @@ from the CSV/JSON artifacts below.
 - Classified ~good-defensive-exit~ (correctly — this was an
   excellent exit), but it is simultaneously the single largest source
   of "waited too long to re-enter" in the whole dataset.
-- The ~above-sma~ candidate would have triggered 2008-05-20 — *1571
+- The ~above-sma~ candidate would have triggered 2008-05-19 — *1571
   days earlier* than the actual re-entry. But this is a cautionary
-  result, not a promising one: 2008-05-20 sits inside the
+  result, not a promising one: 2008-05-19 sits inside the
   2008 bear-market rally, well before the crash's much larger second
   leg down through March 2009. An ~above-sma~ re-entry here would have
   been a severe whipsaw into the worst of the decline — visible
