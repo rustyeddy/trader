@@ -320,6 +320,7 @@ func TestSMATrendProbationTrendWalkForwardBaseline(t *testing.T) {
 		TestMaxDrawdown     float64 `json:"test_max_drawdown"`
 	}
 	var allFolds []foldSummary
+	var wfSpanStart, wfSpanEnd time.Time // the overall [first fold's testStart, last fold's testEnd) span, tracked below
 
 	for _, tsp := range []string{"0.10", "0.20"} {
 		cfg := smatrend.Config{
@@ -379,10 +380,75 @@ func TestSMATrendProbationTrendWalkForwardBaseline(t *testing.T) {
 			})
 
 			allTrades = append(allTrades, foldTradeRows(t, tsp, i, testStart, testEndExclusive, resp, fills)...)
+
+			if wfSpanStart.IsZero() || testStart.Before(wfSpanStart) {
+				wfSpanStart = testStart
+			}
+			if testEndExclusive.After(wfSpanEnd) {
+				wfSpanEnd = testEndExclusive
+			}
 		}
 	}
 
 	writeTradeLogCSV(t, filepath.Join(fullArchiveSMATrendWFOutputDir, "spy-probation-trend-walkforward-trades.csv"), allTrades)
+
+	// Buy-and-hold benchmark over the identical walk-forward-tested
+	// span (the union of every fold's own [testStart, testEnd) test
+	// window — the strategy is never evaluated outside this range, so
+	// comparing against buy-and-hold over any wider span would not be
+	// a fair comparison). Unlike the strategy's own per-fold
+	// MaxDrawdown (a floor, not continuous — see foldSummary's own
+	// TestMaxDrawdown and this test's doc comment), this is a true,
+	// single-pass, continuous peak-to-trough figure computed directly
+	// from the real daily Close series, since buy-and-hold is not a
+	// risk-sized, fold-chained product at all.
+	bhStartBar, ok := firstBarAtOrAfter(setup.bars, wfSpanStart)
+	if !ok {
+		t.Fatalf("no bar found at or after walk-forward span start %s", wfSpanStart.Format("2006-01-02"))
+	}
+	bhEndBar := lastBarBefore(setup.bars, wfSpanEnd)
+	years := bhEndBar.Time.Sub(bhStartBar.Time).Hours() / 24 / 365.25
+	bhReturn := bhEndBar.Close.Float64()/bhStartBar.Open.Float64() - 1
+	bhCAGR := cagrFromReturn(bhReturn, years)
+	bhMaxDD := 0.0
+	peak := 0.0
+	for _, b := range setup.bars {
+		if b.Time.Before(wfSpanStart) || !b.Time.Before(wfSpanEnd) {
+			continue
+		}
+		c := b.Close.Float64()
+		if c > peak {
+			peak = c
+		}
+		if peak > 0 {
+			if dd := (peak - c) / peak; dd > bhMaxDD {
+				bhMaxDD = dd
+			}
+		}
+	}
+	type buyAndHoldSummary struct {
+		SpanStart   string  `json:"span_start"`
+		SpanEnd     string  `json:"span_end"`
+		Years       float64 `json:"years"`
+		NetReturn   float64 `json:"net_return"`
+		CAGR        float64 `json:"cagr"`
+		MaxDrawdown float64 `json:"max_drawdown"`
+		Calmar      float64 `json:"calmar"`
+	}
+	bh := buyAndHoldSummary{
+		SpanStart: bhStartBar.Time.Format("2006-01-02"), SpanEnd: bhEndBar.Time.Format("2006-01-02"),
+		Years: years, NetReturn: bhReturn, CAGR: bhCAGR, MaxDrawdown: bhMaxDD, Calmar: calmarRatio(bhCAGR, bhMaxDD),
+	}
+	t.Logf("SPY buy-and-hold [%s, %s]: return=%.4f cagr=%.4f maxDD=%.4f calmar=%.4f",
+		bh.SpanStart, bh.SpanEnd, bhReturn, bhCAGR, bhMaxDD, bh.Calmar)
+	bhOut, err := json.MarshalIndent(bh, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal buy-and-hold summary: %v", err)
+	}
+	bhPath := filepath.Join(fullArchiveSMATrendWFOutputDir, "spy-buyhold-benchmark.json")
+	if err := os.WriteFile(bhPath, bhOut, 0o644); err != nil {
+		t.Fatalf("write %s: %v", bhPath, err)
+	}
 
 	foldsOut, err := json.MarshalIndent(allFolds, "", "  ")
 	if err != nil {
