@@ -281,7 +281,7 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 
 		s.commitFill(t.order.Request.Listing, outcome)
 		s.asOf = deps.Clock.Now()
-		s.commitEvents(outcome.fillEvent, outcome.filledEvent)
+		s.commitEvents(append([]brokerpkg.Event{outcome.fillEvent, outcome.filledEvent}, outcome.extraEvents...)...)
 	}
 
 	return errors.Join(errs...)

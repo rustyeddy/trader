@@ -504,7 +504,7 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 
 	h.state.commitFill(req.Listing, outcome)
 	h.state.asOf = now
-	h.state.commitEvents(acceptEvent, outcome.fillEvent, outcome.filledEvent)
+	h.state.commitEvents(append([]brokerpkg.Event{acceptEvent, outcome.fillEvent, outcome.filledEvent}, outcome.extraEvents...)...)
 	return outcome.order, nil
 }
 
@@ -516,6 +516,15 @@ type fillOutcome struct {
 	order       order.Order
 	fillEvent   brokerpkg.Event
 	filledEvent brokerpkg.Event
+	// extraEvents holds any additional events that must be committed
+	// as part of this exact same atomic transaction, beyond fillEvent/
+	// filledEvent — today only ever the two-event StatusPendingCancel
+	// -> StatusCanceled sequence built for an oversized ReduceOnly
+	// fill's unfillable remainder (issue #352 review). Empty (nil) in
+	// the ordinary case; order already reflects whatever these events
+	// (if any) transitioned it to, so a caller never needs to inspect
+	// extraEvents to know order's final status — only to commit them.
+	extraEvents []brokerpkg.Event
 	position    order.Position
 	mark        num.Price
 	cash        num.Money
@@ -629,14 +638,15 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 		// Clamped, never rejected outright, when the position is
 		// smaller than what this order was sized for: this keeps the
 		// core invariant (a ReduceOnly fill never reverses or exceeds
-		// the standing position) unconditionally true. The resulting
-		// order is left StatusPartiallyFilled/Working for whatever
-		// quantity remains unfilled rather than atomically canceling
-		// that remainder — a real brokerage refinement tracked
-		// separately (issue #352's own follow-up), not a safety gap:
-		// the remainder can never itself cause an overfill, since any
-		// later attempt to fill it re-enters this same check against
-		// whatever is reducible at that time.
+		// the standing position) unconditionally true. The unfillable
+		// remainder is canceled atomically, as part of this exact same
+		// fill transaction — see the ReduceOnly clamp handling below,
+		// right after order.ApplyFill — rather than left resting: an
+		// oversized ReduceOnly order that clamps here leaves
+		// order.ApplyFill's own result at StatusPartiallyFilled, and
+		// accountState.advance only ever reconsiders StatusWorking
+		// orders, so a live PartiallyFilled remainder would never be
+		// evaluated again (PR #353 review).
 		if fillQty.Cmp(reducible) > 0 {
 			fillQty = reducible
 		}
@@ -743,6 +753,26 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 		return fillOutcome{}, err
 	}
 
+	// An oversized ReduceOnly order's clamp above (fillQty < the
+	// originally requested quantity) leaves order.ApplyFill's own
+	// result at StatusPartiallyFilled. That remainder can never
+	// legally fill — the position it would reduce is already fully
+	// accounted for — so it is canceled atomically, right here, as
+	// part of this exact same fill transaction, rather than left as a
+	// live order accountState.advance would never reconsider (only
+	// StatusWorking orders are ever re-evaluated there) (PR #353
+	// review, following up on issue #352).
+	finalOrder := filled
+	var extraEvents []brokerpkg.Event
+	if req.ReduceOnly && filled.Status == order.StatusPartiallyFilled {
+		pendingEvent, canceledEvent, canceled, err := s.buildInternalCancellation(deps, filled, filledEvent.Metadata.EventID, sequence+2)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+		finalOrder = canceled
+		extraEvents = []brokerpkg.Event{pendingEvent, canceledEvent}
+	}
+
 	existing, hasExisting := s.positions[key]
 	transition, err := order.ApplyFillToPosition(existing, hasExisting, req.AccountID, req.Listing, currency, req.Side, price, fillQty)
 	if err != nil {
@@ -768,9 +798,10 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 	}
 
 	return fillOutcome{
-		order:       filled,
+		order:       finalOrder,
 		fillEvent:   fillEvent,
 		filledEvent: filledEvent,
+		extraEvents: extraEvents,
 		position:    positionAfter,
 		mark:        price,
 		cash:        cashAfter,
@@ -809,7 +840,14 @@ func (s *accountState) buildInternalCancellation(deps Deps, o order.Order, causa
 	if err != nil {
 		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
 	}
-	pendingEvent, err := s.buildOrderEvent(deps, pending, causationID, sequence)
+	// Caused by cancelEventID (the internal cancel request's own
+	// EventID), not the outer causationID — matching Cancel()'s own
+	// contract exactly (its pendingEvent is caused by req.Metadata
+	// .EventID, never by whatever caused the CancelRequest itself).
+	// causationID above only ever flows into cancelReq.Metadata
+	// .CausationID: what triggered the decision to cancel, not what
+	// caused this specific order-status transition (PR #353 review).
+	pendingEvent, err := s.buildOrderEvent(deps, pending, cancelEventID, sequence)
 	if err != nil {
 		return brokerpkg.Event{}, brokerpkg.Event{}, order.Order{}, err
 	}

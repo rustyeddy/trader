@@ -241,12 +241,9 @@ func TestSMATrendProbationTrendSimpleBacktest(t *testing.T) {
 
 		for i, p := range periods {
 			warmupStart := p.start.AddDate(-1, 0, 0)
-			var anchorBar marketdata.Bar
-			for _, b := range setup.bars {
-				if !b.Time.Before(warmupStart) {
-					anchorBar = b
-					break
-				}
+			anchorBar, ok := firstBarAtOrAfter(setup.bars, warmupStart)
+			if !ok {
+				t.Fatalf("tsp=%s period %d: no bar found at or after warmup start %s", tsp, i, warmupStart.Format("2006-01-02"))
 			}
 			adverseDistance, err := anchorBar.Open.MulRate(num.MustParseRate("1")) // 100% of price: full notional
 			if err != nil {
@@ -268,7 +265,10 @@ func TestSMATrendProbationTrendSimpleBacktest(t *testing.T) {
 			// boundaries — resolved to the nearest real bar time
 			// before looking up the equity curve, which only ever has
 			// points at real bar timestamps.
-			periodStartBar := firstBarAtOrAfter(setup.bars, p.start)
+			periodStartBar, ok := firstBarAtOrAfter(setup.bars, p.start)
+			if !ok {
+				t.Fatalf("tsp=%s period %d: no bar found at or after period start %s", tsp, i, p.start.Format("2006-01-02"))
+			}
 			periodEndBar := lastBarBefore(setup.bars, p.end)
 			baselineEquity, ok1 := equityCurveAt(resp.EquityCurve, periodStartBar.Time)
 			finalEquity, ok2 := equityCurveAt(resp.EquityCurve, periodEndBar.Time)
@@ -339,15 +339,19 @@ func lastBarBefore(bars []marketdata.Bar, cutoff time.Time) marketdata.Bar {
 	return last
 }
 
-// firstBarAtOrAfter returns the first bar in bars at or after from —
-// used to resolve a calendar period boundary (which may fall on a
-// non-trading day) to the real bar time the equity curve actually has
-// a point at.
-func firstBarAtOrAfter(bars []marketdata.Bar, from time.Time) marketdata.Bar {
+// firstBarAtOrAfter returns the first bar in bars at or after from,
+// and false (a zero Bar) if no such bar exists — used to resolve a
+// calendar period boundary (which may fall on a non-trading day) to
+// the real bar time the equity curve actually has a point at. Never
+// silently falls back to some other bar (for example the dataset's
+// own last one) when from is out of range: a caller anchoring
+// sizing or an equity-curve lookup on the wrong bar would fail
+// silently instead of loudly (PR #353 review).
+func firstBarAtOrAfter(bars []marketdata.Bar, from time.Time) (marketdata.Bar, bool) {
 	for _, b := range bars {
 		if !b.Time.Before(from) {
-			return b
+			return b, true
 		}
 	}
-	return bars[len(bars)-1]
+	return marketdata.Bar{}, false
 }

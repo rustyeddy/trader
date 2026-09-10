@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	brokerpkg "github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
@@ -193,7 +194,13 @@ func TestReduceOnly_BuyAgainstLongNeverIncreasesLong(t *testing.T) {
 // TestReduceOnly_OversizedCannotReversePosition proves the clamp
 // (issue #352 review point 3): a ReduceOnly Sell requesting more than
 // the held Long fills only up to the held quantity, closing to Flat
-// rather than reversing into a Short.
+// rather than reversing into a Short. The unfillable remainder is
+// canceled atomically as part of this exact same fill, leaving the
+// order terminal (PR #353 review) rather than a live
+// StatusPartiallyFilled order accountState.advance would never
+// reconsider (only StatusWorking orders are ever re-evaluated there)
+// — proven here by asserting the order is absent from
+// Snapshot.OpenOrders, which only ever lists non-terminal orders.
 func TestReduceOnly_OversizedCannotReversePosition(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
@@ -207,12 +214,16 @@ func TestReduceOnly_OversizedCannotReversePosition(t *testing.T) {
 
 	o, err := acc.Submit(ctx, mustReduceOnlyMarketRequestFor(t, deps.IDs, accountID, mustEurUsdListing(t), order.Sell, "1500"))
 	require.NoError(t, err)
-	assert.Equal(t, order.StatusPartiallyFilled, o.Status, "the unfillable remainder leaves the order partially filled, not silently dropped")
-	assert.Equal(t, "1000", o.FilledQuantity.String())
+	assert.Equal(t, order.StatusCanceled, o.Status, "the unfillable remainder must be canceled atomically, not left partially filled and live")
+	assert.Equal(t, "1000", o.FilledQuantity.String(), "the reducible quantity must still have been filled before the remainder was canceled")
 
 	snap, err := acc.Snapshot(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, snap.Positions(), "must close to Flat, never reverse into a Short")
+
+	for _, open := range snap.OpenOrders() {
+		assert.NotEqual(t, o.Request.OrderID, open.Request.OrderID, "a terminal (Canceled) order must never remain in OpenOrders")
+	}
 }
 
 // TestReduceOnly_StaleProtectiveStopCannotFillIntoFlat is issue #352's
@@ -263,4 +274,33 @@ func TestReduceOnly_StaleProtectiveStopCannotFillIntoFlat(t *testing.T) {
 	final := handle.state.orders[stopOrder.Request.OrderID]
 	handle.state.mu.Unlock()
 	assert.Equal(t, order.StatusCanceled, final.Status, "the stale protective stop must be canceled, not left dangling or filled")
+
+	// PR #353 review: the internal cancellation's own two-event
+	// sequence must be causally chained exactly like Cancel() chains
+	// an external one — pendingEvent caused by the internal cancel
+	// request's own (non-zero) EventID, never by whatever outer
+	// causationID Advance happened to pass in (zero, here), and
+	// canceledEvent caused by pendingEvent's own EventID.
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	var pendingEvt, canceledEvt brokerpkg.Event
+	for {
+		e, err := reader.Next(ctx)
+		require.NoError(t, err)
+		if e.Kind != brokerpkg.EventKindOrder || e.Order == nil || e.Order.Request.OrderID != stopOrder.Request.OrderID {
+			continue
+		}
+		switch e.Order.Status {
+		case order.StatusPendingCancel:
+			pendingEvt = e
+		case order.StatusCanceled:
+			canceledEvt = e
+			goto done
+		}
+	}
+done:
+	require.False(t, pendingEvt.Metadata.EventID.IsZero(), "must have observed the pending-cancel event")
+	require.False(t, canceledEvt.Metadata.EventID.IsZero(), "must have observed the canceled event")
+	assert.False(t, pendingEvt.Metadata.CausationID.IsZero(), "the pending-cancel event must be caused by the internal cancel request's own EventID, not left as the zero causation Advance itself passed in")
+	assert.Equal(t, pendingEvt.Metadata.EventID, canceledEvt.Metadata.CausationID, "the canceled event must be caused by the pending-cancel event's own EventID")
 }
