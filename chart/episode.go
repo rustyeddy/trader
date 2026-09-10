@@ -2,14 +2,14 @@ package chart
 
 import "io"
 
-// DefaultEpisodeSize is RenderEpisode's own default output size.
-var DefaultEpisodeSize = Size{WidthInches: 10, HeightInches: 5}
+// defaultEpisodeSize is RenderEpisode's own default output size.
+var defaultEpisodeSize = Size{WidthInches: 10, HeightInches: 5}
 
 // RenderEpisode renders in's own bounded exit/re-entry episode chart
 // (issue #355) — the windowed Close-price series, optional SMA/
 // probation-stop/trailing-stop overlays, and this episode's own
 // markers (typically entry, exit, post-exit trough, and re-entry) —
-// to w in format, at DefaultEpisodeSize. Returns ErrEmptyBars if
+// to w in format, at defaultEpisodeSize. Returns ErrEmptyBars if
 // in.Bars is empty.
 func RenderEpisode(w io.Writer, in EpisodeInput, format Format) error {
 	extra := []namedSeries{
@@ -21,5 +21,5 @@ func RenderEpisode(w io.Writer, in EpisodeInput, format Format) error {
 	if err != nil {
 		return err
 	}
-	return writePlot(w, p, DefaultEpisodeSize, format)
+	return writePlot(w, p, defaultEpisodeSize, format)
 }

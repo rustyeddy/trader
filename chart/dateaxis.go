@@ -9,8 +9,11 @@ import (
 // unixSeconds converts t to the float64 x-value every plotted point
 // and tick in this package uses for its time axis — plain Unix
 // seconds, UTC. A direct numeric conversion, not a round-trip through
-// any text representation, so it introduces no precision loss and no
-// non-determinism of its own.
+// any text representation, so it introduces no non-determinism of its
+// own; it does discard any sub-second component of t (time.Time.Unix
+// truncates to whole seconds), which is immaterial for this package's
+// own D1/H4-scale research charts but would not be an appropriate
+// primitive for a tick- or sub-second-resolution chart.
 func unixSeconds(t time.Time) float64 {
 	return float64(t.UTC().Unix())
 }

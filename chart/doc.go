@@ -30,7 +30,7 @@
 // through its own Input struct.
 //
 // Only two chart-native types are exported at all (Format and Size);
-// every other exported type (Series, LevelPoint, Marker, MarkerKind,
+// every other exported type (LevelPoint, Marker, MarkerKind,
 // OverviewInput, EpisodeInput, EquityInput) is a plain Trader-owned
 // value built from marketdata/num/order-time types, never a
 // gonum.org/v1/plot type — the architecture document's own "do not

@@ -65,7 +65,13 @@ func TestRenderEpisode_DeterministicAcrossRuns(t *testing.T) {
 	var first, second bytes.Buffer
 	require.NoError(t, RenderEpisode(&first, in, FormatPNG))
 	require.NoError(t, RenderEpisode(&second, in, FormatPNG))
-	assert.Equal(t, first.Bytes(), second.Bytes())
+	assert.Equal(t, first.Bytes(), second.Bytes(), "identical EpisodeInput must render byte-identical PNG output")
+
+	first.Reset()
+	second.Reset()
+	require.NoError(t, RenderEpisode(&first, in, FormatSVG))
+	require.NoError(t, RenderEpisode(&second, in, FormatSVG))
+	assert.Equal(t, first.Bytes(), second.Bytes(), "identical EpisodeInput must render byte-identical SVG output")
 }
 
 func TestRenderEpisode_RejectsEmptyBars(t *testing.T) {
@@ -82,4 +88,19 @@ func TestRenderEpisode_WorksWithNoStopOverlaysAtAll(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, RenderEpisode(&buf, in, FormatPNG))
 	assert.NotEmpty(t, buf.Bytes())
+}
+
+// TestRenderEpisode_MarkerLabelIsActuallyRendered proves Marker.Label
+// is not merely a documented-but-ignored field (PR #358 review):
+// SVG's own text-based format lets this be checked directly, rather
+// than merely trusting that addMarkers's own label-drawing code path
+// executed without error.
+func TestRenderEpisode_MarkerLabelIsActuallyRendered(t *testing.T) {
+	in := sampleEpisodeInput(t)
+	in.Markers = []Marker{
+		{Time: in.Bars[2].Time, Price: in.Bars[2].Close, Kind: MarkerExit, Label: "gap-through stop"},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, RenderEpisode(&buf, in, FormatSVG))
+	assert.Contains(t, buf.String(), "gap-through stop")
 }

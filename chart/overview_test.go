@@ -57,8 +57,8 @@ func TestRenderOverview_PNGProducesValidImageAtDefaultSize(t *testing.T) {
 	// directly rather than assumed) — width/height in pixels should
 	// match the requested inch size at that DPI.
 	const dpi = 96
-	assert.InDelta(t, DefaultOverviewSize.WidthInches*dpi, float64(b.Dx()), 3)
-	assert.InDelta(t, DefaultOverviewSize.HeightInches*dpi, float64(b.Dy()), 3)
+	assert.InDelta(t, defaultOverviewSize.WidthInches*dpi, float64(b.Dx()), 3)
+	assert.InDelta(t, defaultOverviewSize.HeightInches*dpi, float64(b.Dy()), 3)
 }
 
 func TestRenderOverview_SVGProducesNonEmptyVectorOutput(t *testing.T) {

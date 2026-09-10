@@ -48,14 +48,6 @@ type LevelPoint struct {
 	Price num.Price
 }
 
-// Series is one named LevelPoint series plotted as a line — used for
-// an indicator overlay (SMA) or a resting stop level (probation,
-// trailing) on an overview or episode chart.
-type Series struct {
-	Name   string
-	Points []LevelPoint
-}
-
 // MarkerKind identifies what a Marker represents on a chart.
 type MarkerKind string
 

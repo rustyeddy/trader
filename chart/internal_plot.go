@@ -124,11 +124,17 @@ type namedSeries struct {
 func addMarkers(p *plot.Plot, markers []Marker) error {
 	byKind := make(map[MarkerKind]plotter.XYs)
 	order := make([]MarkerKind, 0, 4)
+	var labelPts plotter.XYLabels
 	for _, m := range markers {
 		if _, ok := byKind[m.Kind]; !ok {
 			order = append(order, m.Kind)
 		}
 		byKind[m.Kind] = append(byKind[m.Kind], plotter.XY{X: unixSeconds(m.Time), Y: m.Price.Float64()})
+
+		if m.Label != "" {
+			labelPts.XYs = append(labelPts.XYs, plotter.XY{X: unixSeconds(m.Time), Y: m.Price.Float64()})
+			labelPts.Labels = append(labelPts.Labels, m.Label)
+		}
 	}
 	for _, kind := range order {
 		sc, err := plotter.NewScatter(byKind[kind])
@@ -138,6 +144,22 @@ func addMarkers(p *plot.Plot, markers []Marker) error {
 		sc.GlyphStyle = markerStyle(kind)
 		p.Add(sc)
 		p.Legend.Add(string(kind), sc)
+	}
+
+	// Marker.Label is rendered as small text offset above each labeled
+	// point (issue #355 review): the field is part of the documented
+	// public contract specifically so a research chart can distinguish
+	// same-Kind markers from each other (for example two MarkerExit
+	// points, one "probation stop" and one "gap-through") — a
+	// documented field that addMarkers silently ignored would be a
+	// contract the API promises but never keeps.
+	if len(labelPts.XYs) > 0 {
+		labels, err := plotter.NewLabels(labelPts)
+		if err != nil {
+			return fmt.Errorf("chart: building marker labels: %w", err)
+		}
+		labels.Offset = vg.Point{X: 0, Y: vg.Points(8)}
+		p.Add(labels)
 	}
 	return nil
 }

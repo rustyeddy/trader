@@ -10,12 +10,12 @@ import (
 	"gonum.org/v1/plot/vg"
 )
 
-// DefaultEquitySize is RenderEquity's own default output size.
-var DefaultEquitySize = Size{WidthInches: 12, HeightInches: 5}
+// defaultEquitySize is RenderEquity's own default output size.
+var defaultEquitySize = Size{WidthInches: 12, HeightInches: 5}
 
 // RenderEquity renders in's own equity curve (issue #355), optionally
 // compared against a buy-and-hold series over the identical span, to
-// w in format, at DefaultEquitySize. Returns ErrEmptyEquity if
+// w in format, at defaultEquitySize. Returns ErrEmptyEquity if
 // in.Equity is empty.
 func RenderEquity(w io.Writer, in EquityInput, format Format) error {
 	if len(in.Equity) == 0 {
@@ -46,7 +46,7 @@ func RenderEquity(w io.Writer, in EquityInput, format Format) error {
 		p.Legend.Add("Buy & Hold", bhLine)
 	}
 
-	return writePlot(w, p, DefaultEquitySize, format)
+	return writePlot(w, p, defaultEquitySize, format)
 }
 
 func newLevelLine(points []EquityPoint, col color.Color) (*plotter.Line, error) {

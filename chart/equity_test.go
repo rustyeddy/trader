@@ -50,7 +50,13 @@ func TestRenderEquity_DeterministicAcrossRuns(t *testing.T) {
 	var first, second bytes.Buffer
 	require.NoError(t, RenderEquity(&first, in, FormatPNG))
 	require.NoError(t, RenderEquity(&second, in, FormatPNG))
-	assert.Equal(t, first.Bytes(), second.Bytes())
+	assert.Equal(t, first.Bytes(), second.Bytes(), "identical EquityInput must render byte-identical PNG output")
+
+	first.Reset()
+	second.Reset()
+	require.NoError(t, RenderEquity(&first, in, FormatSVG))
+	require.NoError(t, RenderEquity(&second, in, FormatSVG))
+	assert.Equal(t, first.Bytes(), second.Bytes(), "identical EquityInput must render byte-identical SVG output")
 }
 
 func TestRenderEquity_RejectsEmptyEquity(t *testing.T) {
