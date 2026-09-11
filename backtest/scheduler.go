@@ -768,25 +768,138 @@ func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strat
 	s.listingsByInstrument[intent.Instrument] = in.Listing
 
 	result, submitErr := s.deps.Pipeline.Submit(ctx, in)
+	corr := intent.Metadata.CorrelationID
+
+	// order.IntentEnterWithStop (issue #351, ADR-059) has its own
+	// distinct error-propagation contract from every other intent
+	// kind (PR #367 review) — handled entirely by submitBracketOutcome,
+	// which journals both legs' own real outcomes (including a real
+	// entry fill) before ever returning, regardless of submitErr, so a
+	// partial bracket failure can never leave the journal/fill stream
+	// silently behind real broker state.
+	if result.Bracket != nil {
+		return s.submitBracketOutcome(ctx, intent, corr, result.Bracket, submitErr)
+	}
+
 	rejected := errors.Is(submitErr, pipeline.ErrRejected)
 	if submitErr != nil && !rejected {
 		return fmt.Errorf("backtest: scheduler: submitting intent %s: %w", intent.IntentID, submitErr)
 	}
 
-	corr := intent.Metadata.CorrelationID
+	if err := s.journalPipelineResult(ctx, corr, result); err != nil {
+		return err
+	}
+	if result.Replace == nil && rejected {
+		return nil
+	}
+	return s.drainAndJournal(ctx)
+}
 
+// submitBracketOutcome journals order.IntentEnterWithStop's own two
+// legs (issue #351, ADR-059; PR #367 review) — including each leg's
+// own synthesized sub-intent (journalBracketLeg), so the real
+// bracket -> sub-intent -> proposal causal chain ADR-059 documents is
+// actually present in the journal, not merely asserted in a doc
+// comment — and always drains afterward, regardless of either leg's
+// own outcome: drainAndJournal is its own incremental, watermark-based
+// no-op when nothing new triggered (see its own doc comment), and the
+// entry leg alone can have produced a real fill even when the stop
+// leg was separately rejected.
+//
+// submitErr, the error pipeline.Submit itself returned for the whole
+// bracket call, is then propagated according to which leg it actually
+// concerns — bracket.Entry.Order.Status reports order.StatusFilled
+// only once the entry leg has genuinely filled, which is the one
+// signal available to tell the two cases apart:
+//
+//   - Entry never filled: nothing was ever opened, the identical
+//     harmless case an ordinary IntentEnter rejection already is — a
+//     risk rejection (errors.Is(submitErr, pipeline.ErrRejected))
+//     returns nil exactly like the plain path does; any other error
+//     (including ErrBracketEntryNotSynchronouslyFilled) aborts Run.
+//   - Entry filled: any remaining submitErr necessarily belongs to the
+//     stop leg — the only thing that can still fail once the entry
+//     has already succeeded — and is *always* treated as a hard,
+//     Run-aborting error, never as an ordinary harmless rejection
+//     (PR #367 review): silently continuing a backtest with a real,
+//     unprotected open position would defeat this whole capability's
+//     own safety contract.
+func (s *Scheduler) submitBracketOutcome(ctx context.Context, bracketIntent order.Intent, corr id.CorrelationID, bracket *pipeline.BracketOutcome, submitErr error) error {
+	if err := s.journalBracketLeg(ctx, corr, bracket.EntryIntent, bracket.Entry); err != nil {
+		return err
+	}
+	if err := s.journalBracketLeg(ctx, corr, bracket.StopIntent, bracket.Stop); err != nil {
+		return err
+	}
+	if err := s.drainAndJournal(ctx); err != nil {
+		return err
+	}
+
+	if submitErr == nil {
+		return nil
+	}
+
+	if bracket.Entry.Order.Status != order.StatusFilled {
+		if errors.Is(submitErr, pipeline.ErrRejected) {
+			return nil
+		}
+		return fmt.Errorf("backtest: scheduler: submitting bracket entry intent %s: %w", bracketIntent.IntentID, submitErr)
+	}
+	return fmt.Errorf("backtest: scheduler: bracket intent %s entry filled but stop leg failed, leaving an unprotected open position: %w", bracketIntent.IntentID, submitErr)
+}
+
+// journalBracketLeg journals one order.IntentEnterWithStop leg's own
+// synthesized sub-intent (PR #367 review: previously only the outer
+// bracket intent was journaled, leaving each leg's own real
+// Proposal.Metadata.CausationID point at an event absent from the
+// journal), then that leg's own Proposal/Decision/(Request-or-Replace)
+// sequence via journalPipelineResult — the identical helper the
+// plain, non-bracket path in submit uses, so a stop leg that resolves
+// to a replace (ratcheting an already-resting stop, exactly like any
+// ordinary IntentAdjustStop against an instrument that already has
+// one) is journaled correctly too, not silently dropped (PR #367
+// review). legIntent's own zero value (the stop leg when it was never
+// attempted at all — the entry leg was rejected or did not fill
+// synchronously) is a clean no-op.
+func (s *Scheduler) journalBracketLeg(ctx context.Context, corr id.CorrelationID, legIntent order.Intent, leg pipeline.Result) error {
+	if legIntent.Metadata.EventID.IsZero() {
+		return nil
+	}
+	if err := s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindIntent,
+		Intent:   &legIntent,
+	}); err != nil {
+		return err
+	}
+	return s.journalPipelineResult(ctx, corr, leg)
+}
+
+// journalPipelineResult journals result's own Proposal/Decision, then
+// either its Replace or (only once Decision.Allowed) its Request —
+// the identical sequence every successfully-planned intent already
+// gets, whether that intent stood alone or was one leg of an
+// order.IntentEnterWithStop bracket (PR #367 review: previously
+// duplicated separately for the plain and bracket paths, now shared
+// so the two cannot drift out of parity with each other, and the
+// bracket path gains Replace handling it was previously missing for
+// free). A Result whose own Proposal was never built at all (Replace
+// populated instead, or planning failed before any Proposal existed)
+// is handled correctly without journaling three hollow, zero-valued
+// records.
+func (s *Scheduler) journalPipelineResult(ctx context.Context, corr id.CorrelationID, result pipeline.Result) error {
 	if result.Replace != nil {
-		if err := s.journalRecord(ctx, journal.Record{
+		return s.journalRecord(ctx, journal.Record{
 			RunID:          s.deps.RunID,
 			Metadata:       id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
 			Kind:           journal.KindReplaceRequest,
 			ReplaceRequest: &result.Replace.Request,
-		}); err != nil {
-			return err
-		}
-		return s.drainAndJournal(ctx)
+		})
 	}
-
+	if result.Proposal.Metadata.EventID.IsZero() {
+		return nil
+	}
 	if err := s.journalRecord(ctx, journal.Record{
 		RunID:    s.deps.RunID,
 		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
@@ -803,20 +916,15 @@ func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strat
 	}); err != nil {
 		return err
 	}
-	if rejected {
+	if !result.Decision.Allowed {
 		return nil
 	}
-
-	if err := s.journalRecord(ctx, journal.Record{
+	return s.journalRecord(ctx, journal.Record{
 		RunID:    s.deps.RunID,
 		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
 		Kind:     journal.KindRequest,
 		Request:  &result.Request,
-	}); err != nil {
-		return err
-	}
-
-	return s.drainAndJournal(ctx)
+	})
 }
 
 // journalRecord validates and records rec, wrapping any failure as a

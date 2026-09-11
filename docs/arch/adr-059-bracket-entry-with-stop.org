@@ -1,0 +1,264 @@
+#+title: ADR-059: Atomic entry-with-protective-stop submission (order.IntentEnterWithStop)
+
+* Status
+
+Accepted
+
+* Context
+
+Issue #351 (raised in PR #350 review, issue #349's own smatrend
+PROBATION/TRENDING lifecycle) identified a real, regression-locked
+backtest correctness gap, general to any =strategy/smatrend= =ExitRule=
+though most visible for =probation-trend=, whose whole purpose is a
+*tight* stop immediately after entry:
+
+1. Bar T closes and =Strategy.OnBar= emits =order.IntentEnter=.
+2. The entry fills at bar T+1's open (Trader's normal next-session
+   execution semantics).
+3. =Strategy.OnBar= first observes the position as =order.Long= during
+   bar T+1's own call, and only *then* does the configured =ExitRule=
+   compute and emit the first protective =order.IntentAdjustStop=.
+4. But =backtest.Scheduler='s own broker-side resting-order machinery
+   (ADR-026) has already resolved bar T+1's own intrabar price action
+   *before* =OnBar= ever runs for it.
+
+The AdjustStop intent computed during bar T+1's own =OnBar= call only
+becomes a checked resting order starting bar T+2 onward. Bar T+1
+itself — the entry fill bar — trades with *no protective stop active
+at all*, regardless of what any =ExitRule= intends.
+=strategy/smatrend/regression_test.go='s
+=TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation= reproduces
+this against a real EURUSD fixture.
+
+Issue #351 explicitly left the direction open (native broker-level
+bracket order, a narrower =strategy.IntentFactory= capability, or
+changing =backtest.Scheduler='s own intrabar-advancement ordering) and
+explicitly scoped "actually rewiring =strategy/smatrend= to use
+whatever mechanism results" out of the issue.
+
+** A tempting non-fix, and why it does not generalize
+
+=backtest.Scheduler='s own Phase 2 loop (=runBatch='s =submit=) already
+submits one batch's queued intents sequentially, taking a *fresh*
+=Account.Snapshot()= before planning each one. =adapters/broker/sim=
+fills a =Market= order *synchronously*, inside =Submit= itself. Put
+together: if a strategy emitted =[IntentEnter, IntentAdjustStop]=
+*together*, from the same =OnBar= call that decides to enter, the stop
+would already be resting by that same bar's own =IntrabarAdvancer=
+check — closing the gap with *no changes at all* to
+=order=/=execution=/=risk=/=broker=/=backtest=.
+
+This only works because the simulator happens to fill a =Market= order
+synchronously inside =Submit=. A real broker adapter (OANDA, Alpaca)
+acknowledges a market order and reports the fill *later*, asynchronously,
+through its own event stream — =Submit= returns an accepted order, not
+a fill. The identical "emit both intents in order" trick would
+silently *not* be atomic against a real broker: the second intent's
+account snapshot would very likely still show Flat, and
+=execution.planAdjustStop= would fail outright (it requires an
+existing position via =planExit=). Relying on this coincidence would
+be a fragile non-fix masquerading as one.
+
+** Scope decision
+
+Per the issue's own discussion (recorded in issue #351's comments): this
+ADR scopes correctness to =backtest.Scheduler= + =adapters/broker/sim=
+only. Live/real-broker atomicity — where a fill is genuinely
+asynchronous — is a distinct problem needing its own design (a native
+broker-level bracket order, or an execution-layer mechanism that
+awaits a real fill event before submitting the second leg) and is
+tracked separately as issue #366, not solved here. The mechanism this
+ADR adopts is explicitly, mechanically safe in the meantime: it
+*never* silently proceeds as if a position were protected when it is
+not — see Decision, below.
+
+* Decision
+
+** A new =order.IntentKind=: =IntentEnterWithStop=
+
+Expresses "open a position in Side's direction, and ensure it has a
+protective stop at StopPrice active from the same fill." Like
+=IntentEnter=, it carries no Quantity (sizing remains risk's
+responsibility, ADR-006). =StopPrice= is required and must be
+computable *before* the fill — for example from an indicator value,
+never from the real average fill price — since the two legs this
+intent expands into are submitted before that fill price is known to
+the caller. (=probation-trend='s own initial PROBATION stop already
+satisfies this: it is computed from the current SMA value, not the
+entry price.)
+
+** =pipeline.Pipeline= is the only place this intent is fulfilled
+
+=execution.Planner= never sees =IntentEnterWithStop= directly — its own
+=Plan= switch's =default= case would reject it with
+=ErrUnsupportedIntentKind= if it were ever mistakenly passed there,
+which it structurally cannot be. =risk.Engine=, =broker=, and
+=adapters/broker/sim= need *no changes whatsoever*: both legs this
+intent expands into go through the exact same =IntentEnter=/
+=IntentAdjustStop= planning and risk-admission path every other intent
+already uses.
+
+=Pipeline.Evaluate= rejects =IntentEnterWithStop= outright, with the new
+=ErrBracketRequiresSubmit=: a bracket cannot be evaluated read-only,
+since the second (stop) leg's own viability depends on whether the
+first (entry) leg's real broker submission actually filled — that is
+not knowable without an actual broker call, breaking Evaluate's own
+"never calls the broker" contract (ADR-032).
+
+=Pipeline.Submit= dispatches =IntentEnterWithStop= to a new
+=submitBracket= method:
+
+1. Build an =IntentEnter= sub-intent (same Instrument/Side), correlated
+   to the bracket's own =CorrelationID= and caused by its own
+   =EventID=, with its own fresh =IntentID=/=EventID=.
+2. Submit it through =Pipeline.Submit= itself, recursively — reusing
+   100% of the existing sizing/planning/risk-admission/broker-submit
+   path, unchanged.
+3. Check the resulting =Order.Status= directly. If it is not
+   =order.StatusFilled=, return =ErrBracketEntryNotSynchronouslyFilled=
+   immediately — the stop leg is never attempted. This is the
+   mechanism that makes this decision correctly backtest-only *without
+   special-casing any broker*: it only ever succeeds against a broker
+   that fills a Market order synchronously inside =Submit= (today,
+   only the simulator), and *fails loudly*, not silently, against one
+   that does not (every real broker adapter today). A caller that
+   receives this error has a real, unprotected open position and must
+   decide how to protect it — Pipeline makes no such decision on the
+   caller's behalf.
+4. Re-fetch a fresh account snapshot from the broker (the entry's own
+   fill is now reflected in it).
+5. Build an =IntentAdjustStop= sub-intent (same =StopPrice=), correlated
+   and caused identically to the entry sub-intent, and submit it
+   through =Pipeline.Submit= against the fresh snapshot — again, the
+   exact same path every ordinary =IntentAdjustStop= already uses.
+
+=pipeline.Result= gains a third, mutually exclusive shape,
+=Bracket *BracketOutcome=, alongside the existing =Replace= shape:
+=BracketOutcome{Entry, Stop pipeline.Result}=, each an ordinary,
+full =Result= — so the identical journaling/inspection code a caller
+already has for a plain intent applies to each leg unchanged.
+
+** =backtest.Scheduler= journals each leg as an ordinary sub-intent, and aborts the run if a filled entry's stop leg fails
+
+=Scheduler.submit='s own generic Proposal/Decision/Request journaling
+sequence (extracted as =journalPipelineResult=, shared with the plain,
+non-bracket path so a leg that resolves to a =Replace= is journaled
+correctly too — the same gap ADR-054 already solved once for the
+top-level path) assumes one flat =Result=. A new =journalBracketLeg=
+helper first journals the leg's own =order.Intent= itself as a
+=journal.KindIntent= record — =BracketOutcome= carries both sub-intent
+values (=EntryIntent=, =StopIntent=) specifically so this is possible —
+then delegates to =journalPipelineResult= for that leg's
+Proposal/Decision/Request. Without journaling the sub-intents
+themselves, each leg's own =Proposal.Metadata.CausationID= would point
+at an =EventID= absent from the journal entirely, breaking the
+causal chain a reader is expected to be able to walk (PR #367 review).
+
+=Scheduler.submitBracketOutcome= journals both legs (skipping the stop
+leg cleanly when it was never attempted) and drains fills exactly once,
+*before* deciding what to return — regardless of either leg's own
+outcome, since the entry leg alone can have produced a real fill even
+when the stop leg was separately risk-rejected, and that fill must
+never be silently dropped from the journal or left undrained (PR #367
+review, blocker 1).
+
+Only then does it decide what error, if any, to propagate, using
+=Result.Bracket.Entry.Order.Status= as the discriminating signal rather
+than a single "was anything rejected" flag: if the entry leg itself
+never filled, an entry-side risk rejection is treated exactly like any
+other intent's rejection (the run continues); but once the entry has
+genuinely filled, *any* stop-leg failure — including an ordinary risk
+rejection, not only an infrastructure error — aborts the run outright.
+An open position with no protective stop is not "an intent got
+rejected, move on" the way an ordinary =IntentEnter= rejection is; it is
+a real, unprotected exposure that requires operator attention, and
+silently continuing would misrepresent that (PR #367 review, blocker
+2).
+
+** =strategy.IntentFactory= gains =EnterWithStop=
+
+The strategy-facing capability needed for any strategy (not only
+=smatrend=) to actually construct a valid =IntentEnterWithStop= — a
+strategy has no direct access to an =*id.Generator=, so without this,
+the new intent kind would be unusable outside a test. This is the one
+piece of "plumbing," not "rewiring": no existing strategy's own
+=ExitRule=/re-entry logic is changed to use it — issue #351's own
+explicit scope boundary.
+
+** =service/execution= rejects =IntentEnterWithStop= outright
+
+=service/execution.SubmitResponse= has no field carrying
+=pipeline.Result.Bracket=; silently discarding a successful bracket
+outcome there would be worse than rejecting the request outright (PR
+#367 review, blocker 4). =SubmitRequest.Validate= now returns a new
+=ErrBracketNotSupported= for this intent kind, since this service
+layer's own callers may configure *any* broker adapter, and this
+decision's atomicity guarantee is explicitly backtest-only (see Scope
+decision, above) — =backtest.Scheduler= is the one caller that submits
+this intent kind today, and it talks to =*pipeline.Pipeline= directly,
+never through this service.
+
+* Consequences
+
+- =pipeline.Input.RiskFraction= and =AdverseDistance= are required
+  whenever =Intent.Kind= is =IntentEnterWithStop=, identically to
+  =IntentEnter=: =submitBracket= forwards both unchanged to the
+  synthesized entry sub-intent, which has that identical requirement.
+- The regression-locked gap =TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation=
+  documents now has a real, usable fix — proven end-to-end by a new
+  =backtest.Scheduler= integration test
+  (=TestScheduler_BracketEntryProtectsFromTheFillBarItself=) reusing
+  the identical fixture/stop-price =TestScheduler_IntrabarAdvancerTriggersRestingStop=
+  already established: the bracket's own protective stop triggers on
+  the *same* bar (01:00) the entry itself fills, one full bar earlier
+  than the equivalent two-step Enter-then-observe-then-AdjustStop
+  strategy (which needs until 02:00). Confirmed meaningful by reverting
+  the fix and observing the real, expected failure before restoring it.
+- =strategy/smatrend= is *not* rewired to use =IntentEnterWithStop= in
+  this issue — a deliberate, explicit deferral (issue #351's own scope
+  boundary), not an oversight.
+- Live/real-broker atomicity remains unsolved, tracked as issue #366.
+  =ErrBracketEntryNotSynchronouslyFilled= is the concrete, tested proof
+  that this decision fails loudly rather than silently in that case,
+  today, against any broker adapter that does not fill Market orders
+  synchronously.
+- =pipeline.Result= now has three mutually exclusive shapes (plain,
+  =Replace=, =Bracket=) instead of two; every caller inspecting
+  =Result= must now check =Bracket != nil= alongside the existing
+  =Replace != nil= check before reading Proposal/Decision/Request/Order,
+  the same discipline ADR-054 already established for =Replace=.
+- A bracket's own two legs are never risk-evaluated as one combined
+  proposal — each is independently, separately risk-admitted, exactly
+  as if a strategy had submitted two ordinary intents back to back.
+  This is a deliberate consequence of reusing the existing per-intent
+  risk path unchanged, not a new risk-evaluation concept: a rule that
+  would reject the *combination* (for example a hypothetical margin
+  rule sensitive to a stop-protected vs. unprotected position) is out
+  of scope for this decision.
+
+* Alternatives Considered
+
+- *Native broker-level bracket order* (entry + attached stop as one
+  broker submission, understood by =broker.Account=/every adapter).
+  Rejected for this issue: no real broker adapter has bracket-order
+  integration work done yet to validate against, and it would require
+  changing the =broker.Account= port contract — a materially larger
+  change for a problem this decision's own scope (backtest-only) does
+  not need solved that way. Left as the likely shape of issue #366's
+  own eventual live-broker fix.
+- *Changing =backtest.Scheduler='s own intrabar-advancement ordering*
+  (running =IntrabarAdvancer= after =OnBar= instead of before, or some
+  other reordering) so a same-bar =AdjustStop= could retroactively
+  protect that same bar. Rejected: ADR-026/ADR-055's own no-lookahead
+  ordering (advance intrabar state *before* the strategy sees the bar,
+  using only prior-bar information) is a deliberate, foundational
+  backtest-determinism guarantee; changing it to solve one strategy
+  pattern would risk reintroducing lookahead risk across every other
+  resting-order interaction Scheduler already handles correctly.
+- *Silently emitting =[Enter, AdjustStop]= from the same =OnBar= call*
+  (the "tempting non-fix" described in Context), relying on the
+  simulator's own synchronous Market fill. Rejected: correct only by
+  accident of the simulator's own implementation, would silently stop
+  being atomic against any real broker adapter with no error or
+  warning at all — exactly the failure mode =ErrBracketEntryNotSynchronouslyFilled=
+  exists to make loud instead.

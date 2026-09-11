@@ -37,7 +37,11 @@ type Input struct {
 	// RiskFraction is the fraction of Account.Equity() Sizer may risk
 	// when sizing an unsized order.IntentEnter (risk.SizeInput.
 	// RiskFraction). Required, and must be positive, exactly when
-	// Intent.Kind is order.IntentEnter; ignored otherwise.
+	// Intent.Kind is order.IntentEnter; ignored otherwise. Also
+	// required for order.IntentEnterWithStop (issue #351, ADR-059):
+	// submitBracket forwards it unchanged to the synthesized
+	// order.IntentEnter sub-intent it submits for the entry leg, which
+	// has this identical requirement.
 	RiskFraction num.Rate
 
 	// AdverseDistance is the adverse price-distance assumption this
@@ -47,7 +51,9 @@ type Input struct {
 	// one (for example PerTradeLossRule, #182). Required, and must be
 	// positive, exactly when Intent.Kind is order.IntentEnter; optional
 	// otherwise — a Rule that needs it regardless of Kind and finds it
-	// nil returns its own classifiable ErrInsufficientRuleInput.
+	// nil returns its own classifiable ErrInsufficientRuleInput. Also
+	// required for order.IntentEnterWithStop, for the identical reason
+	// RiskFraction is (see its own doc comment).
 	AdverseDistance *num.Price
 
 	// ReferencePrice is the valuation price threaded into
@@ -83,12 +89,42 @@ type Input struct {
 // Go zero values on the replace path, and Decision's zero value in
 // particular (Allowed: false) must not be misread as a risk rejection
 // that never happened.
+// Bracket is Result's third, mutually exclusive shape (issue #351,
+// ADR-059): populated *instead of* Proposal/Decision/Request/Order/
+// Replace when Input.Intent was order.IntentEnterWithStop. A caller
+// must check Bracket != nil before reading any of the other four; all
+// stay their ordinary Go zero values on this path.
 type Result struct {
 	Proposal order.Proposal
 	Decision risk.Decision
 	Request  order.Request
 	Order    order.Order
 	Replace  *ReplaceOutcome
+	Bracket  *BracketOutcome
+}
+
+// BracketOutcome carries an order.IntentEnterWithStop's own two-leg
+// result (issue #351, ADR-059): EntryIntent/Entry are always populated
+// once submitBracket runs. StopIntent/Stop are populated only once
+// Entry's own Order reports order.StatusFilled — a rejected or
+// asynchronously-accepted entry leaves both at their zero value, and
+// the accompanying error (ErrRejected, or
+// ErrBracketEntryNotSynchronouslyFilled) explains why. Each Result is
+// a full, ordinary Result — the identical shape Submit returns for
+// any non-bracket intent — so the same journaling and inspection code
+// a caller already has for a plain IntentEnter/IntentAdjustStop
+// applies to each leg unchanged. EntryIntent/StopIntent are the exact
+// order.Intent values submitBracket built and submitted for each leg
+// (PR #367 review): a caller journaling this outcome needs them to
+// record the real bracket -> sub-intent -> proposal causal chain
+// ADR-059 documents — without them, each leg's own Proposal.Metadata.
+// CausationID points at an event the caller has no other way to
+// discover, let alone journal.
+type BracketOutcome struct {
+	EntryIntent order.Intent
+	Entry       Result
+	StopIntent  order.Intent
+	Stop        Result
 }
 
 // ReplaceOutcome carries a replacement's own request/result pair,
@@ -152,6 +188,9 @@ func (p *Pipeline) Evaluate(ctx context.Context, in Input) (Result, error) {
 	validIntent, err := order.NewIntent(in.Intent)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: intent: %v", ErrInvalidInput, err)
+	}
+	if validIntent.Kind == order.IntentEnterWithStop {
+		return Result{}, ErrBracketRequiresSubmit
 	}
 	if !strings.EqualFold(p.deps.Broker.Name(), in.Account.Broker()) {
 		return Result{}, fmt.Errorf("%w: broker %q does not match account broker %q (Pipeline must never evaluate or submit against a different broker than the account was sized/planned/risk-evaluated for)",
@@ -273,7 +312,16 @@ func (p *Pipeline) evaluateReplace(ctx context.Context, in Input) (Result, error
 // issue #336), Submit calls deps.Broker.OpenAccount(...).Replace
 // instead of Submit, and populates Result.Replace.Result rather than
 // Result.Order.
+//
+// When in.Intent.Kind is order.IntentEnterWithStop (issue #351,
+// ADR-059), Submit does not call Evaluate at all — Evaluate always
+// rejects that kind with ErrBracketRequiresSubmit — and dispatches to
+// submitBracket instead; see that method's own doc comment.
 func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
+	if in.Intent.Kind == order.IntentEnterWithStop {
+		return p.submitBracket(ctx, in)
+	}
+
 	result, err := p.Evaluate(ctx, in)
 	if err != nil {
 		return result, err
@@ -300,4 +348,138 @@ func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
 
 	result.Order = o
 	return result, nil
+}
+
+// submitBracket implements order.IntentEnterWithStop (issue #351,
+// ADR-059): open a position and ensure it has a protective stop
+// active from the same fill, with no bar of unprotected exposure — by
+// chaining two ordinary sub-intents (order.IntentEnter, then
+// order.IntentAdjustStop) through this same Submit method, recursively,
+// with a fresh account snapshot taken between them. execution.Planner,
+// risk.Engine, and every broker.Account method this reaches are
+// exactly the ones a plain IntentEnter/IntentAdjustStop already uses —
+// nothing about either leg's own planning or risk admission is
+// special-cased for a bracket.
+//
+// Both sub-intents correlate to the bracket intent's own
+// Metadata.CorrelationID and are caused by its own Metadata.EventID
+// (id.Metadata's own correlation/causation convention) — so each
+// leg's own resulting Proposal.Metadata.CausationID is one hop
+// further still, that *sub-intent's* own fresh EventID, not the
+// bracket's directly: bracket-event -> sub-intent-event ->
+// proposal, a proper two-hop chain, not both legs' proposals pointing
+// at one shared root. The journal therefore reads as one bracket
+// decision producing two causally-linked, independently inspectable
+// sub-intents — not two unrelated ones.
+//
+// This only ever succeeds against a broker that fills a Market order
+// *synchronously*, inside the same Submit call that accepted it (the
+// simulator's own behavior today): after the entry leg's own Submit
+// returns, submitBracket checks Result.Order.Status directly — if it
+// is not order.StatusFilled, the stop leg is never attempted at all,
+// and ErrBracketEntryNotSynchronouslyFilled is returned instead (see
+// that sentinel's own doc comment for why this is the correct,
+// deliberately loud failure mode against a real broker's own
+// asynchronous fill reporting, rather than a silent gap). ADR-059
+// records this as this decision's own deliberate scope: a genuine
+// live/async-broker-safe bracket mechanism is a separate, tracked
+// follow-up (issue #366), not solved by this one.
+func (p *Pipeline) submitBracket(ctx context.Context, in Input) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+
+	validIntent, err := order.NewIntent(in.Intent)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: intent: %v", ErrInvalidInput, err)
+	}
+	if validIntent.Kind != order.IntentEnterWithStop {
+		return Result{}, fmt.Errorf("%w: submitBracket called for non-bracket intent kind %v", ErrInvalidInput, validIntent.Kind)
+	}
+
+	entryIntent, err := p.buildBracketSubIntent(order.IntentEnter, validIntent, func(sub *order.Intent) {
+		sub.Side = validIntent.Side
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("pipeline: building bracket entry intent: %w", err)
+	}
+
+	entryResult, err := p.Submit(ctx, Input{
+		Intent:          entryIntent,
+		Listing:         in.Listing,
+		Account:         in.Account,
+		RiskFraction:    in.RiskFraction,
+		AdverseDistance: in.AdverseDistance,
+		ReferencePrice:  in.ReferencePrice,
+	})
+	bracket := &BracketOutcome{EntryIntent: entryIntent, Entry: entryResult}
+	if err != nil {
+		return Result{Bracket: bracket}, err
+	}
+
+	if entryResult.Order.Status != order.StatusFilled {
+		return Result{Bracket: bracket}, fmt.Errorf("%w: entry order %s accepted with status %s",
+			ErrBracketEntryNotSynchronouslyFilled, entryResult.Order.Request.OrderID, entryResult.Order.Status)
+	}
+
+	acc, err := p.deps.Broker.OpenAccount(ctx, in.Account.AccountID())
+	if err != nil {
+		return Result{Bracket: bracket}, fmt.Errorf("pipeline: reopening broker account after bracket entry fill: %w", err)
+	}
+	filledSnapshot, err := acc.Snapshot(ctx)
+	if err != nil {
+		return Result{Bracket: bracket}, fmt.Errorf("pipeline: snapshotting account after bracket entry fill: %w", err)
+	}
+
+	stopPrice := *validIntent.StopPrice
+	stopIntent, err := p.buildBracketSubIntent(order.IntentAdjustStop, validIntent, func(sub *order.Intent) {
+		sub.StopPrice = &stopPrice
+	})
+	if err != nil {
+		return Result{Bracket: bracket}, fmt.Errorf("pipeline: building bracket stop intent: %w", err)
+	}
+
+	stopResult, err := p.Submit(ctx, Input{
+		Intent:          stopIntent,
+		Listing:         in.Listing,
+		Account:         filledSnapshot,
+		RiskFraction:    in.RiskFraction,
+		AdverseDistance: in.AdverseDistance,
+		ReferencePrice:  in.ReferencePrice,
+	})
+	bracket.StopIntent = stopIntent
+	bracket.Stop = stopResult
+	return Result{Bracket: bracket}, err
+}
+
+// buildBracketSubIntent constructs one of submitBracket's two
+// sub-intents: kind is order.IntentEnter or order.IntentAdjustStop,
+// correlated to bracket's own Metadata.CorrelationID and caused by
+// bracket's own Metadata.EventID, with a fresh IntentID/EventID of its
+// own (id.Metadata's own correlation/causation convention). set
+// applies whichever kind-specific field (Side for the entry leg,
+// StopPrice for the stop leg) the caller needs beyond the fields every
+// sub-intent shares.
+func (p *Pipeline) buildBracketSubIntent(kind order.IntentKind, bracket order.Intent, set func(*order.Intent)) (order.Intent, error) {
+	eventID, err := id.GenerateEventID(p.deps.IDs)
+	if err != nil {
+		return order.Intent{}, fmt.Errorf("generating event id: %w", err)
+	}
+	intentID, err := id.GenerateIntentID(p.deps.IDs)
+	if err != nil {
+		return order.Intent{}, fmt.Errorf("generating intent id: %w", err)
+	}
+	sub := order.Intent{
+		IntentID:   intentID,
+		Kind:       kind,
+		Instrument: bracket.Instrument,
+		Metadata: id.Metadata{
+			EventID:       eventID,
+			CorrelationID: bracket.Metadata.CorrelationID,
+			CausationID:   bracket.Metadata.EventID,
+			Timestamp:     bracket.Metadata.Timestamp,
+		},
+	}
+	set(&sub)
+	return order.NewIntent(sub)
 }

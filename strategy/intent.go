@@ -31,6 +31,20 @@ type IntentFactory interface {
 	// AdjustStop builds an order.IntentAdjustStop moving instID's
 	// protective stop to stopPrice.
 	AdjustStop(instID instrument.ID, stopPrice num.Price) (order.Intent, error)
+	// EnterWithStop builds an order.IntentEnterWithStop for instID/
+	// side, with an initial protective stop at stopPrice active from
+	// the same fill (issue #351, ADR-059) — closing the one-bar gap
+	// where a strategy's own first protective stop, emitted only once
+	// the position is observed open, leaves the entry bar itself
+	// completely unprotected. stopPrice must be computable before the
+	// fill (for example from an indicator value), never derived from
+	// the real average fill price: pipeline.Pipeline submits this
+	// intent's two legs — entry, then stop — before that fill price is
+	// known to the caller. See order.IntentEnterWithStop's own doc
+	// comment for pipeline.Pipeline.Submit's deliberately backtest-only
+	// scope (it works only against a broker that fills a Market order
+	// synchronously, inside Submit itself).
+	EnterWithStop(instID instrument.ID, side order.Side, stopPrice num.Price) (order.Intent, error)
 	// TargetExposure builds an order.IntentTargetExposure for instID,
 	// side, and quantity.
 	TargetExposure(instID instrument.ID, side order.Side, quantity num.Quantity) (order.Intent, error)
@@ -80,6 +94,10 @@ func (f *intentFactory) Exit(instID instrument.ID) (order.Intent, error) {
 
 func (f *intentFactory) AdjustStop(instID instrument.ID, stopPrice num.Price) (order.Intent, error) {
 	return f.build(order.IntentAdjustStop, instID, 0, nil, &stopPrice)
+}
+
+func (f *intentFactory) EnterWithStop(instID instrument.ID, side order.Side, stopPrice num.Price) (order.Intent, error) {
+	return f.build(order.IntentEnterWithStop, instID, side, nil, &stopPrice)
 }
 
 func (f *intentFactory) TargetExposure(instID instrument.ID, side order.Side, quantity num.Quantity) (order.Intent, error) {

@@ -44,6 +44,33 @@ const (
 	// carrying the desired absolute Side and Quantity rather than a
 	// delta from whatever position currently exists.
 	IntentTargetExposure
+
+	// IntentEnterWithStop expresses "open a position in Side's
+	// direction, and ensure it has a protective stop at StopPrice
+	// active from the same fill" (issue #351, ADR-059) — a bracket
+	// entry, closing the gap where a strategy's own first protective
+	// stop (emitted only once the position is observed open, one bar
+	// after the fill) leaves the entry bar itself completely
+	// unprotected. Like IntentEnter, it carries no Quantity — sizing
+	// remains risk's responsibility (ADR-006). StopPrice must be
+	// computable before the fill (for example from an indicator value,
+	// never from the real average fill price), since the two legs this
+	// intent expands into are submitted before that fill price is
+	// known to the caller.
+	//
+	// pipeline.Pipeline is the only place this intent is actually
+	// fulfilled (see its own Submit/submitBracket doc comments):
+	// execution.Planner never sees IntentEnterWithStop directly, and
+	// Pipeline.Evaluate rejects it outright, since verifying the
+	// second (stop) leg's own viability requires a real broker
+	// submission for the first (entry) leg — a bracket cannot be
+	// evaluated read-only. ADR-059 records this decision's own
+	// deliberate scope: it succeeds only against a broker that fills a
+	// Market order synchronously inside Submit (today, only
+	// adapters/broker/sim) and fails loudly, not silently, against one
+	// that does not (every real broker adapter today) — see
+	// pipeline.ErrBracketEntryNotSynchronouslyFilled.
+	IntentEnterWithStop
 )
 
 // String returns a human-readable IntentKind name.
@@ -57,6 +84,8 @@ func (k IntentKind) String() string {
 		return "adjust_stop"
 	case IntentTargetExposure:
 		return "target_exposure"
+	case IntentEnterWithStop:
+		return "enter_with_stop"
 	default:
 		return fmt.Sprintf("IntentKind(%d)", uint8(k))
 	}
@@ -64,7 +93,7 @@ func (k IntentKind) String() string {
 
 func (k IntentKind) valid() bool {
 	switch k {
-	case IntentEnter, IntentExit, IntentAdjustStop, IntentTargetExposure:
+	case IntentEnter, IntentExit, IntentAdjustStop, IntentTargetExposure, IntentEnterWithStop:
 		return true
 	default:
 		return false
@@ -102,16 +131,16 @@ type Intent struct {
 	// concerns.
 	Instrument instrument.ID
 
-	// Side is required for IntentEnter and IntentTargetExposure, and
-	// must be the zero value otherwise.
+	// Side is required for IntentEnter, IntentTargetExposure, and
+	// IntentEnterWithStop, and must be the zero value otherwise.
 	Side Side
 
 	// Quantity is required (and must be positive) for
 	// IntentTargetExposure, and must be nil otherwise.
 	Quantity *num.Quantity
 
-	// StopPrice is required for IntentAdjustStop, and must be nil
-	// otherwise.
+	// StopPrice is required for IntentAdjustStop and
+	// IntentEnterWithStop, and must be nil otherwise.
 	StopPrice *num.Price
 
 	// Metadata carries this intent's correlation and causation
@@ -135,6 +164,8 @@ type Intent struct {
 //   - IntentAdjustStop: StopPrice required; Side and Quantity forbidden.
 //   - IntentTargetExposure: Side and a positive Quantity required;
 //     StopPrice forbidden.
+//   - IntentEnterWithStop: Side and StopPrice required; Quantity
+//     forbidden.
 func NewIntent(in Intent) (Intent, error) {
 	if err := checkIntent(in); err != nil {
 		return Intent{}, fmt.Errorf("%w: %v", ErrInvalidIntent, err)
@@ -164,9 +195,9 @@ func checkIntent(in Intent) error {
 }
 
 func checkIntentKindFields(in Intent) error {
-	requireSide := in.Kind == IntentEnter || in.Kind == IntentTargetExposure
+	requireSide := in.Kind == IntentEnter || in.Kind == IntentTargetExposure || in.Kind == IntentEnterWithStop
 	requireQuantity := in.Kind == IntentTargetExposure
-	requireStopPrice := in.Kind == IntentAdjustStop
+	requireStopPrice := in.Kind == IntentAdjustStop || in.Kind == IntentEnterWithStop
 
 	if requireSide {
 		if !in.Side.valid() {
