@@ -1076,6 +1076,51 @@ func TestStrategy_BracketEntryStopSameBarStillTransitionsLifecycle(t *testing.T)
 	assert.Equal(t, order.IntentEnterWithStop, intents[0].Kind, "the re-entry must also be a fresh bracket entry, protected from its own fill bar too")
 }
 
+// TestStrategy_BracketEntryGapExactlyToStopStillTransitionsLifecycle
+// is PR #369's own re-review regression: RealizedPnL alone misses one
+// real same-bar round trip — a long bracket entry filling at this
+// bar's own Open, already at or below its own protective stop, gaps
+// through at that exact price (ADR-026's own gap rule), so entry and
+// exit realize exactly zero PnL and RealizedPnL never changes at all.
+// h.realizedPnL is deliberately left at its zero default throughout —
+// only event.Bar.Open's own relationship to the bracket's stop price
+// can prove this case (see Strategy.lastRealizedPnL's own doc
+// comment).
+func TestStrategy_BracketEntryGapExactlyToStopStillTransitionsLifecycle(t *testing.T) {
+	h := newTestHarness(t, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		ReEntryRuleName:     "above-sma",
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+		TrailingStopPercent: num.MustParseRate("0.10"),
+	})
+
+	for i, c := range []float64{100, 100, 100, 99} {
+		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
+	}
+
+	// Bar 5: entry decision — a bracket order.IntentEnterWithStop with
+	// stop 99.33 (sma(99,102's own bar4/5)... see the sibling test's
+	// own identical bar-5 comment: sma(100,99,102)=100.33333333,
+	// stop=100.33333333*0.99=99.33).
+	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
+	require.Equal(t, "99.33", intents[0].StopPrice.String())
+	h.side = order.Flat // see the sibling test's own identical note.
+
+	// Bar 6: the entry's own fill bar gaps down — Open (99) already at
+	// or below the 99.33 bracket stop. RealizedPnL stays "0" for this
+	// entire test; only the gap-through-Open check can prove this bar
+	// was a real round trip. Still above the SMA (sma(99,102,102)=101,
+	// close 102 above it) with no fresh cross, so above-sma fires
+	// immediately if the lifecycle correctly transitioned.
+	intents, _ = h.onBar(6, bar{open: 99, high: 100, low: 95, close: 102})
+	require.Len(t, intents, 1, "the lifecycle must have transitioned to post-exit/re-entry mode even though RealizedPnL never changed")
+	assert.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
+}
+
 // TestProbationTrendExitRule_SeedInitialStopPreventsLoosening is PR
 // #369 review's own required "also fix before merge" regression: a
 // bracket entry that *survives* its own fill bar, whose next

@@ -127,13 +127,28 @@ type Strategy struct {
 	// RealizedPnL only changes when a position actually closes
 	// (opening one does not move it), so a change observed while
 	// pendingInitialStop is non-nil and side is Flat is conclusive
-	// proof a full bracket round trip occurred; no change is
-	// conclusive proof the entry never filled at all. This assumes
-	// smatrend is the only strategy trading this account (already
-	// assumed elsewhere — see OnBar's own order.Short case) and a
-	// non-zero commission/fee model in the exceptionally narrow case
-	// where a round trip's realized gain is exactly zero and no
-	// RealizedPnL change would otherwise register.
+	// proof a full bracket round trip occurred.
+	//
+	// A change is sufficient but not necessary (PR #369 re-review): a
+	// long bracket entry filling at this bar's own Open, already at or
+	// below its own protective stop, realizes exactly zero PnL —
+	// ADR-026's gap rule fills the stop at that identical Open price,
+	// so entry and exit share one price. OnBar's own Flat branch
+	// covers that case with a second, independent check
+	// (event.Bar.Open against the bracket's own stop) that needs no
+	// account state at all. Together the two checks are exhaustive for
+	// every fill outcome this codebase's own fill models produce
+	// today: a non-gap intrabar touch always realizes a strictly
+	// negative PnL (the stop necessarily fills below the entry's own
+	// Open), and a gap-through-Open fill always realizes exactly zero.
+	// What remains unprovable from account/bar state alone is the
+	// reverse case — a bracket entry rejected outright (no fill at
+	// all) on a bar whose Open independently happens to sit at or
+	// below whatever stop price would have been used. That coincidence
+	// is unrelated to genuine price/risk causality and is not resolved
+	// here; closing it fully would need a real fill-event signal (for
+	// example a wired FillHandler capability) rather than inference
+	// over account/bar snapshots.
 	lastRealizedPnL num.Money
 
 	intents strategy.IntentFactory
@@ -280,7 +295,17 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 			if err != nil {
 				return nil, fmt.Errorf("smatrend: comparing realized pnl: %w", err)
 			}
-			if roundTrip {
+			// A RealizedPnL change alone misses one real case (PR #369
+			// re-review): a long bracket entry filling at this bar's
+			// own Open, already at or below its own protective stop
+			// (ADR-026's gap rule then fills that stop at the
+			// identical Open price) realizes exactly zero PnL — entry
+			// and exit at the same price. event.Bar.Open is knowable
+			// directly from this bar's own data, independent of
+			// account state, and conclusively proves that outcome
+			// whenever it holds.
+			gappedThroughStop := event.Bar.Open.Cmp(*s.pendingInitialStop) <= 0
+			if roundTrip || gappedThroughStop {
 				// The bracket entry filled and its own attached stop
 				// triggered within this same bar (PR #369 review,
 				// blocker 1) — invisible to sideLastBar, which never
