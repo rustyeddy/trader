@@ -728,7 +728,7 @@ func TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes(t *tes
 // does it.
 type ambiguousExitRule struct{}
 
-func (ambiguousExitRule) OnEntry(marketdata.Bar, num.Price) {}
+func (ambiguousExitRule) OnEntry(marketdata.Bar, num.Price, *num.Price) {}
 
 func (ambiguousExitRule) OnLongBar(bar marketdata.Bar, _ float64) (ExitDecision, error) {
 	stop := bar.Close
@@ -843,16 +843,25 @@ func TestStrategy_ProbationTrendFullLifecyclePhaseTransitions(t *testing.T) {
 	for i, c := range []float64{100, 100, 100, 99} {
 		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
 	}
+	// probation-trend implements InitialStopProvider (issue #368): the
+	// entry decision itself is now a bracket order.IntentEnterWithStop,
+	// with its stop computed from this bar's own sma(100,99,102)=
+	// 100.33333333, before the fill — 100.33333333*0.99 = 99.33.
 	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
 	require.Len(t, intents, 1)
-	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	require.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
+	require.NotNil(t, intents[0].StopPrice)
+	assert.Equal(t, "99.33", intents[0].StopPrice.String())
 	h.side = order.Long
 	h.avgPrice = "102" // the real fill price this episode entered at; activation threshold = 102 * 1.05 = 107.1
 
 	assert.Equal(t, PhaseFlat, h.strategy.Phase(), "OnEntry has not yet been observed — this was only the entry-decision bar")
 
-	// Bar 6: first bar observed Long — OnEntry seeds Probation.
-	// sma(99,102,102)=101, stop=101*0.99=99.99.
+	// Bar 6: first bar observed Long — OnEntry seeds Probation, this
+	// time from the 99.33 bracket stop already resting (issue #368)
+	// rather than nil. sma(99,102,102)=101, raw stop=101*0.99=99.99 —
+	// still above that 99.33 floor, so the ratchet fires exactly as
+	// it always did.
 	intents, _ = h.onBar(6, bar{open: 103, high: 105, low: 102, close: 102})
 	require.Len(t, intents, 1)
 	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
@@ -911,10 +920,15 @@ func TestStrategy_ProbationTrendFullLifecyclePhaseTransitions(t *testing.T) {
 	assert.Empty(t, intents)
 	assert.Equal(t, PhaseFlat, h.strategy.Phase())
 
-	// A genuine fresh cross back above the SMA re-enters.
+	// A genuine fresh cross back above the SMA re-enters — again a
+	// bracket order.IntentEnterWithStop (issue #368), proving re-entry
+	// gets the identical immediate protection as the initial entry:
+	// sma(55,40,70)=55, stop=55*0.99=54.45.
 	intents, _ = h.onBar(12, bar{open: 45, high: 72, low: 44, close: 70})
 	require.Len(t, intents, 1)
-	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	require.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
+	require.NotNil(t, intents[0].StopPrice)
+	assert.Equal(t, "54.45", intents[0].StopPrice.String())
 	h.side = order.Long
 	h.avgPrice = "70"
 	assert.Equal(t, PhaseFlat, h.strategy.Phase(), "still only the entry-decision bar")
@@ -953,13 +967,18 @@ func TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar(t *testing.T)
 	for i, c := range []float64{100, 100, 100, 99} {
 		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
 	}
+	// probation-trend implements InitialStopProvider (issue #368):
+	// sma(100,99,102)=100.33333333, stop=100.33333333*0.99=99.33.
 	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
 	require.Len(t, intents, 1)
-	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	require.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
+	require.NotNil(t, intents[0].StopPrice)
+	assert.Equal(t, "99.33", intents[0].StopPrice.String())
 	h.side = order.Long
 	h.avgPrice = "102"
 
-	// Bar 6: first Long bar, Probation stop placed at 99.99.
+	// Bar 6: first Long bar, Probation stop placed at 99.99 — above
+	// the 99.33 floor bracketed at entry, so the ratchet still fires.
 	intents, _ = h.onBar(6, bar{open: 103, high: 105, low: 102, close: 102})
 	require.Len(t, intents, 1)
 	assert.Equal(t, "99.99", intents[0].StopPrice.String())
@@ -970,9 +989,14 @@ func TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar(t *testing.T)
 	// back above the SMA (103): "stop-out while still above the SMA,"
 	// exactly the case above-sma exists for.
 	h.triggerStop()
+	// sma(102,102,105)=103, stop=103*0.99=101.97 — this re-entry gets
+	// the identical immediate bracket protection the initial entry did
+	// (issue #368).
 	intents, _ = h.onBar(7, bar{open: 100, high: 106, low: 99, close: 105})
 	require.Len(t, intents, 1)
-	assert.Equal(t, order.IntentEnter, intents[0].Kind, "above-sma must re-enter on the very next eligible flat bar, with no fresh cross or reclaim/breakout threshold required")
+	assert.Equal(t, order.IntentEnterWithStop, intents[0].Kind, "above-sma must re-enter on the very next eligible flat bar, with no fresh cross or reclaim/breakout threshold required")
+	require.NotNil(t, intents[0].StopPrice)
+	assert.Equal(t, "101.97", intents[0].StopPrice.String())
 	h.side = order.Long
 	h.avgPrice = "105"
 

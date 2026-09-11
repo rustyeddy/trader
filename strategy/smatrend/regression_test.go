@@ -230,10 +230,20 @@ func runSMATrendFixture(t *testing.T) (svcbacktest.RunResponse, *memoryRecorder)
 // parallel fixture.
 func runSMATrendFixtureWithConfig(t *testing.T, cfg smatrend.Config) (svcbacktest.RunResponse, *memoryRecorder) {
 	t.Helper()
+	return runSMATrendFixtureForSpan(t, cfg, smatrendFixtureSpan(t))
+}
+
+// runSMATrendFixtureForSpan generalizes runSMATrendFixtureWithConfig
+// over the query span (issue #368), so a second, dedicated fixture
+// under testdata/raw/oanda/EURUSD's own other months can be exercised
+// through the identical real M4/M5 composition path without touching
+// the original 11-bar January fixture every other regression in this
+// file depends on.
+func runSMATrendFixtureForSpan(t *testing.T, cfg smatrend.Config, span marketdata.TimeRange) (svcbacktest.RunResponse, *memoryRecorder) {
+	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t, "oanda")))
 
-	span := smatrendFixtureSpan(t)
 	c := clock.NewSimulated(span.Start())
 
 	manager, err := marketdata.New(marketdata.Config{
@@ -407,53 +417,111 @@ func TestSMATrend_BreakoutReEntryChangesRealOutcome(t *testing.T) {
 	assert.Empty(t, resp.Account.Positions(), "the account must remain flat for the rest of the fixture")
 }
 
-// TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation documents
-// a known limitation of the "probation-trend" ExitRule raised in PR
-// #350 review, using the exact same real EURUSD bars
-// TestSMATrend_EndToEndRegression exercises: bar 5 (2024-01-12, the
-// entry fill bar) has Low 1.10000 and SMA(bar3,4,5)=1.11667, so the
-// intended probation stop — 1.11667 * (1-0.01) = 1.1055 — is breached
-// intrabar on this very bar, yet its Close (1.15000) recovers back
-// above the SMA.
+// smatrendProbationEntryBarFixtureSpan covers strategy/smatrend/
+// testdata's own dedicated 9-bar D1 EURUSD February fixture (issue
+// #368), a separate month from smatrendFixtureSpan's own January
+// fixture so this test's own engineered price path — designed
+// specifically to breach the "probation-trend" bracket's own initial
+// stop intrabar, on the entry fill bar itself, for both the initial
+// entry and a re-entry — never has to share numbers with (or risk
+// disturbing) the assertions every other regression in this file
+// makes against the January data.
+func smatrendProbationEntryBarFixtureSpan(t *testing.T) marketdata.TimeRange {
+	t.Helper()
+	span, err := marketdata.NewTimeRange(
+		time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, time.February, 14, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	return span
+}
+
+// TestSMATrend_ProbationEntryBarBreachClosesSameBar is issue #368's
+// own required regression, replacing
+// TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation (PR
+// #350 review's documented gap): "probation-trend" now implements
+// InitialStopProvider, so Strategy emits a bracket
+// order.IntentEnterWithStop (ADR-059) instead of a plain
+// order.IntentEnter, and the intended probation stop is a real
+// resting order *before* the entry fill bar's own intrabar price
+// action is checked, not one bar later.
 //
-// The playbook's own intent is that this should stop the position out
-// intrabar. It does not, for a real sequencing reason rather than a
-// bug in the stop math itself: Strategy only ever observes a fresh
-// Long position — and therefore only ever computes and emits its
-// first protective stop — on the bar *after* the entry decision (the
-// fill bar itself), but backtest.Scheduler's own broker-side
-// resting-order machinery has already resolved that fill bar's own
-// intrabar price action *before* OnBar ever runs for it (see
-// Strategy.OnBar's own doc comment). The AdjustStop intent bar 5's own
-// OnBar call emits only becomes a resting order checked against
-// intrabar price action starting bar 6 onward. Every other ExitRule
-// in this package has the identical gap; "probation-trend" simply
-// makes it matter most, since its whole purpose is a *tight* stop
-// immediately after entry.
+// On this fixture (see the February CSV's own values):
 //
-// Solving this needs an execution/pipeline capability this codebase
-// does not have yet — submitting a protective stop atomically with
-// the entry order itself, rather than one bar later — which is out of
-// scope for issue #349's current implementation pass. This test
-// exists so the gap is proven and regression-locked rather than
-// silently assumed away: if a future change to Strategy or the
-// pipeline closes this gap, this test's own assertion (that the
-// position survives bar 5 unprotected) will fail and must be updated
-// deliberately, not accidentally.
-func TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation(t *testing.T) {
-	resp, _ := runSMATrendFixtureWithConfig(t, smatrend.Config{
+//   - bar 4 (2024-02-06) is the entry decision bar:
+//     sma(bar2,3,4)=(1.10+1.09+1.20)/3=1.13, close (1.20) crosses
+//     above it. The bracket's own initial stop, computed from this
+//     bar's SMA alone — never bar 5's own Close/High/Low, which is
+//     not yet known — is 1.13*(1-0.01)=1.1187.
+//   - bar 5 (2024-02-07) is the entry fill bar: fills at this bar's
+//     own Open (1.19), and its Low (1.05) breaches the 1.1187
+//     bracket stop intrabar (an ordinary touch, not a gap: Open is
+//     above the stop). The position closes on this same bar, at the
+//     stop price itself (ADR-026) — it does not survive to bar 6.
+//   - bars 6-7 stay below the SMA: no re-entry.
+//   - bar 8 (2024-02-12) is a fresh cross-above re-entry decision:
+//     sma(bar6,7,8)=(1.05+1.00+1.30)/3=1.11667, initial stop=
+//     1.11667*0.99=1.1055 — proving the re-entry gets the identical
+//     immediate protection the initial entry did.
+//   - bar 9 (2024-02-13) is the re-entry's own fill bar: fills at
+//     Open (1.29), and its Low (1.05) breaches the 1.1055 bracket
+//     stop intrabar, again closing on this same bar.
+func TestSMATrend_ProbationEntryBarBreachClosesSameBar(t *testing.T) {
+	resp, rec := runSMATrendFixtureForSpan(t, smatrend.Config{
 		SMAPeriod:           3,
 		ExitRuleName:        "probation-trend",
 		ReEntryRuleName:     "fresh-cross",
 		InitialStopBelowSMA: num.MustParseRate("0.01"),
 		TrailActivationGain: num.MustParseRate("0.05"),
 		TrailingStopPercent: num.MustParseRate("0.10"),
-	})
+	}, smatrendProbationEntryBarFixtureSpan(t))
 
-	bar5Fill := time.Date(2024, time.January, 12, 22, 0, 0, 0, time.UTC)
-	require.NotEmpty(t, resp.Trades, "the position must have closed eventually for this run to produce a trade at all")
+	// The actual intent kind Strategy emitted for both entries — never
+	// a plain IntentEnter — is the real proof the bracket path was
+	// taken, not merely that a trade eventually closed.
+	var enterWithStopCount int
+	for _, rec := range rec.kinds(journal.KindIntent) {
+		if rec.Intent.Kind == order.IntentEnterWithStop {
+			enterWithStopCount++
+		}
+	}
+	assert.Equal(t, 2, enterWithStopCount, "both the initial entry and the re-entry must be bracket entries")
+
+	bar5Fill := time.Date(2024, time.February, 7, 22, 0, 0, 0, time.UTC)
+	bar9Fill := time.Date(2024, time.February, 13, 22, 0, 0, 0, time.UTC)
+
+	require.Len(t, resp.Trades, 2, "both episodes must have closed as realized trades, each on its own fill bar")
+
 	first := resp.Trades[0]
 	assert.True(t, first.OpenedAt.Equal(bar5Fill), "got %s", first.OpenedAt)
-	assert.True(t, first.ClosedAt.After(bar5Fill),
-		"known limitation: the position must survive bar 5's own intrabar Low (1.10000), which breaches the 1.1055 probation stop that same bar's SMA implies — the resting stop is not active until the following bar")
+	assert.True(t, first.ClosedAt.Equal(bar5Fill),
+		"the position must not survive past its own entry fill bar: the bracket's initial stop is already resting when bar 5's own intrabar Low (1.05) breaches it", "got %s", first.ClosedAt)
+
+	second := resp.Trades[1]
+	assert.True(t, second.OpenedAt.Equal(bar9Fill), "got %s", second.OpenedAt)
+	assert.True(t, second.ClosedAt.Equal(bar9Fill),
+		"the re-entry must receive the identical immediate protection: bar 9's own intrabar Low (1.05) breaches its own bracket stop on the same bar it fills", "got %s", second.ClosedAt)
+
+	assert.Empty(t, resp.OpenTrades, "both episodes closed intrabar on their own fill bar; nothing should remain open")
+	assert.Empty(t, resp.Account.Positions())
+}
+
+// TestSMATrend_PlainEntryStillWorksWithoutInitialStopProvider proves
+// an ExitRule that does not implement InitialStopProvider (issue
+// #368) is entirely unaffected: Strategy must keep emitting a plain
+// order.IntentEnter for it, exactly as before this issue, on the same
+// fixture and entry bar the previous test's bracket path uses.
+func TestSMATrend_PlainEntryStillWorksWithoutInitialStopProvider(t *testing.T) {
+	resp, rec := runSMATrendFixtureForSpan(t, smatrend.Config{
+		SMAPeriod:           3,
+		TrailingStopPercent: num.MustParseRate("0.10"),
+	}, smatrendProbationEntryBarFixtureSpan(t))
+
+	intents := rec.kinds(journal.KindIntent)
+	require.NotEmpty(t, intents)
+	for _, rec := range intents {
+		assert.NotEqual(t, order.IntentEnterWithStop, rec.Intent.Kind, "the default trailing-stop exit rule never implements InitialStopProvider")
+	}
+
+	require.NotEmpty(t, resp.Trades, "the default trailing-stop rule must still trade this fixture normally")
 }

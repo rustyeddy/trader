@@ -216,7 +216,17 @@ never through this service.
   the fix and observing the real, expected failure before restoring it.
 - =strategy/smatrend= is *not* rewired to use =IntentEnterWithStop= in
   this issue — a deliberate, explicit deferral (issue #351's own scope
-  boundary), not an oversight.
+  boundary), not an oversight. (Update: issue #368 performed that
+  rewiring for "probation-trend" — see its own doc comments and
+  =strategy/smatrend/doc.go=. The known-limitation test this Context
+  section names,
+  =TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation=, was
+  replaced there by
+  =TestSMATrend_ProbationEntryBarBreachClosesSameBar=, which proves
+  the gap is closed rather than merely documenting it; this ADR's own
+  Context/Decision text above is left as originally written, per this
+  registry's non-rewrite convention for an already-Accepted
+  decision.)
 - Live/real-broker atomicity remains unsolved, tracked as issue #366.
   =ErrBracketEntryNotSynchronouslyFilled= is the concrete, tested proof
   that this decision fails loudly rather than silently in that case,

@@ -80,6 +80,17 @@ type Strategy struct {
 	// #348 review). nil whenever the most recent exit was a
 	// broker-triggered stop instead, in which case lastStop is used.
 	directExitReference *num.Price
+	// pendingInitialStop is the stop price used by the most recent
+	// EnterWithStop intent onFlat emitted, carried forward exactly one
+	// bar so OnBar's own Flat->Long transition can hand it to
+	// exitRule.OnEntry as the level already resting from that bracket
+	// entry (issue #368) — nil whenever the most recent entry was a
+	// plain Enter (no InitialStopProvider, or none configured).
+	// Always consumed (read and reset to nil) on the very next
+	// Flat->Long transition; a rejected/never-filled entry attempt is
+	// simply overwritten by the next actual entry attempt without
+	// ever being read.
+	pendingInitialStop *num.Price
 
 	intents strategy.IntentFactory
 	journal journal.Recorder // nil unless env.Journal was set
@@ -220,7 +231,8 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 			if err != nil {
 				return nil, fmt.Errorf("smatrend: reading entry price: %w", err)
 			}
-			s.exitRule.OnEntry(event.Bar, entryPrice)
+			s.exitRule.OnEntry(event.Bar, entryPrice, s.pendingInitialStop)
+			s.pendingInitialStop = nil
 		}
 		s.sideLastBar = order.Long
 		return s.onLong(ctx, event, close, smaValue)
@@ -298,14 +310,57 @@ func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedA
 		return nil, nil
 	}
 
-	in, err := s.intents.Enter(s.instrumentID, order.Buy)
+	in, initialStop, err := s.buildEntryIntent(smaValue)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.recordSignal(ctx, event, close, smaValue, PhaseFlat, "enter-long", nil, []order.Intent{in}); err != nil {
+	action := "enter-long"
+	if initialStop != nil {
+		action = "enter-long-with-stop"
+	}
+	if err := s.recordSignal(ctx, event, close, smaValue, PhaseFlat, action, initialStop, []order.Intent{in}); err != nil {
 		return nil, err
 	}
 	return []order.Intent{in}, nil
+}
+
+// buildEntryIntent builds this entry's own order.Intent: a bracket
+// order.IntentEnterWithStop when exitRule implements
+// InitialStopProvider (issue #368, ADR-059) — closing the entry-fill-
+// bar protection gap for whichever ExitRule can compute its first
+// stop before the fill — or a plain order.IntentEnter otherwise,
+// unchanged from before this issue. The returned *num.Price, when
+// non-nil, is both the stop actually placed (recorded via
+// s.pendingInitialStop for exitRule.OnEntry to seed its own state
+// from, see that field's own doc comment) and the value recordSignal
+// journals as decision evidence.
+//
+// smaValue is the entry-decision bar's own current SMA value — the
+// only signal available before the fill — so InitialStop is
+// necessarily computed from information no later than this bar; it
+// never uses the eventual fill bar's own Close/High/Low, which is not
+// yet known (issue #368's own explicit no-lookahead requirement).
+func (s *Strategy) buildEntryIntent(smaValue float64) (order.Intent, *num.Price, error) {
+	provider, ok := s.exitRule.(InitialStopProvider)
+	if !ok {
+		in, err := s.intents.Enter(s.instrumentID, order.Buy)
+		if err != nil {
+			return order.Intent{}, nil, err
+		}
+		s.pendingInitialStop = nil
+		return in, nil, nil
+	}
+
+	stop, err := provider.InitialStop(smaValue)
+	if err != nil {
+		return order.Intent{}, nil, fmt.Errorf("smatrend: computing initial stop for bracket entry: %w", err)
+	}
+	in, err := s.intents.EnterWithStop(s.instrumentID, order.Buy, stop)
+	if err != nil {
+		return order.Intent{}, nil, err
+	}
+	s.pendingInitialStop = &stop
+	return in, &stop, nil
 }
 
 // onLong handles a bar observed with an open long position that
