@@ -47,19 +47,7 @@ type ExitRule interface {
 	// entry (for example probationTrendExitRule's trail activation).
 	// A rule with no such dependency (trailingStopExitRule,
 	// smaCrossExitRule) simply ignores it.
-	//
-	// initialStop is the protective stop already resting from a
-	// bracket entry (order.IntentEnterWithStop, ADR-059), when
-	// Strategy used one — see InitialStopProvider — or nil when the
-	// entry was a plain order.IntentEnter (issue #368). A rule that
-	// implements InitialStopProvider must seed whatever state governs
-	// its own next ratchet-only comparison from this exact value
-	// rather than from nil, so it never emits a decision that would
-	// loosen protection below what the entry itself already
-	// established. A rule that never implements InitialStopProvider
-	// always receives nil here and can ignore this parameter exactly
-	// as before.
-	OnEntry(entryBar marketdata.Bar, entryPrice num.Price, initialStop *num.Price)
+	OnEntry(entryBar marketdata.Bar, entryPrice num.Price)
 	// OnLongBar is called once per bar while long, after the position
 	// has survived the bar. smaValue is the strategy's own current
 	// SMA value, supplied for a rule whose trigger depends on it (for
@@ -91,6 +79,24 @@ type InitialStopProvider interface {
 	InitialStop(smaValue float64) (num.Price, error)
 }
 
+// InitialStopSeeder is a second, separate optional ExitRule capability
+// (PR #369 review): an ExitRule that implements InitialStopProvider
+// may additionally implement this to receive the stop Strategy
+// actually placed via the resulting bracket entry, so it can seed its
+// own ratchet-floor state from that exact value instead of whatever
+// default OnEntry itself establishes — without widening OnEntry's own
+// required, exported signature. ExitRule is a public interface any
+// external/custom implementation may satisfy; adding a parameter to
+// OnEntry would have broken every one of them for a
+// probation-trend-only enhancement. Strategy calls SeedInitialStop
+// immediately after OnEntry, and only when Strategy actually used a
+// bracket entry for this position — never for a plain entry, and
+// never before OnEntry has already run its own (now-superseded)
+// default initialization.
+type InitialStopSeeder interface {
+	SeedInitialStop(stop num.Price)
+}
+
 // exitRuleRegistry maps a Config.ExitRuleName to its constructor. A
 // new ExitRule is a new small type plus one entry here — never a
 // change to Strategy's own control flow (issue #347).
@@ -119,10 +125,7 @@ func newTrailingStopExitRule(cfg Config) (ExitRule, error) {
 	return &trailingStopExitRule{retainFraction: retain}, nil
 }
 
-// OnEntry ignores initialStop: trailingStopExitRule never implements
-// InitialStopProvider, since its first stop genuinely depends on the
-// entry/fill bar's own High, not knowable before the fill.
-func (r *trailingStopExitRule) OnEntry(entryBar marketdata.Bar, _ num.Price, _ *num.Price) {
+func (r *trailingStopExitRule) OnEntry(entryBar marketdata.Bar, _ num.Price) {
 	high := entryBar.High
 	r.highWaterMark = &high
 	r.lastStop = nil
@@ -158,10 +161,7 @@ func newSMACrossExitRule(Config) (ExitRule, error) {
 	return smaCrossExitRule{}, nil
 }
 
-// OnEntry ignores initialStop for the identical reason
-// trailingStopExitRule's own OnEntry does: smaCrossExitRule never
-// implements InitialStopProvider (it manages no resting stop at all).
-func (smaCrossExitRule) OnEntry(marketdata.Bar, num.Price, *num.Price) {}
+func (smaCrossExitRule) OnEntry(marketdata.Bar, num.Price) {}
 
 func (smaCrossExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDecision, error) {
 	// bar.Close.Float64() is ADR-045's explicit exact-to-analytical
@@ -247,22 +247,12 @@ func newProbationTrendExitRule(cfg Config) (ExitRule, error) {
 // reads from.
 func (r *probationTrendExitRule) Phase() Phase { return r.phase }
 
-// OnEntry seeds r.probationStop from initialStop, when non-nil,
-// instead of resetting it to nil (issue #368): initialStop is the
-// stop this rule itself already returned from InitialStop and
-// Strategy already placed via a bracket entry, so onProbationBar's
-// own ratchet-only comparison (stop.Cmp(*r.probationStop) > 0) must
-// treat it as the floor already earned, never emitting a decision
-// that would loosen protection below it. When initialStop is nil (a
-// plain entry — no InitialStopProvider was consulted, or Strategy
-// chose not to use it), r.probationStop resets to nil exactly as
-// before.
-func (r *probationTrendExitRule) OnEntry(entryBar marketdata.Bar, entryPrice num.Price, initialStop *num.Price) {
+func (r *probationTrendExitRule) OnEntry(entryBar marketdata.Bar, entryPrice num.Price) {
 	r.phase = PhaseProbation
 	r.entryPrice = entryPrice
 	high := entryBar.High
 	r.highWaterMark = &high
-	r.probationStop = initialStop
+	r.probationStop = nil
 	r.trendStop = nil
 }
 
@@ -277,6 +267,17 @@ func (r *probationTrendExitRule) InitialStop(smaValue float64) (num.Price, error
 		return num.Price{}, fmt.Errorf("smatrend: computing initial probation stop: %w", err)
 	}
 	return stop, nil
+}
+
+// SeedInitialStop implements InitialStopSeeder (PR #369 review):
+// called by Strategy immediately after OnEntry, only when a bracket
+// entry was actually used, this overrides the nil OnEntry just
+// established with the stop Strategy actually placed — the floor
+// onProbationBar's own ratchet-only comparison
+// (stop.Cmp(*r.probationStop) > 0) must never emit a decision that
+// would loosen protection below.
+func (r *probationTrendExitRule) SeedInitialStop(stop num.Price) {
+	r.probationStop = &stop
 }
 
 func (r *probationTrendExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDecision, error) {

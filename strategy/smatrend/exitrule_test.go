@@ -33,7 +33,7 @@ func TestTrailingStopExitRule_RatchetsMonotonicallyUpward(t *testing.T) {
 	rule, err := newTrailingStopExitRule(cfg)
 	require.NoError(t, err)
 
-	rule.OnEntry(mustBar(t, "100", "110", "99", "105"), num.MustParsePrice("100"), nil)
+	rule.OnEntry(mustBar(t, "100", "110", "99", "105"), num.MustParsePrice("100"))
 
 	decision, err := rule.OnLongBar(mustBar(t, "103", "110", "102", "105"), 90)
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestTrailingStopExitRule_RatchetsMonotonicallyUpward(t *testing.T) {
 func TestSMACrossExitRule_ExitsOnCloseAtOrBelowSMA(t *testing.T) {
 	rule, err := newSMACrossExitRule(Config{})
 	require.NoError(t, err)
-	rule.OnEntry(mustBar(t, "100", "105", "99", "102"), num.MustParsePrice("100"), nil)
+	rule.OnEntry(mustBar(t, "100", "105", "99", "102"), num.MustParsePrice("100"))
 
 	decision, err := rule.OnLongBar(mustBar(t, "103", "106", "102", "105"), 100)
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func newProbationTrendRuleForTest(t *testing.T) *probationTrendExitRule {
 // SMA on a later bar must never pull the stop back down.
 func TestProbationTrendExitRule_ProbationStopRatchetsFromSMAOnly(t *testing.T) {
 	rule := newProbationTrendRuleForTest(t)
-	rule.OnEntry(mustBar(t, "100", "101", "99", "100"), num.MustParsePrice("100"), nil)
+	rule.OnEntry(mustBar(t, "100", "101", "99", "100"), num.MustParsePrice("100"))
 	assert.Equal(t, PhaseProbation, rule.Phase())
 
 	// sma=99, close (101) above it and well under the 105 activation
@@ -116,7 +116,7 @@ func TestProbationTrendExitRule_ProbationStopRatchetsFromSMAOnly(t *testing.T) {
 // currently rests.
 func TestProbationTrendExitRule_SMACrossExitsDuringProbation(t *testing.T) {
 	rule := newProbationTrendRuleForTest(t)
-	rule.OnEntry(mustBar(t, "100", "101", "99", "100"), num.MustParsePrice("100"), nil)
+	rule.OnEntry(mustBar(t, "100", "101", "99", "100"), num.MustParsePrice("100"))
 
 	decision, err := rule.OnLongBar(mustBar(t, "99", "100", "95", "97"), 100)
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestProbationTrendExitRule_SMACrossExitsDuringProbation(t *testing.T) {
 // itself only takes effect starting the *next* OnLongBar call.
 func TestProbationTrendExitRule_ActivatesOnCloseGainThresholdWithoutRetroactivelyTighteningTheBarItself(t *testing.T) {
 	rule := newProbationTrendRuleForTest(t)
-	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"), nil)
+	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"))
 
 	// A large spike High while still in probation, never exceeded
 	// again — this is the "since entry, not since activation" case
@@ -178,7 +178,7 @@ func TestProbationTrendExitRule_ActivatesOnCloseGainThresholdWithoutRetroactivel
 // already had in place.
 func TestProbationTrendExitRule_HandoffNeverLoosensProtection(t *testing.T) {
 	rule := newProbationTrendRuleForTest(t)
-	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"), nil)
+	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"))
 
 	// Activates this bar: sma=104, close=105 >= 100*1.05=105
 	// threshold. Probation stop = 104*0.99 = 102.96.
@@ -209,7 +209,7 @@ func TestProbationTrendExitRule_HandoffNeverLoosensProtection(t *testing.T) {
 // trailingStopExitRule's own ratchet once activated.
 func TestProbationTrendExitRule_TrendingStopRatchetsMonotonicallyUpward(t *testing.T) {
 	rule := newProbationTrendRuleForTest(t)
-	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"), nil)
+	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"))
 	// Force activation immediately.
 	_, err := rule.OnLongBar(mustBar(t, "100", "100", "99", "105"), 100)
 	require.NoError(t, err)

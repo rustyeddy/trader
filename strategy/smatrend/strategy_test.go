@@ -53,16 +53,17 @@ func mustListing(t *testing.T) instrument.Listing {
 	return l
 }
 
-func mustSnapshot(t *testing.T, accountID id.AccountID, position *order.Position) account.Snapshot {
+func mustSnapshot(t *testing.T, accountID id.AccountID, position *order.Position, realizedPnL string) account.Snapshot {
 	t.Helper()
 	var positions []order.Position
 	if position != nil {
 		positions = []order.Position{*position}
 	}
 	snap, err := tradertest.NewSnapshot(tradertest.SnapshotParams{
-		AccountID: accountID,
-		Broker:    "OANDA",
-		Positions: positions,
+		AccountID:   accountID,
+		Broker:      "OANDA",
+		Positions:   positions,
+		RealizedPnL: realizedPnL,
 	})
 	require.NoError(t, err)
 	return snap
@@ -97,6 +98,14 @@ type testHarness struct {
 	// activation threshold, which is computed directly from the real
 	// AvgPrice Strategy reads via currentPositionAvgPrice (issue #349).
 	avgPrice string
+	// realizedPnL overrides the harness-reported account's own
+	// RealizedPnL ("0" otherwise) — needed to simulate a bracket entry
+	// whose own attached stop triggers within the same bar the entry
+	// fills (issue #368, PR #369 review): h.side stays order.Flat for
+	// that whole episode (OnBar never observes order.Long at all), so
+	// a nonzero RealizedPnL is the only way this harness can simulate
+	// the one signal Strategy itself uses to detect it.
+	realizedPnL string
 }
 
 func newTestHarness(t *testing.T, config Config) *testHarness {
@@ -167,7 +176,7 @@ func (h *testHarness) buildBar(barNum int, b bar) (strategy.BarEvent, strategy.V
 		Close: mp(b.close),
 	}
 	event := strategy.BarEvent{Instrument: h.instID, Interval: marketdata.D1, Bar: mdBar}
-	view := fakeView{snap: mustSnapshot(h.t, h.accountID, position)}
+	view := fakeView{snap: mustSnapshot(h.t, h.accountID, position, h.realizedPnL)}
 	return event, view, barTime
 }
 
@@ -188,7 +197,7 @@ func (h *testHarness) onBar(barNum int, b bar) ([]order.Intent, time.Time) {
 	// changes-side vocabulary.
 	for _, in := range intents {
 		switch in.Kind {
-		case order.IntentEnter:
+		case order.IntentEnter, order.IntentEnterWithStop:
 			h.side = order.Long
 		case order.IntentExit:
 			h.side = order.Flat
@@ -728,7 +737,7 @@ func TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes(t *tes
 // does it.
 type ambiguousExitRule struct{}
 
-func (ambiguousExitRule) OnEntry(marketdata.Bar, num.Price, *num.Price) {}
+func (ambiguousExitRule) OnEntry(marketdata.Bar, num.Price) {}
 
 func (ambiguousExitRule) OnLongBar(bar marketdata.Bar, _ float64) (ExitDecision, error) {
 	stop := bar.Close
@@ -1007,4 +1016,90 @@ func TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar(t *testing.T)
 	require.Equal(t, order.IntentAdjustStop, intents[0].Kind)
 	assert.Equal(t, "103.29", intents[0].StopPrice.String())
 	assert.Equal(t, PhaseProbation, h.strategy.Phase(), "re-entry must start a fresh Probation episode, never stale Trending")
+}
+
+// TestStrategy_BracketEntryStopSameBarStillTransitionsLifecycle is PR
+// #369 review's own required regression for blocker 1: a bracket
+// entry whose own attached stop triggers within the same bar the
+// entry itself fills must still transition the strategy's lifecycle
+// into post-exit/re-entry mode (everExited=true, ReEntryRule.OnExit
+// called) — not silently leave it looking like the strategy never
+// entered at all.
+//
+// h.side deliberately stays order.Flat for the whole episode: OnBar
+// never observes order.Long in between, exactly the case a bare
+// sideLastBar comparison cannot see (see Strategy.lastRealizedPnL's
+// own doc comment). h.realizedPnL simulates the one signal Strategy
+// itself has to detect it.
+//
+// The proof is behavioral, not internal-state inspection: configured
+// with ReEntryRuleName "above-sma" (fires on the very next eligible
+// flat bar, no fresh cross required) but the default
+// InitialEntryModeName "fresh-cross" (requires an actual cross), bar
+// 6 — the fill bar, already above the SMA with no fresh cross of its
+// own — must itself immediately re-enter *if and only if* the
+// lifecycle actually transitioned. If the bug were still present,
+// everExited would stay false, bar 6's entry decision would fall
+// through to InitialEntryRule's own "fresh-cross" gate instead, and
+// no intent would be emitted at all (crossedAbove is false at bar 6:
+// price was already above the SMA since bar 5).
+func TestStrategy_BracketEntryStopSameBarStillTransitionsLifecycle(t *testing.T) {
+	h := newTestHarness(t, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "probation-trend",
+		ReEntryRuleName:     "above-sma",
+		InitialStopBelowSMA: num.MustParseRate("0.01"),
+		TrailActivationGain: num.MustParseRate("0.05"),
+		TrailingStopPercent: num.MustParseRate("0.10"),
+	})
+
+	for i, c := range []float64{100, 100, 100, 99} {
+		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
+	}
+
+	// Bar 5: entry decision — a bracket order.IntentEnterWithStop.
+	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
+	// h.onBar's own auto-derivation (Enter/EnterWithStop -> Long) does
+	// not apply here: this test deliberately overrides it back to
+	// Flat, since the whole point is that OnBar never observes
+	// order.Long for this episode at all.
+	h.side = order.Flat
+
+	// Bar 6: the entry's own fill bar. sma(99,102,102)=101, close
+	// (102) above it — still above the SMA, no fresh cross (already
+	// above since bar 5).
+	h.realizedPnL = "5"
+	intents, _ = h.onBar(6, bar{open: 103, high: 105, low: 95, close: 102})
+	require.Len(t, intents, 1, "the lifecycle must have transitioned to post-exit/re-entry mode: above-sma must fire immediately on this still-above-SMA bar, which fresh-cross (the initial-entry gate) never would")
+	assert.Equal(t, order.IntentEnterWithStop, intents[0].Kind, "the re-entry must also be a fresh bracket entry, protected from its own fill bar too")
+}
+
+// TestProbationTrendExitRule_SeedInitialStopPreventsLoosening is PR
+// #369 review's own required "also fix before merge" regression: a
+// bracket entry that *survives* its own fill bar, whose next
+// SMA-derived probation stop would actually be lower than the
+// bracket's own initial stop, must never loosen protection down to
+// that lower value — SeedInitialStop's own floor must hold exactly
+// like PROBATION's ordinary ratchet-only comparison already does for
+// every later bar.
+func TestProbationTrendExitRule_SeedInitialStopPreventsLoosening(t *testing.T) {
+	rule := newProbationTrendRuleForTest(t)
+	rule.OnEntry(mustBar(t, "100", "100", "99", "100"), num.MustParsePrice("100"))
+	rule.SeedInitialStop(num.MustParsePrice("99.5"))
+
+	// sma=99: 99*0.99=98.01, below the 99.5 floor SeedInitialStop just
+	// established — must emit nothing, never loosen down to 98.01.
+	decision, err := rule.OnLongBar(mustBar(t, "100", "101", "99", "100"), 99)
+	require.NoError(t, err)
+	assert.Nil(t, decision.NewStop, "must never loosen from the seeded 99.5 floor down to 98.01")
+
+	// sma=101, close (102) safely above it (avoiding the independent
+	// SMA-cross override): 101*0.99=99.99, finally above the 99.5
+	// floor — normal ratcheting resumes once it's genuinely earned.
+	decision, err = rule.OnLongBar(mustBar(t, "101", "103", "100", "102"), 101)
+	require.NoError(t, err)
+	require.NotNil(t, decision.NewStop)
+	assert.Equal(t, "99.99", decision.NewStop.String())
 }
