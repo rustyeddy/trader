@@ -1,0 +1,161 @@
+#+TITLE: EQ-361: Breakout-2/Breakout-3 Re-Entry Comparison (SMA Long Hold)
+#+STARTUP: overview indent
+
+* Purpose
+
+Issue #361 asks whether a short N-bar breakout confirmation can
+improve SMA Long Hold re-entry timing without giving back the
+drawdown protection =probation-trend= already provides — the most
+plausible next experiment issue #354/PR #359's own diagnostic
+identified. This compares the playbook's current reference re-entry
+rule (=reclaim-exit-price=) against two new candidates,
+=breakout-2= and =breakout-3=, using full backtest results with real
+fills and state (never a trigger-date-only analysis).
+
+* New Strategy Code
+
+=strategy/smatrend/reentryrule.go= gained =nBarBreakoutReEntryRule=: a
+fixed, sliding N-bar lookback window (distinct from the existing
+=breakout= rule's own unbounded since-exit high), re-entering the
+first bar Close exceeds the highest High of the immediately preceding
+=lookback= bars. Two fixed instances are registered, ~"breakout-2"~
+and ~"breakout-3"~ — no configurable-N parameter was added to
+=Config= (issue #361's own guardrail against a broader sweep).
+
+The window can never see a bar from before the exit:
+=ReEntryRule.ShouldEnter= is only ever called while flat, so it is
+seeded from the exit bar itself at =OnExit= and grows to =lookback=
+bars over the first few flat bars of each episode — a real
+information constraint the live strategy has that an offline analysis
+with full hindsight (like #354's own diagnostic) does not.
+
+Four new focused unit tests in =reentryrule_test.go= cover: the two
+registered lookbacks behaving independently, the window actually
+evicting its oldest bar (the property that distinguishes this rule
+from the unbounded =breakout= rule), the existing check-before-update
+ordering, and state not leaking across episodes. Exit behavior,
+=TrailingStopPercent=, and every other reference parameter are
+unchanged.
+
+* Method
+
+One continuous backtest per variant over SPY's full Stooq history
+(2005-02-25 through 2026-09-04), at the playbook's own established
+reference sizing (=RiskFraction= 0.01, fixed $20 adverse distance —
+the same sizing #354/#356's own diagnostic used), so relative
+comparisons between the three variants are fair even though this
+sizing is not matched to buy-and-hold (per PR #360's own review
+finding, this file makes no such comparison). =ExitRuleName=
+=probation-trend=, =InitialStopBelowSMA= 0.01, =TrailActivationGain=
+0.05, =TrailingStopPercent= 0.10 held fixed; only =ReEntryRuleName=
+varies.
+
+Full reproduction:
+=marketdata/smatrend_breakout_reentry_fullarchive_test.go= (build tag
+=fullarchive=; local path constants edited locally, never committed).
+
+* Results
+
+| Metric                         | reclaim-exit-price | breakout-2 | breakout-3 |
+|---------------------------------+---------------------+------------+------------|
+| Net return                     |             27.24% |     29.43% |     29.79% |
+| CAGR                           |              1.13% |      1.21% |      1.22% |
+| Max drawdown (true, continuous) |              3.33% |      3.57% |      3.33% |
+| Calmar                         |               0.338 |      0.337 |      0.366 |
+| Trade count                    |                  38 |         42 |         40 |
+| Exposure (time in market)      |               60.0% |      73.2% |      73.2% |
+| Whipsaws / total episodes      |               12/37 |       8/41 |       7/39 |
+
+(Absolute CAGR is small across all three because this run uses the
+playbook's conservative 1%-risk reference sizing, not matched to
+buy-and-hold — see Method. Only the *relative* differences between
+variants are meaningful here.)
+
+** Named episode outcomes
+
+| Episode | reclaim-exit-price       | breakout-2               | breakout-3                |
+|---------+---------------------------+---------------------------+----------------------------|
+| 2008    | exit 2007-12-27 -> reentry 2012-09-07 (1716 days flat) | exit 2007-12-28 -> reentry 2009-06-30 (550 days flat) | exit 2007-12-12 -> reentry 2009-06-30 (566 days flat) |
+| 2022    | exit 2022-04-11 -> reentry 2023-06-13 (428 days flat)  | exit 2022-04-11 -> reentry 2023-01-17 (281 days flat) | exit 2022-04-11 -> reentry 2023-01-24 (288 days flat) |
+
+Both breakout candidates re-enter the 2008 episode on the *identical*
+date (2009-06-30, off the March 2009 low) despite their different
+lookback windows — a large, unambiguous breakout dominates the small
+N difference near the original exit. Charts (=chart= package,
+ADR-058) for all six exit/re-entry episodes above were rendered and
+visually confirm this: the =reclaim-exit-price= chart shows price
+essentially round-tripping the entire 2008-2012 span before
+re-entering near the old high; both breakout charts show re-entry
+occurring visibly at the 2009 recovery's own early stage, over three
+years earlier.
+
+* Analysis
+
+Both candidates materially shorten the two long-flat episodes #354's
+own diagnostic identified as the dominant source of surrendered
+rebound (2008: 1716 -> ~550-566 days; 2022: 428 -> ~281-288 days),
+while *reducing*, not increasing, whipsaw frequency (12/37 ->
+8/41 or 7/39) despite re-entering meaningfully earlier and holding
+more trades. This directly answers the caution #354's own report
+raised about a fast re-entry rule risking a whipsaw into an
+unresolved decline (the =above-sma= candidate's 2008-05-19 example):
+an N-bar breakout, unlike a bare above-SMA condition, requires price
+to have actually confirmed a real short-term reversal first, and in
+this run that confirmation did not turn out to be a false signal at
+either crisis.
+
+=breakout-3= is the stronger of the two candidates on every metric
+reported: higher CAGR (1.22% vs. 1.13% baseline, +8% relative), better
+Calmar (0.366 vs. 0.338, +8% relative), a lower whipsaw count (7 vs.
+12) despite two more completed episodes than baseline, and — unlike
+=breakout-2= — no increase in max drawdown over baseline at all
+(3.33% vs. 3.33%). =breakout-2= is directionally supportive (higher
+return, fewer whipsaws, much shorter flat periods) but shows a
+slightly worse Calmar than baseline (0.337 vs. 0.338) due to a
+somewhat higher max drawdown (3.57%).
+
+* Conclusion
+
+*PROMISING* — specifically for =breakout-3=; =breakout-2= is
+directionally supportive but weaker on drawdown/Calmar.
+
+Rationale: =breakout-3= improves return, Calmar, and whipsaw frequency
+simultaneously over the current reference re-entry rule, without
+increasing max drawdown, on the same SPY history and reference
+configuration #354/#356 already established as this playbook's
+baseline. Both candidates resolve the two dominant long-flat episodes
+#354 identified by years, not merely days, while the underlying exit
+behavior — the mechanism actually responsible for most of this
+strategy's defensive value — is completely unchanged.
+
+Per issue #361's own guardrail, this single continuous full-history
+run is not a substitute for proper out-of-sample validation before any
+change to the playbook's own reference configuration: no parameter was
+selected against a holdout period here (only two fixed, pre-specified
+N values were ever run), but broader walk-forward validation of
+=breakout-3= — the same 5-year-train/1-year-test/1-year-step protocol
+PR #357 already established — belongs in its own follow-up issue
+before treating this as more than promising initial evidence.
+
+* Full Data
+
+- Per-variant summary JSON (all metrics above plus full named-episode
+  detail): =/srv/trading/sweeps/smatrend-breakout-reentry/breakout-reentry-comparison.json=
+- Episode charts (PNG, =chart= package) for all six exit/re-entry
+  episodes: =/srv/trading/sweeps/smatrend-breakout-reentry/charts/episode-{2008,2022}-{reclaim-exit-price,breakout-2,breakout-3}.png=
+
+Not committed (private research output, matching every other
+=fullarchive= driver's own convention); regenerate locally via
+=go test -tags fullarchive ./marketdata/ -run TestSMATrendBreakoutReEntryComparison=
+after editing this file's own local output-directory and SPY CSV path
+constants.
+
+* Next Steps (Not This Issue)
+
+- A proper walk-forward validation of =breakout-3= against the same
+  protocol PR #357's own baseline used, before considering it for the
+  playbook's own reference configuration.
+- =breakout-2= is not recommended for further validation ahead of
+  =breakout-3= given its own weaker drawdown/Calmar profile in this
+  run, though it remains a candidate if =breakout-3='s own walk-forward
+  result disappoints.

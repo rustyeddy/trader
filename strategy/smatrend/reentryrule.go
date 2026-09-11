@@ -50,6 +50,13 @@ var reEntryRuleRegistry = map[string]func(Config) (ReEntryRule, error){
 	"reclaim-exit-price": newReclaimExitPriceReEntryRule,
 	"breakout":           newBreakoutReEntryRule,
 	"above-sma":          newAboveSMAReEntryRule,
+	// breakout-2 and breakout-3 are issue #361's own N-bar breakout
+	// re-entry candidates — see nBarBreakoutReEntryRule's own doc
+	// comment for why they are two fixed names rather than one rule
+	// with a configurable lookback (issue #361's own guardrail: no
+	// broader N sweep in this issue).
+	"breakout-2": newNBarBreakoutReEntryRule(2),
+	"breakout-3": newNBarBreakoutReEntryRule(3),
 }
 
 // freshCrossReEntryRule is EQS-01's own original, only re-entry
@@ -113,6 +120,65 @@ func (r *breakoutReEntryRule) ShouldEnter(ctx ReEntryContext) bool {
 	enter := ctx.Bar.Close.Cmp(r.sinceExitHigh) > 0
 	if ctx.Bar.High.Cmp(r.sinceExitHigh) > 0 {
 		r.sinceExitHigh = ctx.Bar.High
+	}
+	return enter
+}
+
+// nBarBreakoutReEntryRule re-enters the first bar the close moves
+// above the highest High of the immediately preceding lookback
+// *completed* bars — a fixed, sliding N-bar window, independent of
+// the exit level and of how long the strategy has been flat (issue
+// #361), unlike breakoutReEntryRule's own unbounded "since exit"
+// high-water mark. Two fixed instances are registered, "breakout-2"
+// and "breakout-3" — issue #361's own guardrail against a broader N
+// sweep in this issue means lookback is never exposed through Config
+// at all, only through which of these two constructors a caller
+// selects.
+//
+// The window is seeded from the exit bar itself at OnExit and grows
+// one bar per ShouldEnter call up to lookback bars, then slides
+// (oldest evicted, newest appended). It can never include a bar from
+// before the exit: ReEntryRule.ShouldEnter is only ever called while
+// flat (see that method's own doc comment), so no bar observed while
+// the position was open is available to this rule at all — unlike an
+// offline analysis with full hindsight over the whole bar series (for
+// example issue #354's own diagnostic, which could and did look
+// further back before the exit for a very early flat bar), this live
+// rule genuinely cannot, and does not try to. The breakout threshold
+// is always the high established by *prior* bars in the window, never
+// including the current bar's own new High (mirroring
+// breakoutReEntryRule's identical check-before-update ordering), so a
+// bar can never trivially "break out" against a high it itself just
+// set.
+type nBarBreakoutReEntryRule struct {
+	lookback int
+	highs    []num.Price // most recent up to lookback bars' High, oldest first
+}
+
+func newNBarBreakoutReEntryRule(lookback int) func(Config) (ReEntryRule, error) {
+	return func(Config) (ReEntryRule, error) {
+		return &nBarBreakoutReEntryRule{lookback: lookback}, nil
+	}
+}
+
+func (r *nBarBreakoutReEntryRule) OnExit(_ num.Price, exitBar marketdata.Bar) {
+	r.highs = []num.Price{exitBar.High}
+}
+
+func (r *nBarBreakoutReEntryRule) ShouldEnter(ctx ReEntryContext) bool {
+	enter := false
+	if len(r.highs) > 0 {
+		highest := r.highs[0]
+		for _, h := range r.highs[1:] {
+			if h.Cmp(highest) > 0 {
+				highest = h
+			}
+		}
+		enter = ctx.Bar.Close.Cmp(highest) > 0
+	}
+	r.highs = append(r.highs, ctx.Bar.High)
+	if len(r.highs) > r.lookback {
+		r.highs = r.highs[len(r.highs)-r.lookback:]
 	}
 	return enter
 }

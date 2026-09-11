@@ -49,13 +49,20 @@
 //     above the level the strategy exited at, without waiting for the
 //     SMA to catch up. "breakout" re-enters as soon as the close
 //     exceeds the highest High observed since the exit, independent
-//     of the old exit level. "above-sma" re-enters on the very first
-//     eligible flat bar with no further condition of its own: since
-//     the central gate has already confirmed price is back above the
-//     SMA before this rule is even consulted, its own meaning is
-//     simply "resume immediately once the bullish regime returns,"
-//     without waiting for a fresh cross or a reclaim/breakout
-//     threshold.
+//     of the old exit level. "breakout-2" and "breakout-3" (issue
+//     #361) are a materially different breakout: a fixed, sliding
+//     2- or 3-bar lookback window rather than an unbounded
+//     since-exit high, re-entering as soon as the close exceeds the
+//     highest High of only the immediately preceding lookback
+//     completed bars — see reentryrule.go's own
+//     nBarBreakoutReEntryRule doc comment for why the window can
+//     never see a bar from before the exit. "above-sma" re-enters on
+//     the very first eligible flat bar with no further condition of
+//     its own: since the central gate has already confirmed price is
+//     back above the SMA before this rule is even consulted, its own
+//     meaning is simply "resume immediately once the bullish regime
+//     returns," without waiting for a fresh cross or a
+//     reclaim/breakout threshold.
 //   - InitialEntryRule (Config.InitialEntryModeName) decides, once
 //     per bar while flat and before this strategy has ever held or
 //     exited a position, whether to make its very first entry (issue
