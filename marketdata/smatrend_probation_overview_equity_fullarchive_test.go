@@ -40,7 +40,6 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/rustyeddy/trader/chart"
 	"github.com/rustyeddy/trader/marketdata"
@@ -153,109 +152,55 @@ func TestSMATrendProbationTrendOverviewAndEquityCharts(t *testing.T) {
 	})
 
 	// --- Equity chart: strategy equity curve vs. buy-and-hold over
-	// the identical span, both at matched ~100%-of-equity notional
-	// sizing (issue #355's chart type #3). This deliberately does NOT
-	// reuse resp.EquityCurve from the run above: that run is sized
-	// conservatively (RiskFraction 0.01, fixed $20 adverse distance —
-	// fine for the overview chart, which only ever needs entry/exit
-	// *dates and prices*, unaffected by position size) and plotting it
-	// against an unsized buy-and-hold curve would repeat exactly the
-	// mismatched-sizing mistake already corrected earlier in this
-	// research thread (PR #353's own "are you sizing buy and hold at
-	// 100%?" correction) — the strategy would look like it captured
-	// almost none of buy-and-hold's return, purely as a sizing
-	// artifact having nothing to do with the strategy's real
-	// risk-adjusted performance.
+	// the identical span (issue #355's chart type #3).
 	//
-	// A second, separately sized run builds the real equity curve:
-	// the comparison window is split into 1-year periods (mirroring
-	// smatrend_probation_simple_fullarchive_test.go's own chaining
-	// technique), each run independently at full notional
-	// (RiskFraction=1, AdverseDistance=100% of that period's own
-	// opening price — re-anchored every period for the same reason
-	// recorded there), and each period's own equity-curve points are
-	// rescaled to continue from the running equity the *previous*
-	// period ended at, producing one genuine continuous, honestly-
-	// comparable equity curve rather than only a final chained return
-	// ratio.
-	riskFractionFull := num.MustParseRate("1")
-	startingCapitalF := mustParseFloatWF(t, fieldsFirst(startingCapital.String()))
-
-	type period struct{ start, end time.Time }
-	var periods []period
-	spanEnd := bars[len(bars)-1].Time.AddDate(0, 0, 1)
-	for cur := bars[0].Time; cur.Before(spanEnd); cur = cur.AddDate(1, 0, 0) {
-		end := cur.AddDate(1, 0, 0)
-		if end.After(spanEnd) {
-			end = spanEnd
-		}
-		periods = append(periods, period{start: cur, end: end})
-	}
-
-	runningEquity := startingCapitalF
+	// PR #360 review (Rusty + Copilot) rejected an earlier version of
+	// this section that tried to manufacture a matched-~100%-notional
+	// strategy curve by stitching together independent yearly
+	// full-notional backtests, each started fresh from a one-year
+	// warmup prefix and rescaled to continue from the running equity
+	// the previous period ended at. That approach cannot actually
+	// reconstruct real state carried across an annual boundary — an
+	// open position, PROBATION/TRENDING phase, high-water-mark/
+	// trailing-stop state, and re-entry reference state are all lost
+	// and re-derived differently at every boundary — so rescaling the
+	// resulting dollar values only visually joins them; it does not
+	// produce a genuine continuous run, and calling it "matched
+	// notional" or "honestly comparable" overstated what the stitched
+	// series actually was.
+	//
+	// This chart instead plots the real, single continuous
+	// resp.EquityCurve from the one real backtest run above —
+	// genuinely continuous by construction, with every position/phase/
+	// stop transition preserved exactly as the strategy and broker
+	// actually produced it — at its own real reference sizing
+	// (RiskFraction 0.01, fixed $20 adverse distance), explicitly
+	// *not* matched to buy-and-hold's ~100%-of-equity exposure. The
+	// title says so directly rather than implying a fair notional
+	// comparison the chart does not actually provide (Rusty's own
+	// review: "make the chart/report explicit about its sizing,
+	// rather than manufacturing a matched-notional curve"). A genuine
+	// matched-notional SMA Long Hold vs. buy-and-hold comparison needs
+	// its own controlled backtest whose position-sizing policy itself
+	// produces ~100% exposure in one continuous run — strategy/
+	// research methodology, not chart-package validation, and out of
+	// scope for this issue.
 	var equityPts []chart.EquityPoint
-	for i, p := range periods {
-		// Clamped to the dataset's own start (PR #359-style pattern,
-		// but a real edge case here unlike that file's own driver:
-		// this file's own periods begin at bars[0].Time itself, so
-		// the very first period's naive 1-year warmup prefix would
-		// underflow before any data exists at all).
-		warmupStart := p.start.AddDate(-1, 0, 0)
-		if warmupStart.Before(bars[0].Time) {
-			warmupStart = bars[0].Time
-		}
-		anchorBar, ok := firstBarAtOrAfter(bars, warmupStart)
-		if !ok {
-			t.Fatalf("period %d: no bar found at or after warmup start %s", i, warmupStart.Format("2006-01-02"))
-		}
-		periodAdverseDistance, err := anchorBar.Open.MulRate(riskFractionFull) // 100% of price: full notional
-		if err != nil {
-			t.Fatalf("period %d: computing adverse distance: %v", i, err)
-		}
-		runSpan, err := marketdata.NewTimeRange(warmupStart, p.end)
-		if err != nil {
-			t.Fatalf("period %d: run span: %v", i, err)
-		}
-		periodResp, err := runEQS01WFBacktest(ctx, setup.mgr, setup.simResolver, setup.simID, runSpan, cfg, startingCapital, riskFractionFull, periodAdverseDistance, setup.priceByTime)
-		if err != nil {
-			t.Fatalf("period %d [%s, %s): backtest run: %v", i, p.start.Format("2006-01-02"), p.end.Format("2006-01-02"), err)
-		}
-
-		periodStartBar, ok := firstBarAtOrAfter(bars, p.start)
-		if !ok {
-			t.Fatalf("period %d: no bar found at or after period start %s", i, p.start.Format("2006-01-02"))
-		}
-		baselineEquity, ok := equityCurveAt(periodResp.EquityCurve, periodStartBar.Time)
-		if !ok {
-			t.Fatalf("period %d: could not locate equity-curve point at period start %s", i, periodStartBar.Time.Format("2006-01-02"))
-		}
-		scale := runningEquity / baselineEquity
-
-		for _, ep := range periodResp.EquityCurve {
-			if ep.Timestamp.Before(p.start) || !ep.Timestamp.Before(p.end) {
-				continue // warmup-prefix or next-period's own boundary point; each period contributes only its own [start, end) span
-			}
-			v := mustParseFloatWF(t, fieldsFirst(ep.Equity.String()))
-			equityPts = append(equityPts, chart.EquityPoint{Time: ep.Timestamp, Value: v * scale})
-		}
-
-		finalBar := lastBarBefore(bars, p.end)
-		finalEquity, ok := equityCurveAt(periodResp.EquityCurve, finalBar.Time)
-		if !ok {
-			t.Fatalf("period %d: could not locate equity-curve point at period end %s", i, finalBar.Time.Format("2006-01-02"))
-		}
-		runningEquity = finalEquity * scale
+	for _, ep := range resp.EquityCurve {
+		v := mustParseFloatWF(t, fieldsFirst(ep.Equity.String()))
+		equityPts = append(equityPts, chart.EquityPoint{Time: ep.Timestamp, Value: v})
 	}
 
+	startingCapitalF := mustParseFloatWF(t, fieldsFirst(startingCapital.String()))
 	baseClose := bars[0].Close.Float64()
 	var buyHoldPts []chart.EquityPoint
 	for _, b := range bars {
 		buyHoldPts = append(buyHoldPts, chart.EquityPoint{Time: b.Time, Value: startingCapitalF * (b.Close.Float64() / baseClose)})
 	}
-	t.Logf("equity chart: %d strategy points (matched 100%% notional, %d periods), %d buy-and-hold points, final strategy equity %.2f", len(equityPts), len(periods), len(buyHoldPts), runningEquity)
+	t.Logf("equity chart: %d strategy points (real continuous run, reference sizing), %d buy-and-hold points", len(equityPts), len(buyHoldPts))
 
 	equityIn := chart.EquityInput{
-		Title:      "SPY probation-trend (10% trailing) vs buy-and-hold, matched 100% notional sizing",
+		Title:      "SPY probation-trend (10% trailing, reference 1% risk-managed sizing) vs 100%-invested buy-and-hold — sizing NOT matched",
 		Equity:     equityPts,
 		BuyAndHold: buyHoldPts,
 	}
