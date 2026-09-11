@@ -166,6 +166,7 @@ the original decided, use full supersession instead.
 | 056 | Rounding a computed stop price to the listing's tick size (in adr-056-price-round-to-tick.org) | Accepted |
 | 057 | Rounding every simulated fill price to the listing's tick size (in adr-057-sim-fill-price-tick-rounding.org) | Accepted |
 | 058 | A chart research package for deterministic static backtest visualization (in adr-058-chart-research-package.org) | Accepted |
+| 059 | Atomic entry-with-protective-stop submission (order.IntentEnterWithStop) (in adr-059-bracket-entry-with-stop.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —

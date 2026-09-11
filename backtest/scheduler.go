@@ -787,6 +787,28 @@ func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strat
 		return s.drainAndJournal(ctx)
 	}
 
+	// order.IntentEnterWithStop (issue #351, ADR-059): result.Bracket
+	// carries two full, ordinary sub-Results (Entry, then Stop) rather
+	// than the single Proposal/Decision/Request this function's own
+	// generic path below assumes — each leg is journaled with the
+	// identical Proposal/Decision/(Request-if-allowed) sequence a
+	// plain intent already gets, via journalBracketLeg, so the journal
+	// reads as two ordinary sub-intents rather than one intent with a
+	// bracket-shaped hole in it. Always drains afterward regardless of
+	// either leg's own outcome: drainAndJournal is its own incremental,
+	// watermark-based no-op when nothing new triggered (see its own
+	// doc comment), and the entry leg alone can have produced a real
+	// fill even when the stop leg was separately rejected.
+	if result.Bracket != nil {
+		if err := s.journalBracketLeg(ctx, corr, result.Bracket.Entry); err != nil {
+			return err
+		}
+		if err := s.journalBracketLeg(ctx, corr, result.Bracket.Stop); err != nil {
+			return err
+		}
+		return s.drainAndJournal(ctx)
+	}
+
 	if err := s.journalRecord(ctx, journal.Record{
 		RunID:    s.deps.RunID,
 		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
@@ -817,6 +839,47 @@ func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strat
 	}
 
 	return s.drainAndJournal(ctx)
+}
+
+// journalBracketLeg journals one order.IntentEnterWithStop leg's own
+// Proposal/Decision/(Request-if-allowed) sequence (issue #351,
+// ADR-059) — the identical sequence submit's own generic path already
+// uses for a plain, non-bracket intent. It is a clean no-op for
+// pipeline.Result's own zero value: leg.Proposal.Metadata.EventID is
+// never zero once execution.Planner has actually planned a Proposal,
+// so an unpopulated leg (result.Bracket.Stop when the entry leg was
+// rejected or did not fill synchronously, per submitBracket's own doc
+// comment) is recognized and skipped rather than journaling three
+// hollow, zero-valued records.
+func (s *Scheduler) journalBracketLeg(ctx context.Context, corr id.CorrelationID, leg pipeline.Result) error {
+	if leg.Proposal.Metadata.EventID.IsZero() {
+		return nil
+	}
+	if err := s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindProposal,
+		Proposal: &leg.Proposal,
+	}); err != nil {
+		return err
+	}
+	if err := s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindDecision,
+		Decision: &leg.Decision,
+	}); err != nil {
+		return err
+	}
+	if !leg.Decision.Allowed {
+		return nil
+	}
+	return s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindRequest,
+		Request:  &leg.Request,
+	})
 }
 
 // journalRecord validates and records rec, wrapping any failure as a

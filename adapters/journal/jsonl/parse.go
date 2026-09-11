@@ -131,6 +131,8 @@ func parseIntentKind(s string) (order.IntentKind, error) {
 		return order.IntentAdjustStop, nil
 	case "target_exposure":
 		return order.IntentTargetExposure, nil
+	case "enter_with_stop":
+		return order.IntentEnterWithStop, nil
 	default:
 		return 0, fmt.Errorf("%w: unrecognized intent kind %q", ErrCorruptEntry, s)
 	}

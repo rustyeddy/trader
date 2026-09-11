@@ -1401,3 +1401,87 @@ func TestScheduler_IntrabarAdvancerFillsAtOpenOnGap(t *testing.T) {
 	assert.Equal(t, order.Buy, fills[1].Side, "the stop-triggered closing fill")
 	assert.Equal(t, "1.1006", fills[1].Price.String(), "a gap-through fill must use the bar's own (worse) Open, 1.10060, never the requested stop price 1.10055")
 }
+
+// bracketEntryStrategy emits exactly one order.IntentEnterWithStop
+// (issue #351, ADR-059) on the first eligible bar, then stays
+// deliberately inert — proving the bracket mechanism itself against a
+// real Scheduler.Run, not exercising any other strategy behavior.
+type bracketEntryStrategy struct {
+	requirements []strategy.DataRequirement
+	intents      strategy.IntentFactory
+	instID       instrument.ID
+	side         order.Side
+	stopPrice    string
+	entered      bool
+}
+
+func (s *bracketEntryStrategy) Describe() strategy.Descriptor {
+	return strategy.Descriptor{Name: "bracket-entry", Version: "test", Requirements: s.requirements}
+}
+
+func (s *bracketEntryStrategy) Start(ctx context.Context, env strategy.Environment) error {
+	s.intents = env.Intents
+	return nil
+}
+
+func (s *bracketEntryStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	if !ev.Instrument.Equal(s.instID) || s.entered {
+		return nil, nil
+	}
+	s.entered = true
+	in, err := s.intents.EnterWithStop(ev.Instrument, s.side, num.MustParsePrice(s.stopPrice))
+	if err != nil {
+		return nil, err
+	}
+	return []order.Intent{in}, nil
+}
+
+// TestScheduler_BracketEntryProtectsFromTheFillBarItself is issue
+// #351/ADR-059's own central acceptance criterion, proven end-to-end
+// against a real Scheduler.Run: an order.IntentEnterWithStop's
+// protective stop is already resting — and can already trigger — on
+// the very same bar the entry itself fills, not one bar later.
+//
+// Reuses TestScheduler_IntrabarAdvancerTriggersRestingStop's own
+// fixture and stop price (1.10065) exactly, so the two tests are
+// directly comparable: that test's own two-step
+// Enter-then-observe-then-AdjustStop strategy needs until bar 3
+// (02:00, High 1.10100) to trigger this identical stop, leaving bar 2
+// (01:00, the real fill bar, High 1.10085 — already past 1.10065)
+// completely unprotected in between. This test's bracket intent
+// instead triggers on bar 2 itself: both legs are submitted within
+// that same bar's own Phase 2, before that bar's own Phase 3
+// IntrabarAdvancer call ever runs, so the stop is already resting
+// when the trigger check against that bar's own High happens.
+func TestScheduler_BracketEntryProtectsFromTheFillBarItself(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &bracketEntryStrategy{
+		requirements: bothInstrumentsRequirements(t),
+		instID:       eurusdID(t),
+		side:         order.Sell,
+		stopPrice:    "1.10065",
+	}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "the bracket's own resting stop must have triggered and closed the short position")
+	assert.Empty(t, snap.OpenOrders())
+
+	fills := sched.Fills()
+	require.Len(t, fills, 2, "both the bracket's own entry fill and the stop-triggered exit fill must have been drained")
+	assert.Equal(t, order.Sell, fills[0].Side, "the bracket's own entry fill")
+	assert.Equal(t, "2024-01-08T01:00:00Z", fills[0].Timestamp.Format(time.RFC3339), "the entry fills at bar 2 (01:00), the bar immediately after the decision bar")
+	assert.Equal(t, order.Buy, fills[1].Side, "the stop-triggered closing fill")
+	assert.Equal(t, "1.10065", fills[1].Price.String(), "an intrabar trigger fills at the resting stop price, not the bar's Open")
+	assert.Equal(t, "2024-01-08T01:00:00Z", fills[1].Timestamp.Format(time.RFC3339),
+		"the closing fill must land on bar 2 (01:00) itself, the same bar the entry filled on — proving the stop was already resting before that bar's own IntrabarAdvancer check, not one bar later (02:00, as the equivalent two-step strategy needs — see TestScheduler_IntrabarAdvancerTriggersRestingStop)")
+}
