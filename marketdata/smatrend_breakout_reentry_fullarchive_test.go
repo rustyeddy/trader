@@ -385,20 +385,36 @@ func renderNamedEpisodeChart(t *testing.T, dir string, bars []marketdata.Bar, va
 	t.Logf("wrote %s", path)
 }
 
-// walkForwardVariantResult is one re-entry variant's own matched-
-// ~100%-notional walk-forward result (PR #362 review): Rusty's own
-// review correctly pointed out that TestSMATrendBreakoutReEntryComparison's
-// 1%-risk/fixed-$20-adverse-distance sizing answers "how does this
-// signal behave inside a risk-managed swing account," not the actual
-// strategic question issue #361 is meant to answer — "if this timing
-// rule replaces buy-and-hold as the equity allocation policy, how much
-// long-term return do we retain for the drawdown reduction." This
-// type's own fields are therefore the primary quantitative comparison
-// this file reports; TestSMATrendBreakoutReEntryComparison's own
-// 1%-risk run remains a secondary diagnostic (useful for the named-
-// episode/whipsaw analysis, which is sizing-independent) and its
-// absolute CAGR/return must not be read as a portfolio-allocation
-// answer.
+// walkForwardVariantResult is one re-entry variant's own
+// *approximately* ~100%-notional walk-forward result (PR #362
+// review): Rusty's own first review pointed out that
+// TestSMATrendBreakoutReEntryComparison's 1%-risk/fixed-$20-adverse-
+// distance sizing answers "how does this signal behave inside a
+// risk-managed swing account," not the actual strategic question
+// issue #361 is meant to answer — "if this timing rule replaces
+// buy-and-hold as the equity allocation policy, how much long-term
+// return do we retain for the drawdown reduction." This type's own
+// fields are therefore the primary quantitative comparison this file
+// reports; TestSMATrendBreakoutReEntryComparison's own 1%-risk run
+// remains a secondary diagnostic (useful for the named-episode/
+// whipsaw analysis, which is sizing-independent) and its absolute
+// CAGR/return must not be read as a portfolio-allocation answer.
+//
+// "Approximately," not exactly, ~100%-notional (PR #362's own
+// rereview): this is risk.FixedFractionSizer with RiskFraction=1 and
+// AdverseDistance re-anchored once per fold from that fold's own
+// train-start price — sizing genuinely drifts from true 100%-of-
+// equity as price moves within a fold's ~1-year test window, since
+// AdverseDistance stays fixed at that fold's own starting price for
+// the whole fold. Trader has no exact full-notional Sizer today:
+// risk.SizeInput carries no price field at all (Sizer is deliberately
+// never shown the current market price), so "invest all available
+// equity at the actual entry price" cannot be expressed through the
+// existing Sizer contract — tracked as issue #364 rather than treated
+// as solved by this approximation. BuyAndHold below is computed
+// directly from Close prices (exactly 100% invested by construction,
+// no Sizer involved) precisely so it is not exposed to this same
+// approximation.
 type walkForwardVariantResult struct {
 	Variant       string  `json:"variant"`
 	ChainedReturn float64 `json:"chained_return"`
@@ -417,19 +433,33 @@ type walkForwardVariantResult struct {
 	OOSReEntryCount  int     `json:"oos_reentry_count"`
 	ExposurePct      float64 `json:"exposure_pct"`
 	Folds            int     `json:"folds"`
+	// IsBuyAndHold marks the one row (Variant == "buy-and-hold") that
+	// is not a strategy variant at all: the benchmark PR #362's
+	// rereview asked to be placed directly in this same table, over
+	// the identical OOS span, rather than requiring a reader to cross-
+	// reference a separate artifact. OOSTradeCount/OOSReEntryCount are
+	// meaningless for this row and left at zero; ExposurePct is always
+	// 1.0 by construction (buy-and-hold is never flat).
+	IsBuyAndHold bool `json:"is_buy_and_hold,omitempty"`
 }
 
 // TestSMATrendBreakoutReEntryWalkForwardComparison runs issue #361's
 // own baseline/breakout-2/breakout-3 comparison a second way, at
-// matched ~100%-of-equity notional sizing via the identical walk-
-// forward protocol (5-year train, 1-year test, 1-year step,
-// AdverseDistance re-anchored from each fold's own train-start price)
+// approximately ~100%-of-equity notional sizing (see
+// walkForwardVariantResult's own doc comment for exactly how, and its
+// known limitation) via the identical walk-forward protocol (5-year
+// train, 1-year test, 1-year step, AdverseDistance re-anchored from
+// each fold's own train-start price)
 // smatrend_probation_walkforward_fullarchive_test.go's own baseline
 // already established — issue #361's own Research Protocol section
 // asks for "the same sizing and walk-forward/backtest protocol used
 // by the current reference baseline where practical," and PR #362's
-// review specifically asked for a matched-notional comparison as the
-// primary one.
+// review specifically asked for a full-notional comparison as the
+// primary one. A buy-and-hold benchmark row, computed directly from
+// Close prices over the identical OOS span (the union of every
+// fold's own [testStart, testEnd)), is included in the same result
+// set (PR #362's own rereview: the benchmark belongs in the same
+// table as the timing variants, not only in a separate artifact).
 func TestSMATrendBreakoutReEntryWalkForwardComparison(t *testing.T) {
 	if fullArchiveBreakoutReEntryOutputDir == "" {
 		t.Skip("fullArchiveBreakoutReEntryOutputDir is empty; edit the constant in this file to point at a local results directory to run this test")
@@ -447,6 +477,8 @@ func TestSMATrendBreakoutReEntryWalkForwardComparison(t *testing.T) {
 
 	startingCapital := num.MustParseMoney(eqs01WFStartingCapital, num.MustParseCurrency("USD"))
 	fullNotional := num.MustParseRate("1")
+
+	var wfSpanStart, wfSpanEnd time.Time // overall [first fold's testStart, last fold's testEnd) span, tracked below (same pattern as smatrend_probation_walkforward_fullarchive_test.go)
 
 	var results []walkForwardVariantResult
 	for _, variant := range breakoutReEntryVariants {
@@ -543,6 +575,13 @@ func TestSMATrendBreakoutReEntryWalkForwardComparison(t *testing.T) {
 				exposureDays += overlapEnd.Sub(overlapStart).Hours() / 24
 			}
 			totalOOSDays += testEndExclusive.Sub(testStart).Hours() / 24
+
+			if wfSpanStart.IsZero() || testStart.Before(wfSpanStart) {
+				wfSpanStart = testStart
+			}
+			if testEndExclusive.After(wfSpanEnd) {
+				wfSpanEnd = testEndExclusive
+			}
 		}
 
 		netReturn := chainedReturn - 1
@@ -567,6 +606,53 @@ func TestSMATrendBreakoutReEntryWalkForwardComparison(t *testing.T) {
 		t.Logf("[walk-forward, full notional] variant=%s return=%.4f cagr=%.4f maxDDFloor=%.4f calmar=%.4f oosTrades=%d oosReEntries=%d exposure=%.4f folds=%d (dataset span %.1fy)",
 			variant, netReturn, cagr, worstFoldMaxDD, result.Calmar, oosTradeCount, oosReEntryCount, result.ExposurePct, folds, years)
 	}
+
+	// Buy-and-hold benchmark, in the same result set as the timing
+	// variants (PR #362's own rereview), over the identical OOS span
+	// (the union of every fold's own [testStart, testEnd) test
+	// window) — the strategy is never evaluated outside that range,
+	// so comparing against a wider buy-and-hold span would not be a
+	// fair comparison. Computed directly from Close prices, exactly
+	// 100% invested by construction (no Sizer/AdverseDistance
+	// approximation involved at all), mirroring
+	// smatrend_probation_walkforward_fullarchive_test.go's own
+	// identical buy-and-hold section.
+	bhStartBar, ok := firstBarAtOrAfter(setup.bars, wfSpanStart)
+	if !ok {
+		t.Fatalf("no bar found at or after walk-forward span start %s", wfSpanStart.Format("2006-01-02"))
+	}
+	bhEndBar := lastBarBefore(setup.bars, wfSpanEnd)
+	bhYears := bhEndBar.Time.Sub(bhStartBar.Time).Hours() / 24 / 365.25
+	bhReturn := bhEndBar.Close.Float64()/bhStartBar.Open.Float64() - 1
+	bhCAGR := cagrFromReturn(bhReturn, bhYears)
+	bhMaxDD := 0.0
+	peak := 0.0
+	for _, b := range setup.bars {
+		if b.Time.Before(wfSpanStart) || !b.Time.Before(wfSpanEnd) {
+			continue
+		}
+		c := b.Close.Float64()
+		if c > peak {
+			peak = c
+		}
+		if peak > 0 {
+			if dd := (peak - c) / peak; dd > bhMaxDD {
+				bhMaxDD = dd
+			}
+		}
+	}
+	bhResult := walkForwardVariantResult{
+		Variant:          "buy-and-hold",
+		ChainedReturn:    bhReturn,
+		CAGR:             bhCAGR,
+		MaxDrawdownFloor: bhMaxDD, // a true, single-pass continuous figure here, not a floor — see the field's own doc comment for why buy-and-hold has no such limitation
+		Calmar:           calmarRatio(bhCAGR, bhMaxDD),
+		ExposurePct:      1.0,
+		IsBuyAndHold:     true,
+	}
+	results = append(results, bhResult)
+	t.Logf("[walk-forward span] buy-and-hold [%s, %s]: return=%.4f cagr=%.4f maxDD=%.4f calmar=%.4f",
+		bhStartBar.Time.Format("2006-01-02"), bhEndBar.Time.Format("2006-01-02"), bhReturn, bhCAGR, bhMaxDD, bhResult.Calmar)
 
 	out, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {

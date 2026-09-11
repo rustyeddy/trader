@@ -12,12 +12,12 @@ rule (=reclaim-exit-price=) against two new candidates,
 =breakout-2= and =breakout-3=, using full backtest results with real
 fills and state (never a trigger-date-only analysis).
 
-*Revision note*: PR #362's review (Rusty + Copilot) found a real bug
-in the first implementation of the new rule and a sizing-methodology
-problem in the first version of this report; both are fixed, and the
-findings and conclusion below reflect the corrected numbers, which
-differ materially from the first draft (see "What Changed After
-Review" below).
+*Revision note*: PR #362's review (Rusty + Copilot, two rounds) found
+a real bug in the first implementation of the new rule and two
+sizing-methodology problems in the first two versions of this report;
+all are fixed, and the findings and conclusion below reflect the fully
+corrected numbers, which differ materially from the first draft (see
+"What Changed After Review" below).
 
 * New Strategy Code
 
@@ -81,7 +81,7 @@ which is sizing-independent, but its absolute CAGR/return does not
 answer the actual portfolio-allocation question this issue cares about
 (see below) and must not drive the conclusion on its own.
 
-** Comparison 2 (primary): walk-forward, matched ~100%-notional sizing
+** Comparison 2 (primary): walk-forward, approximately ~100%-notional sizing
 
 Per PR #362's review: "the primary return/CAGR comparison should be
 based on roughly 100% invested capital while the strategy is long, ...
@@ -100,6 +100,19 @@ a true continuous figure across fold boundaries, the identical
 documented limitation PR #357's own =TestMaxDrawdown= and PR #353's
 own =MaxDrawdownIsPerPeriodFloor= already carry.
 
+*Approximately*, not exactly, ~100%-notional (PR #362's own
+rereview): =AdverseDistance= is fixed at each fold's own train-start
+price for that entire ~1-year test window, so real sizing drifts from
+true 100%-of-equity as price moves within the fold. Trader has no
+exact full-notional =Sizer= today — =risk.SizeInput= carries no price
+field at all, so "invest all available equity at the actual entry
+price" cannot be expressed through the existing =Sizer= contract at
+all — tracked as issue #364 rather than treated as solved here. The
+buy-and-hold row in the results table below is exactly 100% invested
+by construction (computed directly from Close prices, no =Sizer=
+involved), so it is not exposed to this same approximation and is the
+one row in this comparison genuinely free of it.
+
 Full reproduction:
 =marketdata/smatrend_breakout_reentry_fullarchive_test.go=
 (=TestSMATrendBreakoutReEntryComparison= and
@@ -108,16 +121,30 @@ Full reproduction:
 
 * Results
 
-** Comparison 2 (primary): walk-forward, matched ~100%-notional sizing
+** Comparison 2 (primary): walk-forward, approximately ~100%-notional sizing
 
-| Metric                          | reclaim-exit-price | breakout-2 | breakout-3 |
-|-----------------------------------+---------------------+------------+------------|
-| Chained OOS return               |             459.8% |     468.9% |     469.0% |
-| CAGR                             |              11.34% |     11.46% |     11.46% |
-| Max drawdown (worst-fold floor)  |              27.04% |     31.32% |     31.32% |
-| Calmar                           |               0.419 |      0.366 |      0.366 |
-| OOS trades / re-entries          |              35 / 26 |    48 / 35 |    48 / 35 |
-| Exposure (time in market)        |               69.2% |      83.3% |      83.3% |
+| Metric                          | reclaim-exit-price | breakout-2 | breakout-3 | buy-and-hold |
+|-----------------------------------+---------------------+------------+------------+---------------|
+| Chained OOS return               |             459.8% |     468.9% |     469.0% |        688.3% |
+| CAGR                             |              11.34% |     11.46% |     11.46% |        13.75% |
+| Max drawdown (worst-fold floor*) |              27.04% |     31.32% |     31.32% |        33.72% |
+| Calmar                           |               0.419 |      0.366 |      0.366 |         0.408 |
+| OOS trades / re-entries          |              35 / 26 |    48 / 35 |    48 / 35 |            n/a |
+| Exposure (time in market)        |               69.2% |      83.3% |      83.3% |         100.0% |
+
+*Buy-and-hold's own max drawdown is a true, single-pass continuous
+figure over the identical OOS span — it has no fold-boundary
+limitation, unlike the strategy rows (see above). All four rows cover
+the identical span: 2010-03-01 through 2026-03-11 (the union of every
+fold's own test window).
+
+Note the risk-adjusted comparison this table now makes directly
+visible: =reclaim-exit-price= (baseline) achieves a slightly *better*
+Calmar than buy-and-hold itself (0.419 vs. 0.408) while retaining
+82.5% of its CAGR. Both breakout candidates retain marginally more
+CAGR (83.3%) but with a *worse* Calmar than buy-and-hold (0.366 vs.
+0.408) — the added exposure and drawdown are not compensated by a
+proportionate return gain.
 
 ** Comparison 1 (secondary diagnostic): continuous run, reference sizing
 
@@ -170,6 +197,19 @@ fix:
   forward: +0.12 points, ~1% relative; continuous run: +0.03 points,
   ~3% relative) — a real but much smaller edge than first reported.
 
+PR #362's second rereview then raised two further methodology points,
+also addressed: the "matched ~100%-notional" claim was corrected to
+"approximately" (=AdverseDistance= drifts within each fold as price
+moves — an exact full-notional =Sizer= does not exist in Trader today,
+tracked as issue #364), and a buy-and-hold benchmark row was added
+directly to the primary comparison table (previously only in a
+separate secondary-diagnostic artifact) so the actual "how much
+buy-and-hold return do we retain" question the sizing switch was meant
+to answer is directly visible: baseline retains 82.5% of buy-and-hold's
+CAGR at a slightly *better* Calmar (0.419 vs. 0.408); both breakout
+candidates retain marginally more CAGR (83.3%) but at a *worse* Calmar
+than buy-and-hold (0.366).
+
 * Analysis
 
 Both candidates still materially shorten the two long-flat episodes
@@ -182,7 +222,7 @@ What does not survive is the risk-adjusted conclusion. A materially
 earlier re-entry buys back time in the market (exposure rises from
 ~60-69% to ~74-83% across both comparisons) and a small amount of
 extra return, but it does so by accepting real additional drawdown —
-in the primary, matched-notional comparison, over four points of
+in the primary, approximately-100%-notional comparison, over four points of
 extra worst-fold drawdown for about one-tenth of a point of extra
 CAGR. That trade is not obviously favorable, and the fact that
 =breakout-2= and =breakout-3= are now indistinguishable removes the
@@ -224,11 +264,12 @@ N-bar breakout at N=2/3 is not that mechanism on this evidence.
 
 - Continuous-run comparison JSON (all metrics above plus full named-
   episode/downstream detail):
-  =/srv/trading/sweeps/smatrend-breakout-reentry/breakout-reentry-comparison.json=
-- Walk-forward matched-notional comparison JSON:
-  =/srv/trading/sweeps/smatrend-breakout-reentry/breakout-reentry-walkforward-comparison.json=
+  =/srv/trading/backtests/equities/sma-long-hold/reentry/breakout-2-3/breakout-reentry-comparison.json=
+- Walk-forward comparison JSON (approximately ~100%-notional, now
+  including a buy-and-hold row):
+  =/srv/trading/backtests/equities/sma-long-hold/reentry/breakout-2-3/breakout-reentry-walkforward-comparison.json=
 - Episode charts (PNG, =chart= package) for all six exit/re-entry
-  episodes: =/srv/trading/sweeps/smatrend-breakout-reentry/charts/episode-{2008,2022}-{reclaim-exit-price,breakout-2,breakout-3}.png=
+  episodes: =/srv/trading/backtests/equities/sma-long-hold/reentry/breakout-2-3/charts/episode-{2008,2022}-{reclaim-exit-price,breakout-2,breakout-3}.png=
 
 Not committed (private research output, matching every other
 =fullarchive= driver's own convention); regenerate locally via
@@ -243,6 +284,12 @@ constants.
 - Issue #363: fix the identical below-SMA-observation gap in the
   existing =breakout= re-entry rule (issue #347), found as a byproduct
   of this issue's own review but explicitly not fixed here.
+- Issue #364: design and implement an exact full-notional =Sizer=
+  (=risk.SizeInput= has no price field today, so "invest all available
+  equity at the actual entry price" cannot be expressed through the
+  existing =Sizer= contract) — once available, this research family
+  should switch its own "approximately ~100%-notional" comparisons to
+  the exact sizer and re-verify whether this conclusion changes.
 - A percentage- or volatility-based rebound confirmation (rather than
   a bare N-bar price breakout) remains a plausible next hypothesis for
   the same underlying question, per issue #354's own candidate list —
