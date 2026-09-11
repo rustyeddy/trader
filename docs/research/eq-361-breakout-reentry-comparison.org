@@ -1,0 +1,296 @@
+#+TITLE: EQ-361: Breakout-2/Breakout-3 Re-Entry Comparison (SMA Long Hold)
+#+STARTUP: overview indent
+
+* Purpose
+
+Issue #361 asks whether a short N-bar breakout confirmation can
+improve SMA Long Hold re-entry timing without giving back the
+drawdown protection =probation-trend= already provides — the most
+plausible next experiment issue #354/PR #359's own diagnostic
+identified. This compares the playbook's current reference re-entry
+rule (=reclaim-exit-price=) against two new candidates,
+=breakout-2= and =breakout-3=, using full backtest results with real
+fills and state (never a trigger-date-only analysis).
+
+*Revision note*: PR #362's review (Rusty + Copilot, two rounds) found
+a real bug in the first implementation of the new rule and two
+sizing-methodology problems in the first two versions of this report;
+all are fixed, and the findings and conclusion below reflect the fully
+corrected numbers, which differ materially from the first draft (see
+"What Changed After Review" below).
+
+* New Strategy Code
+
+=strategy/smatrend/reentryrule.go= gained =nBarBreakoutReEntryRule=: a
+fixed, sliding N-bar lookback window (distinct from the existing
+=breakout= rule's own unbounded since-exit high), re-entering the
+first bar Close exceeds the highest High of the immediately preceding
+=lookback= bars. Two fixed instances are registered, ~"breakout-2"~
+and ~"breakout-3"~ — no configurable-N parameter was added to
+=Config= (issue #361's own guardrail against a broader sweep).
+
+=ReEntryRule= gained a new =ObserveFlatBar= method, called for
+*every* flat bar once =Strategy.everExited= is true, regardless of the
+central above-SMA regime gate — unlike =ShouldEnter=, which
+=Strategy.onFlat= only ever consults once price is already back above
+the SMA. This was required to fix a real bug PR #362's review caught:
+the first version of =nBarBreakoutReEntryRule= updated its window only
+from inside =ShouldEnter=, so it silently never observed any bar
+during a below-SMA stretch — after a long below-SMA period, the rule
+was effectively comparing against whichever bar happened to be
+consulted three consultations ago, not "the immediately preceding N
+completed bars" issue #361 actually specified. =Strategy.onFlat= now
+calls =ObserveFlatBar= for every flat bar, strictly after that bar's
+own enter/no-enter decision has already been computed, so the new
+state can never influence the decision it was itself built from.
+
+*Known related limitation, not fixed here*: the existing =breakout=
+rule (issue #347, unbounded since-exit high) has the identical
+structural gap — its own high-water mark is updated only inside
+=ShouldEnter= too. =ObserveFlatBar= is a no-op for that rule,
+deliberately preserving its exact existing behavior rather than
+silently changing an unrelated, already-shipped rule as a side effect
+of this issue. Tracked as issue #363.
+
+Five focused unit tests in =reentryrule_test.go= cover the two
+registered lookbacks behaving independently, the window evicting its
+oldest bar, the check-before-update ordering, and state not leaking
+across episodes. A new *integration* test in =strategy_test.go=,
+=TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes=,
+exercises the real =Strategy.onFlat= wiring across several below-SMA
+flat bars — including one with a large High spike — before eligibility
+returns, and proves the window correctly reflects that spike; reverting
+the =ObserveFlatBar= wiring was confirmed to make this test fail before
+restoring the fix. Exit behavior is completely unchanged.
+
+* Method
+
+Two independent comparisons, both fixed baseline =reclaim-exit-price=
+vs. =breakout-2= vs. =breakout-3=, =ExitRuleName= =probation-trend=,
+=InitialStopBelowSMA= 0.01, =TrailActivationGain= 0.05,
+=TrailingStopPercent= 0.10 held fixed; only =ReEntryRuleName= varies.
+
+** Comparison 1: continuous run, reference (1%-risk) sizing
+
+One continuous backtest per variant over SPY's full Stooq history
+(2005-02-25 through 2026-09-04) at the playbook's own established
+reference sizing (=RiskFraction= 0.01, fixed $20 adverse distance —
+the same sizing #354/#356's own diagnostic used). This is a
+*secondary diagnostic*: useful for the whipsaw/named-episode analysis,
+which is sizing-independent, but its absolute CAGR/return does not
+answer the actual portfolio-allocation question this issue cares about
+(see below) and must not drive the conclusion on its own.
+
+** Comparison 2 (primary): walk-forward, approximately ~100%-notional sizing
+
+Per PR #362's review: "the primary return/CAGR comparison should be
+based on roughly 100% invested capital while the strategy is long, ...
+not the existing 1%-risk / fixed-$20 adverse-distance swing-trading
+sizing," since the real strategic question is "if this timing rule
+replaces buy-and-hold as the equity allocation policy, how much
+long-term return do we retain for the drawdown reduction." This
+comparison reuses the identical walk-forward protocol (5-year train,
+1-year test, 1-year step, =AdverseDistance= re-anchored from each
+fold's own train-start price, =RiskFraction=1=) PR #357's own baseline
+already established as "the current reference baseline" issue #361's
+own Research Protocol section asks to reuse where practical.
+=MaxDrawdownFloor= is the worst single fold's own true, continuous
+mark-to-market drawdown — a floor on the real whole-span drawdown, not
+a true continuous figure across fold boundaries, the identical
+documented limitation PR #357's own =TestMaxDrawdown= and PR #353's
+own =MaxDrawdownIsPerPeriodFloor= already carry.
+
+*Approximately*, not exactly, ~100%-notional (PR #362's own
+rereview): =AdverseDistance= is fixed at each fold's own train-start
+price for that entire ~1-year test window, so real sizing drifts from
+true 100%-of-equity as price moves within the fold. Trader has no
+exact full-notional =Sizer= today — =risk.SizeInput= carries no price
+field at all, so "invest all available equity at the actual entry
+price" cannot be expressed through the existing =Sizer= contract at
+all — tracked as issue #364 rather than treated as solved here. The
+buy-and-hold row in the results table below is exactly 100% invested
+by construction (computed directly from Close prices, no =Sizer=
+involved), so it is not exposed to this same approximation and is the
+one row in this comparison genuinely free of it.
+
+Full reproduction:
+=marketdata/smatrend_breakout_reentry_fullarchive_test.go=
+(=TestSMATrendBreakoutReEntryComparison= and
+=TestSMATrendBreakoutReEntryWalkForwardComparison=; build tag
+=fullarchive=; local path constants edited locally, never committed).
+
+* Results
+
+** Comparison 2 (primary): walk-forward, approximately ~100%-notional sizing
+
+| Metric                          | reclaim-exit-price | breakout-2 | breakout-3 | buy-and-hold |
+|-----------------------------------+---------------------+------------+------------+---------------|
+| Chained OOS return               |             459.8% |     468.9% |     469.0% |        688.3% |
+| CAGR                             |              11.34% |     11.46% |     11.46% |        13.75% |
+| Max drawdown (worst-fold floor*) |              27.04% |     31.32% |     31.32% |        33.72% |
+| Calmar                           |               0.419 |      0.366 |      0.366 |         0.408 |
+| OOS trades / re-entries          |              35 / 26 |    48 / 35 |    48 / 35 |            n/a |
+| Exposure (time in market)        |               69.2% |      83.3% |      83.3% |         100.0% |
+
+*Buy-and-hold's own max drawdown is a true, single-pass continuous
+figure over the identical OOS span — it has no fold-boundary
+limitation, unlike the strategy rows (see above). All four rows cover
+the identical span: 2010-03-01 through 2026-03-11 (the union of every
+fold's own test window).
+
+Note the risk-adjusted comparison this table now makes directly
+visible: =reclaim-exit-price= (baseline) achieves a slightly *better*
+Calmar than buy-and-hold itself (0.419 vs. 0.408) while retaining
+82.5% of its CAGR. Both breakout candidates retain marginally more
+CAGR (83.3%) but with a *worse* Calmar than buy-and-hold (0.366 vs.
+0.408) — the added exposure and drawdown are not compensated by a
+proportionate return gain.
+
+** Comparison 1 (secondary diagnostic): continuous run, reference sizing
+
+| Metric                     | reclaim-exit-price | breakout-2 | breakout-3 |
+|------------------------------+---------------------+------------+------------|
+| Net return                  |              27.24% |     28.22% |     28.20% |
+| CAGR                        |               1.13% |      1.16% |      1.16% |
+| Max drawdown                |               3.33% |      4.53% |      4.53% |
+| Calmar                      |                0.338 |      0.257 |      0.256 |
+| Trades / re-entries          |               37/37 |    48/48 |    48/48 |
+| Exposure                    |               60.0% |      73.7% |      73.7% |
+| Whipsaws / total episodes   |               12/37 |     11/48 |     11/48 |
+
+** Named episode outcomes (secondary diagnostic run)
+
+| Episode | reclaim-exit-price | breakout-2 / breakout-3 (identical) |
+|---------+----------------------+---------------------------------------|
+| 2008    | exit 2007-12-27 -> reentry 2012-09-07 (1716 days flat); downstream exit 2012-11-14, -5.1% | exit 2008-05-21 -> reentry 2009-06-02 (377 days flat); downstream exit 2009-06-16, -2.8% |
+| 2022    | exit 2022-04-11 -> reentry 2023-06-13 (428 days flat); downstream exit 2023-10-26, -4.7% | exit 2022-08-18 -> reentry 2022-12-01 (105 days flat); downstream exit 2022-12-06, -2.3% |
+
+Note that both the exit *and* re-entry dates differ from
+=reclaim-exit-price='s own for these episodes, not only the re-entry:
+changing re-entry timing cascades forward through the whole trade
+sequence, so a later episode's own exit can legitimately fall on a
+different date under a different variant — this is real, not a
+labeling artifact (see Method in the original issue's own framing).
+
+* What Changed After Review
+
+The first version of this PR reported =breakout-3= as clearly
+=PROMISING= — better CAGR, better Calmar, *fewer* whipsaws than
+baseline, no increase in max drawdown. Every one of those comparisons
+was computed against the buggy rule described above, which
+under-observed the below-SMA portion of each flat period and so
+systematically under-estimated the real breakout threshold. After the
+fix:
+
+- =breakout-2= and =breakout-3= now produce *identical* results in
+  this dataset — the N=2 vs. N=3 distinction the buggy version made
+  look meaningfully different turns out not to matter at all once the
+  window is computed correctly.
+- Max drawdown is now materially *higher* under both breakout variants
+  in both comparisons (walk-forward floor: 31.3% vs. 27.0% baseline,
+  +16% relative; continuous run: 4.53% vs. 3.33%, +36% relative), not
+  unchanged.
+- Calmar is now *lower* under both breakout variants in both
+  comparisons (walk-forward: 0.366 vs. 0.419, -13% relative;
+  continuous run: 0.257 vs. 0.338, -24% relative), not higher.
+- CAGR is still modestly higher for both breakout variants (walk-
+  forward: +0.12 points, ~1% relative; continuous run: +0.03 points,
+  ~3% relative) — a real but much smaller edge than first reported.
+
+PR #362's second rereview then raised two further methodology points,
+also addressed: the "matched ~100%-notional" claim was corrected to
+"approximately" (=AdverseDistance= drifts within each fold as price
+moves — an exact full-notional =Sizer= does not exist in Trader today,
+tracked as issue #364), and a buy-and-hold benchmark row was added
+directly to the primary comparison table (previously only in a
+separate secondary-diagnostic artifact) so the actual "how much
+buy-and-hold return do we retain" question the sizing switch was meant
+to answer is directly visible: baseline retains 82.5% of buy-and-hold's
+CAGR at a slightly *better* Calmar (0.419 vs. 0.408); both breakout
+candidates retain marginally more CAGR (83.3%) but at a *worse* Calmar
+than buy-and-hold (0.366).
+
+* Analysis
+
+Both candidates still materially shorten the two long-flat episodes
+#354's own diagnostic identified (2008: 1716 -> 377 days; 2022: 428 ->
+105 days), and whipsaw frequency is still modestly lower (12/37 ->
+11/48) despite substantially more completed episodes. That part of the
+original finding survives the fix.
+
+What does not survive is the risk-adjusted conclusion. A materially
+earlier re-entry buys back time in the market (exposure rises from
+~60-69% to ~74-83% across both comparisons) and a small amount of
+extra return, but it does so by accepting real additional drawdown —
+in the primary, approximately-100%-notional comparison, over four points of
+extra worst-fold drawdown for about one-tenth of a point of extra
+CAGR. That trade is not obviously favorable, and the fact that
+=breakout-2= and =breakout-3= are now indistinguishable removes the
+original hypothesis's own reason for preferring =breakout-3=
+specifically.
+
+* Conclusion
+
+*INCONCLUSIVE.*
+
+Rationale: both breakout candidates recover some of the surrendered
+rebound issue #354 identified and meaningfully shorten the two named
+long-flat episodes, but on the primary, matched-~100%-notional
+comparison they do so at a real cost to risk-adjusted return (Calmar
+-13%, worst-fold drawdown +16% relative) for a CAGR gain of roughly
+one-tenth of a percentage point. Neither candidate clears a bar for
+=PROMISING= (a genuine improvement, not a marginal return gain funded
+by materially more drawdown), and neither is unambiguously worse
+across every metric either — whipsaw frequency and time-in-market both
+still favor the breakout candidates, and the return figures are not
+*negative*. =breakout-2= and =breakout-3= being statistically
+identical in this dataset also means this run cannot recommend one
+over the other, undermining the original premise that N itself was
+worth comparing.
+
+Per issue #361's own guardrail, this is not a substitute for broader
+out-of-sample validation, and the corrected numbers above should be
+treated as the actual evidence going forward, not the first draft's
+own =PROMISING= claim (retracted). No further validation of these
+specific two candidates is recommended ahead of a different
+hypothesis — the underlying idea (confirm a real reversal before
+re-entering, rather than instantly reclaiming the exit level) may
+still be worth exploring with a different confirmation mechanism (for
+example a volatility- or percentage-based rebound threshold, as issue
+#354's own "Candidate follow-up rules" list already named), but a bare
+N-bar breakout at N=2/3 is not that mechanism on this evidence.
+
+* Full Data
+
+- Continuous-run comparison JSON (all metrics above plus full named-
+  episode/downstream detail):
+  =/srv/trading/backtests/equities/sma-long-hold/reentry/breakout-2-3/breakout-reentry-comparison.json=
+- Walk-forward comparison JSON (approximately ~100%-notional, now
+  including a buy-and-hold row):
+  =/srv/trading/backtests/equities/sma-long-hold/reentry/breakout-2-3/breakout-reentry-walkforward-comparison.json=
+- Episode charts (PNG, =chart= package) for all six exit/re-entry
+  episodes: =/srv/trading/backtests/equities/sma-long-hold/reentry/breakout-2-3/charts/episode-{2008,2022}-{reclaim-exit-price,breakout-2,breakout-3}.png=
+
+Not committed (private research output, matching every other
+=fullarchive= driver's own convention); regenerate locally via
+=go test -tags fullarchive ./marketdata/ -run TestSMATrendBreakoutReEntryComparison=
+and
+=go test -tags fullarchive ./marketdata/ -run TestSMATrendBreakoutReEntryWalkForwardComparison=
+after editing this file's own local output-directory and SPY CSV path
+constants.
+
+* Next Steps (Not This Issue)
+
+- Issue #363: fix the identical below-SMA-observation gap in the
+  existing =breakout= re-entry rule (issue #347), found as a byproduct
+  of this issue's own review but explicitly not fixed here.
+- Issue #364: design and implement an exact full-notional =Sizer=
+  (=risk.SizeInput= has no price field today, so "invest all available
+  equity at the actual entry price" cannot be expressed through the
+  existing =Sizer= contract) — once available, this research family
+  should switch its own "approximately ~100%-notional" comparisons to
+  the exact sizer and re-verify whether this conclusion changes.
+- A percentage- or volatility-based rebound confirmation (rather than
+  a bare N-bar price breakout) remains a plausible next hypothesis for
+  the same underlying question, per issue #354's own candidate list —
+  not attempted in this issue.

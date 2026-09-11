@@ -273,6 +273,14 @@ func (s *Strategy) onExit(exitBar marketdata.Bar) {
 // regime this strategy does not consider bullish yet. Only once price
 // is back above the SMA does reEntryRule get to decide how, within
 // that regime, to resume (issue #347).
+//
+// reEntryRule.ObserveFlatBar is called for every flat bar once
+// everExited is true, regardless of aboveSMA (PR #362 review) — after
+// this bar's own enter/no-enter decision has already been computed,
+// so a rule with continuous bar-by-bar state (for example
+// nBarBreakoutReEntryRule's own rolling window) stays chronologically
+// correct across a below-SMA stretch without that state ever
+// influencing this same bar's own already-decided outcome.
 func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedAbove, aboveSMA bool, close, smaValue float64) ([]order.Intent, error) {
 	var enter bool
 	switch {
@@ -282,6 +290,9 @@ func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedA
 		enter = s.reEntryRule.ShouldEnter(ReEntryContext{Bar: event.Bar, CrossedAboveSMA: crossedAbove})
 	default:
 		enter = crossedAbove
+	}
+	if s.everExited {
+		s.reEntryRule.ObserveFlatBar(event.Bar)
 	}
 	if !enter {
 		return nil, nil
