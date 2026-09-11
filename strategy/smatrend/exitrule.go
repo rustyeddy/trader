@@ -56,6 +56,47 @@ type ExitRule interface {
 	OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDecision, error)
 }
 
+// InitialStopProvider is an optional ExitRule capability (issue #368),
+// mirroring phaseReporter's own type-assertion pattern in strategy.go:
+// an ExitRule implements it only when its intended first protective
+// stop is computable *before* the entry fill, from information
+// available at the entry-decision bar. smaValue is that bar's own
+// current SMA value — the only signal Strategy already has in hand at
+// decision time — so a rule computes InitialStop from exactly the
+// same inputs it would otherwise wait one bar to use. Strategy uses
+// this to emit order.IntentEnterWithStop (ADR-059) instead of a plain
+// order.IntentEnter wherever it is available, closing the entry-fill-
+// bar protection gap for whichever ExitRule can offer one.
+//
+// trailingStopExitRule and smaCrossExitRule never implement this:
+// trailingStopExitRule's first stop is defined in terms of the entry/
+// fill bar's own High, not known before the fill; smaCrossExitRule
+// manages no resting stop at all. Only probationTrendExitRule
+// implements it today, since its probation stop is already, by
+// design, a pure function of the SMA value alone (Config.
+// InitialStopBelowSMA) — never the fill price.
+type InitialStopProvider interface {
+	InitialStop(smaValue float64) (num.Price, error)
+}
+
+// InitialStopSeeder is a second, separate optional ExitRule capability
+// (PR #369 review): an ExitRule that implements InitialStopProvider
+// may additionally implement this to receive the stop Strategy
+// actually placed via the resulting bracket entry, so it can seed its
+// own ratchet-floor state from that exact value instead of whatever
+// default OnEntry itself establishes — without widening OnEntry's own
+// required, exported signature. ExitRule is a public interface any
+// external/custom implementation may satisfy; adding a parameter to
+// OnEntry would have broken every one of them for a
+// probation-trend-only enhancement. Strategy calls SeedInitialStop
+// immediately after OnEntry, and only when Strategy actually used a
+// bracket entry for this position — never for a plain entry, and
+// never before OnEntry has already run its own (now-superseded)
+// default initialization.
+type InitialStopSeeder interface {
+	SeedInitialStop(stop num.Price)
+}
+
 // exitRuleRegistry maps a Config.ExitRuleName to its constructor. A
 // new ExitRule is a new small type plus one entry here — never a
 // change to Strategy's own control flow (issue #347).
@@ -154,19 +195,26 @@ func (smaCrossExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDec
 // high-water-mark formula would imply a lower stop than that, nothing
 // is emitted until it genuinely ratchets past it — see onProbationBar.
 //
-// Known limitation (PR #350 review): the entry fill bar itself is not
-// protected by this rule's own intended probation stop at all. That
-// stop is only computed and emitted as an AdjustStop intent on the
-// bar OnBar first observes the fresh Long position, but by then
-// backtest.Scheduler's own broker-side resting-order machinery has
-// already resolved that same bar's own intrabar price action (see
-// Strategy.OnBar's own doc comment) — the emitted stop only becomes a
-// checked resting order starting the *following* bar. Solving this
-// needs an execution/pipeline capability (an entry submitted
-// atomically with its own protective stop) this codebase does not
-// have yet; see regression_test.go's own
-// TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation for a
-// regression-locked proof against a real fixture.
+// Formerly known limitation (PR #350 review; closed by issue #368):
+// the entry fill bar itself used to be unprotected by this rule's own
+// intended probation stop, since that stop was only computed and
+// emitted as an AdjustStop intent on the bar OnBar first observed the
+// fresh Long position — one bar after backtest.Scheduler's own
+// broker-side resting-order machinery had already resolved that same
+// bar's own intrabar price action (see Strategy.OnBar's own doc
+// comment). This rule now implements InitialStopProvider: its initial
+// probation stop is computable from the SMA value at the entry
+// *decision* bar, before the fill, so Strategy emits
+// order.IntentEnterWithStop (ADR-059) instead of a plain
+// order.IntentEnter, and the stop is already resting by the time the
+// fill bar's own intrabar action is checked. trailingStopExitRule and
+// smaCrossExitRule still have the gap in principle (their first stop
+// genuinely depends on the fill/entry bar's own High, or manages no
+// resting stop at all), but neither is the playbook's own
+// probation/tight-stop-on-entry use case this issue exists for. See
+// regression_test.go's own
+// TestSMATrend_ProbationEntryBarBreachClosesSameBar for the
+// regression proving the fix.
 //
 // Phase reports this rule's own current lifecycle state; Strategy
 // mirrors it via Strategy.Phase (see phase.go) so it is directly
@@ -206,6 +254,30 @@ func (r *probationTrendExitRule) OnEntry(entryBar marketdata.Bar, entryPrice num
 	r.highWaterMark = &high
 	r.probationStop = nil
 	r.trendStop = nil
+}
+
+// InitialStop implements InitialStopProvider: the same probation-stop
+// formula onProbationBar uses, computed from smaValue alone so it is
+// knowable before the entry fill (issue #368) — never from the fill
+// bar's own High/Low/Close, which is not yet known when Strategy asks
+// for this value at the entry-decision bar.
+func (r *probationTrendExitRule) InitialStop(smaValue float64) (num.Price, error) {
+	stop, err := probationStopFromSMA(smaValue, r.belowSMA)
+	if err != nil {
+		return num.Price{}, fmt.Errorf("smatrend: computing initial probation stop: %w", err)
+	}
+	return stop, nil
+}
+
+// SeedInitialStop implements InitialStopSeeder (PR #369 review):
+// called by Strategy immediately after OnEntry, only when a bracket
+// entry was actually used, this overrides the nil OnEntry just
+// established with the stop Strategy actually placed — the floor
+// onProbationBar's own ratchet-only comparison
+// (stop.Cmp(*r.probationStop) > 0) must never emit a decision that
+// would loosen protection below.
+func (r *probationTrendExitRule) SeedInitialStop(stop num.Price) {
+	r.probationStop = &stop
 }
 
 func (r *probationTrendExitRule) OnLongBar(bar marketdata.Bar, smaValue float64) (ExitDecision, error) {
