@@ -43,6 +43,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/rustyeddy/trader/chart"
 	"github.com/rustyeddy/trader/id"
@@ -75,6 +76,7 @@ type variantResult struct {
 	MaxDrawdown            float64 `json:"max_drawdown"`
 	Calmar                 float64 `json:"calmar"`
 	TradeCount             int     `json:"trade_count"`
+	ReEntryCount           int     `json:"reentry_count"`
 	OpenAtEnd              bool    `json:"open_at_end"`
 	ExposurePct            float64 `json:"exposure_pct"` // fraction of the full span spent holding a position
 	WhipsawCount           int     `json:"whipsaw_count"`
@@ -103,6 +105,19 @@ type namedEpisodeOutcome struct {
 	FurtherDeclinePct       float64 `json:"further_decline_pct"`
 	ReboundBeforeReEntryPct float64 `json:"rebound_before_reentry_pct"`
 	Classification          string  `json:"classification"`
+
+	// Downstream* records what happened to the position opened at
+	// ReEntryDate — issue #361's own "record ... what happened
+	// afterward" (PR #362 review: an earlier version stopped at the
+	// re-entry itself and reported no downstream outcome at all).
+	// DownstreamStillOpenAtEnd is true when that position never
+	// closed before the run ended (the other three fields are then
+	// zero/empty); otherwise it records that position's own
+	// subsequent exit date/price and simple return.
+	DownstreamStillOpenAtEnd bool    `json:"downstream_still_open_at_end"`
+	DownstreamExitDate       string  `json:"downstream_exit_date,omitempty"`
+	DownstreamExitPrice      float64 `json:"downstream_exit_price,omitempty"`
+	DownstreamReturnPct      float64 `json:"downstream_return_pct,omitempty"`
 }
 
 func TestSMATrendBreakoutReEntryComparison(t *testing.T) {
@@ -203,13 +218,28 @@ func TestSMATrendBreakoutReEntryComparison(t *testing.T) {
 			}
 		}
 
+		// TradeCount is closed trades only (resp.Trades), matching
+		// backtest.Metrics' own TradeCount population (PR #362 review:
+		// an earlier version used len(all), which included the
+		// still-open position at run end and was therefore one too
+		// high whenever the run ends with an open trade — as this one
+		// always does). ReEntryCount is separate and explicit rather
+		// than inferred from TradeCount: the number of entries in the
+		// ordered timeline after the very first one (which is an
+		// initial entry, not a re-entry) — issue #361 asks for this
+		// count directly.
+		reEntryCount := 0
+		if len(all) > 0 {
+			reEntryCount = len(all) - 1
+		}
 		result := variantResult{
 			Variant:                variant,
 			NetReturn:              netReturn,
 			CAGR:                   cagr,
 			MaxDrawdown:            maxDD,
 			Calmar:                 calmarRatio(cagr, maxDD),
-			TradeCount:             len(all),
+			TradeCount:             len(resp.Trades),
+			ReEntryCount:           reEntryCount,
 			OpenAtEnd:              len(resp.OpenTrades) > 0,
 			ExposurePct:            exposureDays / spanDays,
 			WhipsawCount:           whipsawCount,
@@ -218,8 +248,8 @@ func TestSMATrendBreakoutReEntryComparison(t *testing.T) {
 			Episode2022:            episode2022,
 		}
 		results = append(results, result)
-		t.Logf("variant=%s return=%.4f cagr=%.4f maxDD=%.4f calmar=%.4f trades=%d exposure=%.4f whipsaws=%d/%d",
-			variant, netReturn, cagr, maxDD, result.Calmar, result.TradeCount, result.ExposurePct, whipsawCount, whipsawCount+goodCount)
+		t.Logf("variant=%s return=%.4f cagr=%.4f maxDD=%.4f calmar=%.4f trades=%d reentries=%d exposure=%.4f whipsaws=%d/%d",
+			variant, netReturn, cagr, maxDD, result.Calmar, result.TradeCount, result.ReEntryCount, result.ExposurePct, whipsawCount, whipsawCount+goodCount)
 
 		renderNamedEpisodeChart(t, chartsDir, bars, variant, "2008", episode2008)
 		renderNamedEpisodeChart(t, chartsDir, bars, variant, "2022", episode2022)
@@ -280,7 +310,7 @@ func classifyEpisode(t *testing.T, bars []marketdata.Bar, tr, next order.Trade, 
 		classification = "whipsaw"
 	}
 
-	return &namedEpisodeOutcome{
+	outcome := &namedEpisodeOutcome{
 		ExitDate:                tr.ClosedAt.Format("2006-01-02"),
 		ExitPrice:               exitPriceF,
 		ReEntryDate:             next.OpenedAt.Format("2006-01-02"),
@@ -289,7 +319,25 @@ func classifyEpisode(t *testing.T, bars []marketdata.Bar, tr, next order.Trade, 
 		FurtherDeclinePct:       furtherDeclinePct,
 		ReboundBeforeReEntryPct: reboundPct,
 		Classification:          classification,
-	}, nil
+	}
+
+	// Downstream outcome: what happened to the position opened at
+	// ReEntryDate (issue #361's own "record ... what happened
+	// afterward", PR #362 review).
+	if next.ClosedAt.IsZero() {
+		outcome.DownstreamStillOpenAtEnd = true
+	} else {
+		downstreamExitPrice, _, err := weightedFillPrice(t, next.ExitFillIDs, fills)
+		if err != nil {
+			return nil, fmt.Errorf("reconstructing downstream exit price: %w", err)
+		}
+		downstreamExitPriceF := downstreamExitPrice.Float64()
+		outcome.DownstreamExitDate = next.ClosedAt.Format("2006-01-02")
+		outcome.DownstreamExitPrice = downstreamExitPriceF
+		outcome.DownstreamReturnPct = (downstreamExitPriceF - reentryPriceF) / reentryPriceF
+	}
+
+	return outcome, nil
 }
 
 // renderNamedEpisodeChart renders one chart.RenderEpisode PNG for
@@ -335,4 +383,199 @@ func renderNamedEpisodeChart(t *testing.T, dir string, bars []marketdata.Bar, va
 		t.Fatalf("close %s: %v", path, err)
 	}
 	t.Logf("wrote %s", path)
+}
+
+// walkForwardVariantResult is one re-entry variant's own matched-
+// ~100%-notional walk-forward result (PR #362 review): Rusty's own
+// review correctly pointed out that TestSMATrendBreakoutReEntryComparison's
+// 1%-risk/fixed-$20-adverse-distance sizing answers "how does this
+// signal behave inside a risk-managed swing account," not the actual
+// strategic question issue #361 is meant to answer — "if this timing
+// rule replaces buy-and-hold as the equity allocation policy, how much
+// long-term return do we retain for the drawdown reduction." This
+// type's own fields are therefore the primary quantitative comparison
+// this file reports; TestSMATrendBreakoutReEntryComparison's own
+// 1%-risk run remains a secondary diagnostic (useful for the named-
+// episode/whipsaw analysis, which is sizing-independent) and its
+// absolute CAGR/return must not be read as a portfolio-allocation
+// answer.
+type walkForwardVariantResult struct {
+	Variant       string  `json:"variant"`
+	ChainedReturn float64 `json:"chained_return"`
+	CAGR          float64 `json:"cagr"`
+	// MaxDrawdownFloor is the worst single fold's own true,
+	// continuous mark-to-market drawdown (maxDrawdownSince, computed
+	// within one unbroken backtest run per fold) — a floor on the
+	// real whole-span drawdown, not a true continuous figure across
+	// fold boundaries, the same documented limitation
+	// eqs01WFFoldResult.TestMaxDrawdown and
+	// smatrendSimpleBacktestResult.MaxDrawdownIsPerPeriodFloor already
+	// carry for this identical reason.
+	MaxDrawdownFloor float64 `json:"max_drawdown_floor"`
+	Calmar           float64 `json:"calmar"`
+	OOSTradeCount    int     `json:"oos_trade_count"`
+	OOSReEntryCount  int     `json:"oos_reentry_count"`
+	ExposurePct      float64 `json:"exposure_pct"`
+	Folds            int     `json:"folds"`
+}
+
+// TestSMATrendBreakoutReEntryWalkForwardComparison runs issue #361's
+// own baseline/breakout-2/breakout-3 comparison a second way, at
+// matched ~100%-of-equity notional sizing via the identical walk-
+// forward protocol (5-year train, 1-year test, 1-year step,
+// AdverseDistance re-anchored from each fold's own train-start price)
+// smatrend_probation_walkforward_fullarchive_test.go's own baseline
+// already established — issue #361's own Research Protocol section
+// asks for "the same sizing and walk-forward/backtest protocol used
+// by the current reference baseline where practical," and PR #362's
+// review specifically asked for a matched-notional comparison as the
+// primary one.
+func TestSMATrendBreakoutReEntryWalkForwardComparison(t *testing.T) {
+	if fullArchiveBreakoutReEntryOutputDir == "" {
+		t.Skip("fullArchiveBreakoutReEntryOutputDir is empty; edit the constant in this file to point at a local results directory to run this test")
+	}
+	if fullArchiveEQS01SPYCSVPath == "" {
+		t.Skip("fullArchiveEQS01SPYCSVPath is empty; edit the constant in eqs01_walkforward_fullarchive_test.go to point at a local Stooq SPY export to run this test")
+	}
+	if err := os.MkdirAll(fullArchiveBreakoutReEntryOutputDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", fullArchiveBreakoutReEntryOutputDir, err)
+	}
+
+	ctx := context.Background()
+	inst := eqs01WFInstrument{Symbol: "SPY", CSVPath: fullArchiveEQS01SPYCSVPath, Exchange: "ARCA"}
+	setup := setupEQS01WalkForwardInstrument(t, ctx, inst)
+
+	startingCapital := num.MustParseMoney(eqs01WFStartingCapital, num.MustParseCurrency("USD"))
+	fullNotional := num.MustParseRate("1")
+
+	var results []walkForwardVariantResult
+	for _, variant := range breakoutReEntryVariants {
+		cfg := smatrend.Config{
+			SMAPeriod:           200,
+			ExitRuleName:        "probation-trend",
+			ReEntryRuleName:     variant,
+			InitialStopBelowSMA: num.MustParseRate("0.01"),
+			TrailActivationGain: num.MustParseRate("0.05"),
+			TrailingStopPercent: num.MustParseRate("0.10"),
+		}
+
+		chainedReturn := 1.0
+		worstFoldMaxDD := 0.0
+		oosTradeCount, oosReEntryCount := 0, 0
+		exposureDays, totalOOSDays := 0.0, 0.0
+		folds := 0
+
+		numFolds := (len(setup.bars) - eqs01WFTrainBars) / eqs01WFStepBars
+		for i := 0; i < numFolds; i++ {
+			trainStartIdx := i * eqs01WFStepBars
+			testStartIdx := trainStartIdx + eqs01WFTrainBars
+			testEndIdxExclusive := testStartIdx + eqs01WFTestBars
+			if testEndIdxExclusive > len(setup.bars) {
+				break
+			}
+
+			trainStart := setup.bars[trainStartIdx].Time
+			testStart := setup.bars[testStartIdx].Time
+			var testEndExclusive time.Time
+			if testEndIdxExclusive < len(setup.bars) {
+				testEndExclusive = setup.bars[testEndIdxExclusive].Time
+			} else {
+				testEndExclusive = setup.bars[len(setup.bars)-1].Time.AddDate(0, 0, 1)
+			}
+
+			combinedSpan, err := marketdata.NewTimeRange(trainStart, testEndExclusive)
+			if err != nil {
+				t.Fatalf("variant=%s fold %d: combined span: %v", variant, i, err)
+			}
+			adverseDistance, err := setup.bars[trainStartIdx].Open.MulRate(fullNotional)
+			if err != nil {
+				t.Fatalf("variant=%s fold %d: adverse distance: %v", variant, i, err)
+			}
+
+			resp, err := runEQS01WFBacktest(ctx, setup.mgr, setup.simResolver, setup.simID, combinedSpan, cfg, startingCapital, fullNotional, adverseDistance, setup.priceByTime)
+			if err != nil {
+				t.Fatalf("variant=%s fold %d [%s, %s): backtest run: %v", variant, i, testStart.Format("2006-01-02"), testEndExclusive.Format("2006-01-02"), err)
+			}
+
+			baselineEquity, ok1 := equityCurveAt(resp.EquityCurve, testStart)
+			finalTime := setup.bars[testEndIdxExclusive-1].Time
+			finalEquity, ok2 := equityCurveAt(resp.EquityCurve, finalTime)
+			if !ok1 || !ok2 {
+				t.Fatalf("variant=%s fold %d: could not locate equity-curve points at fold boundaries", variant, i)
+			}
+			testReturn := finalEquity/baselineEquity - 1
+			chainedReturn *= 1 + testReturn
+			testMaxDD := maxDrawdownSince(resp.EquityCurve, testStart)
+			if testMaxDD > worstFoldMaxDD {
+				worstFoldMaxDD = testMaxDD
+			}
+			folds++
+
+			all := make([]order.Trade, 0, len(resp.Trades)+len(resp.OpenTrades))
+			all = append(all, resp.Trades...)
+			all = append(all, resp.OpenTrades...)
+			for _, tr := range all {
+				end := tr.ClosedAt
+				if end.IsZero() {
+					end = testEndExclusive
+				}
+				// Overlap with [testStart, testEndExclusive), not the
+				// whole combined train+test span — a position opened
+				// during training and merely carried open across
+				// testStart still counts toward this fold's own OOS
+				// trade/exposure accounting (mirroring foldTradeRows'
+				// own identical overlap predicate, PR #357 review), but
+				// is not counted as a fresh OOS re-entry.
+				if !tr.OpenedAt.Before(testEndExclusive) || end.Before(testStart) {
+					continue
+				}
+				oosTradeCount++
+				if !tr.OpenedAt.Before(testStart) {
+					oosReEntryCount++
+				}
+				overlapStart, overlapEnd := tr.OpenedAt, end
+				if overlapStart.Before(testStart) {
+					overlapStart = testStart
+				}
+				if overlapEnd.After(testEndExclusive) {
+					overlapEnd = testEndExclusive
+				}
+				exposureDays += overlapEnd.Sub(overlapStart).Hours() / 24
+			}
+			totalOOSDays += testEndExclusive.Sub(testStart).Hours() / 24
+		}
+
+		netReturn := chainedReturn - 1
+		years := setup.bars[len(setup.bars)-1].Time.Sub(setup.bars[0].Time).Hours() / 24 / 365.25
+		// years here is the full dataset span for logging context only;
+		// CAGR below uses the actual OOS-tested span length.
+		oosYears := totalOOSDays / 365.25
+		cagr := cagrFromReturn(netReturn, oosYears)
+
+		result := walkForwardVariantResult{
+			Variant:          variant,
+			ChainedReturn:    netReturn,
+			CAGR:             cagr,
+			MaxDrawdownFloor: worstFoldMaxDD,
+			Calmar:           calmarRatio(cagr, worstFoldMaxDD),
+			OOSTradeCount:    oosTradeCount,
+			OOSReEntryCount:  oosReEntryCount,
+			ExposurePct:      exposureDays / totalOOSDays,
+			Folds:            folds,
+		}
+		results = append(results, result)
+		t.Logf("[walk-forward, full notional] variant=%s return=%.4f cagr=%.4f maxDDFloor=%.4f calmar=%.4f oosTrades=%d oosReEntries=%d exposure=%.4f folds=%d (dataset span %.1fy)",
+			variant, netReturn, cagr, worstFoldMaxDD, result.Calmar, oosTradeCount, oosReEntryCount, result.ExposurePct, folds, years)
+	}
+
+	out, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal walk-forward results: %v", err)
+	}
+	outPath := filepath.Join(fullArchiveBreakoutReEntryOutputDir, "breakout-reentry-walkforward-comparison.json")
+	if err := os.WriteFile(outPath, out, 0o644); err != nil {
+		t.Fatalf("write %s: %v", outPath, err)
+	}
+	t.Logf("wrote %s", outPath)
+	fmt.Println(string(out))
 }

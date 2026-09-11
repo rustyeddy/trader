@@ -666,6 +666,59 @@ func TestStrategy_ReEntryGatedByAboveSMAEvenForNonDefaultRule(t *testing.T) {
 	assert.Equal(t, order.IntentEnter, intents[0].Kind, "a fresh cross above the SMA must still re-enter regardless of the configured ReEntryRule")
 }
 
+// TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes
+// is the integration/regression test PR #362's review asked for: it
+// exercises the real Strategy.onFlat wiring across several below-SMA
+// flat bars before re-entry eligibility returns, and proves
+// breakout-2's own rolling window actually reflects those bars — not
+// only the bars ShouldEnter happened to be consulted on. An earlier
+// revision of nBarBreakoutReEntryRule updated its window only from
+// inside ShouldEnter, which Strategy.onFlat never calls while the
+// central SMA gate is false; that bug would have made this test's own
+// first assertion fail (a below-SMA spike bar's own High would have
+// been silently forgotten, letting bar10's lower Close incorrectly
+// enter against a stale, much smaller remembered high).
+func TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes(t *testing.T) {
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ReEntryRuleName: "breakout-2"})
+	h.onBar(6, bar{open: 103, high: 110, low: 102, close: 105}) // ratchets stop
+	h.triggerStop()
+
+	// Bar7: exit-observation bar, below its own SMA (99.0) — default
+	// branch, ShouldEnter not called, but ObserveFlatBar must still
+	// fire (window becomes [91]).
+	intents, _ := h.onBar(7, bar{open: 90, high: 91, low: 89, close: 90})
+	assert.Empty(t, intents)
+
+	// Bar8: still below SMA (93.33) — a large spike High (130) while
+	// the central gate blocks ShouldEnter entirely. If this bar were
+	// never observed (the bug), breakout-2's window would remain
+	// stuck at bar7's own modest 91 high indefinitely.
+	intents, _ = h.onBar(8, bar{open: 85, high: 130, low: 84, close: 85})
+	assert.Empty(t, intents)
+
+	// Bar9: still below SMA (85.0) — window slides to [130, 82]
+	// (bar7's 91 evicted; the lookback is 2).
+	intents, _ = h.onBar(9, bar{open: 80, high: 82, low: 79, close: 80})
+	assert.Empty(t, intents)
+
+	// Bar10: finally above its own SMA (86.67), so ShouldEnter is
+	// consulted for the first time since the exit. Close (95) is well
+	// above bar7's own 91 high (what a rule that forgot bar8/bar9
+	// would still be comparing against) but below the window's real
+	// current highest (130, from bar8's own below-SMA spike) — this
+	// must NOT enter, proving bar8's High really is part of the
+	// window bar10 is evaluated against.
+	intents, _ = h.onBar(10, bar{open: 94, high: 96, low: 93, close: 95})
+	assert.Empty(t, intents, "95 must not break out above the window's real highest (130, from the below-SMA bar8 spike)")
+
+	// Bar11: window has now slid to [82, 96] (bar8's 130 evicted); a
+	// close of 135 clears that and enters — confirming the rule is
+	// not permanently stuck, only correctly stricter at bar10.
+	intents, _ = h.onBar(11, bar{open: 100, high: 136, low: 99, close: 135})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind)
+}
+
 // ambiguousExitRule is a test double proving Strategy.onLong rejects
 // an ExitRule that returns both ExitNow and NewStop set on the same
 // decision (PR #348 review): ExitDecision's own doc comment requires
