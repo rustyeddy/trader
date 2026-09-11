@@ -44,6 +44,40 @@ func TestNewIntentValidAdjustStop(t *testing.T) {
 	assert.True(t, got.StopPrice.Equal(*price(t, "1.05000")))
 }
 
+func TestNewIntentValidEnterWithStop(t *testing.T) {
+	in := baseIntent(t, IntentEnterWithStop)
+	in.Side = Sell
+	in.StopPrice = price(t, "1.10065")
+	got, err := NewIntent(in)
+	require.NoError(t, err)
+	assert.Equal(t, Sell, got.Side)
+	require.NotNil(t, got.StopPrice)
+	assert.True(t, got.StopPrice.Equal(*price(t, "1.10065")))
+}
+
+func TestNewIntentEnterWithStopRequiresSide(t *testing.T) {
+	in := baseIntent(t, IntentEnterWithStop)
+	in.StopPrice = price(t, "1.10065")
+	_, err := NewIntent(in)
+	require.ErrorIs(t, err, ErrInvalidIntent)
+}
+
+func TestNewIntentEnterWithStopRequiresStopPrice(t *testing.T) {
+	in := baseIntent(t, IntentEnterWithStop)
+	in.Side = Sell
+	_, err := NewIntent(in)
+	require.ErrorIs(t, err, ErrInvalidIntent)
+}
+
+func TestNewIntentEnterWithStopRejectsQuantity(t *testing.T) {
+	in := baseIntent(t, IntentEnterWithStop)
+	in.Side = Sell
+	in.StopPrice = price(t, "1.10065")
+	in.Quantity = qty(t, "100")
+	_, err := NewIntent(in)
+	require.ErrorIs(t, err, ErrInvalidIntent)
+}
+
 func TestNewIntentValidTargetExposure(t *testing.T) {
 	in := baseIntent(t, IntentTargetExposure)
 	in.Side = Sell

@@ -82,6 +82,7 @@ func TestParseIntentKindEveryValue(t *testing.T) {
 	cases := map[string]order.IntentKind{
 		"enter": order.IntentEnter, "exit": order.IntentExit,
 		"adjust_stop": order.IntentAdjustStop, "target_exposure": order.IntentTargetExposure,
+		"enter_with_stop": order.IntentEnterWithStop,
 	}
 	for s, want := range cases {
 		got, err := parseIntentKind(s)

@@ -22,6 +22,19 @@ import (
 // domain validation another layer already owns).
 var ErrInvalidRequest = errors.New("service/execution: invalid request")
 
+// ErrBracketNotSupported reports that req.Intent.Kind is
+// order.IntentEnterWithStop (issue #351, ADR-059). SubmitResponse has
+// no field carrying pipeline.Result.Bracket — silently discarding a
+// successful bracket outcome would be worse than rejecting it
+// outright (PR #367 review) — and ADR-059's own atomicity guarantee is
+// explicitly backtest-only (it works only against a broker that fills
+// a Market order synchronously inside Submit, today only
+// adapters/broker/sim), which this service layer cannot assume for
+// whatever broker its own caller configured. backtest.Scheduler is
+// the one caller that submits this intent kind today, and it talks to
+// *pipeline.Pipeline directly, never through this service.
+var ErrBracketNotSupported = errors.New("service/execution: order.IntentEnterWithStop is not yet supported through this service (issue #366)")
+
 // SubmitRequest is the request for the Submit use case: carry req.Intent
 // through the full canonical M4 path against req.AccountID's current,
 // freshly-fetched account state.
@@ -58,6 +71,9 @@ type SubmitRequest struct {
 func (r SubmitRequest) Validate() error {
 	if r.AccountID.IsZero() {
 		return fmt.Errorf("%w: account id is zero", ErrInvalidRequest)
+	}
+	if r.Intent.Kind == order.IntentEnterWithStop {
+		return ErrBracketNotSupported
 	}
 	return nil
 }

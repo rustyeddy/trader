@@ -71,6 +71,27 @@ func TestIntentFactory_AdjustStop(t *testing.T) {
 	assert.True(t, in.StopPrice.Equal(stop))
 }
 
+func TestIntentFactory_EnterWithStop(t *testing.T) {
+	f, _ := testFactory(t)
+	instID := testInstrumentID(t)
+	stop := num.MustParsePrice("1.10065")
+
+	in, err := f.EnterWithStop(instID, order.Sell, stop)
+	require.NoError(t, err)
+	assert.Equal(t, order.IntentEnterWithStop, in.Kind)
+	assert.Equal(t, instID, in.Instrument)
+	assert.Equal(t, order.Sell, in.Side)
+	assert.Nil(t, in.Quantity)
+	require.NotNil(t, in.StopPrice)
+	assert.True(t, in.StopPrice.Equal(stop))
+	assert.False(t, in.IntentID.IsZero())
+	assert.False(t, in.Metadata.EventID.IsZero())
+	assert.False(t, in.Metadata.CorrelationID.IsZero())
+	assert.True(t, in.Metadata.CausationID.IsZero(), "an Intent is the first stage of its own workflow")
+	assert.Equal(t, testStart, in.Metadata.Timestamp)
+	assert.Equal(t, id.Source("strategy.test"), in.Metadata.Source)
+}
+
 func TestIntentFactory_TargetExposure(t *testing.T) {
 	f, _ := testFactory(t)
 	instID := testInstrumentID(t)

@@ -37,7 +37,11 @@ type Input struct {
 	// RiskFraction is the fraction of Account.Equity() Sizer may risk
 	// when sizing an unsized order.IntentEnter (risk.SizeInput.
 	// RiskFraction). Required, and must be positive, exactly when
-	// Intent.Kind is order.IntentEnter; ignored otherwise.
+	// Intent.Kind is order.IntentEnter; ignored otherwise. Also
+	// required for order.IntentEnterWithStop (issue #351, ADR-059):
+	// submitBracket forwards it unchanged to the synthesized
+	// order.IntentEnter sub-intent it submits for the entry leg, which
+	// has this identical requirement.
 	RiskFraction num.Rate
 
 	// AdverseDistance is the adverse price-distance assumption this
@@ -47,7 +51,9 @@ type Input struct {
 	// one (for example PerTradeLossRule, #182). Required, and must be
 	// positive, exactly when Intent.Kind is order.IntentEnter; optional
 	// otherwise — a Rule that needs it regardless of Kind and finds it
-	// nil returns its own classifiable ErrInsufficientRuleInput.
+	// nil returns its own classifiable ErrInsufficientRuleInput. Also
+	// required for order.IntentEnterWithStop, for the identical reason
+	// RiskFraction is (see its own doc comment).
 	AdverseDistance *num.Price
 
 	// ReferencePrice is the valuation price threaded into
@@ -98,18 +104,27 @@ type Result struct {
 }
 
 // BracketOutcome carries an order.IntentEnterWithStop's own two-leg
-// result (issue #351, ADR-059): Entry is always populated once
-// submitBracket runs. Stop is populated only once Entry's own Order
-// reports order.StatusFilled — a rejected or asynchronously-accepted
-// entry leaves Stop at its zero value, and the accompanying error
-// (ErrRejected, or ErrBracketEntryNotSynchronouslyFilled) explains
-// why. Each field is a full, ordinary Result — the identical shape
-// Submit returns for any non-bracket intent — so the same journaling
-// and inspection code a caller already has for a plain
-// IntentEnter/IntentAdjustStop applies to each leg unchanged.
+// result (issue #351, ADR-059): EntryIntent/Entry are always populated
+// once submitBracket runs. StopIntent/Stop are populated only once
+// Entry's own Order reports order.StatusFilled — a rejected or
+// asynchronously-accepted entry leaves both at their zero value, and
+// the accompanying error (ErrRejected, or
+// ErrBracketEntryNotSynchronouslyFilled) explains why. Each Result is
+// a full, ordinary Result — the identical shape Submit returns for
+// any non-bracket intent — so the same journaling and inspection code
+// a caller already has for a plain IntentEnter/IntentAdjustStop
+// applies to each leg unchanged. EntryIntent/StopIntent are the exact
+// order.Intent values submitBracket built and submitted for each leg
+// (PR #367 review): a caller journaling this outcome needs them to
+// record the real bracket -> sub-intent -> proposal causal chain
+// ADR-059 documents — without them, each leg's own Proposal.Metadata.
+// CausationID points at an event the caller has no other way to
+// discover, let alone journal.
 type BracketOutcome struct {
-	Entry Result
-	Stop  Result
+	EntryIntent order.Intent
+	Entry       Result
+	StopIntent  order.Intent
+	Stop        Result
 }
 
 // ReplaceOutcome carries a replacement's own request/result pair,
@@ -397,7 +412,7 @@ func (p *Pipeline) submitBracket(ctx context.Context, in Input) (Result, error) 
 		AdverseDistance: in.AdverseDistance,
 		ReferencePrice:  in.ReferencePrice,
 	})
-	bracket := &BracketOutcome{Entry: entryResult}
+	bracket := &BracketOutcome{EntryIntent: entryIntent, Entry: entryResult}
 	if err != nil {
 		return Result{Bracket: bracket}, err
 	}
@@ -432,6 +447,7 @@ func (p *Pipeline) submitBracket(ctx context.Context, in Input) (Result, error) 
 		AdverseDistance: in.AdverseDistance,
 		ReferencePrice:  in.ReferencePrice,
 	})
+	bracket.StopIntent = stopIntent
 	bracket.Stop = stopResult
 	return Result{Bracket: bracket}, err
 }

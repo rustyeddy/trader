@@ -131,16 +131,16 @@ type Intent struct {
 	// concerns.
 	Instrument instrument.ID
 
-	// Side is required for IntentEnter and IntentTargetExposure, and
-	// must be the zero value otherwise.
+	// Side is required for IntentEnter, IntentTargetExposure, and
+	// IntentEnterWithStop, and must be the zero value otherwise.
 	Side Side
 
 	// Quantity is required (and must be positive) for
 	// IntentTargetExposure, and must be nil otherwise.
 	Quantity *num.Quantity
 
-	// StopPrice is required for IntentAdjustStop, and must be nil
-	// otherwise.
+	// StopPrice is required for IntentAdjustStop and
+	// IntentEnterWithStop, and must be nil otherwise.
 	StopPrice *num.Price
 
 	// Metadata carries this intent's correlation and causation

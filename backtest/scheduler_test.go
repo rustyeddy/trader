@@ -1485,3 +1485,136 @@ func TestScheduler_BracketEntryProtectsFromTheFillBarItself(t *testing.T) {
 	assert.Equal(t, "2024-01-08T01:00:00Z", fills[1].Timestamp.Format(time.RFC3339),
 		"the closing fill must land on bar 2 (01:00) itself, the same bar the entry filled on — proving the stop was already resting before that bar's own IntrabarAdvancer check, not one bar later (02:00, as the equivalent two-step strategy needs — see TestScheduler_IntrabarAdvancerTriggersRestingStop)")
 }
+
+// TestScheduler_BracketEntryRejectedDoesNotAbortRun is the harmless
+// half of PR #367 review's blocker 2: when the *entry* leg itself is
+// rejected, nothing was ever opened — the identical harmless case an
+// ordinary IntentEnter rejection already is (TestScheduler_
+// RiskRejectionDoesNotAbortRun) — so Run must not abort.
+func TestScheduler_BracketEntryRejectedDoesNotAbortRun(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	planner, err := execution.NewPlanner(execution.Deps{Clock: h.clockObj, IDs: h.ids})
+	require.NoError(t, err)
+	engine, err := risk.NewEngine(alwaysRejectRule{})
+	require.NoError(t, err)
+	pl, err := pipeline.NewPipeline(pipeline.Deps{
+		Sizer:   risk.NewFixedFractionSizer(),
+		Planner: planner,
+		Engine:  engine,
+		Broker:  h.broker,
+		IDs:     h.ids,
+	})
+	require.NoError(t, err)
+
+	strat := &bracketEntryStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), side: order.Sell, stopPrice: "1.10065"}
+	deps := newSchedulerDeps(t, replay, strat, h)
+	deps.Pipeline = pl
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()), "an entry-leg rejection must not abort Run")
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "the entry leg was rejected; nothing should have opened")
+	assert.Empty(t, snap.OpenOrders())
+}
+
+// stopRejectingRule rejects only Stop-type proposals, letting a
+// Market entry through — used to prove a bracket's own entry can
+// genuinely fill while its stop leg is separately, independently
+// risk-evaluated and can be rejected on its own merits (mirrors
+// pipeline/bracket_test.go's identical rule).
+type stopRejectingRule struct{}
+
+func (stopRejectingRule) Name() string { return "reject_stops" }
+func (stopRejectingRule) Evaluate(ctx context.Context, in risk.Input) (risk.RuleResult, error) {
+	if in.Proposal.Type == order.Stop {
+		return risk.RuleResult{Violations: []risk.Violation{{Message: "test: stop orders always rejected"}}}, nil
+	}
+	return risk.RuleResult{}, nil
+}
+
+// TestScheduler_BracketStopLegRejectedAbortsRunAfterJournalingEntryFill
+// is PR #367 review's own three central findings, proven together
+// against a real Scheduler.Run:
+//
+//  1. (blocker 1) the entry leg's own real fill is journaled/drained
+//     even though the overall bracket submission ultimately errors —
+//     the journal/fill stream never silently falls behind real broker
+//     state.
+//  2. (blocker 2) once the entry has filled, a stop-leg rejection is a
+//     hard, Run-aborting error, never swallowed like an ordinary
+//     rejection — an unprotected open position must never pass
+//     silently.
+//  3. (blocker 3) both legs' own synthesized sub-intents
+//     (order.IntentEnter, order.IntentAdjustStop) are journaled as
+//     real KindIntent records in their own right, not only the outer
+//     order.IntentEnterWithStop — the bracket -> sub-intent -> proposal
+//     causal chain ADR-059 documents is actually present in the
+//     journal.
+func TestScheduler_BracketStopLegRejectedAbortsRunAfterJournalingEntryFill(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	planner, err := execution.NewPlanner(execution.Deps{Clock: h.clockObj, IDs: h.ids})
+	require.NoError(t, err)
+	engine, err := risk.NewEngine(stopRejectingRule{})
+	require.NoError(t, err)
+	pl, err := pipeline.NewPipeline(pipeline.Deps{
+		Sizer:   risk.NewFixedFractionSizer(),
+		Planner: planner,
+		Engine:  engine,
+		Broker:  h.broker,
+		IDs:     h.ids,
+	})
+	require.NoError(t, err)
+
+	strat := &bracketEntryStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), side: order.Sell, stopPrice: "1.10065"}
+	rec := &capturingRecorder{}
+	deps := newSchedulerDeps(t, replay, strat, h)
+	deps.Pipeline = pl
+	deps.Journal = rec
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	err = sched.Run(context.Background())
+	require.Error(t, err, "the run must abort loudly once the entry filled but the stop leg was rejected")
+	assert.Contains(t, err.Error(), "unprotected open position")
+
+	// Blocker 1: the entry leg's own real fill must still have been
+	// journaled/drained, not silently lost because the run ultimately
+	// errored.
+	fills := sched.Fills()
+	require.Len(t, fills, 1, "the entry leg's own real fill must have been drained despite the run aborting")
+	assert.Equal(t, order.Sell, fills[0].Side)
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1, "the entry fill is real, unrolled-back broker state")
+	assert.Empty(t, snap.OpenOrders(), "the stop leg was rejected: no resting stop protects this position")
+
+	// Blocker 3: both sub-intents must be journaled as their own
+	// KindIntent records, not only the outer bracket intent.
+	records := rec.all()
+	intentKinds := map[order.IntentKind]int{}
+	var foundRejectedStopDecision bool
+	for _, r := range records {
+		if r.Kind == journal.KindIntent && r.Intent != nil {
+			intentKinds[r.Intent.Kind]++
+		}
+		if r.Kind == journal.KindDecision && r.Decision != nil && !r.Decision.Allowed {
+			foundRejectedStopDecision = true
+		}
+	}
+	assert.Equal(t, 1, intentKinds[order.IntentEnterWithStop], "the outer bracket intent")
+	assert.Equal(t, 1, intentKinds[order.IntentEnter], "the entry leg's own sub-intent")
+	assert.Equal(t, 1, intentKinds[order.IntentAdjustStop], "the stop leg's own sub-intent")
+	assert.True(t, foundRejectedStopDecision, "the stop leg's own risk rejection must be journaled")
+}

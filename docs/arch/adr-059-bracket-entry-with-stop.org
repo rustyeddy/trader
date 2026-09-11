@@ -138,17 +138,42 @@ not knowable without an actual broker call, breaking Evaluate's own
 full =Result= — so the identical journaling/inspection code a caller
 already has for a plain intent applies to each leg unchanged.
 
-** =backtest.Scheduler= journals each leg as an ordinary sub-intent
+** =backtest.Scheduler= journals each leg as an ordinary sub-intent, and aborts the run if a filled entry's stop leg fails
 
 =Scheduler.submit='s own generic Proposal/Decision/Request journaling
-sequence assumes one flat =Result=; a new =journalBracketLeg= helper
-applies that identical sequence to each of =Result.Bracket.Entry= and
-=Result.Bracket.Stop= in turn (skipping =Stop= cleanly when it was
-never attempted), then calls =drainAndJournal= once at the end — always,
-regardless of either leg's own outcome, since =drainAndJournal= is
-already its own incremental, watermark-based no-op (ADR-036) and the
-entry leg alone can have produced a real fill even when the stop leg
-was separately risk-rejected.
+sequence (extracted as =journalPipelineResult=, shared with the plain,
+non-bracket path so a leg that resolves to a =Replace= is journaled
+correctly too — the same gap ADR-054 already solved once for the
+top-level path) assumes one flat =Result=. A new =journalBracketLeg=
+helper first journals the leg's own =order.Intent= itself as a
+=journal.KindIntent= record — =BracketOutcome= carries both sub-intent
+values (=EntryIntent=, =StopIntent=) specifically so this is possible —
+then delegates to =journalPipelineResult= for that leg's
+Proposal/Decision/Request. Without journaling the sub-intents
+themselves, each leg's own =Proposal.Metadata.CausationID= would point
+at an =EventID= absent from the journal entirely, breaking the
+causal chain a reader is expected to be able to walk (PR #367 review).
+
+=Scheduler.submitBracketOutcome= journals both legs (skipping the stop
+leg cleanly when it was never attempted) and drains fills exactly once,
+*before* deciding what to return — regardless of either leg's own
+outcome, since the entry leg alone can have produced a real fill even
+when the stop leg was separately risk-rejected, and that fill must
+never be silently dropped from the journal or left undrained (PR #367
+review, blocker 1).
+
+Only then does it decide what error, if any, to propagate, using
+=Result.Bracket.Entry.Order.Status= as the discriminating signal rather
+than a single "was anything rejected" flag: if the entry leg itself
+never filled, an entry-side risk rejection is treated exactly like any
+other intent's rejection (the run continues); but once the entry has
+genuinely filled, *any* stop-leg failure — including an ordinary risk
+rejection, not only an infrastructure error — aborts the run outright.
+An open position with no protective stop is not "an intent got
+rejected, move on" the way an ordinary =IntentEnter= rejection is; it is
+a real, unprotected exposure that requires operator attention, and
+silently continuing would misrepresent that (PR #367 review, blocker
+2).
 
 ** =strategy.IntentFactory= gains =EnterWithStop=
 
@@ -160,8 +185,25 @@ piece of "plumbing," not "rewiring": no existing strategy's own
 =ExitRule=/re-entry logic is changed to use it — issue #351's own
 explicit scope boundary.
 
+** =service/execution= rejects =IntentEnterWithStop= outright
+
+=service/execution.SubmitResponse= has no field carrying
+=pipeline.Result.Bracket=; silently discarding a successful bracket
+outcome there would be worse than rejecting the request outright (PR
+#367 review, blocker 4). =SubmitRequest.Validate= now returns a new
+=ErrBracketNotSupported= for this intent kind, since this service
+layer's own callers may configure *any* broker adapter, and this
+decision's atomicity guarantee is explicitly backtest-only (see Scope
+decision, above) — =backtest.Scheduler= is the one caller that submits
+this intent kind today, and it talks to =*pipeline.Pipeline= directly,
+never through this service.
+
 * Consequences
 
+- =pipeline.Input.RiskFraction= and =AdverseDistance= are required
+  whenever =Intent.Kind= is =IntentEnterWithStop=, identically to
+  =IntentEnter=: =submitBracket= forwards both unchanged to the
+  synthesized entry sub-intent, which has that identical requirement.
 - The regression-locked gap =TestSMATrend_ProbationEntryBarIntrabarGapIsAKnownLimitation=
   documents now has a real, usable fix — proven end-to-end by a new
   =backtest.Scheduler= integration test
