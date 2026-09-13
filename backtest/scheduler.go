@@ -329,6 +329,19 @@ func (d SchedulerDeps) validate() error {
 // Scheduler depends on it as a separate, narrow, structurally-satisfied
 // capability instead of widening broker.Broker.
 //
+// # Fill delivery (FillHandler)
+//
+// Every fill this batch produced — from Phase 2's flush and Phase 3's
+// IntrabarAdvancer triggers alike — is delivered, in delivery order,
+// to Strategy's own optional strategy.FillHandler capability, against
+// the same frozen View the batch's own OnBar calls use, strictly
+// before any of them run (ADR-060). This is Strategy's one
+// authoritative source of "did a fill actually happen," for the rare
+// case View/History state genuinely cannot answer that (see
+// strategy/smatrend's own same-bar bracket round-trip detection,
+// issue #368/#370, for the motivating example) — most strategies never
+// need it.
+//
 // # Cancellation
 //
 // ctx is checked at the start of every batch, before each flush/OnBar/
@@ -526,6 +539,12 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		return err
 	}
 
+	// Captured before anything in this batch can append to s.fills
+	// (Phase 2's flush, Phase 3's IntrabarAdvancer triggers), so the
+	// slice below the FillHandler delivery loop uses is exactly this
+	// batch's own new fills (ADR-060).
+	fillsBefore := len(s.fills)
+
 	// Phase 0: every event's own (instrument, interval) must be one of
 	// Strategy's own declared DataRequirements (issue #214 review). An
 	// undeclared stream would be invisible to History/warm-up
@@ -652,6 +671,26 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 			cutoffs:  cutoffs,
 			declared: s.warmupRequired,
 		},
+	}
+
+	// Deliver every fill this batch produced (Phase 2's flush, Phase
+	// 3's IntrabarAdvancer triggers — both already drained/journaled
+	// above) to Strategy's own optional FillHandler capability, in
+	// delivery order, against the identical frozen view the OnBar loop
+	// below is about to use — authoritative execution history and
+	// OnBar both reason from one consistent account snapshot (ADR-060).
+	// A FillHandler must return no intents in this v0 (see
+	// strategy.FillHandler's own doc comment); nothing here queues or
+	// submits anything on Strategy's behalf.
+	if fh, ok := s.deps.Strategy.(strategy.FillHandler); ok {
+		for _, f := range s.fills[fillsBefore:] {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := fh.OnFill(ctx, strategy.FillEvent{Fill: f}, view); err != nil {
+				return fmt.Errorf("backtest: scheduler: OnFill for fill %s at %s: %w", f.FillID, t, err)
+			}
+		}
 	}
 
 	type collected struct {

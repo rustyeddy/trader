@@ -20,7 +20,16 @@ import (
 const Name = "sma-trend"
 
 // Version distinguishes revisions of this strategy's own logic.
-const Version = "v1"
+//
+// Bumped to "v2" by issue #368 (PR #369 review, blocker 4): a
+// probation-trend entry/re-entry now submits a bracket
+// order.IntentEnterWithStop instead of a plain order.IntentEnter,
+// changing both entry-bar stop behavior and persisted signal
+// semantics (a new "enter-long-with-stop" KindSignal action, see
+// recordSignal). Per ADR-044, Descriptor.Version is the discriminator
+// for exactly this kind of logic change: a "v1" run and a "v2" run of
+// an otherwise-identical config are not directly comparable results.
+const Version = "v2"
 
 // Strategy is the SMA-trend baseline strategy.Strategy implementation
 // (issue #335, EQS-01), extended with pluggable exit/re-entry rules
@@ -80,6 +89,54 @@ type Strategy struct {
 	// #348 review). nil whenever the most recent exit was a
 	// broker-triggered stop instead, in which case lastStop is used.
 	directExitReference *num.Price
+	// pendingInitialStop is the stop price used by the most recent
+	// EnterWithStop intent onFlat emitted, carried forward exactly one
+	// bar (issue #368) — nil whenever the most recent entry was a
+	// plain Enter (no InitialStopProvider, or none configured). It is
+	// consumed on the very next bar OnBar observes, one of three ways:
+	//
+	//   - Flat->Long transition: the bracket entry filled and survived
+	//     the bar. exitRule.OnEntry runs its own default
+	//     initialization, then — if exitRule also implements
+	//     InitialStopSeeder — SeedInitialStop overrides the one field
+	//     that default reset with this exact value (PR #369 review;
+	//     see InitialStopSeeder's own doc comment for why this is a
+	//     second call rather than a parameter on OnEntry itself).
+	//   - Flat->Flat, with entryFilledThisBatch false: the entry never
+	//     filled at all (rejected outright) — simply discarded, see
+	//     discardUnfilledBracket.
+	//   - Flat->Flat, with entryFilledThisBatch true: the entry filled
+	//     *and* its own attached stop triggered within the same bar,
+	//     invisible to a side-only Flat/Long comparison (PR #369
+	//     review, blocker 1) — see entryFilledThisBatch's own doc
+	//     comment.
+	pendingInitialStop *num.Price
+	// entryFilledThisBatch and stopFilledThisBatch are set by OnFill
+	// (ADR-060, issue #370) — strategy.FillHandler delivers every fill
+	// for this strategy's own account, in order, strictly before OnBar
+	// runs for the same batch. A fill for this Strategy's own
+	// instrument with Side Buy sets entryFilledThisBatch;
+	// order.Sell sets stopFilledThisBatch. Both are cleared,
+	// unconditionally, at the end of every OnBar call (see OnBar's own
+	// defer) — they describe only "this batch," never carried forward.
+	//
+	// OnBar's own Flat branch consumes only entryFilledThisBatch today
+	// (stopFilledThisBatch is tracked because PR #369/#370 review asked
+	// for named, distinguishable fill identity rather than one generic
+	// "some fill happened" boolean, not because current logic needs
+	// both): if the bracket's entry genuinely filled this batch and the
+	// position is observed order.Flat again at the end of the same
+	// batch, its own attached protective stop is *structurally* the
+	// only thing that could have closed it — nothing else can act on
+	// an open position before OnBar itself ever runs. This is
+	// authoritative, not a heuristic (unlike the RealizedPnL/
+	// event.Bar.Open checks this field set replaces): a bracket entry
+	// that was rejected outright never produces a fill at all, so
+	// entryFilledThisBatch correctly stays false regardless of what
+	// that bar's own Open happens to be relative to the hypothetical
+	// stop — the exact residual gap those heuristics could not close.
+	entryFilledThisBatch bool
+	stopFilledThisBatch  bool
 
 	intents strategy.IntentFactory
 	journal journal.Recorder // nil unless env.Journal was set
@@ -190,6 +247,17 @@ func (s *Strategy) Start(ctx context.Context, env strategy.Environment) error {
 // never compares this bar's own price action against a stop level
 // computed from this same bar.
 func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	// entryFilledThisBatch/stopFilledThisBatch describe only this
+	// batch (ADR-060): OnFill, if called at all, already set them for
+	// this exact batch before this OnBar call runs; clearing them here
+	// via defer — regardless of return path, including the warm-up
+	// early return below — keeps them from ever leaking into a later
+	// batch that produces no fill of its own.
+	defer func() {
+		s.entryFilledThisBatch = false
+		s.stopFilledThisBatch = false
+	}()
+
 	// event.Bar.Close.Float64() is ADR-045's explicit exact-to-analytical
 	// conversion boundary: a direct numeric conversion, never a
 	// String()/strconv.ParseFloat() round-trip.
@@ -209,8 +277,25 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 
 	switch side {
 	case order.Flat:
-		if s.sideLastBar == order.Long {
+		switch {
+		case s.sideLastBar == order.Long:
 			s.onExit(event.Bar)
+		case s.pendingInitialStop != nil && s.entryFilledThisBatch:
+			// The bracket entry genuinely filled this batch (OnFill
+			// already observed a Buy fill for this instrument), and
+			// the position is Flat again at the end of the same
+			// batch: its own attached protective stop is
+			// structurally the only thing that could have closed it
+			// — nothing else can act on an open position before
+			// OnBar itself ever runs (ADR-060, issue #368/#370,
+			// replacing PR #369's own RealizedPnL/event.Bar.Open
+			// heuristics with this authoritative signal).
+			s.onExit(event.Bar)
+		case s.pendingInitialStop != nil:
+			// entryFilledThisBatch is false: the bracket entry was
+			// never filled at all (rejected outright) — no episode
+			// occurred.
+			s.discardUnfilledBracket()
 		}
 		s.sideLastBar = order.Flat
 		return s.onFlat(ctx, event, crossedAbove, aboveSMA, close, smaValue)
@@ -221,6 +306,12 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 				return nil, fmt.Errorf("smatrend: reading entry price: %w", err)
 			}
 			s.exitRule.OnEntry(event.Bar, entryPrice)
+			if s.pendingInitialStop != nil {
+				if seeder, ok := s.exitRule.(InitialStopSeeder); ok {
+					seeder.SeedInitialStop(*s.pendingInitialStop)
+				}
+				s.pendingInitialStop = nil
+			}
 		}
 		s.sideLastBar = order.Long
 		return s.onLong(ctx, event, close, smaValue)
@@ -237,6 +328,42 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 	}
 }
 
+// OnFill implements the optional strategy.FillHandler capability
+// (ADR-060, issue #370): backtest.Scheduler (or any other runtime
+// implementing the identical contract) delivers every fill for this
+// strategy's own account here, in order, strictly before the OnBar
+// call for whichever bar the fill belongs to. A fill for an
+// instrument other than s.instrumentID is ignored outright — this
+// assumes smatrend is the only strategy trading this account (already
+// assumed elsewhere, see OnBar's own order.Short case). Side
+// distinguishes an entry fill (order.Buy, the only side smatrend ever
+// enters with) from a protective-exit fill (order.Sell) — see
+// entryFilledThisBatch/stopFilledThisBatch's own doc comment for how
+// OnBar consumes this.
+func (s *Strategy) OnFill(ctx context.Context, event strategy.FillEvent, view strategy.View) error {
+	fill := event.Fill
+	if !fill.Listing.InstrumentID().Equal(s.instrumentID) {
+		return nil
+	}
+	switch fill.Side {
+	case order.Buy:
+		s.entryFilledThisBatch = true
+	case order.Sell:
+		s.stopFilledThisBatch = true
+	}
+	return nil
+}
+
+// discardUnfilledBracket rolls back the speculative state
+// buildEntryIntent's bracket path set for an entry attempt that never
+// actually filled (issue #368): pendingInitialStop and lastStop, both
+// set optimistically before the outcome was known. Called only from
+// the Flat branch's own entryFilledThisBatch-false case.
+func (s *Strategy) discardUnfilledBracket() {
+	s.pendingInitialStop = nil
+	s.lastStop = nil
+}
+
 // onExit notifies reEntryRule that a position just closed — whether
 // via a broker-triggered stop (ADR-026) or a direct
 // ExitRule.ExitNow — using the best available reference level for
@@ -247,7 +374,15 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 // later bar this exit is observed on), else lastStop when it was a
 // broker-triggered stop, else — only possible for a custom ExitRule
 // that manages neither — exitBar's own Close as a last resort. Called
-// exactly once per exit, from OnBar's own Flat-transition detection.
+// exactly once per exit, from OnBar's own Flat-transition detection —
+// either the classic Long->Flat transition, or (issue #368) a bracket
+// entry whose own attached stop triggered within the same bar the
+// entry itself filled, detected via a RealizedPnL change while
+// sideLastBar never observed order.Long at all. lastStop is already
+// the correct reference for that second case too: buildEntryIntent's
+// bracket path sets it to the bracket's own stop price at the moment
+// the entry intent was built, and nothing overwrites it before onExit
+// runs, since OnEntry/onLong were never reached.
 func (s *Strategy) onExit(exitBar marketdata.Bar) {
 	exitPrice := exitBar.Close
 	switch {
@@ -260,6 +395,7 @@ func (s *Strategy) onExit(exitBar marketdata.Bar) {
 	s.everExited = true
 	s.lastStop = nil
 	s.directExitReference = nil
+	s.pendingInitialStop = nil
 }
 
 // onFlat handles a bar observed with no open position. The very first
@@ -298,14 +434,70 @@ func (s *Strategy) onFlat(ctx context.Context, event strategy.BarEvent, crossedA
 		return nil, nil
 	}
 
-	in, err := s.intents.Enter(s.instrumentID, order.Buy)
+	in, initialStop, err := s.buildEntryIntent(smaValue)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.recordSignal(ctx, event, close, smaValue, PhaseFlat, "enter-long", nil, []order.Intent{in}); err != nil {
+	action := "enter-long"
+	if initialStop != nil {
+		action = "enter-long-with-stop"
+	}
+	if err := s.recordSignal(ctx, event, close, smaValue, PhaseFlat, action, initialStop, []order.Intent{in}); err != nil {
 		return nil, err
 	}
 	return []order.Intent{in}, nil
+}
+
+// buildEntryIntent builds this entry's own order.Intent: a bracket
+// order.IntentEnterWithStop when exitRule implements
+// InitialStopProvider (issue #368, ADR-059) — closing the entry-fill-
+// bar protection gap for whichever ExitRule can compute its first
+// stop before the fill — or a plain order.IntentEnter otherwise,
+// unchanged from before this issue. The returned *num.Price, when
+// non-nil, is both the stop actually placed and the value
+// recordSignal journals as decision evidence.
+//
+// The bracket path sets both s.pendingInitialStop (for OnBar's own
+// Flat->Long/Flat->Flat consumption, see that field's own doc
+// comment) and s.lastStop (PR #369 review, blocker 2): without this,
+// a bracket entry that survives its own fill bar with no ratcheting
+// AdjustStop on the very next OnLongBar call (its computed stop no
+// higher than the seeded floor) would leave lastStop nil despite a
+// real resting stop existing, so onExit would later fall back to the
+// exit bar's own Close instead of the real intended stop level when
+// that resting stop eventually triggers — corrupting exit-price-based
+// re-entry rules such as "reclaim-exit-price". Both are speculative
+// until the outcome is known: OnBar's own Flat branch rolls them back
+// via discardUnfilledBracket if the entry turns out to have never
+// filled at all.
+//
+// smaValue is the entry-decision bar's own current SMA value — the
+// only signal available before the fill — so InitialStop is
+// necessarily computed from information no later than this bar; it
+// never uses the eventual fill bar's own Close/High/Low, which is not
+// yet known (issue #368's own explicit no-lookahead requirement).
+func (s *Strategy) buildEntryIntent(smaValue float64) (order.Intent, *num.Price, error) {
+	provider, ok := s.exitRule.(InitialStopProvider)
+	if !ok {
+		in, err := s.intents.Enter(s.instrumentID, order.Buy)
+		if err != nil {
+			return order.Intent{}, nil, err
+		}
+		s.pendingInitialStop = nil
+		return in, nil, nil
+	}
+
+	stop, err := provider.InitialStop(smaValue)
+	if err != nil {
+		return order.Intent{}, nil, fmt.Errorf("smatrend: computing initial stop for bracket entry: %w", err)
+	}
+	in, err := s.intents.EnterWithStop(s.instrumentID, order.Buy, stop)
+	if err != nil {
+		return order.Intent{}, nil, err
+	}
+	s.pendingInitialStop = &stop
+	s.lastStop = &stop
+	return in, &stop, nil
 }
 
 // onLong handles a bar observed with an open long position that

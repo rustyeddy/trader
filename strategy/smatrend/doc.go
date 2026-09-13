@@ -98,6 +98,16 @@
 // a spike observed during PROBATION still governs the TRENDING stop
 // after activation.
 //
+// "probation-trend" additionally implements the optional
+// InitialStopProvider ExitRule capability (issue #368, see
+// exitrule.go): its initial probation stop is a pure function of the
+// SMA value alone, so it is computable *before* the entry fill, and
+// Strategy uses it to submit a bracket order.IntentEnterWithStop
+// (ADR-059) instead of a plain order.IntentEnter — the position is
+// protected starting the entry fill bar itself, not one bar later.
+// "trailing-stop" and "sma-cross" never implement this capability and
+// keep using a plain entry, unchanged.
+//
 // New rules are a new small type plus one registry entry in
 // exitrule.go/reentryrule.go/initialentryrule.go — never a change to
 // Strategy's own control flow. See those files for the exact
