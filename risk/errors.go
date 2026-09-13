@@ -17,10 +17,12 @@ var (
 	ErrInvalidRule = errors.New("risk: invalid rule")
 
 	// ErrInvalidSizeInput reports a SizeInput that fails validation:
-	// an unconstructed Account/Listing, a non-positive RiskFraction or
-	// StopDistance, or an account equity currency that does not match
-	// the listing's settlement currency (ADR-030: Sizer performs no
-	// implicit currency conversion).
+	// an unconstructed Account/Listing, an account equity currency
+	// that does not match the listing's settlement currency (ADR-030:
+	// Sizer performs no implicit currency conversion), or — checked by
+	// each concrete Sizer itself, not by the shared checkSizeInput
+	// (ADR-061) — a non-positive RiskFraction/StopDistance/
+	// ReferencePrice that Sizer implementation actually requires.
 	ErrInvalidSizeInput = errors.New("risk: invalid size input")
 
 	// ErrSizeRoundsToZero reports that a Sizer's raw computed quantity

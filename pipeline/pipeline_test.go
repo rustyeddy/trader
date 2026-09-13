@@ -154,12 +154,21 @@ func mustAdjustStopIntent(t *testing.T, ids *id.Generator, instID instrument.ID)
 // deterministic seed for a cross-instance determinism check.
 func newPipeline(t *testing.T, h testHarness, rules ...risk.Rule) *pipeline.Pipeline {
 	t.Helper()
+	return newPipelineWithSizer(t, h, risk.NewFixedFractionSizer(), rules...)
+}
+
+// newPipelineWithSizer is newPipeline generalized over the configured
+// risk.Sizer (ADR-061), so a test can exercise Pipeline against
+// risk.NewFullNotionalSizer() without duplicating the rest of the
+// harness wiring.
+func newPipelineWithSizer(t *testing.T, h testHarness, sizer risk.Sizer, rules ...risk.Rule) *pipeline.Pipeline {
+	t.Helper()
 	planner, err := execution.NewPlanner(execution.Deps{Clock: h.clock, IDs: h.ids})
 	require.NoError(t, err)
 	engine, err := risk.NewEngine(rules...)
 	require.NoError(t, err)
 	p, err := pipeline.NewPipeline(pipeline.Deps{
-		Sizer:   risk.NewFixedFractionSizer(),
+		Sizer:   sizer,
 		Planner: planner,
 		Engine:  engine,
 		Broker:  h.broker,
@@ -271,7 +280,16 @@ func TestPipelineSubmit_PlanningErrorPropagatesAndNeverTouchesBroker(t *testing.
 	assert.Empty(t, after.Positions(), "broker must never be touched on a planning failure")
 }
 
-func TestPipelineSubmit_EnterWithoutAdverseDistanceIsInvalidInput(t *testing.T) {
+// TestPipelineSubmit_EnterWithoutAdverseDistanceIsSizeInputError is
+// ADR-061's own required regression for the classification change its
+// own review flagged: Pipeline no longer enforces AdverseDistance's
+// requiredness itself (that requirement belongs to whichever concrete
+// risk.Sizer is configured), so a missing AdverseDistance against the
+// default fixedFractionSizer now surfaces as risk.ErrInvalidSizeInput
+// — wrapped by Pipeline's own "pipeline: sizing intent: %w" — never
+// pipeline.ErrInvalidInput. Callers that classify on the sentinel must
+// be able to rely on this intentionally, not by accident.
+func TestPipelineSubmit_EnterWithoutAdverseDistanceIsSizeInputError(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, "10000")
 	p := newPipeline(t, h)
@@ -285,7 +303,95 @@ func TestPipelineSubmit_EnterWithoutAdverseDistanceIsInvalidInput(t *testing.T) 
 		Account:      before,
 		RiskFraction: num.MustParseRate("0.01"),
 	})
-	require.ErrorIs(t, err, pipeline.ErrInvalidInput)
+	require.ErrorIs(t, err, risk.ErrInvalidSizeInput)
+	require.NotErrorIs(t, err, pipeline.ErrInvalidInput, "a missing AdverseDistance is now the configured Sizer's own classification, not a structural Pipeline.Input defect")
+}
+
+// TestPipelineSubmit_FullNotionalSizerNeedsNoRiskFractionOrAdverseDistance
+// is ADR-061's own end-to-end proof that a price-based Sizer works
+// through the unchanged Pipeline/Input contract: a full-notional
+// Submit with neither RiskFraction nor AdverseDistance set — both
+// required by the default fixedFractionSizer, neither used by
+// risk.NewFullNotionalSizer() — succeeds when ReferencePrice is set
+// instead.
+func TestPipelineSubmit_FullNotionalSizerNeedsNoRiskFractionOrAdverseDistance(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "10000")
+	p := newPipelineWithSizer(t, h, risk.NewFullNotionalSizer())
+
+	before := h.snapshot(t, ctx)
+	ref := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	result, err := p.Submit(ctx, pipeline.Input{
+		Intent:         intent,
+		Listing:        h.listing,
+		Account:        before,
+		ReferencePrice: &ref,
+	})
+	require.NoError(t, err)
+	assert.False(t, result.Order.Request.Quantity.IsZero())
+}
+
+// TestPipelineSubmit_FullNotionalSizerIsExactOnlyAtReferencePriceNotRealFill
+// is issue #364/ADR-061 review's own required regression: the
+// full-notional Sizer sizes exactly against SizeInput.ReferencePrice,
+// never against the real, eventual broker fill price, which can
+// differ (slippage, a gap, a different fill model). This submits with
+// a ReferencePrice (1.20000) deliberately different from the sim
+// broker's own fixed real fill price (1.10000, mustEurUsdListing's
+// harness default) and confirms the resulting position's real cost is
+// *not* equal to Equity — proving the Sizer never silently corrects
+// for an execution-price difference it cannot know about pre-submit.
+func TestPipelineSubmit_FullNotionalSizerIsExactOnlyAtReferencePriceNotRealFill(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "10000")
+	p := newPipelineWithSizer(t, h, risk.NewFullNotionalSizer())
+
+	before := h.snapshot(t, ctx)
+	ref := num.MustParsePrice("1.20000") // deliberately not the real 1.10000 fill price.
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	result, err := p.Submit(ctx, pipeline.Input{
+		Intent:         intent,
+		Listing:        h.listing,
+		Account:        before,
+		ReferencePrice: &ref,
+	})
+	require.NoError(t, err)
+
+	// Sized exactly against the 1.20000 reference: floor(10000 /
+	// 1.20000) = 8333, at a whole-unit quantity increment.
+	assert.True(t, result.Order.Request.Quantity.Equal(num.MustParseQuantity("8333")), "got %s", result.Order.Request.Quantity)
+
+	realFillPrice := num.MustParsePrice("1.10000")
+	realCost, err := realFillPrice.MulQuantity(result.Order.Request.Quantity, num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+
+	cmp, err := realCost.Cmp(before.Equity())
+	require.NoError(t, err)
+	assert.NotEqual(t, 0, cmp, "the real fill's own cost must not equal Equity — the Sizer promised exact notional at ReferencePrice (1.20000), not at the real fill price (1.10000)")
+	assert.Less(t, cmp, 0, "this specific reference/fill combination leaves the position under-invested relative to Equity, not over — demonstrating no silent overspend either")
+}
+
+// TestPipelineSubmit_FullNotionalSizerWithoutReferencePriceIsSizeInputError
+// is the FullNotionalSizer-side mirror of
+// TestPipelineSubmit_EnterWithoutAdverseDistanceIsSizeInputError: the
+// configured Sizer, not Pipeline, owns deciding what it requires.
+func TestPipelineSubmit_FullNotionalSizerWithoutReferencePriceIsSizeInputError(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "10000")
+	p := newPipelineWithSizer(t, h, risk.NewFullNotionalSizer())
+
+	before := h.snapshot(t, ctx)
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	_, err := p.Submit(ctx, pipeline.Input{
+		Intent:  intent,
+		Listing: h.listing,
+		Account: before,
+	})
+	require.ErrorIs(t, err, risk.ErrInvalidSizeInput)
 }
 
 func TestPipelineSubmit_SizingErrorPropagates(t *testing.T) {
