@@ -99,12 +99,11 @@ type testHarness struct {
 	// AvgPrice Strategy reads via currentPositionAvgPrice (issue #349).
 	avgPrice string
 	// realizedPnL overrides the harness-reported account's own
-	// RealizedPnL ("0" otherwise) — needed to simulate a bracket entry
-	// whose own attached stop triggers within the same bar the entry
-	// fills (issue #368, PR #369 review): h.side stays order.Flat for
-	// that whole episode (OnBar never observes order.Long at all), so
-	// a nonzero RealizedPnL is the only way this harness can simulate
-	// the one signal Strategy itself uses to detect it.
+	// RealizedPnL ("0" otherwise). Strategy itself no longer reads
+	// this for same-bar round-trip detection (ADR-060 replaced that
+	// heuristic with deliverFill/OnFill); retained only as a general
+	// account-shape override for a test that needs one for some other
+	// reason.
 	realizedPnL string
 }
 
@@ -144,6 +143,26 @@ func newTestHarnessWithJournal(t *testing.T, config Config, rec journal.Recorder
 // ever reset via onFlat, driven by the next onBar call observing Flat.
 func (h *testHarness) triggerStop() {
 	h.side = order.Flat
+}
+
+// deliverFill simulates backtest.Scheduler's own FillHandler delivery
+// (ADR-060): a minimal, valid order.Fill for h's own listing/account,
+// with side, passed to the strategy's OnFill directly — the same call
+// Scheduler makes before OnBar for the same batch. Panics on
+// construction failure (a harness bug, never a test assertion).
+func (h *testHarness) deliverFill(side order.Side) {
+	h.t.Helper()
+	fill, err := order.NewFill(order.Fill{
+		FillID:    tradertest.MustFillID(h.ids),
+		OrderID:   tradertest.MustOrderID(h.ids),
+		AccountID: h.accountID,
+		Listing:   h.listing,
+		Side:      side,
+		Price:     num.MustParsePrice("1.10000"),
+		Quantity:  num.MustParseQuantity("1"),
+	})
+	require.NoError(h.t, err)
+	require.NoError(h.t, h.strategy.OnFill(context.Background(), strategy.FillEvent{Fill: fill}, fakeView{snap: mustSnapshot(h.t, h.accountID, nil, h.realizedPnL)}))
 }
 
 // buildBar constructs bar barNum's own BarEvent/View pair (bars are
@@ -1028,9 +1047,10 @@ func TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar(t *testing.T)
 //
 // h.side deliberately stays order.Flat for the whole episode: OnBar
 // never observes order.Long in between, exactly the case a bare
-// sideLastBar comparison cannot see (see Strategy.lastRealizedPnL's
-// own doc comment). h.realizedPnL simulates the one signal Strategy
-// itself has to detect it.
+// sideLastBar comparison cannot see. deliverFill simulates
+// backtest.Scheduler's own FillHandler delivery (ADR-060, issue #370)
+// — the authoritative signal that replaced PR #369's own
+// RealizedPnL/event.Bar.Open heuristics.
 //
 // The proof is behavioral, not internal-state inspection: configured
 // with ReEntryRuleName "above-sma" (fires on the very next eligible
@@ -1067,26 +1087,36 @@ func TestStrategy_BracketEntryStopSameBarStillTransitionsLifecycle(t *testing.T)
 	// order.Long for this episode at all.
 	h.side = order.Flat
 
-	// Bar 6: the entry's own fill bar. sma(99,102,102)=101, close
-	// (102) above it — still above the SMA, no fresh cross (already
-	// above since bar 5).
-	h.realizedPnL = "5"
+	// Bar 6: the entry's own fill bar. OnFill delivers both the entry
+	// fill (Buy) and the attached protective stop's own fill (Sell),
+	// exactly as Scheduler would before calling OnBar for this same
+	// batch. sma(99,102,102)=101, close (102) above it — still above
+	// the SMA, no fresh cross (already above since bar 5).
+	h.deliverFill(order.Buy)
+	h.deliverFill(order.Sell)
 	intents, _ = h.onBar(6, bar{open: 103, high: 105, low: 95, close: 102})
 	require.Len(t, intents, 1, "the lifecycle must have transitioned to post-exit/re-entry mode: above-sma must fire immediately on this still-above-SMA bar, which fresh-cross (the initial-entry gate) never would")
 	assert.Equal(t, order.IntentEnterWithStop, intents[0].Kind, "the re-entry must also be a fresh bracket entry, protected from its own fill bar too")
 }
 
-// TestStrategy_BracketEntryGapExactlyToStopStillTransitionsLifecycle
-// is PR #369's own re-review regression: RealizedPnL alone misses one
-// real same-bar round trip — a long bracket entry filling at this
-// bar's own Open, already at or below its own protective stop, gaps
-// through at that exact price (ADR-026's own gap rule), so entry and
-// exit realize exactly zero PnL and RealizedPnL never changes at all.
-// h.realizedPnL is deliberately left at its zero default throughout —
-// only event.Bar.Open's own relationship to the bracket's stop price
-// can prove this case (see Strategy.lastRealizedPnL's own doc
-// comment).
-func TestStrategy_BracketEntryGapExactlyToStopStillTransitionsLifecycle(t *testing.T) {
+// TestStrategy_RejectedBracketOnGapThroughBarDoesNotFabricateExit is
+// ADR-060's own required regression (issue #370, PR #369 re-review):
+// a bracket entry that is rejected outright (no fill at all) must
+// never be misclassified as a same-bar round trip, even on a bar
+// whose Open happens to coincidentally sit at or below wherever the
+// hypothetical stop would have been — exactly the residual gap PR
+// #369's own RealizedPnL/event.Bar.Open heuristics could not resolve
+// (a heuristic based on bar/account state alone cannot distinguish
+// this from a genuine zero-PnL round trip; only real fill visibility
+// can).
+//
+// No deliverFill call happens anywhere in this test: OnFill is simply
+// never invoked for this instrument, the same as a real rejected
+// entry produces no fill event at all. h.side stays Flat throughout,
+// and bar 6's own Open (99) is deliberately at/below the 99.33 stop
+// bar 5's decision would have used — the exact coincidence that used
+// to fabricate an exit.
+func TestStrategy_RejectedBracketOnGapThroughBarDoesNotFabricateExit(t *testing.T) {
 	h := newTestHarness(t, Config{
 		SMAPeriod:           3,
 		ExitRuleName:        "probation-trend",
@@ -1101,24 +1131,33 @@ func TestStrategy_BracketEntryGapExactlyToStopStillTransitionsLifecycle(t *testi
 	}
 
 	// Bar 5: entry decision — a bracket order.IntentEnterWithStop with
-	// stop 99.33 (sma(99,102's own bar4/5)... see the sibling test's
-	// own identical bar-5 comment: sma(100,99,102)=100.33333333,
-	// stop=100.33333333*0.99=99.33).
+	// stop 99.33 (sma(100,99,102)=100.33333333, stop=100.33333333*
+	// 0.99=99.33). The pipeline/risk engine rejecting this in a real
+	// run is exactly what "no deliverFill call" simulates here.
 	intents, _ := h.onBar(5, bar{open: 102, high: 102, low: 102, close: 102})
 	require.Len(t, intents, 1)
 	require.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
 	require.Equal(t, "99.33", intents[0].StopPrice.String())
-	h.side = order.Flat // see the sibling test's own identical note.
+	h.side = order.Flat // never actually filled — no position ever opened.
 
-	// Bar 6: the entry's own fill bar gaps down — Open (99) already at
-	// or below the 99.33 bracket stop. RealizedPnL stays "0" for this
-	// entire test; only the gap-through-Open check can prove this bar
-	// was a real round trip. Still above the SMA (sma(99,102,102)=101,
-	// close 102 above it) with no fresh cross, so above-sma fires
-	// immediately if the lifecycle correctly transitioned.
+	// Bar 6: no fill delivered at all. This bar's own Open (99) is
+	// deliberately at/below the 99.33 stop — the exact coincidence PR
+	// #369's own event.Bar.Open heuristic could not tell apart from a
+	// genuine round trip. Still above the SMA with no fresh cross
+	// (sma(99,102,102)=101, close 102 above it), so if the lifecycle
+	// were incorrectly considered "exited," above-sma would fire
+	// immediately here.
 	intents, _ = h.onBar(6, bar{open: 99, high: 100, low: 95, close: 102})
-	require.Len(t, intents, 1, "the lifecycle must have transitioned to post-exit/re-entry mode even though RealizedPnL never changed")
-	assert.Equal(t, order.IntentEnterWithStop, intents[0].Kind)
+	assert.Empty(t, intents, "a rejected/unfilled bracket must never fabricate an exit: everExited must still be false, so above-sma (which only applies post-exit) must not fire")
+
+	// Confirm directly: the strategy still believes it has never
+	// entered at all, so the *next* flat bar is still governed by
+	// InitialEntryRule ("fresh-cross", which requires an actual cross)
+	// rather than the configured "above-sma" ReEntryRule (which would
+	// fire unconditionally on any above-SMA flat bar) — a bar that
+	// stays above the SMA with no fresh cross must produce no entry.
+	intents, _ = h.onBar(7, bar{open: 100, high: 101, low: 99, close: 100})
+	assert.Empty(t, intents, "still no fresh cross: InitialEntryRule, not ReEntryRule, must still be governing entry decisions")
 }
 
 // TestProbationTrendExitRule_SeedInitialStopPreventsLoosening is PR

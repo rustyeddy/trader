@@ -6,13 +6,17 @@
 // # Scope
 //
 // Strategy is deliberately small — Describe, Start, and OnBar — per
-// the M5-02 design review: TickHandler, FillHandler,
-// AccountEventHandler, StateManager, and DataRequirement.NeedTicks are
-// not published here. Each is additive, optional-capability surface
-// area for a later issue with a concrete consumer to shape it against,
-// not something to speculate into place now (the architecture
-// document's own "small required core plus capability discovery"
-// guidance).
+// the M5-02 design review: TickHandler, AccountEventHandler,
+// StateManager, and DataRequirement.NeedTicks are not published here.
+// Each is additive, optional-capability surface area for a later issue
+// with a concrete consumer to shape it against, not something to
+// speculate into place now (the architecture document's own "small
+// required core plus capability discovery" guidance). FillHandler is
+// the first of that originally-deferred list to actually get one
+// (ADR-060, issue #370): a concrete consumer (strategy/smatrend's own
+// same-bar bracket round-trip detection, issue #368) needed
+// authoritative fill visibility that no combination of View/History
+// state could provide.
 //
 // View's required surface is similarly minimal: Account()
 // account.Snapshot is the one read every View exposes. Historical-bar

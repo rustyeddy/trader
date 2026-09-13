@@ -1,0 +1,223 @@
+#+title: ADR-060: strategy.FillHandler — an authoritative per-bar fill-delivery capability
+
+* Status
+
+Accepted
+
+* Context
+
+Issue #368 (PR #369) wired =strategy/smatrend='s ="probation-trend"=
+=ExitRule= to =order.IntentEnterWithStop= (ADR-059), so the entry-fill
+bar itself gets a real resting protective stop instead of only starting
+protection one bar late. That surfaced a genuine lifecycle gap PR #369
+review worked through across several rounds: a bracket entry's own
+attached stop can trigger within the *same bar* the entry itself
+fills, so =Strategy.OnBar= never observes =order.Long= for that
+episode at all — =sideLastBar= stays =order.Flat= across both the bar
+before and the bar of the episode. Without an extra signal,
+=onExit= never runs: =everExited= stays incorrectly =false=, and the
+next entry is governed by =InitialEntryRule= instead of the configured
+=ReEntryRule=.
+
+PR #369 tried two successive account/bar-state heuristics to detect
+this without any new capability:
+
+1. A change in =view.Account().RealizedPnL()= bar over bar — catches
+   every ordinary intrabar stop touch (always a strictly negative
+   realized PnL), but misses...
+2. ...a gap-through-Open fill (ADR-026's own gap rule: entry and stop
+   both fill at the identical Open price), which realizes *exactly
+   zero* PnL. Added a second check, =event.Bar.Open= compared directly
+   against the bracket's own stop price, to catch this too.
+
+Those two checks together are exhaustive for every *filled* bracket
+outcome — but neither, nor any combination of account/bar-snapshot
+state, can distinguish a genuine zero-PnL round trip from a bracket
+entry that was *rejected outright* (no fill at all) on a bar whose
+Open independently happens to sit at or below wherever the stop would
+have been. That coincidence is real (a risk rejection is decided
+independently of that same bar's own price action) and, if it occurs,
+the heuristic fabricates an =onExit= call — and therefore
+=everExited=true=/=ReEntryRule.OnExit= — for an episode that never
+happened.
+
+Rusty's review of PR #369 (2026-09-11) declined to accept a third
+heuristic layered on the first two, and asked for a tightly-scoped
+prerequisite issue instead: give =Strategy= an authoritative signal
+that a fill actually happened, rather than continuing to infer it.
+Issue #370 sketched three options (wire the already-documented-but-
+never-implemented =strategy.FillHandler= capability; extend
+=strategy.View= with a fill accessor; a narrower smatrend-only signal)
+and asked for a short design pass before implementation, per this
+repository's own established "stop and flag genuinely unresolved
+architecture" convention (=CONTRIBUTING.org=) for a change to the
+public =strategy= package.
+
+* Decision
+
+** =strategy.FillEvent= / =strategy.FillHandler=
+
+#+BEGIN_SRC go
+package strategy
+
+import (
+    "context"
+
+    "github.com/rustyeddy/trader/order"
+)
+
+type FillEvent struct {
+    Fill order.Fill
+}
+
+type FillHandler interface {
+    OnFill(ctx context.Context, event FillEvent, view View) error
+}
+#+END_SRC
+
+=FillHandler= is an *optional* =Strategy= capability — the identical
+"small required core plus capability discovery" pattern
+=strategy.History= already established (issue #214) — not a widening
+of the required =Strategy= interface. Most strategies never need
+per-fill visibility; =View.Account()='s own =Positions()= snapshot is
+normally enough.
+
+=FillEvent= wraps =order.Fill= directly rather than defining a parallel
+set of fields. =order.Fill= already carries =OrderID=, =Listing=,
+=Side=, =Price=, =Quantity=, and =Metadata= (=CorrelationID=/
+=CausationID=, propagated unchanged from the originating
+=order.Intent= through Proposal/Decision/Request/Order per ADR-005's
+own correlation convention) — enough identity/causality for a strategy
+to tell what filled: an instrument it does not own
+(=Listing.InstrumentID()=), an entry versus a protective exit for a
+long-only strategy (=Side=), or a specific submission
+(=Metadata.CorrelationID=), without =FillEvent= inventing a second
+vocabulary for information =order.Fill= already carries.
+
+** =OnFill= returns only =error=, not =[]order.Intent=
+
+The architecture document's own original =FillHandler= sketch returned
+=[]Intent=, matching =OnBar='s own shape. This decision deliberately
+narrows that for v0: emitting intents directly from a fill callback
+needs its own design — ordering and recursion within a batch,
+next-bar-open eligibility, warm-up interaction, and eventual live/paper
+semantics all matter, and no current strategy needs it. Publishing a
+wider signature and then hard-rejecting every non-empty result would
+freeze half-designed behavior into a public contract for no present
+benefit. See Alternatives Considered.
+
+** Delivery scope: every fill for the account, not requirement-filtered
+
+=Scheduler= delivers *every* fill on the strategy's own account,
+letting the strategy filter by instrument/side itself — mirroring the
+existing =View.Account().Positions()= convention every =OnBar=
+implementation already uses (for example
+=strategy/smatrend='s own =currentPositionSide=).
+=Strategy.Describe().Requirements= is deliberately *not* used to
+pre-filter fill delivery: requirements describe market-data needs, not
+execution ownership, and conflating the two contracts would silently
+hide a fill for an instrument outside the strategy's declared
+requirements — a case that should not arise given one-provider-per-
+account (ADR-016) today, but is not this capability's job to assume
+away by filtering.
+
+** Backtest delivery ordering
+
+=backtest.Scheduler.runBatch= already accumulates every fill produced
+during a batch — from Phase 2's flush (each =submit= call drains/
+journals as it goes) and Phase 3's =IntrabarAdvancer= triggers alike —
+into =s.fills= *before* the batch's frozen =account.Snapshot=/=View=
+is constructed and the =OnBar= loop runs. Wiring =FillHandler= is
+therefore small: capture =len(s.fills)= at the top of =runBatch=, and
+once the frozen =view= is built, deliver every fill added since that
+point — one =OnFill= call per fill, in delivery order — to a
+=FillHandler=-implementing =Strategy=, immediately before the =OnBar=
+loop. =OnFill= and every =OnBar= call in the same batch therefore
+reason from one identical frozen account snapshot: authoritative
+execution history first, then the strategy's own bar-close decision,
+never the reverse.
+
+A =FillHandler.OnFill= error aborts =Run= exactly like any other
+=Scheduler=-stage failure — it is not treated as a recoverable, skip-
+and-continue condition, matching every other =Scheduler= failure mode
+(=submit=, =journalRecord=, =drainAndJournal=).
+
+** =strategy/smatrend= rewire
+
+=Strategy= implements =OnFill=: a fill whose =Listing.InstrumentID()=
+matches this strategy's own instrument and whose =Side= is =Buy= sets
+=entryFilledThisBatch=; a matching =Sell= sets =stopFilledThisBatch=.
+Both are named for what they mean to smatrend specifically (per PR
+#369/#370 review — avoid a generic "some fill happened" boolean), even
+though =OnBar='s own detection today only needs
+=entryFilledThisBatch=: if the bracket's entry genuinely filled this
+batch (=entryFilledThisBatch= true) and the position is observed
+=order.Flat= again at the end of the same batch, its own attached
+protective stop is *structurally* the only thing that could have
+closed it — nothing else can act on an open position before =OnBar=
+itself ever runs. This is authoritative, not a heuristic:
+=lastRealizedPnL=, =realizedPnLChanged=, and the
+=event.Bar.Open=-vs-stop gap check PR #369 added are deleted entirely,
+not retained as a fallback.
+
+* Consequences
+
+- =strategy.Strategy= gains its first optional capability beyond
+  =strategy.History= (issue #214) — =strategy.doc.go='s own "not
+  published here yet" list for =TickHandler=/=FillHandler=/
+  =AccountEventHandler=/=StateManager= loses one entry, on the same
+  "concrete consumer" basis =History= itself was added under.
+- =strategy/smatrend='s same-bar bracket round-trip detection is now
+  provably correct rather than heuristic: a rejected/unfilled bracket
+  entry can no longer fabricate an =onExit= call, regardless of what
+  that bar's own Open happens to be relative to the hypothetical stop
+  — the exact residual gap PR #369 review would not accept a third
+  heuristic to paper over.
+- Any future backtest-runtime capability (paper/live sessions,
+  eventually) implementing =strategy.Strategy='s own composition must
+  also drive =FillHandler= with the identical ordering guarantee
+  (fills before =OnBar=, against one consistent snapshot) if it wants
+  to support a =FillHandler=-implementing strategy at all; the live
+  path itself is out of scope for this ADR (see Alternatives
+  Considered) but the *contract* — not merely =backtest.Scheduler='s
+  own implementation of it — is what a live composition would need to
+  honor.
+- A =FillHandler= that returns a non-empty intent list has no path to
+  do so today: the type signature itself makes this impossible rather
+  than requiring a runtime check.
+
+* Alternatives Considered
+
+- *Let =OnFill= return =[]order.Intent= now, matching =OnBar='s own
+  shape, and reject non-empty results at the =Scheduler= level.*
+  Rejected: publishing intent-return semantics only to hard-error on
+  every actual use freezes an API surface around behavior nobody has
+  designed yet. The narrower =error=-only signature can be widened
+  additively later (a new optional capability, or a signature change
+  before any external consumer depends on it) once a real
+  fill-triggered-intent use case exists to design against — the
+  identical "small required core plus capability discovery" reasoning
+  =strategy.History= itself was built under.
+- *Extend =strategy.View= with a fill accessor* (for example
+  =Fills() []order.Fill=) instead of a push-style capability. Rejected
+  in favor of the push model: a pull-style accessor would need its own
+  answer for "fills since when" (a cursor/cutoff concept =View= does
+  not otherwise have — =History='s own cutoff is about bar visibility,
+  not fill delivery), while =FillHandler= reuses the same "called once
+  per relevant occurrence, before =OnBar=, against a frozen View"
+  shape =OnBar= itself already has, requiring no new View-side state.
+- *A narrower, smatrend-only signal* (for example a =Scheduler=-side
+  callback specific to bracket intents) rather than a general
+  =Strategy=-level capability. Rejected: the underlying problem
+  (Strategy cannot always tell whether a fill occurred from
+  account/bar state alone) is not specific to brackets or to
+  smatrend — a general, reusable capability is the smaller total
+  surface area, and issue #370 was explicitly scoped as a
+  =strategy=-level prerequisite for this reason.
+- *Design and wire live/paper delivery in this same change.* Rejected
+  as premature: no live/paper session composition exists yet in this
+  codebase to validate the ordering guarantee against; the contract is
+  written generally enough not to assume backtest specifically, but
+  the live wiring itself is deferred until a live composition exists to
+  need it — the same scoping precedent ADR-059 set for live/async
+  broker semantics (issue #366).

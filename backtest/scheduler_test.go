@@ -1486,6 +1486,101 @@ func TestScheduler_BracketEntryProtectsFromTheFillBarItself(t *testing.T) {
 		"the closing fill must land on bar 2 (01:00) itself, the same bar the entry filled on — proving the stop was already resting before that bar's own IntrabarAdvancer check, not one bar later (02:00, as the equivalent two-step strategy needs — see TestScheduler_IntrabarAdvancerTriggersRestingStop)")
 }
 
+// recordedEvent is one entry in fillRecordingStrategy's own ordered
+// log — either a delivered fill or an OnBar call — kept structured
+// rather than string-formatted so the test asserting on it never
+// depends on instrument.ID's own String() format.
+type recordedEvent struct {
+	kind       string // "fill" or "onbar"
+	instrument instrument.ID
+	timestamp  time.Time
+	side       order.Side // only meaningful for "fill"
+}
+
+// fillRecordingStrategy wraps bracketEntryStrategy's own bracket
+// submission, additionally implementing strategy.FillHandler
+// (ADR-060) and recording, in delivery order, one recordedEvent per
+// OnFill call and one per OnBar call — proving Scheduler delivers
+// every fill for a batch strictly before that batch's own OnBar
+// calls, not merely that OnFill is called at all.
+type fillRecordingStrategy struct {
+	bracketEntryStrategy
+	log []recordedEvent
+}
+
+func (s *fillRecordingStrategy) OnFill(ctx context.Context, event strategy.FillEvent, view strategy.View) error {
+	s.log = append(s.log, recordedEvent{
+		kind:       "fill",
+		instrument: event.Fill.Listing.InstrumentID(),
+		timestamp:  event.Fill.Timestamp,
+		side:       event.Fill.Side,
+	})
+	return nil
+}
+
+func (s *fillRecordingStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	s.log = append(s.log, recordedEvent{kind: "onbar", instrument: ev.Instrument, timestamp: ev.Bar.Time})
+	return s.bracketEntryStrategy.OnBar(ctx, ev, view)
+}
+
+// TestScheduler_FillHandlerDeliversFillsBeforeOnBarInSameBatch is
+// ADR-060's own required end-to-end proof (issue #370): every fill a
+// batch produces is delivered to strategy.FillHandler.OnFill, in
+// delivery order, strictly before that same batch's own OnBar calls —
+// not merely that OnFill fires at all. Reuses
+// TestScheduler_BracketEntryProtectsFromTheFillBarItself's own
+// fixture: both the bracket's entry fill and its own stop-triggered
+// closing fill land on bar 2 (01:00), the same bar whose own OnBar
+// call (for EUR/USD) fillRecordingStrategy also logs.
+func TestScheduler_FillHandlerDeliversFillsBeforeOnBarInSameBatch(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &fillRecordingStrategy{bracketEntryStrategy: bracketEntryStrategy{
+		requirements: bothInstrumentsRequirements(t),
+		instID:       eurusdID(t),
+		side:         order.Sell,
+		stopPrice:    "1.10065",
+	}}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	bar2 := time.Date(2024, time.January, 8, 1, 0, 0, 0, time.UTC)
+	eurusd := eurusdID(t)
+
+	var fillIdxs []int
+	onBarIdx := -1
+	for i, ev := range strat.log {
+		if !ev.timestamp.Equal(bar2) || !ev.instrument.Equal(eurusd) {
+			continue
+		}
+		switch ev.kind {
+		case "fill":
+			fillIdxs = append(fillIdxs, i)
+		case "onbar":
+			if onBarIdx == -1 {
+				onBarIdx = i
+			}
+		}
+	}
+	require.Len(t, fillIdxs, 2, "both the entry fill and the stop-triggered closing fill must have been delivered via OnFill")
+	require.NotEqual(t, -1, onBarIdx, "OnBar must still have been called for EUR/USD's own bar 2")
+	for _, fi := range fillIdxs {
+		assert.Less(t, fi, onBarIdx, "every fill for a batch must be delivered before that batch's own OnBar call")
+	}
+
+	// The two fills themselves are delivered in delivery order: entry
+	// (Sell) before the stop-triggered closing fill (Buy) — matching
+	// sched.Fills()' own already-asserted order in the sibling test.
+	assert.Equal(t, order.Sell, strat.log[fillIdxs[0]].side)
+	assert.Equal(t, order.Buy, strat.log[fillIdxs[1]].side)
+}
+
 // TestScheduler_BracketEntryRejectedDoesNotAbortRun is the harmless
 // half of PR #367 review's blocker 2: when the *entry* leg itself is
 // rejected, nothing was ever opened — the identical harmless case an

@@ -102,54 +102,41 @@ type Strategy struct {
 	//     that default reset with this exact value (PR #369 review;
 	//     see InitialStopSeeder's own doc comment for why this is a
 	//     second call rather than a parameter on OnEntry itself).
-	//   - Flat->Flat, with the account's own RealizedPnL unchanged
-	//     since the last bar observed: the entry never filled at all
-	//     (rejected outright) — simply discarded, see
+	//   - Flat->Flat, with entryFilledThisBatch false: the entry never
+	//     filled at all (rejected outright) — simply discarded, see
 	//     discardUnfilledBracket.
-	//   - Flat->Flat, with RealizedPnL changed: the entry filled *and*
-	//     its own attached stop triggered within the same bar,
+	//   - Flat->Flat, with entryFilledThisBatch true: the entry filled
+	//     *and* its own attached stop triggered within the same bar,
 	//     invisible to a side-only Flat/Long comparison (PR #369
-	//     review, blocker 1) — see lastRealizedPnL's own doc comment.
+	//     review, blocker 1) — see entryFilledThisBatch's own doc
+	//     comment.
 	pendingInitialStop *num.Price
-	// lastRealizedPnL is this Strategy's own last-observed
-	// view.Account().RealizedPnL(), captured at the end of every OnBar
-	// call regardless of return path (issue #368, PR #369 review). It
-	// exists solely to detect the one lifecycle transition a bare
-	// Flat/Long position-side comparison cannot see at all: a bracket
-	// entry (order.IntentEnterWithStop) whose own attached stop
-	// triggers within the same bar the entry itself fills.
-	// sideLastBar stays order.Flat across both the bar before and the
-	// bar of such an episode — OnBar never observes order.Long in
-	// between — so without this signal, onExit would never run:
-	// everExited would stay false, ReEntryRule.OnExit would never be
-	// called, and the next entry would be incorrectly governed by
-	// InitialEntryRule instead of the configured ReEntryRule.
-	// RealizedPnL only changes when a position actually closes
-	// (opening one does not move it), so a change observed while
-	// pendingInitialStop is non-nil and side is Flat is conclusive
-	// proof a full bracket round trip occurred.
+	// entryFilledThisBatch and stopFilledThisBatch are set by OnFill
+	// (ADR-060, issue #370) — strategy.FillHandler delivers every fill
+	// for this strategy's own account, in order, strictly before OnBar
+	// runs for the same batch. A fill for this Strategy's own
+	// instrument with Side Buy sets entryFilledThisBatch;
+	// order.Sell sets stopFilledThisBatch. Both are cleared,
+	// unconditionally, at the end of every OnBar call (see OnBar's own
+	// defer) — they describe only "this batch," never carried forward.
 	//
-	// A change is sufficient but not necessary (PR #369 re-review): a
-	// long bracket entry filling at this bar's own Open, already at or
-	// below its own protective stop, realizes exactly zero PnL —
-	// ADR-026's gap rule fills the stop at that identical Open price,
-	// so entry and exit share one price. OnBar's own Flat branch
-	// covers that case with a second, independent check
-	// (event.Bar.Open against the bracket's own stop) that needs no
-	// account state at all. Together the two checks are exhaustive for
-	// every fill outcome this codebase's own fill models produce
-	// today: a non-gap intrabar touch always realizes a strictly
-	// negative PnL (the stop necessarily fills below the entry's own
-	// Open), and a gap-through-Open fill always realizes exactly zero.
-	// What remains unprovable from account/bar state alone is the
-	// reverse case — a bracket entry rejected outright (no fill at
-	// all) on a bar whose Open independently happens to sit at or
-	// below whatever stop price would have been used. That coincidence
-	// is unrelated to genuine price/risk causality and is not resolved
-	// here; closing it fully would need a real fill-event signal (for
-	// example a wired FillHandler capability) rather than inference
-	// over account/bar snapshots.
-	lastRealizedPnL num.Money
+	// OnBar's own Flat branch consumes only entryFilledThisBatch today
+	// (stopFilledThisBatch is tracked because PR #369/#370 review asked
+	// for named, distinguishable fill identity rather than one generic
+	// "some fill happened" boolean, not because current logic needs
+	// both): if the bracket's entry genuinely filled this batch and the
+	// position is observed order.Flat again at the end of the same
+	// batch, its own attached protective stop is *structurally* the
+	// only thing that could have closed it — nothing else can act on
+	// an open position before OnBar itself ever runs. This is
+	// authoritative, not a heuristic (unlike the RealizedPnL/
+	// event.Bar.Open checks this field set replaces): a bracket entry
+	// that was rejected outright never produces a fill at all, so
+	// entryFilledThisBatch correctly stays false regardless of what
+	// that bar's own Open happens to be relative to the hypothetical
+	// stop — the exact residual gap those heuristics could not close.
+	entryFilledThisBatch bool
+	stopFilledThisBatch  bool
 
 	intents strategy.IntentFactory
 	journal journal.Recorder // nil unless env.Journal was set
@@ -260,13 +247,16 @@ func (s *Strategy) Start(ctx context.Context, env strategy.Environment) error {
 // never compares this bar's own price action against a stop level
 // computed from this same bar.
 func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
-	// Captured once, up front: used both by the Flat-branch same-bar-
-	// round-trip check below and to refresh lastRealizedPnL, via
-	// defer, on every return path (issue #368, PR #369 review) —
-	// including the warm-up early return, so lastRealizedPnL is never
-	// stale relative to what this bar actually observed.
-	currentRealizedPnL := view.Account().RealizedPnL()
-	defer func() { s.lastRealizedPnL = currentRealizedPnL }()
+	// entryFilledThisBatch/stopFilledThisBatch describe only this
+	// batch (ADR-060): OnFill, if called at all, already set them for
+	// this exact batch before this OnBar call runs; clearing them here
+	// via defer — regardless of return path, including the warm-up
+	// early return below — keeps them from ever leaking into a later
+	// batch that produces no fill of its own.
+	defer func() {
+		s.entryFilledThisBatch = false
+		s.stopFilledThisBatch = false
+	}()
 
 	// event.Bar.Close.Float64() is ADR-045's explicit exact-to-analytical
 	// conversion boundary: a direct numeric conversion, never a
@@ -290,30 +280,22 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 		switch {
 		case s.sideLastBar == order.Long:
 			s.onExit(event.Bar)
+		case s.pendingInitialStop != nil && s.entryFilledThisBatch:
+			// The bracket entry genuinely filled this batch (OnFill
+			// already observed a Buy fill for this instrument), and
+			// the position is Flat again at the end of the same
+			// batch: its own attached protective stop is
+			// structurally the only thing that could have closed it
+			// — nothing else can act on an open position before
+			// OnBar itself ever runs (ADR-060, issue #368/#370,
+			// replacing PR #369's own RealizedPnL/event.Bar.Open
+			// heuristics with this authoritative signal).
+			s.onExit(event.Bar)
 		case s.pendingInitialStop != nil:
-			roundTrip, err := realizedPnLChanged(currentRealizedPnL, s.lastRealizedPnL)
-			if err != nil {
-				return nil, fmt.Errorf("smatrend: comparing realized pnl: %w", err)
-			}
-			// A RealizedPnL change alone misses one real case (PR #369
-			// re-review): a long bracket entry filling at this bar's
-			// own Open, already at or below its own protective stop
-			// (ADR-026's gap rule then fills that stop at the
-			// identical Open price) realizes exactly zero PnL — entry
-			// and exit at the same price. event.Bar.Open is knowable
-			// directly from this bar's own data, independent of
-			// account state, and conclusively proves that outcome
-			// whenever it holds.
-			gappedThroughStop := event.Bar.Open.Cmp(*s.pendingInitialStop) <= 0
-			if roundTrip || gappedThroughStop {
-				// The bracket entry filled and its own attached stop
-				// triggered within this same bar (PR #369 review,
-				// blocker 1) — invisible to sideLastBar, which never
-				// observed order.Long in between.
-				s.onExit(event.Bar)
-			} else {
-				s.discardUnfilledBracket()
-			}
+			// entryFilledThisBatch is false: the bracket entry was
+			// never filled at all (rejected outright) — no episode
+			// occurred.
+			s.discardUnfilledBracket()
 		}
 		s.sideLastBar = order.Flat
 		return s.onFlat(ctx, event, crossedAbove, aboveSMA, close, smaValue)
@@ -346,24 +328,37 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 	}
 }
 
-// realizedPnLChanged reports whether cur differs from prev, both
-// account.Snapshot.RealizedPnL() values from the same account and
-// therefore always the same currency (issue #368) — a mismatch would
-// indicate the account itself changed underneath this Strategy, which
-// is reported as an error rather than silently guessed at.
-func realizedPnLChanged(cur, prev num.Money) (bool, error) {
-	cmp, err := cur.Cmp(prev)
-	if err != nil {
-		return false, err
+// OnFill implements the optional strategy.FillHandler capability
+// (ADR-060, issue #370): backtest.Scheduler (or any other runtime
+// implementing the identical contract) delivers every fill for this
+// strategy's own account here, in order, strictly before the OnBar
+// call for whichever bar the fill belongs to. A fill for an
+// instrument other than s.instrumentID is ignored outright — this
+// assumes smatrend is the only strategy trading this account (already
+// assumed elsewhere, see OnBar's own order.Short case). Side
+// distinguishes an entry fill (order.Buy, the only side smatrend ever
+// enters with) from a protective-exit fill (order.Sell) — see
+// entryFilledThisBatch/stopFilledThisBatch's own doc comment for how
+// OnBar consumes this.
+func (s *Strategy) OnFill(ctx context.Context, event strategy.FillEvent, view strategy.View) error {
+	fill := event.Fill
+	if !fill.Listing.InstrumentID().Equal(s.instrumentID) {
+		return nil
 	}
-	return cmp != 0, nil
+	switch fill.Side {
+	case order.Buy:
+		s.entryFilledThisBatch = true
+	case order.Sell:
+		s.stopFilledThisBatch = true
+	}
+	return nil
 }
 
 // discardUnfilledBracket rolls back the speculative state
 // buildEntryIntent's bracket path set for an entry attempt that never
 // actually filled (issue #368): pendingInitialStop and lastStop, both
 // set optimistically before the outcome was known. Called only from
-// the Flat branch's own "no realized-pnl change" case.
+// the Flat branch's own entryFilledThisBatch-false case.
 func (s *Strategy) discardUnfilledBracket() {
 	s.pendingInitialStop = nil
 	s.lastStop = nil
