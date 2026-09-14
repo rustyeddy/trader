@@ -161,10 +161,12 @@ func (r *reclaimExitPriceReEntryRule) ShouldEnter(ctx ReEntryContext) bool {
 // new High in its own check, so a bar can never trivially "break out"
 // against a high it itself just set.
 //
-// ObserveFlatBar is the sole mutator of sinceExitHigh — ShouldEnter is
-// a pure read-only comparison against whatever value ObserveFlatBar
-// has already established (issue #363, mirroring PR #362's identical
-// fix for nBarBreakoutReEntryRule below). PR #362 review found and
+// ObserveFlatBar is the sole per-bar mutator of sinceExitHigh — OnExit
+// still assigns it once, to seed each new episode, but ShouldEnter
+// itself is a pure read-only comparison against whatever value
+// ObserveFlatBar has already established (issue #363, mirroring PR
+// #362's identical fix for nBarBreakoutReEntryRule below). PR #362
+// review found and
 // deliberately deferred this exact bug rather than fixing it as a
 // side effect of issue #361's own, unrelated scope: sinceExitHigh was
 // previously updated only inside ShouldEnter, which — like every
@@ -187,9 +189,11 @@ func (r *breakoutReEntryRule) OnExit(_ num.Price, exitBar marketdata.Bar) {
 	r.sinceExitHigh = exitBar.High
 }
 
-// ObserveFlatBar is the sole mutator of r.sinceExitHigh — ShouldEnter
-// is now purely a read-only comparison against whatever value
-// ObserveFlatBar has already established (issue #363 fix).
+// ObserveFlatBar is the sole per-bar mutator of r.sinceExitHigh —
+// OnExit still assigns it once per episode, to seed it, but
+// ShouldEnter itself is now purely a read-only comparison against
+// whatever value ObserveFlatBar has already established (issue #363
+// fix).
 func (r *breakoutReEntryRule) ObserveFlatBar(bar marketdata.Bar) {
 	if bar.High.Cmp(r.sinceExitHigh) > 0 {
 		r.sinceExitHigh = bar.High
