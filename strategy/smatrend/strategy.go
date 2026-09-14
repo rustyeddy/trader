@@ -273,6 +273,15 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 	aboveSMA := close > smaValue
 	crossedAbove := s.cross.update(aboveSMA)
 
+	// Unconditional, regardless of position side — issue #365's own
+	// SMAObserver capability: the SMA's own trajectory keeps moving
+	// while Long exactly as it does while Flat, so a rule that
+	// depends on it (for example smaSlopeReEntryRule) must see every
+	// ready bar, not only the flat ones ObserveFlatBar would supply.
+	if obs, ok := s.reEntryRule.(SMAObserver); ok {
+		obs.ObserveSMA(smaValue)
+	}
+
 	side := currentPositionSide(view, s.instrumentID)
 
 	switch side {

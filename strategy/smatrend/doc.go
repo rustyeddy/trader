@@ -62,7 +62,22 @@
 //     back above the SMA before this rule is even consulted, its own
 //     meaning is simply "resume immediately once the bullish regime
 //     returns," without waiting for a fresh cross or a
-//     reclaim/breakout threshold.
+//     reclaim/breakout threshold. "above-sma-slope-20" and
+//     "above-sma-slope-50" (issue #365) add a long-term-trend
+//     confirmation on top of the same central above-SMA gate:
+//     re-enter only once the SMA itself is rising over the preceding
+//     20 or 50 bars (SMA(today) > SMA(N bars ago)) — see
+//     reentryrule.go's own smaSlopeReEntryRule and the new
+//     SMAObserver capability (fed every ready bar regardless of
+//     position side, unlike ObserveFlatBar, since the SMA's own
+//     trajectory keeps moving while Long too). "retrace-25" and
+//     "retrace-50" (issue #365) instead confirm a fixed fraction of
+//     recovery from the post-exit low: track the lowest Low observed
+//     since the exit (resetting the recovery threshold from any new,
+//     lower low) and re-enter once the close has recovered 25% or
+//     50% of the decline from the exit price down to that low — see
+//     percentRetraceReEntryRule's own doc comment for the exact
+//     formula and its no-decline degenerate case.
 //   - InitialEntryRule (Config.InitialEntryModeName) decides, once
 //     per bar while flat and before this strategy has ever held or
 //     exited a position, whether to make its very first entry (issue

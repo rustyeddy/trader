@@ -1187,3 +1187,66 @@ func TestProbationTrendExitRule_SeedInitialStopPreventsLoosening(t *testing.T) {
 	require.NotNil(t, decision.NewStop)
 	assert.Equal(t, "99.99", decision.NewStop.String())
 }
+
+// TestStrategy_SMASlopeReEntryObservesSMAContinuouslyNotJustWhileFlat
+// is issue #365's own required integration proof for the new
+// SMAObserver wiring (mirroring issue #361's own
+// TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes):
+// OnBar must call ObserveSMA on *every* ready bar, including the two
+// bars spent Long between entry and exit, not only the flat ones.
+//
+// Registers a temporary lookback-3 variant ("test-sma-slope-3":
+// window size 4) so the proof needs only a handful of bars. By the
+// exit bar (bar 7), five ready bars have occurred (bars 3-7); the
+// window (last 4 samples) is [sma4, sma5, sma6, sma7] if ObserveSMA
+// truly runs unconditionally — sma5/sma6 were fed while Long. If
+// ObserveSMA instead only ran while flat, only three samples would
+// ever have been fed by bar 7 (sma3, sma4 before entry, plus sma7
+// itself) — one short of the four this lookback needs — and
+// ShouldEnter would report false regardless of the real slope,
+// leaving the position flat instead of re-entering on this bar.
+func TestStrategy_SMASlopeReEntryObservesSMAContinuouslyNotJustWhileFlat(t *testing.T) {
+	reEntryRuleRegistry["test-sma-slope-3"] = newSMASlopeReEntryRule(3)
+	defer delete(reEntryRuleRegistry, "test-sma-slope-3")
+
+	h := newTestHarness(t, Config{
+		SMAPeriod:           3,
+		ExitRuleName:        "trailing-stop",
+		TrailingStopPercent: num.MustParseRate("0.10"),
+		ReEntryRuleName:     "test-sma-slope-3",
+	})
+
+	for i, c := range []float64{100, 100, 100} {
+		h.onBar(i+1, bar{open: c, high: c, low: c, close: c})
+	}
+
+	// Bar 4: sma(100,100,105)=101.667, close (105) above it — fresh
+	// cross, the very first entry (governed by InitialEntryRule, not
+	// ReEntryRule). ObserveSMA(101.667) is this rule's own first
+	// sample, fed while still Flat (the fill happens next bar).
+	intents, _ := h.onBar(4, bar{open: 103, high: 106, low: 102, close: 105})
+	require.Len(t, intents, 1)
+	require.Equal(t, order.IntentEnter, intents[0].Kind)
+	h.side = order.Long
+
+	// Bars 5-6: Long. sma5=(100,105,110)=105, sma6=(105,110,115)=110
+	// — both fed via ObserveSMA while the position is open, the exact
+	// samples a flat-only wiring would miss entirely.
+	h.onBar(5, bar{open: 106, high: 112, low: 105, close: 110})
+	h.onBar(6, bar{open: 111, high: 117, low: 110, close: 115})
+
+	// Bar 7: the trailing stop triggers (ADR-026) — modeled via
+	// triggerStop, as every other test in this file does — and this
+	// bar's own close (120) recovers back above its own sma7=(110,
+	// 115,120)=115, so above-sma's own central gate is satisfied on
+	// this exact bar (the "stop-out while still above the SMA" case
+	// TestStrategy_AboveSMAReEntryFiresOnTheVeryNextEligibleFlatBar
+	// already established is reachable). The window at this point,
+	// if fed continuously, is [101.667, 105, 110, 115] — oldest
+	// (101.667) < newest (115): rising, so ShouldEnter must report
+	// true and a fresh re-entry intent must fire on this same bar.
+	h.triggerStop()
+	intents, _ = h.onBar(7, bar{open: 118, high: 121, low: 117, close: 120})
+	require.Len(t, intents, 1, "ObserveSMA must have run on bars 5 and 6 (while Long) for the window to already hold 4 samples by bar 7 — a flat-only wiring would have only 3 and report no re-entry at all")
+	assert.Equal(t, order.IntentEnter, intents[0].Kind)
+}
