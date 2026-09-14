@@ -117,8 +117,8 @@ type oosVariantResult struct {
 	ExposurePct       float64 `json:"exposure_pct"`
 	WhipsawCount      int     `json:"whipsaw_count"`
 	GoodDefensiveExit int     `json:"good_defensive_exit_count"`
-	ReturnVsBuyHold   float64 `json:"return_vs_buy_and_hold"`  // OOSReturn - buy-and-hold OOS return
-	MaxDDVsBuyHold    float64 `json:"max_dd_vs_buy_and_hold"`  // MaxDrawdown - buy-and-hold OOS max drawdown
+	ReturnVsBuyHold   float64 `json:"return_vs_buy_and_hold"` // OOSReturn - buy-and-hold OOS return
+	MaxDDVsBuyHold    float64 `json:"max_dd_vs_buy_and_hold"` // MaxDrawdown - buy-and-hold OOS max drawdown
 	IsBuyAndHold      bool    `json:"is_buy_and_hold,omitempty"`
 	Classification    string  `json:"classification,omitempty"` // VALIDATED / MIXED / REJECTED, baseline/buy-and-hold left blank
 }
