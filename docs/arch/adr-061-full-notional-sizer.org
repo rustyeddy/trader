@@ -182,6 +182,37 @@ and confirms the resulting position's real cost does not equal
 =Equity()= — the =Sizer= never silently corrects for an execution-price
 difference it cannot know about pre-submit.
 
+*** Flat-only precondition, at the whole-account level
+
+=order.IntentEnter= means "open or increase" a position, but
+=fullNotionalSizer= always computes a brand-new order equal to its
+*entire* available budget — it is an account-level 100%-invested
+contract, not "100% of capital for one instrument alongside other
+existing exposure," which would be a materially different, narrower
+semantic this =Sizer= does not implement. =Size= therefore rejects
+outright with a new sentinel, =ErrFullNotionalRequiresFlat=, whenever
+=SizeInput.Account= holds *any* open position at all, regardless of
+instrument — not only a position in =SizeInput.Listing='s own
+instrument (PR #371 re-review corrected an earlier, narrower draft of
+this precondition: an instrument-scoped check alone does not protect
+the account-level contract, since =BuyingPower() >= Equity()= is a
+real possibility on a leveraged/margin account, and =SizeInput= places
+no upper bound on =BuyingPower= relative to =Equity=, so a second
+full-equity-notional order against a *different* instrument would
+still have been allowed through). This matches the =Sizer='s own
+motivating contract exactly: =Flat -> invest up to 100% -> Long ->
+Flat=.
+=TestFullNotionalSizerRejectsExistingPositionInSameInstrument= and
+=TestFullNotionalSizerRejectsExistingPositionInDifferentInstrument=
+prove both cases; the latter is the specific regression PR #371
+re-review required, confirmed meaningful by reverting to the
+instrument-scoped check and observing it pass incorrectly.
+
+A target-exposure/delta computation (sizing to reach 100% of equity
+*net* of an existing position, rather than rejecting outright) was
+considered and rejected as a materially larger design this issue's own
+scope excludes — see Alternatives Considered.
+
 * Consequences
 
 - =risk.SizeInput= and =pipeline.Input= are both public types; this ADR
@@ -226,3 +257,18 @@ difference it cannot know about pre-submit.
   (ADR-028) — a =Sizer= that promised this would be lying about
   something outside its own knowledge. Documented as an explicit,
   tested boundary instead of an implicit assumption.
+- *An instrument-scoped flat check* (reject only when =Account= already
+  holds a position in =SizeInput.Listing='s own instrument, rather than
+  any instrument). This was this ADR's own first draft, corrected in PR
+  #371 re-review: it does not protect the account-level "100% invested"
+  contract this =Sizer= actually claims, since an existing position in a
+  *different* instrument can coexist with =BuyingPower() >= Equity()=
+  and still let a second full-equity-notional order through.
+- *A target-exposure/delta computation* (size to reach 100% of equity
+  net of whatever position already exists, rather than requiring
+  =Flat=). Rejected as a materially larger design — it would need its
+  own answer for partial fills, multiple existing lots, and short
+  positions — genuinely out of this issue's own scope; the flat-only
+  precondition is the smaller, sufficient change for the SMA Long Hold
+  =Flat -> invest up to 100% -> Long -> Flat= contract this =Sizer=
+  actually needs to serve.

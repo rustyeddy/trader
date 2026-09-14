@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	"github.com/stretchr/testify/assert"
@@ -471,6 +472,35 @@ func TestFullNotionalSizerUsesEquityWhenBuyingPowerIsHigher(t *testing.T) {
 	assert.True(t, got.Equal(num.MustParseQuantity("100")), "got %s", got)
 }
 
+// mustGbpUsdListingWithSpec is mustListingWithSpec's own identical
+// pattern for a second, genuinely different instrument (GBP/USD
+// rather than EUR/USD) — needed to prove fullNotionalSizer's flat-only
+// guard is account-wide, not merely scoped to the instrument being
+// sized (PR #371 re-review): mustListingWithSpec always builds EUR/USD
+// regardless of its own provider/spec parameters, so it cannot itself
+// produce a second, distinct instrument identity.
+func mustGbpUsdListingWithSpec(t *testing.T, provider, tickSize, quantityIncrement, multiplier, settlementCurrency string) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice(tickSize),
+		num.MustParseQuantity(quantityIncrement),
+		num.MustParseRate(multiplier),
+		num.MustParseCurrency(settlementCurrency),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   provider,
+		Symbol:     "GBP_USD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
+}
+
 // TestFullNotionalSizerRejectsExistingPositionInSameInstrument is PR
 // #371 review's own required blocker regression: order.IntentEnter
 // means "open or increase," but fullNotionalSizer always computes a
@@ -489,6 +519,32 @@ func TestFullNotionalSizerRejectsExistingPositionInSameInstrument(t *testing.T) 
 	_, err := s.Size(context.Background(), SizeInput{
 		Account:        acc,
 		Listing:        listing,
+		ReferencePrice: &ref,
+	})
+	require.ErrorIs(t, err, ErrFullNotionalRequiresFlat)
+}
+
+// TestFullNotionalSizerRejectsExistingPositionInDifferentInstrument is
+// PR #371 re-review's own required regression: the flat-only guard is
+// account-wide, not merely scoped to the instrument being sized. An
+// existing position in a *different* instrument (GBP/USD) must still
+// reject sizing a brand-new full-notional order in EUR/USD — an
+// instrument-scoped check alone would incorrectly allow this, letting
+// a second full-equity-notional order stack on top of existing
+// exposure (for example on a leveraged account where BuyingPower() >=
+// Equity()).
+func TestFullNotionalSizerRejectsExistingPositionInDifferentInstrument(t *testing.T) {
+	s := NewFullNotionalSizer()
+	target := mustListingWithSpec(t, "sim", "0.01", "1", "1", "USD")
+	other := mustGbpUsdListingWithSpec(t, "sim", "0.01", "1", "1", "USD")
+	accountID := mustAccountID(t)
+	existing := mustPosition(t, accountID, other, order.Long, "10")
+	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", existing)
+	ref := num.MustParsePrice("100.00")
+
+	_, err := s.Size(context.Background(), SizeInput{
+		Account:        acc,
+		Listing:        target,
 		ReferencePrice: &ref,
 	})
 	require.ErrorIs(t, err, ErrFullNotionalRequiresFlat)

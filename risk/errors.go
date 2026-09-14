@@ -37,16 +37,17 @@ var (
 	ErrSizeRoundsToZero = errors.New("risk: sizing rounds down to zero at this listing's quantity increment")
 
 	// ErrFullNotionalRequiresFlat reports that fullNotionalSizer
-	// (ADR-061) was asked to size a position for an instrument the
-	// account already holds one in. order.IntentEnter means "open or
-	// increase," but fullNotionalSizer always computes a brand-new
-	// order equal to its entire available budget; sizing a second such
-	// order on top of an existing position could push total exposure
-	// past the 100%-of-equity ceiling this Sizer's whole contract
-	// promises never to exceed. See fullNotionalSizer's own doc
-	// comment for why this is a flat-only precondition rather than a
-	// target-exposure/delta computation.
-	ErrFullNotionalRequiresFlat = errors.New("risk: full-notional sizing requires no existing position in this instrument")
+	// (ADR-061) was asked to size a position while the account already
+	// holds an open position in *any* instrument, not only the one
+	// being sized (PR #371 re-review). order.IntentEnter means "open
+	// or increase," but fullNotionalSizer always computes a brand-new
+	// order equal to its entire available budget; sizing it while any
+	// position is already open could push total account exposure past
+	// the 100%-of-equity ceiling this Sizer's whole contract promises
+	// never to exceed. See fullNotionalSizer's own doc comment for why
+	// this is a whole-account flat-only precondition rather than a
+	// target-exposure/delta computation or an instrument-scoped check.
+	ErrFullNotionalRequiresFlat = errors.New("risk: full-notional sizing requires the account to hold no open positions")
 
 	// ErrInsufficientRuleInput reports that a Rule could not evaluate
 	// Input because it required contextual data Input did not carry —

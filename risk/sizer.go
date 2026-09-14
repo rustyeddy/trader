@@ -214,20 +214,27 @@ func (fixedFractionSizer) Size(ctx context.Context, in SizeInput) (num.Quantity,
 // or report the result as reference-price-exact rather than
 // fill-price-exact.
 //
-// Flat-only (issue #364/PR #371 review): order.IntentEnter means
-// "open or increase" a position, but this Sizer always computes a
-// brand-new order equal to the *entire* available budget. If
-// SizeInput.Account already holds a position in SizeInput.Listing's
-// own instrument, sizing another full-notional order on top of it
-// would push total exposure past the 100% ceiling this Sizer's whole
-// contract promises never to exceed — min(Equity, BuyingPower) caps
-// only *this one order's* budget, not the resulting *position's*
-// total size. Rather than compute a target-exposure delta (a
-// materially larger design this issue's own scope excludes — see
-// ADR-061's own Alternatives Considered), Size rejects outright with
-// ErrFullNotionalRequiresFlat whenever Account already carries a
-// position in this instrument, keeping the semantics honest for
-// exactly the flat-before-entry use case this Sizer exists for.
+// Flat-only, at the whole-account level (issue #364/PR #371 review):
+// order.IntentEnter means "open or increase" a position, but this
+// Sizer always computes a brand-new order equal to the *entire*
+// available budget. This Sizer's own contract is account-level 100%
+// invested, not "100% of capital for one instrument alongside other
+// existing exposure" — a materially different, narrower semantic this
+// Sizer does not implement. Checking only SizeInput.Listing's own
+// instrument for an existing position is not enough to protect that
+// contract: with BuyingPower() >= Equity() (a real possibility on a
+// leveraged/margin account; SizeInput places no upper bound on
+// BuyingPower relative to Equity), a second full-equity-notional order
+// against a *different* instrument would still be allowed through an
+// instrument-scoped check, and even when BuyingPower() < Equity(),
+// resulting portfolio exposure can still exceed the intended 100%
+// depending on the existing position and margin model. Size therefore
+// rejects outright with ErrFullNotionalRequiresFlat whenever Account
+// holds *any* open position at all, regardless of instrument, rather
+// than compute a target-exposure delta (a materially larger design
+// this issue's own scope excludes — see ADR-061's own Alternatives
+// Considered) — matching this Sizer's own motivating contract exactly:
+// Flat -> invest up to 100% -> Long -> Flat.
 type fullNotionalSizer struct{}
 
 // NewFullNotionalSizer returns a Sizer implementing exact,
@@ -249,10 +256,9 @@ func (fullNotionalSizer) Size(ctx context.Context, in SizeInput) (num.Quantity, 
 	if in.ReferencePrice == nil || in.ReferencePrice.IsZero() {
 		return num.Quantity{}, fmt.Errorf("%w: reference price must be positive for full-notional sizing", ErrInvalidSizeInput)
 	}
-	for _, p := range in.Account.Positions() {
-		if p.Listing.InstrumentID().Equal(in.Listing.InstrumentID()) {
-			return num.Quantity{}, fmt.Errorf("%w: account already holds a %s position in %s", ErrFullNotionalRequiresFlat, p.Side, in.Listing.InstrumentID())
-		}
+	if positions := in.Account.Positions(); len(positions) != 0 {
+		p := positions[0]
+		return num.Quantity{}, fmt.Errorf("%w: account already holds a %s position in %s", ErrFullNotionalRequiresFlat, p.Side, p.Listing.InstrumentID())
 	}
 
 	equity := in.Account.Equity()
