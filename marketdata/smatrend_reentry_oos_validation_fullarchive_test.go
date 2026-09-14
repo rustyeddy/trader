@@ -230,8 +230,7 @@ func TestSMATrendReEntryOOSValidation(t *testing.T) {
 
 		oosTradeCount, oosReEntryCount := 0, 0
 		exposureDays := 0.0
-		firstOOSTradeSeen := false
-		for _, tr := range all {
+		for i, tr := range all {
 			end := tr.ClosedAt
 			if end.IsZero() {
 				end = spanEnd
@@ -239,18 +238,26 @@ func TestSMATrendReEntryOOSValidation(t *testing.T) {
 			if end.Before(oosStart) {
 				continue
 			}
-			oosTradeCount++
-			// A re-entry is any OOS trade other than the very first
-			// trade this account ever opened overall (matching
-			// #372's own reentry_count convention) that itself opens
-			// at or after the OOS boundary; a position merely carried
-			// open across the boundary from development is not a
-			// fresh OOS re-entry.
-			if !tr.OpenedAt.Before(oosStart) {
-				if firstOOSTradeSeen || tr.OpenedAt.After(oosStart) || oosTradeCount > 1 {
-					oosReEntryCount++
-				}
-				firstOOSTradeSeen = true
+			// trade_count is the count of round trips actually closed
+			// at or after the OOS boundary — a still-open position
+			// (ClosedAt zero) is reported separately via OpenAtEnd and
+			// must not inflate this count (PR #374 review).
+			if !tr.ClosedAt.IsZero() {
+				oosTradeCount++
+			}
+			// A re-entry is any trade other than the account's very
+			// first trade overall (i==0 in the full, sorted all slice
+			// — never a re-entry by definition) whose own OpenedAt
+			// falls at or after the OOS boundary; a position merely
+			// carried open across the boundary from development is
+			// not a fresh OOS re-entry. Indexing into the full
+			// (not OOS-filtered) all slice — rather than tracking
+			// "first OOS trade seen" — correctly handles an earlier
+			// trade that both opened and closed entirely before
+			// oosStart, which this loop's own oosStart filter above
+			// skips over without ever seeing it (PR #374 review).
+			if i > 0 && !tr.OpenedAt.Before(oosStart) {
+				oosReEntryCount++
 			}
 			overlapStart := tr.OpenedAt
 			if overlapStart.Before(oosStart) {
@@ -310,7 +317,15 @@ func TestSMATrendReEntryOOSValidation(t *testing.T) {
 	// construction, no Sizer involved).
 	bhStartBar := oosStartBar
 	bhEndBar := lastBarBefore(bars, spanEnd)
-	bhReturn := bhEndBar.Close.Float64()/bhStartBar.Open.Float64() - 1
+	// The strategy's own OOS baseline equity point (oosStartAnchor,
+	// above) is the scheduler's mark-to-market value as of that bar's
+	// own Close (backtest.Scheduler.equityCurve's own doc comment):
+	// it already reflects that bar's full open-to-close move. Anchor
+	// the benchmark at the same Close, not Open, so both sides of the
+	// comparison start from the identical boundary instant instead of
+	// silently giving buy-and-hold one extra bar's worth of return
+	// the strategy side does not get (PR #374 review).
+	bhReturn := bhEndBar.Close.Float64()/bhStartBar.Close.Float64() - 1
 	bhCAGR := cagrFromReturn(bhReturn, oosYears)
 	bhMaxDD := 0.0
 	peak := 0.0
@@ -330,7 +345,7 @@ func TestSMATrendReEntryOOSValidation(t *testing.T) {
 		equityByVariant["buy-and-hold"] = append(equityByVariant["buy-and-hold"], struct {
 			t time.Time
 			v float64
-		}{b.Time, c / bhStartBar.Open.Float64()})
+		}{b.Time, c / bhStartBar.Close.Float64()})
 	}
 	bhResult := oosVariantResult{
 		Variant:      "buy-and-hold",
