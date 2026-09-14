@@ -64,9 +64,13 @@ verified: a strategy author may still implement =strategy.Strategy=
 directly and compile into their own Go binary with no protocol
 involved at all. The out-of-process path exists for strategies that
 cannot or should not be compiled into a Go binary sharing Trader's own
-dependency tree — a different language, a separately deployed process,
-or a security boundary around strategy code the operator does not
-fully trust.
+dependency tree — a different language, or a separately deployed
+process whose own crash, hang, or resource use should not be able to
+take the host down with it. It does *not*, by itself, provide a
+security boundary around strategy code an operator does not fully
+trust — see the Unix-domain-socket transport section below for the
+precise process-isolation-versus-security-boundary distinction =v1=
+actually provides and does not provide.
 
 ** =strategy.Strategy= remains the sole runtime contract
 
@@ -112,27 +116,48 @@ side during a migration window without ambiguity over which schema a
 given RPC uses.
 
 Every connection begins with an explicit handshake RPC
-(=Handshake=), carried out before any market/account data flows:
-the external strategy process reports its own protocol version,
-strategy name/version (mirroring =strategy.Descriptor.Name=/
-=Version=), and declared capabilities; the host reports its own
-supported protocol version(s) and rejects the connection outright on
-a version or capability mismatch it cannot bridge, rather than
+(=Handshake=), carried out before any market/account data flows: the
+guest's =Handshake= request reports its own protocol version and
+declared capabilities, and the host's =Handshake= response reports its
+own supported protocol version(s), rejecting the connection outright
+on a version or capability mismatch it cannot bridge rather than
 attempting to silently degrade. This mirrors the architecture
 document's own "Protocol version and capability negotiation occur
 during startup" requirement and gives future capability growth an
 explicit place to be negotiated rather than inferred from RPC calls
-that happen to succeed or fail. =v1='s own negotiable capability set
-is =FillHandler= only (ADR-060; the one optional =strategy=
-capability actually published today) — =AccountEventHandler= and
-=StateManager= remain unpublished in-process capabilities per
-ADR-043's own "Scope" note and are not yet part of this negotiation at
-all; =TickHandler= is excluded entirely, since "tick streaming" is a
-full =v1= non-goal (below), not a capability a =v1= =Handshake= can
-even offer. A later issue that publishes =AccountEventHandler= or
-=StateManager= in-process extends =Handshake='s own capability set
-additively, exactly as =FillHandler= itself was added to =strategy=
-without a =strategy.Strategy= interface change (ADR-060).
+that happen to succeed or fail.
+
+*The guest's =Handshake= request carries the complete
+=strategy.Descriptor= the guest's own wrapped strategy would return
+from =Describe()= in-process* — name, version, capabilities, *and*
+the full =[]DataRequirement= list (instrument, interval, warm-up bars
+per instrument), not only name/version/capabilities as an earlier
+draft of this ADR said (review finding: =Describe()= must be
+answerable before =Start=, and =backtest.Runner= — like any
+=strategy.Strategy= caller — reads =Descriptor.Requirements= to
+validate data/warm-up *before* calling =Start= at all, so the
+requirements cannot be deferred to a later RPC). =ExternalStrategy-
+Adapter.Describe()= returns this handshake-supplied descriptor
+directly, with no further RPC round trip, and every later use of
+"the declared requirements" in this ADR (=GetHistoryBars= scoping,
+below) refers to this same handshake payload — there is no second,
+separate requirements declaration anywhere in =v1=.
+
+=v1='s own negotiable capability set is =FillHandler= only (ADR-060;
+the one optional =strategy= capability actually published today) —
+=AccountEventHandler= and =StateManager= remain unpublished in-process
+capabilities per ADR-043's own "Scope" note and are not yet part of
+this negotiation at all; =TickHandler= is excluded entirely, since
+"tick streaming" is a full =v1= non-goal (below), not a capability a
+=v1= =Handshake= can even offer. History/=GetHistoryBars= is *not* a
+negotiated capability at all (see the =View= section below, corrected
+during review to remove an internal inconsistency): it is a plain,
+always-available =v1= RPC, scoped by the same handshake-declared
+=Requirements=, not gated by =Handshake='s capability list. A later
+issue that publishes =AccountEventHandler= or =StateManager=
+in-process extends =Handshake='s own capability set additively,
+exactly as =FillHandler= itself was added to =strategy= without a
+=strategy.Strategy= interface change (ADR-060).
 
 ** Transport and topology: Unix-domain socket, host as gRPC server
 
@@ -140,14 +165,53 @@ without a =strategy.Strategy= interface change (ADR-060).
 socket (gRPC's own =unix:= target scheme) — the external strategy
 process and the Trader host process run on the same machine. This is
 deliberately the narrowest transport that satisfies the issue's own
-goal (out-of-process, not out-of-host): it needs no TLS material, no
-network firewall configuration, and no additional authentication
-scheme beyond OS-level filesystem permissions on the socket path
-itself, while still giving a strategy process genuine process
-isolation (a crash, hang, or resource leak in the strategy process
-cannot take down the host process, and the strategy process holds no
-broker, risk, pipeline, or execution handle to misuse even if
-compromised).
+goal (out-of-process, not out-of-host): it needs no TLS material and
+no network firewall configuration to be reachable at all.
+
+*This is process isolation, not a security boundary* (review finding,
+Copilot): a crash, hang, or panic in the guest process cannot take
+down the host process directly, and the guest holds no broker, risk,
+pipeline, or execution handle to misuse even if compromised — that
+part of the earlier claim stands. But OS-level filesystem permissions
+on the socket path do not authenticate the specific peer process on
+the other end of it: any process running as the same user (or an
+authorized group member, depending on how the socket's permissions are
+set) can connect and drive the =v1= service, and a same-machine guest
+can still consume host resources (CPU, memory, file descriptors) or
+read whatever the host process's own user account can read, neither
+of which this transport prevents. =v1= therefore assumes the guest
+process is *trusted but isolated* — written by the same operator
+running the host, not an arbitrary third party's untrusted code — the
+same trust assumption an in-process =strategy.Strategy= implementation
+already carries today (it runs with the host's own full process
+privileges). Running a genuinely untrusted external strategy would
+need real sandboxing (a restricted user/namespace, resource limits,
+and peer credential verification via =SO_PEERCRED= or equivalent) that
+=v1= does not attempt to design and does not claim to provide.
+
+Because a hung or slow guest is exactly as real a risk as any other
+strategy failure mode, and the architecture document's own "Strategy
+Process Contract" section already requires "timeouts and a clear
+policy when a strategy is slow, unavailable, or returns an invalid
+intent" (review finding, Copilot), =v1= adopts the following
+supervision policy rather than leaving it unspecified:
+
+- Every RPC (=Handshake=, each =Run=-stream round trip, each
+  =GetHistoryBars= call) carries a caller-supplied deadline via gRPC's
+  own context-deadline mechanism — =ExternalStrategyAdapter= sets one
+  on every call it makes, not merely relying on the guest to behave.
+- A deadline exceeded on the per-bar =Run= round trip is treated
+  exactly as an in-process strategy's =OnBar= returning an error would
+  be: the runner's own existing slow/failed-strategy policy applies
+  (see the architecture document's own "Strategy Lifecycle" section);
+  =v1= does not introduce a second, parallel failure-handling
+  mechanism, only ensures the runner is never blocked *indefinitely*
+  waiting on a guest that has stopped responding.
+- A guest that fails its deadline repeatedly is disconnected by the
+  host rather than retried indefinitely; the exact retry/backoff
+  policy is implementation detail for the follow-on issue, not frozen
+  here, but "eventually give up and disconnect" is the =v1= contract
+  a follow-on implementation must honor.
 
 *The Trader host process is the gRPC server; the external strategy
 process is the gRPC client.* The host creates the Unix-domain socket
@@ -319,22 +383,33 @@ needs, without attempting the full generality a Go interface allows:
   (ADR-035's "no-lookahead is a layered invariant"), since the
   external process never has an independent channel to request
   fresher data through.
-- The optional =History= capability (when negotiated at =Handshake=)
-  is served by =GetHistoryBars=, a plain unary RPC on
-  =StrategyHostService= the guest calls directly and synchronously
-  whenever its own strategy logic needs historical bars — straight-
-  forward given the corrected server/client topology above (the guest
-  is the gRPC client, so it may call any RPC the host's service
-  exposes at will, independent of the =Run= stream; no callback
-  service or second connection is needed). =ExternalStrategyAdapter=
-  (server-side) constrains every =GetHistoryBars= call to exactly the
-  instruments/intervals the guest's own =Descriptor.Requirements=
-  declared at =Handshake= time, rejecting any request outside that
-  declared set at the RPC boundary rather than relying on the guest to
-  police itself — mirroring ADR-043's own stated invariant precisely:
-  "an external adapter must never gain access to future bars,
-  providers, storage, or broker internals, or mutable account state,
-  that an in-process =Strategy= cannot already see."
+- History is *not* a negotiated =Handshake= capability (review
+  finding: an earlier draft of this ADR said both "the one negotiable
+  =v1= capability is =FillHandler=" and "=GetHistoryBars= exists when
+  =History= is negotiated," which cannot both be true — this ADR picks
+  one model, resolving the inconsistency rather than leaving two
+  contradictory statements in force). =GetHistoryBars= is a plain,
+  always-present unary RPC on =StrategyHostService= — mirroring how
+  =strategy.View.History= is itself already an optional capability of
+  a *View implementation* the host supplies, not something a
+  =strategy.Strategy= negotiates about itself; there is nothing for a
+  guest to "negotiate" here beyond what the always-present RPC already
+  exposes. The guest calls it directly and synchronously whenever its
+  own strategy logic needs historical bars — straightforward given the
+  corrected server/client topology above (the guest is the gRPC
+  client, so it may call any RPC the host's service exposes at will,
+  independent of the =Run= stream; no callback service or second
+  connection is needed). =ExternalStrategyAdapter= (server-side)
+  constrains every =GetHistoryBars= call to exactly the
+  instruments/intervals the guest's own =Handshake=-supplied
+  =Descriptor.Requirements= declared (see the =Handshake= section
+  above — this is the same declaration, not a second one), rejecting
+  any request outside that declared set at the RPC boundary rather
+  than relying on the guest to police itself — mirroring ADR-043's own
+  stated invariant precisely: "an external adapter must never gain
+  access to future bars, providers, storage, or broker internals, or
+  mutable account state, that an in-process =Strategy= cannot already
+  see."
 
 This is deliberately the minimum =v1= slice, not a general remote
 query API: no arbitrary =marketdata.Manager= access, no broker or
@@ -352,21 +427,45 @@ the host's Unix-domain socket as a =v1= gRPC *client*, performs the
 =Handshake= caller role, opens and drives the =Run= stream, and calls
 =GetHistoryBars= directly when the wrapped strategy's =View= needs it
 — all as the actual gRPC client, per the corrected topology above.
-It exposes a small Go interface — shaped
-identically to the subset of =strategy.Strategy= a =v1= strategy can
-actually use (=Describe=, =Start=, =OnBar=, plus whichever optional
-capability interfaces the strategy implements) — that real strategy
-authors implement, so writing a =v1= external strategy in Go looks as
-close as possible to writing an ordinary in-process
-=strategy.Strategy=, differing only in how the resulting binary is
-run and connected. =strategysdk= depends on =protocol/strategy/v1=,
-=order=, =marketdata=, =instrument=, and =num= — the same public
-vocabulary set ADR-043's own =strategy/boundary_test.go= already
-restricts =strategy= itself to — and never on =backtest=, =service=,
-=cmd=, =adapters=, =broker=, =execution=, =risk=, or =pipeline=,
-mirroring that same boundary test's forbidden set, since a guest
-process has exactly the same "no broker, risk, pipeline, or
-execution handle" restriction an in-process strategy does.
+
+*=strategysdk.Strategy= is its own interface, not
+=strategy.Strategy=* (review finding: an earlier draft claimed the SDK
+interface is "shaped identically to =strategy.Strategy=," which
+directly contradicts this ADR's own intent-construction-ownership
+section — =strategy.Strategy.OnBar= returns real, canonical
+=[]order.Intent= built through =Environment.Intents=, but a guest must
+never construct one). =strategysdk.Strategy= mirrors
+=strategy.Strategy='s *shape* (=Describe=, =Start=, =OnBar=, plus
+=strategysdk= equivalents of whichever optional capability interfaces
+the wrapped logic implements) closely enough that porting an in-
+process strategy's decision logic to a =v1= guest is mostly mechanical,
+but its =OnBar= signature returns =[]strategysdk.DescribedIntent=, not
+=[]order.Intent= — the same kind/instrument/side/quantity/stop/
+correlation-token shape the =Run=-stream wire message itself carries
+(intent-construction-ownership section above), with =strategysdk=
+providing typed constructor functions (=strategysdk.Enter=,
+=strategysdk.Exit=, and so on, mirroring =IntentFactory='s own method
+names) so a guest author writes recognizably similar code without ever
+holding, or needing, a real =IntentFactory=. =strategysdk.Environment=
+(the guest's own =Start= argument) is smaller than
+=strategy.Environment= for the same reason: no =Intents= field, since
+the guest never mints canonical intents at all; =Clock= is supplied
+from the guest's own local wall clock (a guest process has no
+simulation-clock equivalent in =v1=, since only backtests use a
+simulated clock and =v1= itself does not yet define a backtest-guest
+determinism story — an explicit, separate future concern, not resolved
+by this ADR).
+
+=strategysdk= depends on =protocol/strategy/v1=, =order= (for the
+shared value types =DescribedIntent= itself is built from — =order.
+Side=, =num.Price=, =num.Quantity=, and =instrument.ID= — not for
+=order.Intent= or =order.NewIntent= themselves, which =strategysdk=
+never calls), =marketdata=, =instrument=, and =num= — never on
+=strategy= itself, and never on =backtest=, =service=, =cmd=,
+=adapters=, =broker=, =execution=, =risk=, or =pipeline=, mirroring
+=strategy/boundary_test.go='s own forbidden set, since a guest process
+has exactly the same "no broker, risk, pipeline, or execution handle"
+restriction an in-process strategy does.
 
 Go is the only =v1= SDK language. Python, Rust, or any other language
 SDK is explicitly deferred (non-goals below) — gRPC/Protobuf's own
@@ -377,28 +476,43 @@ deferring this costs nothing forward-compatibility-wise.
 ** Dependency direction
 
 #+BEGIN_EXAMPLE
-              strategy (existing, unchanged)
-                    ^
-                    |
-        protocol/strategy/v1 (generated Protobuf/gRPC types)
-                 ^        ^
-                 |        |
-   adapters/strategy/external   strategysdk
-   (host-side gRPC server,      (guest-side gRPC client +
-    satisfies strategy.Strategy, thin Go strategy interface,
-    constructed by a composition  imported only by an external
-    root exactly like any other   strategy's own process/binary,
-    strategy.Strategy)            never by Trader itself)
+        strategy              protocol/strategy/v1
+   (existing, unchanged;   (generated Protobuf/gRPC types;
+    no new dependency)      depends on nothing but the
+           ^                 Protobuf runtime + stdlib)
+           |                       ^        ^
+           |                       |        |
+   adapters/strategy/external -----+        |
+   (host-side gRPC server,                  |
+    satisfies strategy.Strategy,            |
+    constructed by a composition            |
+    root exactly like any other             |
+    strategy.Strategy)                      |
+                                             |
+                              strategysdk ---+
+                       (guest-side gRPC client, its own
+                        Strategy/DescribedIntent interface —
+                        not strategy.Strategy/order.Intent;
+                        imported only by an external strategy's
+                        own process/binary, never by Trader itself)
 #+END_EXAMPLE
 
 =protocol/strategy/v1= depends only on generated Protobuf runtime
 support and the standard library — it does not import =strategy=,
 =order=, or any other domain package, since wire types are
-deliberately not aliases of domain types (above). Both
-=adapters/strategy/external= and =strategysdk= depend on
-=protocol/strategy/v1= and the same public domain vocabulary
-(=strategy=, =order=, =marketdata=, =instrument=, =num=, =id=), doing
-the field-by-field translation in both directions independently — the
+deliberately not aliases of domain types (above); the diagram shows no
+edge from it to =strategy=, correcting an earlier draft that drew one
+(review finding: the diagram and the text disagreed). Only
+=adapters/strategy/external= imports =strategy= — it is the one
+package on either side of this boundary that actually constructs
+values through =strategy='s own contract (=strategy.Strategy=,
+=strategy.Environment=, =order.Intent= via the retained
+=IntentFactory=). =strategysdk= imports =order=, =marketdata=,
+=instrument=, and =num= for shared value types, but never =strategy=
+itself, since =strategysdk.Strategy= is its own interface (above), not
+an alias of =strategy.Strategy=. Both =adapters/strategy/external= and
+=strategysdk= depend on =protocol/strategy/v1=, doing the
+field-by-field translation in both directions independently — the
 translation logic is not shared code between host and guest, since
 each side owns a different half of the mapping (constructing domain
 values host-side from wire messages; constructing wire messages
@@ -410,9 +524,14 @@ that =ExternalStrategyAdapter= or =strategysdk= exist.
 ** =v1= scope
 
 - One external strategy process per host connection (below).
-- =Describe=, =Start=, =OnBar= (delivered over the =Run= stream), and
-  the account-snapshot slice of =View= (inline) plus scoped
-  =GetHistoryBars= (a direct unary RPC).
+- =Handshake= carries the guest's complete =strategy.Descriptor=
+  equivalent (name, version, capabilities, and the full
+  =[]DataRequirement= list), answering =Describe()= with no further
+  RPC round trip.
+- =Start=, =OnBar= (delivered over the =Run= stream), and the
+  account-snapshot slice of =View= (inline) plus always-available,
+  requirements-scoped =GetHistoryBars= (a direct unary RPC, not a
+  negotiated capability).
 - =FillHandler= is the one negotiable optional capability in =v1=
   (ADR-060, the only one published in-process today), represented by
   =ExternalStrategyAdapter='s own small constructor-selected wrapper-
@@ -446,10 +565,13 @@ Restated from the issue, with the reasoning for each:
   multiple cooperating external processes). No concrete need, and a
   significant coordination/consistency design of its own.
 - *Checkpoint/restart* for the external process itself (surviving a
-  crash mid-session with state intact). =StateManager= already exists
-  as a =strategy= capability for in-process snapshot/restore; wiring
-  it across the =v1= boundary is deferred with the other optional
-  capabilities above, not designed now.
+  crash mid-session with state intact). =StateManager= is itself still
+  an unpublished, additive-later =strategy= capability (ADR-043's own
+  "Scope" note; corrected here from an earlier draft that incorrectly
+  called it already published) — there is no in-process
+  snapshot/restore contract yet for a =v1= wire mapping to mirror, so
+  this is deferred with the other unpublished optional capabilities
+  above, not designed now.
 - *Multiple strategies per external process.* =v1='s =Handshake=
   assumes one strategy identity per connection; a process that wants
   to run several strategies opens several connections (or several
@@ -479,15 +601,27 @@ Restated from the issue, with the reasoning for each:
   host upgrade that also supports =v2=.
 - ADR-010 remains =Proposed=; its own MQTT-related items are still
   open and are not resolved by this ADR.
-- PR #386 review (owner) corrected three design errors in an earlier
-  draft before acceptance: the host/guest gRPC server/client roles
-  were reversed (making =GetHistoryBars= impossible to issue without a
-  second connection), intent identity was assigned to a new
-  adapter-owned =id.Generator= instead of the run's own retained
+- PR #386 review (owner, first pass) corrected three design errors in
+  an earlier draft before acceptance: the host/guest gRPC server/
+  client roles were reversed (making =GetHistoryBars= impossible to
+  issue without a second connection), intent identity was assigned to
+  a new adapter-owned =id.Generator= instead of the run's own retained
   =IntentFactory=, and optional-capability implementation assumed Go
-  method sets could vary at runtime on one concrete type. All three
-  are corrected above; none is a mechanical revert of a review comment
-  suppressed elsewhere.
+  method sets could vary at runtime on one concrete type.
+- PR #386 review (owner and Copilot, second pass, against the
+  corrected topology) found four further contract inconsistencies:
+  =Handshake= did not actually carry the full =strategy.Descriptor= a
+  runner reads before =Start=; =strategysdk= was described as
+  "identical to =strategy.Strategy=" despite that interface's
+  =OnBar= returning canonical intents a guest must never construct;
+  =GetHistoryBars= was simultaneously described as both
+  =FillHandler=-style negotiated and always-available; the dependency
+  diagram drew a =protocol/strategy/v1= -> =strategy= edge the
+  adjacent text explicitly contradicted; and the transport section
+  overclaimed a Unix-domain socket as a security boundary against
+  untrusted code, with no RPC-deadline/supervision policy for a hung
+  guest. All seven findings across both passes are corrected above;
+  none is a mechanical revert of a review comment addressed elsewhere.
 
 * Alternatives Considered
 
@@ -544,3 +678,34 @@ Restated from the issue, with the reasoning for each:
   capability an in-process =strategy.Strategy= itself is
   architecturally forbidden from having (ADR-005, ADR-006), directly
   violating this ADR's own restated =View= invariant.
+- *A separate pre-=Start= descriptor RPC, instead of folding the full
+  descriptor into =Handshake=.* Considered (the review comment's own
+  second option). Rejected as unnecessary complexity: nothing about
+  =Descriptor= (name, version, capabilities, requirements) is
+  sensitive or expensive to compute, and =Handshake= already exists as
+  the one connection-start round trip every =v1= session requires
+  regardless — adding a second mandatory RPC only to carry a few more
+  fields of the same logical value would not simplify anything a
+  richer =Handshake= response does not already handle.
+- *Claiming =strategysdk.Strategy= as a type alias or embedding of
+  =strategy.Strategy=, letting a guest reuse its exact type
+  signature.* Rejected: =strategy.Strategy.OnBar= is typed to return
+  real =[]order.Intent=, which requires an =IntentFactory= a guest
+  must never hold; an alias would either be a lie (the guest cannot
+  actually produce a well-formed return value) or would require
+  smuggling a fake =IntentFactory= into the guest process, reopening
+  exactly the "let the guest mint identity" problem already rejected
+  above. A distinct, shape-mirroring interface with its own
+  =DescribedIntent= return type has no such problem.
+- *Overclaiming the Unix-domain socket as a full security boundary
+  against untrusted strategy code, or conversely adding mandatory peer
+  authentication/sandboxing to =v1= now.* Both rejected. The first
+  overclaims what OS filesystem permissions alone provide (review
+  finding). The second (=SO_PEERCRED= verification, a restricted
+  user/namespace, resource limits) is real, buildable work with no
+  concrete untrusted-guest consumer yet to validate a design against —
+  the same "do not design ahead of a real consumer" discipline this
+  ADR already applies to =AccountEventHandler=/=StateManager= and to
+  remote TCP/TLS. =v1= instead states its actual trust assumption
+  plainly (a trusted-but-isolated guest) rather than either
+  overclaiming or over-engineering.
