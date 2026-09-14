@@ -10,8 +10,11 @@ import (
 	"github.com/rustyeddy/trader/num"
 )
 
-func TestReEntryRuleRegistry_KnowsAllSixNames(t *testing.T) {
-	for _, name := range []string{"fresh-cross", "reclaim-exit-price", "breakout", "above-sma", "breakout-2", "breakout-3"} {
+func TestReEntryRuleRegistry_KnowsAllTenNames(t *testing.T) {
+	for _, name := range []string{
+		"fresh-cross", "reclaim-exit-price", "breakout", "above-sma", "breakout-2", "breakout-3",
+		"above-sma-slope-20", "above-sma-slope-50", "retrace-25", "retrace-50",
+	} {
 		_, ok := reEntryRuleRegistry[name]
 		assert.True(t, ok, name)
 	}
@@ -198,4 +201,222 @@ func TestAboveSMAReEntryRule_AlwaysEntersRelyingEntirelyOnTheCentralGate(t *test
 
 	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "50", "51", "49", "50"), CrossedAboveSMA: false}))
 	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "200", "201", "199", "200"), CrossedAboveSMA: true}))
+}
+
+// smaSlopeCheckThenObserve mirrors Strategy.OnBar's own real call
+// order for an SMAObserver-implementing ReEntryRule: ObserveSMA is
+// called unconditionally for the current bar's own smaValue *before*
+// ShouldEnter ever runs (Strategy.OnBar calls it before the Flat/Long
+// dispatch) — so unlike nBarBreakoutCheckThenObserve's own
+// check-then-observe order, this rule's window already includes the
+// current bar's own value by the time ShouldEnter is consulted.
+func smaSlopeCheckThenObserve(rule ReEntryRule, ctx ReEntryContext, smaValue float64) bool {
+	rule.(SMAObserver).ObserveSMA(smaValue)
+	return rule.ShouldEnter(ctx)
+}
+
+// TestSMASlopeReEntryRule_RegistryConstructsDistinctLookbacks proves
+// "above-sma-slope-20" and "above-sma-slope-50" are genuinely
+// independent constructions (issue #365), mirroring
+// TestNBarBreakoutReEntryRule_RegistryConstructsDistinctLookbacks'
+// own proof for breakout-2/breakout-3.
+func TestSMASlopeReEntryRule_RegistryConstructsDistinctLookbacks(t *testing.T) {
+	rule20, err := reEntryRuleRegistry["above-sma-slope-20"](Config{})
+	require.NoError(t, err)
+	rule50, err := reEntryRuleRegistry["above-sma-slope-50"](Config{})
+	require.NoError(t, err)
+
+	// Feed 20 rising values (100, 101, ..., 119) then one more at 118
+	// (a dip): above-sma-slope-20's own 21-value window now spans
+	// [101..118 plus the new 118] — 20 bars ago from the new sample is
+	// index len-21, i.e. the value 100 fed first has already been
+	// evicted, so its own comparison is against 101 (still a rise, so
+	// still true). above-sma-slope-50 has nowhere near 51 samples yet
+	// and must report false regardless.
+	var enter20, enter50 bool
+	for i := 0; i < 20; i++ {
+		v := 100.0 + float64(i)
+		enter20 = smaSlopeCheckThenObserve(rule20, ReEntryContext{}, v)
+		enter50 = smaSlopeCheckThenObserve(rule50, ReEntryContext{}, v)
+	}
+	assert.False(t, enter50, "above-sma-slope-50 needs 51 samples; only 20 fed")
+	_ = enter20 // not yet meaningful with fewer than 21 samples; the next call is.
+
+	enter20 = smaSlopeCheckThenObserve(rule20, ReEntryContext{}, 118.0)
+	assert.True(t, enter20, "the 21st sample completes above-sma-slope-20's own window: latest (118) > value from 20 bars ago (101)")
+}
+
+// TestSMASlopeReEntryRule_RequiresFullLookbackBeforeEntering proves
+// ShouldEnter reports false until the window has accumulated
+// lookback+1 samples, rather than comparing against a partial or
+// zero-valued history.
+func TestSMASlopeReEntryRule_RequiresFullLookbackBeforeEntering(t *testing.T) {
+	rule, err := newSMASlopeReEntryRule(3)(Config{})
+	require.NoError(t, err)
+
+	// Only 3 samples fed; the window needs 4 (lookback+1) before it
+	// can compare "today" against "3 bars ago" at all.
+	assert.False(t, smaSlopeCheckThenObserve(rule, ReEntryContext{}, 100.0))
+	assert.False(t, smaSlopeCheckThenObserve(rule, ReEntryContext{}, 101.0))
+	assert.False(t, smaSlopeCheckThenObserve(rule, ReEntryContext{}, 102.0))
+}
+
+// TestSMASlopeReEntryRule_RisingAndFallingSlope proves the rule
+// reports true only while the SMA value from lookback bars ago is
+// genuinely exceeded by today's, in both directions.
+func TestSMASlopeReEntryRule_RisingAndFallingSlope(t *testing.T) {
+	rule, err := newSMASlopeReEntryRule(2)(Config{})
+	require.NoError(t, err)
+
+	smaSlopeCheckThenObserve(rule, ReEntryContext{}, 100.0)
+	smaSlopeCheckThenObserve(rule, ReEntryContext{}, 100.0)
+	// Window now [100, 100]; this 3rd sample completes a 3-value
+	// window [100, 100, 105] — compare newest (105) against oldest
+	// (100): rising, must enter.
+	assert.True(t, smaSlopeCheckThenObserve(rule, ReEntryContext{}, 105.0))
+
+	// Window slides to [100, 105, 95] (the 100 fed above evicted) —
+	// compare newest (95) against oldest of this window (100):
+	// falling, must not enter.
+	assert.False(t, smaSlopeCheckThenObserve(rule, ReEntryContext{}, 95.0))
+
+	// Window slides to [105, 95, 96] — compare newest (96) against
+	// oldest (105): still falling.
+	assert.False(t, smaSlopeCheckThenObserve(rule, ReEntryContext{}, 96.0))
+}
+
+// percentRetraceOnExit mirrors Strategy.onFlat's own real invocation
+// for a fresh Long->Flat transition: OnExit and ObserveFlatBar both
+// run on the identical exit bar (see OnExit's own doc comment for
+// why OnExit does not seed postExitLow itself).
+func percentRetraceOnExit(rule ReEntryRule, exitPrice string, exitBar marketdata.Bar) {
+	rule.OnExit(num.MustParsePrice(exitPrice), exitBar)
+	rule.ObserveFlatBar(exitBar)
+}
+
+// percentRetraceCheckThenObserve mirrors Strategy.onFlat's own real
+// call order (check before update).
+func percentRetraceCheckThenObserve(rule ReEntryRule, bar marketdata.Bar) bool {
+	enter := rule.ShouldEnter(ReEntryContext{Bar: bar})
+	rule.ObserveFlatBar(bar)
+	return enter
+}
+
+// TestPercentRetraceReEntryRule_RegistryConstructsDistinctThresholds
+// proves "retrace-25" and "retrace-50" are genuinely independent
+// constructions with different fractions.
+func TestPercentRetraceReEntryRule_RegistryConstructsDistinctThresholds(t *testing.T) {
+	rule25, err := reEntryRuleRegistry["retrace-25"](Config{})
+	require.NoError(t, err)
+	rule50, err := reEntryRuleRegistry["retrace-50"](Config{})
+	require.NoError(t, err)
+
+	// exit at 100, post-exit low at 80: selloff = 20.
+	// retrace-25 recovery level = 80 + 0.25*20 = 85.
+	// retrace-50 recovery level = 80 + 0.50*20 = 90.
+	exitBar := mustBar(t, "100", "100", "80", "90")
+	percentRetraceOnExit(rule25, "100", exitBar)
+	percentRetraceOnExit(rule50, "100", exitBar)
+
+	// Close of 87: above retrace-25's own 85 level, below retrace-50's
+	// own 90 level.
+	assert.True(t, percentRetraceCheckThenObserve(rule25, mustBar(t, "86", "88", "85", "87")))
+	assert.False(t, percentRetraceCheckThenObserve(rule50, mustBar(t, "86", "88", "85", "87")))
+}
+
+// TestPercentRetraceReEntryRule_NoDeclineEntersUnconditionally proves
+// the degenerate case: if postExitLow never actually fell below
+// exitPrice, there is nothing to "recover" from, so ShouldEnter enters
+// unconditionally once flat and above the SMA (the central gate,
+// simulated here by simply calling ShouldEnter).
+func TestPercentRetraceReEntryRule_NoDeclineEntersUnconditionally(t *testing.T) {
+	rule, err := newPercentRetraceReEntryRule("0.25")(Config{})
+	require.NoError(t, err)
+
+	// exit at 100; the exit bar's own Low (101) never dips below the
+	// exit price at all.
+	percentRetraceOnExit(rule, "100", mustBar(t, "102", "103", "101", "102"))
+	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "101", "104", "100.5", "103")}))
+}
+
+// TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnLowBeforeFirstObserveFlatBarCall
+// proves ShouldEnter never panics and correctly incorporates this
+// bar's own Low even on the exit bar itself — consulted (if the exit
+// bar's own Close is already back above the SMA) before
+// ObserveFlatBar has ever run — rather than requiring a prior
+// ObserveFlatBar call to have a low to compare against at all (PR
+// #372 review: ShouldEnter must never depend on postExitLow being
+// already non-nil to produce a correct answer).
+func TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnLowBeforeFirstObserveFlatBarCall(t *testing.T) {
+	rule, err := newPercentRetraceReEntryRule("0.25")(Config{})
+	require.NoError(t, err)
+	rule.OnExit(num.MustParsePrice("100"), mustBar(t, "100", "101", "80", "95"))
+
+	// No ObserveFlatBar call has happened yet: this bar's own Low (94)
+	// is the only low available, and is exactly what must be used.
+	// selloff = 100-94 = 6, recovery level = 94 + 0.25*6 = 95.5. Close
+	// (95) is just below it.
+	assert.False(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "95", "96", "94", "95")}))
+}
+
+// TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnNewLowerLow
+// is PR #372 review's own required regression for the blocker it
+// identified: a bar that itself sets a new, lower post-exit low and
+// also closes above the recovery threshold *that new low implies*
+// must enter on this same bar — not one bar later, once
+// ObserveFlatBar has had a chance to persist it. Verified meaningful
+// by reverting to the old "only ever compare against a prior bar's
+// own low" behavior and confirming this specific case fails.
+func TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnNewLowerLow(t *testing.T) {
+	rule, err := newPercentRetraceReEntryRule("0.50")(Config{})
+	require.NoError(t, err)
+
+	// exit at 100, first observed low (via the exit bar itself) at 90:
+	// selloff 10, recovery level = 90 + 0.5*10 = 95.
+	percentRetraceOnExit(rule, "100", mustBar(t, "100", "100", "90", "95"))
+
+	// This bar's own new, lower low (70) must be used immediately:
+	// selloff becomes 30, recovery level = 70 + 0.5*30 = 85 — and this
+	// same bar's own Close (85) already clears it. Using only the
+	// stale prior low (90, recovery level 95) would incorrectly miss
+	// this entry (85 < 95).
+	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "88", "89", "70", "85")}),
+		"a bar that sets a new lower low and closes above the resulting recovery level must enter on this same bar")
+}
+
+// TestPercentRetraceReEntryRule_ResetsFromANewLowerLow proves the
+// recovery threshold genuinely resets from a new, lower low observed
+// while flat (issue #365's own explicit requirement) across multiple
+// bars, not merely within one.
+func TestPercentRetraceReEntryRule_ResetsFromANewLowerLow(t *testing.T) {
+	rule, err := newPercentRetraceReEntryRule("0.50")(Config{})
+	require.NoError(t, err)
+
+	// exit at 100, first observed low (via the exit bar itself) at 80:
+	// selloff 20, recovery level = 80 + 0.5*20 = 90.
+	percentRetraceOnExit(rule, "100", mustBar(t, "100", "100", "80", "90"))
+	assert.False(t, percentRetraceCheckThenObserve(rule, mustBar(t, "85", "86", "84", "85")), "85 is below the 90 recovery level; this bar's own low (84) is above the existing 80 low, so nothing changes")
+
+	// A new, lower low (60) resets the threshold immediately: selloff
+	// becomes 40, recovery level = 60 + 0.5*40 = 80 — but this bar's
+	// own close (70) still falls short of even that lowered threshold.
+	assert.False(t, percentRetraceCheckThenObserve(rule, mustBar(t, "84", "85", "60", "70")), "70 is still below the 80 recovery level the new low (60) implies")
+	assert.True(t, percentRetraceCheckThenObserve(rule, mustBar(t, "72", "86", "65", "85")), "85 now exceeds the 80 recovery level established by the prior bar's own low (60)")
+}
+
+// TestPercentRetraceReEntryRule_OnExitResetsStateBetweenEpisodes
+// proves a second OnExit call discards the previous episode's own
+// exitPrice/postExitLow entirely rather than leaking stale state.
+func TestPercentRetraceReEntryRule_OnExitResetsStateBetweenEpisodes(t *testing.T) {
+	rule, err := newPercentRetraceReEntryRule("0.50")(Config{})
+	require.NoError(t, err)
+
+	percentRetraceOnExit(rule, "200", mustBar(t, "200", "200", "150", "180")) // selloff 50, recovery level 175
+	assert.False(t, percentRetraceCheckThenObserve(rule, mustBar(t, "160", "170", "159", "170")))
+
+	// Second episode, exit at 10, low at 8: selloff 2, recovery level
+	// 9. If the first episode's state leaked, a close of 9 would
+	// incorrectly compare against the stale 175 level.
+	percentRetraceOnExit(rule, "10", mustBar(t, "10", "10", "8", "9"))
+	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "8.5", "9.2", "8.4", "9")}))
 }

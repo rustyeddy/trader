@@ -63,6 +63,28 @@ type ReEntryRule interface {
 	ShouldEnter(ctx ReEntryContext) bool
 }
 
+// SMAObserver is an optional ReEntryRule capability (issue #365): a
+// rule whose own trigger condition depends on the SMA's trajectory
+// itself (for example whether it is rising), not merely on price
+// relative to it, needs the SMA value on *every* ready bar — including
+// while Long, since the SMA keeps moving regardless of position side,
+// the identical reason Strategy's own crossState is maintained
+// unconditionally (see its own doc comment). ObserveFlatBar cannot
+// supply this: it only ever fires while flat, but an SMA slope
+// computed only from flat-bar samples would silently skip every bar
+// spent Long, corrupting the very trajectory a slope rule needs to
+// measure continuously. Strategy.OnBar calls ObserveSMA on every bar
+// the SMA is ready, immediately once smaValue itself is computed —
+// before the Flat/Long dispatch for that same bar — so a rule
+// implementing this always has today's own current value available
+// by the time ShouldEnter might run later in that identical call. A
+// rule with no such dependency implements nothing extra at all
+// (SMAObserver is optional, mirroring ExitRule's own
+// InitialStopProvider/InitialStopSeeder capability pattern).
+type SMAObserver interface {
+	ObserveSMA(smaValue float64)
+}
+
 // reEntryRuleRegistry maps a Config.ReEntryRuleName to its
 // constructor. A new ReEntryRule is a new small type plus one entry
 // here — never a change to Strategy's own control flow (issue #347).
@@ -78,6 +100,17 @@ var reEntryRuleRegistry = map[string]func(Config) (ReEntryRule, error){
 	// broader N sweep in this issue).
 	"breakout-2": newNBarBreakoutReEntryRule(2),
 	"breakout-3": newNBarBreakoutReEntryRule(3),
+	// above-sma-slope-20/-50 and retrace-25/-50 are issue #365's own
+	// two re-entry-confirmation hypotheses following #361's own
+	// inconclusive N-bar breakout finding — see
+	// smaSlopeReEntryRule/percentRetraceReEntryRule's own doc
+	// comments. Fixed names rather than a configurable lookback/
+	// threshold, matching breakout-2/breakout-3's own precedent
+	// (issue #365's own guardrail: no broad sweep in this issue).
+	"above-sma-slope-20": newSMASlopeReEntryRule(20),
+	"above-sma-slope-50": newSMASlopeReEntryRule(50),
+	"retrace-25":         newPercentRetraceReEntryRule("0.25"),
+	"retrace-50":         newPercentRetraceReEntryRule("0.50"),
 }
 
 // freshCrossReEntryRule is EQS-01's own original, only re-entry
@@ -264,3 +297,184 @@ func (aboveSMAReEntryRule) OnExit(num.Price, marketdata.Bar) {}
 func (aboveSMAReEntryRule) ObserveFlatBar(marketdata.Bar) {}
 
 func (aboveSMAReEntryRule) ShouldEnter(ReEntryContext) bool { return true }
+
+// smaSlopeReEntryRule re-enters once the long SMA itself is rising —
+// issue #365's hypothesis A, following #361's own inconclusive N-bar
+// breakout finding: rather than confirming a short-term price
+// breakout, require evidence that the long-term *regime* has turned
+// upward before re-entering.
+//
+//	slope = SMA(today) - SMA(lookback bars ago)
+//	require slope > 0
+//
+// (the normalized form, slope/SMA(lookback bars ago) > 0, is
+// equivalent in sign — this rule compares the two raw values
+// directly, since only the sign matters and dividing adds nothing but
+// float64 rounding risk near zero.)
+//
+// "Close > SMA" is not checked here at all: Strategy.onFlat's own
+// central above-SMA regime gate already guarantees it before
+// ShouldEnter is ever consulted (the same reliance
+// aboveSMAReEntryRule's own doc comment describes) — this rule's own
+// contribution is purely the slope condition.
+//
+// Implements SMAObserver (not ObserveFlatBar) because the SMA's own
+// trajectory is continuous regardless of position side: an N-bar
+// window fed only from flat bars would silently skip every bar spent
+// Long, understating how long the SMA has actually been moving in one
+// direction. lookback is one of two fixed values registered under
+// explicit names ("above-sma-slope-20"/"above-sma-slope-50") rather
+// than a configurable Config field (issue #365's own guardrail against
+// a broader lookback sweep).
+type smaSlopeReEntryRule struct {
+	lookback int
+	history  []float64 // most recent up to lookback+1 SMA values, oldest first
+}
+
+func newSMASlopeReEntryRule(lookback int) func(Config) (ReEntryRule, error) {
+	return func(Config) (ReEntryRule, error) {
+		return &smaSlopeReEntryRule{lookback: lookback}, nil
+	}
+}
+
+func (r *smaSlopeReEntryRule) OnExit(num.Price, marketdata.Bar) {}
+
+func (r *smaSlopeReEntryRule) ObserveFlatBar(marketdata.Bar) {}
+
+// ObserveSMA implements SMAObserver: maintains a fixed-size sliding
+// window of the most recent lookback+1 SMA values, oldest first, so
+// ShouldEnter can always compare today's own value (the newest
+// entry) against the value from exactly lookback bars ago (the
+// oldest entry) once the window is full.
+func (r *smaSlopeReEntryRule) ObserveSMA(smaValue float64) {
+	r.history = append(r.history, smaValue)
+	if len(r.history) > r.lookback+1 {
+		r.history = r.history[len(r.history)-(r.lookback+1):]
+	}
+}
+
+func (r *smaSlopeReEntryRule) ShouldEnter(ReEntryContext) bool {
+	if len(r.history) < r.lookback+1 {
+		return false // not enough history yet to compute the slope
+	}
+	latest := r.history[len(r.history)-1]
+	past := r.history[0]
+	return latest > past
+}
+
+// percentRetraceReEntryRule re-enters once price has recovered a
+// fixed fraction of its own decline from the exit price down to the
+// lowest Low observed since that exit — issue #365's hypothesis B,
+// the second of two re-entry-confirmation candidates following #361's
+// own inconclusive N-bar breakout finding.
+//
+//	selloff           = exitPrice - postExitLow
+//	recoveryLevel     = postExitLow + fraction * selloff
+//	require Close >= recoveryLevel
+//
+// fraction is one of two fixed thresholds registered under explicit
+// names ("retrace-25"/"retrace-50") rather than a configurable Config
+// field (issue #365's own guardrail against testing every value from
+// 10-50%).
+//
+// postExitLow must keep updating while flat, resetting the recovery
+// threshold from any new, lower low (issue #365's own explicit
+// requirement). Unlike nBarBreakoutReEntryRule's own check-before-
+// update ordering, ShouldEnter here does *not* wait for ObserveFlatBar
+// to persist a new low before considering it (PR #372 review): a bar
+// that itself sets a new post-exit low is, by the hypothesis's own
+// definition ("recovered a fraction of the decline from the exit price
+// down to the lowest Low observed since exit"), already part of that
+// history — excluding the current bar's own Low would silently ignore
+// the very extreme the recovery fraction is measured from. ShouldEnter
+// therefore computes an *effective* low — min(the low prior bars
+// already established, this bar's own Low) — without mutating any
+// state itself; ObserveFlatBar remains the sole place r.postExitLow is
+// actually persisted, strictly after ShouldEnter's own decision for
+// this bar, so the *next* bar's decision reads back exactly what this
+// one computed. This is a real behavior difference from
+// nBarBreakoutReEntryRule's own "never use a bar's own new extreme
+// against itself" rule (deliberately correct there, since a breakout
+// threshold is a fixed prior level a bar's own High must exceed — a
+// retrace threshold is instead itself a *function* of the low, so
+// using the current bar's own Low is the hypothesis definition, not a
+// lookahead or self-referential shortcut).
+//
+// If no decline below the exit price has actually occurred yet
+// (the effective low >= exitPrice — price only ever rose since the
+// exit), there is nothing to "recover" from: ShouldEnter enters
+// unconditionally in that case, the same as reclaim-exit-price would
+// once back above the SMA. This also keeps every computation exact:
+// recoveryLevel is built additively (low + fraction*selloff), never
+// via a selloff/recovery *fraction* division that could divide by a
+// near-zero selloff.
+//
+// Like every ReEntryRule, this still only runs once Strategy.onFlat's
+// own central above-SMA regime gate already passed (issue #365's own
+// explicit requirement to keep honoring that gate) — this rule adds
+// no bypass of its own.
+type percentRetraceReEntryRule struct {
+	fraction    num.Rate
+	exitPrice   num.Price
+	postExitLow *num.Price
+}
+
+func newPercentRetraceReEntryRule(fraction string) func(Config) (ReEntryRule, error) {
+	f := num.MustParseRate(fraction)
+	return func(Config) (ReEntryRule, error) {
+		return &percentRetraceReEntryRule{fraction: f}, nil
+	}
+}
+
+// OnExit records exitPrice and resets postExitLow to nil rather than
+// seeding it from exitBar directly: Strategy.onFlat calls
+// ObserveFlatBar on this same exitBar immediately afterward, within
+// the same OnBar invocation (every real Long->Flat transition
+// triggers onExit then onFlat on the identical bar) — seeding here
+// too would double-count the exit bar's own Low, the identical
+// reasoning nBarBreakoutReEntryRule's own OnExit already documents.
+// (ShouldEnter no longer depends on postExitLow being non-nil to
+// produce a correct answer even on the exit bar itself — see its own
+// doc comment — but OnExit still resets it here so ObserveFlatBar's
+// own persistence starts fresh each episode.)
+func (r *percentRetraceReEntryRule) OnExit(exitPrice num.Price, _ marketdata.Bar) {
+	r.exitPrice = exitPrice
+	r.postExitLow = nil
+}
+
+// ObserveFlatBar is the sole mutator of r.postExitLow, persisting
+// whatever effective low ShouldEnter already computed (including this
+// bar's own Low) for the *next* bar to read back.
+func (r *percentRetraceReEntryRule) ObserveFlatBar(bar marketdata.Bar) {
+	if r.postExitLow == nil || bar.Low.Cmp(*r.postExitLow) < 0 {
+		low := bar.Low
+		r.postExitLow = &low
+	}
+}
+
+func (r *percentRetraceReEntryRule) ShouldEnter(ctx ReEntryContext) bool {
+	low := ctx.Bar.Low
+	if r.postExitLow != nil && r.postExitLow.Cmp(low) < 0 {
+		low = *r.postExitLow
+	}
+	if low.Cmp(r.exitPrice) >= 0 {
+		// No decline below the exit price has occurred since exiting:
+		// nothing to recover from, so any bar back above the SMA
+		// already qualifies.
+		return true
+	}
+
+	selloff, err := r.exitPrice.Sub(low)
+	if err != nil {
+		return false
+	}
+	recovered, err := selloff.MulRate(r.fraction)
+	if err != nil {
+		return false
+	}
+	recoveryLevel, err := low.Add(recovered)
+	if err != nil {
+		return false
+	}
+	return ctx.Bar.Close.Cmp(recoveryLevel) >= 0
+}
