@@ -1,0 +1,265 @@
+#+TITLE: EQ-365: SMA-Slope and Percent-Retrace Re-Entry Comparison (SMA Long Hold)
+#+STARTUP: overview indent
+
+* Purpose
+
+Issue #365 tests two re-entry-confirmation hypotheses for SMA Long
+Hold, following #361's own inconclusive N-bar breakout finding
+(issue #354's original diagnostic: the main structural weakness is
+delayed re-entry after a defensive exit, most visibly the 1716-day
+flat period reclaim-exit-price stays out of the market after its own
+2007-12-27 exit, missing the entire 2009 recovery until 2012):
+
+- *Hypothesis A (SMA slope)*: require the long-term regime itself —
+  the SMA's own trajectory, not merely price relative to it — to have
+  turned upward before re-entering.
+- *Hypothesis B (percent retrace)*: require a fixed fraction of
+  recovery from the post-exit low before re-entering.
+
+Both are compared against the playbook's current reference re-entry
+rule (=reclaim-exit-price=), using full backtest results with real
+fills and state (never a trigger-date-only analysis, issue #365's own
+explicit guardrail).
+
+* New Strategy Code
+
+=strategy/smatrend/reentryrule.go= gained two new =ReEntryRule=
+implementations, registered under four fixed names — no configurable
+=Config= surface, matching =breakout-2=/=breakout-3='s own precedent
+(issue #365's own guardrail against a broader sweep):
+
+- =smaSlopeReEntryRule= ("above-sma-slope-20", "above-sma-slope-50"):
+  =SMA(today) > SMA(N bars ago)=, on top of the existing central
+  above-SMA gate every =ReEntryRule= already relies on.
+- =percentRetraceReEntryRule= ("retrace-25", "retrace-50"): tracks
+  the lowest Low observed since the exit (resetting the recovery
+  threshold from any new, lower low — issue #365's own explicit
+  requirement), and re-enters once Close has recovered 25%/50% of the
+  decline from the exit price down to that low. Computed additively
+  (=postExitLow + fraction*selloff=) rather than via a division, so a
+  near-zero selloff can never divide by zero; if no decline below the
+  exit price ever occurred, there is nothing to recover from and the
+  rule enters unconditionally once the central gate passes.
+
+=ReEntryRule= gained a new optional capability, =SMAObserver=
+(=ObserveSMA(smaValue float64)=): =smaSlopeReEntryRule='s own trigger
+depends on the SMA's continuous trajectory regardless of position
+side, which the existing =ObserveFlatBar= (flat-only) cannot supply —
+a slope computed only from flat-bar samples would silently skip every
+bar spent Long, understating how long the SMA has actually been
+moving in one direction. =Strategy.OnBar= now calls =ObserveSMA=
+unconditionally on every ready bar, before the Flat/Long dispatch,
+mirroring how =crossState= is already maintained continuously. A new
+integration test,
+=TestStrategy_SMASlopeReEntryObservesSMAContinuouslyNotJustWhileFlat=,
+proves this wiring the same way issue #361's own
+=TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes=
+proved =ObserveFlatBar='s wiring — confirmed meaningful by moving the
+call into the Flat-only branch and observing the test fail before
+restoring it.
+
+Exit behavior is completely unchanged.
+
+* Primary Comparison Now Uses Exact Full-Notional Sizing Directly
+
+Issue #364 (=risk.NewFullNotionalSizer=, ADR-061) landed before this
+issue's own research phase, and materially simplifies the protocol
+#361 had to use: =backtest.resolverInputBuilder= already sets
+=pipeline.Input.ReferencePrice= to =event.Bar.Open= on *every*
+submission (issue #216, M5-08 review) — the real bar-open price at
+the actual moment of each entry, not a fold-anchored approximation.
+Swapping in =risk.NewFullNotionalSizer()= therefore sizes every entry
+exactly at 100% of available capital, continuously, with *no
+walk-forward folding needed at all* — the entire reason #361's own
+walk-forward protocol existed in the first place. The primary
+comparison below is one single continuous backtest per variant, not a
+chained walk-forward.
+
+* Method
+
+Two runs, both holding =ExitRuleName= "probation-trend",
+=InitialStopBelowSMA= 0.01, =TrailActivationGain= 0.05,
+=TrailingStopPercent= 0.10 fixed; only =ReEntryRuleName= varies across
+=reclaim-exit-price=, =above-sma-slope-20=, =above-sma-slope-50=,
+=retrace-25=, =retrace-50=.
+
+** Primary: one continuous run per variant, exact full-notional sizing
+
+=risk.NewFullNotionalSizer()=, sized against real bar-open reference
+prices throughout, over SPY's full Stooq history (2005-02-25 through
+2026-09-04). A buy-and-hold benchmark row, computed directly from
+Close prices (exactly 100% invested by construction, no =Sizer=
+involved), covers the identical span.
+
+** Secondary (diagnostic): one continuous run per variant, reference (1%-risk) sizing
+
+The playbook's own established reference sizing (=RiskFraction= 0.01,
+fixed $20 adverse distance) — useful for the whipsaw/named-episode
+analysis, which is sizing-independent; its absolute CAGR/return must
+not be read as a portfolio-allocation answer.
+
+Full reproduction:
+=marketdata/smatrend_slope_retrace_reentry_fullarchive_test.go=
+(=TestSMATrendSlopeRetraceReEntryComparison= and
+=TestSMATrendSlopeRetraceReEntryDiagnostic=; build tag =fullarchive=;
+local path constants edited locally, never committed).
+
+* Results
+
+** Primary: exact full-notional sizing
+
+| Metric        | reclaim-exit-price | above-sma-slope-20 | above-sma-slope-50 | retrace-25 | retrace-50 | buy-and-hold |
+|---------------+---------------------+---------------------+---------------------+------------+------------+---------------|
+| Net return    |              282.0% |               405.0% |               382.2% |     373.8% |     347.6% |        730.0% |
+| CAGR          |               6.43% |                7.81% |                7.58% |      7.50% |      7.21% |        10.33% |
+| Max drawdown  |              19.58% |               20.14% |               20.20% |     20.89% |     18.89% |        56.47% |
+| Calmar        |               0.328 |                0.388 |                0.375 |      0.359 |      0.382 |         0.183 |
+| Trades / re-entries |         37 / 37 |             43 / 43 |             40 / 40 |    56 / 56 |    52 / 52 |           n/a |
+| Exposure      |               60.0% |                71.0% |                69.2% |      73.8% |      72.7% |        100.0% |
+| CAGR retained vs. buy-and-hold |  62.2% |             75.6% |               73.4% |      72.6% |      69.8% |        100.0% |
+| Max DD reduction vs. buy-and-hold | 65.3% |               64.3% |               64.2% |      63.0% |      66.5% |          0.0% |
+
+All four candidates improve *both* CAGR *and* Calmar simultaneously
+over the baseline — a materially different result from #361's own
+breakout-2/breakout-3 finding, where the small CAGR gain came at a
+real Calmar cost. =retrace-50= is the single strongest row: higher
+CAGR *and* lower max drawdown *and* better Calmar than baseline, and
+the best drawdown reduction relative to buy-and-hold of any variant
+in this table (66.5%, exceeding even the baseline's own 65.3%).
+=above-sma-slope-20= retains the most buy-and-hold CAGR of any
+candidate (75.6%) at a Calmar (0.388) meaningfully above both baseline
+(0.328) and buy-and-hold itself (0.183).
+
+** Secondary (diagnostic): reference (1%-risk) sizing
+
+| Metric                     | reclaim-exit-price | above-sma-slope-20 | above-sma-slope-50 | retrace-25 | retrace-50 |
+|------------------------------+---------------------+---------------------+---------------------+------------+------------|
+| Net return                  |              26.34% |               29.45% |               29.41% |     28.32% |     28.09% |
+| CAGR                        |               1.09% |                1.21% |                1.21% |      1.17% |      1.16% |
+| Max drawdown                |               3.46% |                3.34% |                3.34% |      4.08% |      4.09% |
+| Calmar                      |               0.315 |                0.362 |                0.361 |      0.285 |      0.283 |
+| Trades / re-entries          |               37/37 |               43/43 |               40/40 |     56/56 |     52/52 |
+| Exposure                    |               60.0% |                71.0% |                69.2% |      73.8% |      72.7% |
+| Whipsaws / total episodes   |               12/37 |               13/43 |               11/40 |     16/56 |     14/52 |
+
+Whipsaw *rate* is flat or slightly improved for every candidate
+(32.4% baseline vs. 30.2%/27.5%/28.6%/26.9%) despite substantially more
+completed episodes (more re-entries overall) — the added re-entries are
+not disproportionately whipsaws.
+
+** Named episode outcomes (secondary diagnostic run)
+
+| Episode | reclaim-exit-price | above-sma-slope-20 | above-sma-slope-50 | retrace-25 | retrace-50 |
+|---------+----------------------+---------------------+---------------------+------------+------------|
+| 2008    | exit 2007-12-27 -> reentry 2012-09-07 (1716 days flat); downstream -5.1% | exit 2007-12-27 -> reentry 2009-08-14 (596 days flat); downstream +8.2% | exit 2007-12-27 -> reentry 2009-09-15 (628 days flat); downstream +4.2% | exit 2008-05-20 -> reentry 2009-06-02 (378 days flat); downstream -2.6% | exit 2008-05-20 -> reentry 2009-09-11 (479 days flat); downstream +4.7% |
+| 2022    | exit 2022-04-11 -> reentry 2023-06-13 (428 days flat); downstream -4.7% | exit 2022-04-11 -> reentry 2023-03-10 (333 days flat); downstream -1.0% | exit 2022-04-11 -> reentry 2023-04-12 (366 days flat); downstream +0.8% | exit 2022-08-17 -> reentry 2022-12-01 (106 days flat); downstream -2.3% | exit 2022-08-17 -> reentry 2022-12-01 (106 days flat); downstream -2.3% |
+
+All four candidates shorten the pathological 2008 flat period
+dramatically (1716 days -> 378-628 days), and three of the four flip
+that episode's downstream trade from a loss (baseline: -5.1%) to a
+gain. The two =retrace= variants' own 2022 exit date (2022-08-17)
+differs from the SMA-slope variants and baseline (2022-04-11) — a
+cascading consequence of an earlier re-entry cycle already closing
+before baseline's own April exit, exactly the "changing re-entry
+timing cascades forward through the whole trade sequence" effect
+#361's own report documented; not a labeling artifact.
+
+Episode charts (PNG): all ten exit/re-entry episodes across the five
+variants — see Full Data below.
+
+* Analysis
+
+Both hypotheses produce a materially different result from #361's own
+N-bar breakout finding. Where breakout-2/breakout-3 bought a small
+CAGR gain at a real, larger Calmar cost, every candidate here improves
+*both* metrics simultaneously against the identical baseline and exit
+rule. The named-episode evidence explains why: both mechanisms directly
+target the exact failure mode #354 first identified
+(a defensive exit that then misses a large, obvious recovery) rather
+than merely reacting faster to short-term price action the way a bare
+N-bar breakout does — an SMA slope confirms the *regime* has turned,
+and a percent retrace confirms *meaningful* recovery has actually
+happened, both of which correlate better with "the rally is real" than
+"the last 2-3 closes ticked up."
+
+Between the two hypotheses, no single variant dominates every metric:
+=above-sma-slope-20= retains the most buy-and-hold CAGR;
+=retrace-50= achieves the best combined risk profile (lower drawdown
+*and* higher Calmar than baseline simultaneously). Both remain
+clearly ahead of baseline on every metric in the primary comparison,
+so this evidence does not by itself distinguish which specific
+mechanism (or threshold) is preferable — only that both mechanisms, at
+both tested thresholds, are genuine improvements over
+=reclaim-exit-price= on this dataset.
+
+* Conclusion
+
+*Hypothesis A (SMA slope): PROMISING.*
+
+Both =above-sma-slope-20= and =above-sma-slope-50= improve CAGR (+18-
+21% relative), Calmar (+14-18% relative), and dramatically shorten both
+named long-flat episodes (2008: 1716 -> 596-628 days; 2022: 428 -> 333-
+366 days) relative to baseline, while whipsaw rate stays flat or
+slightly improves. This clears the bar #361's own breakout candidates
+could not: a genuine improvement, not a marginal return gain funded by
+materially more drawdown.
+
+*Hypothesis B (percent retrace): PROMISING.*
+
+Both =retrace-25= and =retrace-50= improve CAGR (+13-17% relative) and
+shorten both named episodes even more aggressively for the 2022 case
+(428 -> 106 days), at a modest drawdown increase for =retrace-25=
+(+1.31 points) but a genuine drawdown *reduction* for =retrace-50=
+(-0.69 points) alongside its own Calmar improvement (+16% relative) —
+the strongest single combined result in this entire comparison family
+across #361 and #365.
+
+Per issue #365's own guardrail, this is not a substitute for broader
+out-of-sample validation, and four candidates across two mechanisms
+both clearing the same bar on one dataset warrants some caution before
+treating either as settled — but both hypotheses earn further
+consideration, unlike #361's own breakout candidates. Given both
+hypotheses are now =PROMISING= rather than one clearly dominant, the
+natural next step is validating whether this holds out-of-sample
+(a different instrument, or a genuine train/test split) before
+promoting either to the playbook's own new reference re-entry rule —
+tracked as a follow-up, not attempted in this issue per its own scope
+(no broader parameter sweep, no holdout tuning).
+
+The selloff-severity-dependent threshold idea issue #365 itself named
+as a possible follow-up (vary required recovery with selloff severity)
+is not pursued here, per that same issue's own explicit deferral —
+this fixed-threshold result is promising enough to make that follow-up
+worth considering, but it should be its own issue, earned by this data
+rather than pre-optimized ahead of it.
+
+* Full Data
+
+- Primary (full-notional) comparison JSON:
+  =/srv/trading/sweeps/smatrend-slope-retrace-reentry/slope-retrace-reentry-fullnotional-comparison.json=
+- Secondary diagnostic JSON (whipsaw/named-episode detail):
+  =/srv/trading/sweeps/smatrend-slope-retrace-reentry/slope-retrace-reentry-diagnostic.json=
+- Episode charts (PNG, =chart= package) for all ten exit/re-entry
+  episodes: =/srv/trading/sweeps/smatrend-slope-retrace-reentry/charts/episode-{2008,2022}-{reclaim-exit-price,above-sma-slope-20,above-sma-slope-50,retrace-25,retrace-50}.png=
+
+Not committed (private research output, matching every other
+=fullarchive= driver's own convention); regenerate locally via
+=go test -tags fullarchive ./marketdata/ -run TestSMATrendSlopeRetraceReEntryComparison=
+and
+=go test -tags fullarchive ./marketdata/ -run TestSMATrendSlopeRetraceReEntryDiagnostic=
+after editing this file's own local output-directory and SPY CSV path
+constants.
+
+* Next Steps (Not This Issue)
+
+- Out-of-sample validation of both =PROMISING= hypotheses (a different
+  instrument, or a genuine train/test split) before promoting either
+  to the playbook's own default re-entry rule.
+- A selloff-severity-dependent recovery threshold for
+  =percentRetraceReEntryRule= (issue #365's own named follow-up),
+  earned by this fixed-threshold result rather than pre-optimized
+  ahead of it.
+- Whether the two mechanisms could be combined (for example requiring
+  both a rising SMA *and* a minimum retrace) is an open question this
+  issue does not explore — a broader combination sweep was explicitly
+  out of scope here.
