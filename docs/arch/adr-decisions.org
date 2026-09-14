@@ -169,6 +169,7 @@ the original decided, use full supersession instead.
 | 059 | Atomic entry-with-protective-stop submission (order.IntentEnterWithStop) (in adr-059-bracket-entry-with-stop.org) | Accepted, amended by 061 |
 | 060 | strategy.FillHandler — an authoritative per-bar fill-delivery capability (in adr-060-fill-handler-capability.org) | Accepted |
 | 061 | risk.SizeInput.ReferencePrice and a full-notional risk.Sizer (in adr-061-full-notional-sizer.org) | Accepted, partial amendment of 059 |
+| 062 | External Strategy Protocol v1 and out-of-process architecture (in adr-062-external-strategy-protocol-v1.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -652,6 +653,25 @@ hand, and six =report= package golden files regenerated via
 =golden_test.go='s own documented procedure — confirmed to be the
 complete set of checked-in files anywhere in the repository that embed
 a =Manifest=-derived hash.
+
+Note: ADR-062 is likewise maintained in its own file,
+=docs/arch/adr-062-external-strategy-protocol-v1.org=, rather than
+inline in this registry. Its own Status section is authoritative.
+Issue #376 asks for the architecture of out-of-tree strategies —
+gRPC/Protobuf strategy protocol, transport, package placement,
+versioning, and intent-construction ownership — to be defined and
+recorded before implementation begins, extending ADR-043's own
+deliberately deferred out-of-process analysis (M5-17) into a concrete
+design. It settles the gRPC/Protobuf sub-decision ADR-010 (=Proposed=)
+already committed to in principle but left unspecified ("specific
+message shapes, versioning strategy, and SDK layout ... open"),
+without resolving ADR-010's own remaining MQTT-related items — the
+same "settle one concrete piece without promoting the broader ADR's
+status" pattern ADR-046 already established for ADR-011, which is why
+ADR-010 keeps its own =Proposed= status, unchanged by this ADR. No
+code is introduced by this ADR: =protocol/strategy/v1=,
+=adapters/strategy/external=, and =strategysdk= remain documented
+proposals for a follow-on implementation issue.
 
 * ADR-001: Modular monolith before service decomposition
 

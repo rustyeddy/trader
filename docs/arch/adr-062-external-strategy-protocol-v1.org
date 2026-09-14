@@ -1,0 +1,434 @@
+#+TITLE: External Strategy Protocol v1 and Out-of-Process Architecture ADR-062
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #376 asks for the architecture of out-of-tree
+strategies to be defined and recorded *before* implementation begins,
+under a new milestone ("Add gRPC to trader for remote out of tree
+strategies"). This ADR settles the concrete protocol, transport,
+package placement, versioning, and ownership decisions the issue's own
+"Decisions to capture" list named, extending ADR-043's own deferred
+out-of-process analysis into an actual design rather than building
+against undocumented assumptions.
+
+* Context
+
+ADR-005 already establishes that a strategy emits =order.Intent=
+values and never receives a broker, risk, pipeline, or execution
+handle. ADR-043 (issue #225, M5-17) verified that =strategy.Strategy=
+already satisfies most of what a private, out-of-process strategy
+needs *today* — a private strategy can live in its own repository,
+import Trader as an ordinary Go dependency, and compile into the
+user's own binary, with no Go =plugin= package, registry, or new
+public =ExternalStrategy= interface required. ADR-043 explicitly
+deferred designing an actual wire protocol, reasoning that doing so
+without a concrete consumer would be "exactly the 'widen for a
+speculative future adapter' #225's own review warned against," and
+named this as M8's future work.
+
+That future work is now this issue. ADR-010 (=Proposed=, still
+unresolved) already committed Trader in principle to "gRPC with
+Protobuf as the primary out-of-process strategy control-plane
+protocol, and MQTT as an integration transport for telemetry,
+market/event fan-out, dashboards, and alerts," but explicitly left
+"specific message shapes, versioning strategy, and SDK layout ...
+open." This ADR settles those open items for the strategy
+control-plane specifically. It does not resolve ADR-010's own
+remaining MQTT-related items (out of this issue's scope, and
+explicitly non-goals below) — mirroring the precedent ADR-046 already
+set for a related ADR-011: settling one concrete piece of a broader
+=Proposed= ADR without promoting the broader ADR's own status, since
+not everything that ADR covers is decided here. ADR-010 therefore
+remains =Proposed=, unchanged by this ADR.
+
+The architecture document's own "Out-of-Process Strategies" and
+"Strategy Process Contract" sections already sketch this at a high
+level (gRPC for the control plane, MQTT for fan-out, a
+=protocol/strategy/v1/= schema location, a separate
+=trader-strategy-sdk/= placeholder). ADR-013 commits Trader to one
+repository, not the multi-repository sketch the architecture document
+shows as illustrative; this ADR resolves that specific conflict by
+keeping the protocol schema and SDK inside this repository, at the
+locations decided below.
+
+* Decision
+
+** Out-of-process, not in-process-only
+
+External strategies run as a separate OS process from the Trader host
+process (the backtest runner today; a future =live= session later),
+communicating over a well-defined RPC boundary. This is additive to,
+not a replacement for, the existing in-process path ADR-043 already
+verified: a strategy author may still implement =strategy.Strategy=
+directly and compile into their own Go binary with no protocol
+involved at all. The out-of-process path exists for strategies that
+cannot or should not be compiled into a Go binary sharing Trader's own
+dependency tree — a different language, a separately deployed process,
+or a security boundary around strategy code the operator does not
+fully trust.
+
+** =strategy.Strategy= remains the sole runtime contract
+
+Unchanged from ADR-043's own non-goal, reaffirmed here rather than
+silently assumed: no new public =ExternalStrategy= interface is added.
+An out-of-process strategy is reached through
+=ExternalStrategyAdapter= (below), a concrete type that itself
+satisfies the existing =strategy.Strategy= interface — from
+=backtest.Runner='s (or a future =live.Session='s) point of view, an
+external strategy is indistinguishable from any other
+=strategy.Strategy= implementation. This keeps the "strategy never
+receives a broker/risk/pipeline/execution handle" invariant
+(ADR-005) intact by construction: =ExternalStrategyAdapter= is
+constructed the same way any other strategy is, by whatever
+composition root wires up a =backtest.RunnerParams.Strategy= or
+equivalent, and never itself receives those handles either.
+
+** Protocol: gRPC + Protobuf, versioned as =v1=
+
+The wire protocol is gRPC, with Protobuf message and service
+definitions. Schema files live under =protocol/strategy/v1/=,
+matching the architecture document's own sketch and the version-in-
+package-path idiom already familiar from Trader's own Go API
+versioning discipline (ADR-011, ADR-046 — remaining at =v0= until
+central contracts are proven). A future breaking protocol change
+creates =protocol/strategy/v2/= alongside =v1=, rather than mutating
+=v1= in place; =v1= is retired only once no supported host or SDK
+build depends on it. Generated Go code for =v1= lives alongside its
+=.proto= sources in the same directory tree, following the common
+Go/Protobuf convention of colocating a package's wire types with the
+schema that produced them, rather than a separate top-level
+=gen/=-style directory.
+
+Within =v1=, only additive, wire-compatible changes are permitted
+(new optional fields, new RPCs) — the same discipline Protobuf itself
+is designed to support. A change that would break an existing =v1=
+client or server (removing/renaming a field, changing a field's
+number or type, changing RPC semantics incompatibly) requires =v2=,
+not a =v1= revision. The gRPC service itself is named with its version
+embedded (=trader.strategy.v1.StrategyService=), so a single host
+process can in principle serve both =v1= and a future =v2= side by
+side during a migration window without ambiguity over which schema a
+given RPC uses.
+
+Every connection begins with an explicit handshake RPC
+(=Handshake=), carried out before any market/account data flows:
+the external strategy process reports its own protocol version,
+strategy name/version (mirroring =strategy.Descriptor.Name=/
+=Version=), and declared capabilities; the host reports its own
+supported protocol version(s) and rejects the connection outright on
+a version or capability mismatch it cannot bridge, rather than
+attempting to silently degrade. This mirrors the architecture
+document's own "Protocol version and capability negotiation occur
+during startup" requirement and gives future capability growth (for
+example a =TickHandler=-equivalent, still unpublished per ADR-043) an
+explicit place to be negotiated rather than inferred from RPC calls
+that happen to succeed or fail.
+
+** Transport: Unix-domain socket first, TCP/TLS deferred
+
+=v1='s only supported transport for local execution is a Unix-domain
+socket (gRPC's own =unix:= target scheme) — the external strategy
+process and the Trader host process run on the same machine,
+communicating over a filesystem socket path the host process creates
+and the external process connects to. This is deliberately the
+narrowest transport that satisfies the issue's own goal (out-of-
+process, not out-of-host): it needs no TLS material, no network
+firewall configuration, and no additional authentication scheme
+beyond OS-level filesystem permissions on the socket path itself,
+while still giving a strategy process genuine process isolation
+(a crash, hang, or resource leak in the strategy process cannot take
+down the host process, and the strategy process holds no broker,
+risk, pipeline, or execution handle to misuse even if compromised).
+
+Remote (TCP) transport, and the TLS/authentication material a remote
+deployment would require, is an explicit =v1= non-goal (below) — not
+because it is architecturally hard, but because no concrete remote
+deployment exists yet to validate a real design against, the same
+reasoning ADR-043 already applied to deferring the wire protocol
+itself before this issue existed. Adding TCP/TLS later is expected to
+be an additive transport option alongside the Unix-domain socket, not
+a =v1= schema change, since gRPC's own transport selection is
+orthogonal to its message/service definitions.
+
+** =ExternalStrategyAdapter=: the host-side seam
+
+=ExternalStrategyAdapter= lives in a new package,
+=adapters/strategy/external=, placed under =adapters/= alongside
+=adapters/broker/sim= and =adapters/journal/jsonl= — it is a concrete
+adapter over an external boundary, not a domain package, matching
+=package-boundaries.org='s own placement rule ("Adapters are public
+when users construct them directly"). It is a gRPC *client*: it dials
+the external strategy process's Unix-domain socket, performs the
+=Handshake= RPC, and from that point on satisfies =strategy.Strategy=
+by translating each interface method into the corresponding =v1= RPC
+call and mapping the response back into Trader domain types.
+
+- =Describe()= is answered once, from the =Handshake= response — no
+  RPC round trip is needed on every call.
+- =Start(ctx, env)= opens the long-lived RPC stream/session and
+  transmits the run-scoped context described below (not the raw
+  =Environment= value itself, which carries Go interfaces a wire
+  message cannot represent).
+- =OnBar(ctx, event, view)= issues a request carrying the bar event
+  and the *permitted* slice of =view= (below), and translates the
+  response's described intents into real =[]order.Intent= values
+  through the adapter's own =IntentFactory= — never by trusting an
+  identifier the external process supplies (see intent-construction
+  ownership below).
+- Optional capability methods (=TickHandler=, =FillHandler=,
+  =AccountEventHandler=, =StateManager=, =Closer= — all still
+  unpublished per ADR-043's own "Scope" note) are implemented by
+  =ExternalStrategyAdapter= only when the =Handshake= response
+  declared the corresponding capability; otherwise
+  =ExternalStrategyAdapter= itself does not implement that optional
+  interface at all, so a runtime's own capability-detection
+  (=if h, ok := s.(strategy.FillHandler); ok=) behaves identically to
+  an in-process strategy that simply never implemented it.
+
+** Wire DTOs are not aliases of Trader's domain types
+
+Protobuf-generated Go types are transport representations, used only
+inside =adapters/strategy/external= (host side) and the Go SDK (guest
+side, below) — never returned from, or accepted by,
+=strategy.Strategy= itself, and never imported by any package upstream
+of =adapters/strategy/external= in the dependency graph. A
+=v1.BarEvent= message is hand-mapped, field by field, to and from
+=strategy.BarEvent=/=marketdata.Bar= by the adapter; it is never a
+generated alias standing in for the domain type, per
+=package-boundaries.org= rule 7 ("Transport DTOs must not become
+public domain types"). This is the same discipline ADR-041/ADR-058
+and every existing adapter in this codebase already follow for their
+own wire/storage formats (CSV, JSONL, Alpaca's own wire shape) — this
+ADR does not introduce a new principle, only applies the existing one
+to a new transport.
+
+** Intent construction ownership: described intents, host-minted identity
+
+Unchanged from, and made concrete by, ADR-043's own analysis: an
+external strategy process never mints a real =order.IntentID=,
+=id.EventID=, or =id.CorrelationID=, and never constructs a canonical
+=order.Intent= value itself. The =v1= wire message an external
+strategy's =OnBar= response carries is a *described* intent — kind
+(enter/exit/adjust-stop/target-exposure), instrument, side,
+quantity/stop as applicable, and an adapter-chosen *correlation
+token* (an opaque string the external process may reuse across
+multiple described intents from one callback to group them, with no
+identity meaning of its own beyond that grouping). =ExternalStrategy-
+Adapter=, on the host side, mints the real identifiers via its own
+=id.Generator= and constructs the canonical =order.Intent= exactly as
+an in-process =IntentFactory= does today — preserving ADR-005's
+"strategy emits intents through runtime-owned identity semantics"
+invariant across the process boundary instead of letting a remote
+process invent a parallel identity scheme the host would then have to
+trust or reconcile. This is the same design ADR-043 already recorded
+as the load-bearing answer to "what would the minimum message need to
+carry"; this ADR adopts it as the actual =v1= wire contract rather
+than a documented possibility.
+
+** =View= in =v1=: inline account snapshot, scoped history RPC
+
+ADR-043 named =strategy.View= as the hardest part of this boundary and
+deliberately left its representation undesigned. =v1= needs *some*
+answer to be usable at all (issue non-goals exclude tick streaming,
+not account/history access), so this ADR decides the minimum =v1=
+needs, without attempting the full generality a Go interface allows:
+
+- The account snapshot (=View.Account()='s own already-plain-value
+  fields) is carried *inline* in the =OnBar= request message itself,
+  computed by the host before the call — avoiding a synchronous
+  round-trip RPC on every bar for the common case, and guaranteeing
+  the snapshot reflects the identical no-lookahead cutoff the host's
+  own =frozenView= already enforces for an in-process strategy
+  (ADR-035's "no-lookahead is a layered invariant"), since the
+  external process never has an independent channel to request
+  fresher data through.
+- The optional =History= capability (when negotiated at =Handshake=)
+  is served by a separate =GetHistoryBars= RPC, constrained to
+  exactly the instruments/intervals the strategy's own =Descriptor.
+  Requirements= declared at =Handshake= time — mirroring ADR-043's own
+  stated invariant precisely: "an external adapter must never gain
+  access to future bars, providers, storage, or broker internals, or
+  mutable account state, that an in-process =Strategy= cannot already
+  see." =ExternalStrategyAdapter= rejects a =GetHistoryBars= request
+  for any instrument/interval outside that declared set at the RPC
+  boundary, rather than relying on the external process to police
+  itself.
+
+This is deliberately the minimum =v1= slice, not a general remote
+query API: no arbitrary =marketdata.Manager= access, no broker or
+risk queries, and no capability this ADR has not explicitly listed.
+
+** Go SDK/runtime: guest-side, first-class; other languages later
+
+A public =strategysdk= package (top-level, alongside =tradertest= as a
+public non-domain framework package — see =package-boundaries.org='s
+own "Test infrastructure intended for users belongs in a public
+=tradertest= package" precedent for a public package that exists to
+serve external consumers rather than Trader's own runtime) provides
+the *guest*-side counterpart to =ExternalStrategyAdapter=: it hosts
+the =v1= gRPC *server* on a Unix-domain socket, performs the
+=Handshake= responder role, and exposes a small Go interface — shaped
+identically to the subset of =strategy.Strategy= a =v1= strategy can
+actually use (=Describe=, =Start=, =OnBar=, plus whichever optional
+capability interfaces the strategy implements) — that real strategy
+authors implement, so writing a =v1= external strategy in Go looks as
+close as possible to writing an ordinary in-process
+=strategy.Strategy=, differing only in how the resulting binary is
+run and connected. =strategysdk= depends on =protocol/strategy/v1=,
+=order=, =marketdata=, =instrument=, and =num= — the same public
+vocabulary set ADR-043's own =strategy/boundary_test.go= already
+restricts =strategy= itself to — and never on =backtest=, =service=,
+=cmd=, =adapters=, =broker=, =execution=, =risk=, or =pipeline=,
+mirroring that same boundary test's forbidden set, since a guest
+process has exactly the same "no broker, risk, pipeline, or
+execution handle" restriction an in-process strategy does.
+
+Go is the only =v1= SDK language. Python, Rust, or any other language
+SDK is explicitly deferred (non-goals below) — gRPC/Protobuf's own
+code generation makes a later language SDK an additive addition to
+=protocol/strategy/v1='s existing schema, not a redesign of it, so
+deferring this costs nothing forward-compatibility-wise.
+
+** Dependency direction
+
+#+BEGIN_EXAMPLE
+              strategy (existing, unchanged)
+                    ^
+                    |
+        protocol/strategy/v1 (generated Protobuf/gRPC types)
+                 ^        ^
+                 |        |
+   adapters/strategy/external   strategysdk
+   (host-side gRPC client,      (guest-side gRPC server +
+    satisfies strategy.Strategy, thin Go strategy interface,
+    constructed by a composition  imported only by an external
+    root exactly like any other   strategy's own process/binary,
+    strategy.Strategy)            never by Trader itself)
+#+END_EXAMPLE
+
+=protocol/strategy/v1= depends only on generated Protobuf runtime
+support and the standard library — it does not import =strategy=,
+=order=, or any other domain package, since wire types are
+deliberately not aliases of domain types (above). Both
+=adapters/strategy/external= and =strategysdk= depend on
+=protocol/strategy/v1= and the same public domain vocabulary
+(=strategy=, =order=, =marketdata=, =instrument=, =num=, =id=), doing
+the field-by-field translation in both directions independently — the
+translation logic is not shared code between host and guest, since
+each side owns a different half of the mapping (constructing domain
+values host-side from wire messages; constructing wire messages
+guest-side from whatever the guest's own strategy logic returns).
+Neither package imports the other. =strategy= itself gains no new
+dependency at all: it remains exactly as ADR-043 left it, unaware
+that =ExternalStrategyAdapter= or =strategysdk= exist.
+
+** =v1= scope
+
+- One external strategy process per host connection (below).
+- =Describe=, =Start=, =OnBar=, and the account-snapshot slice of
+  =View= (inline) plus scoped =GetHistoryBars=.
+- =TickHandler=, =FillHandler=, =AccountEventHandler=, and
+  =StateManager= are representable as optional, negotiated
+  capabilities at =Handshake= (mirroring how =strategy= itself already
+  treats them as additive optional interfaces), but this ADR does not
+  design their concrete RPC shapes now — they are added to =v1= as
+  additive RPCs when a real consumer needs them, following the same
+  "do not widen for a speculative future adapter" discipline ADR-043
+  already established, rather than speculatively designed here.
+- Unix-domain socket transport only.
+- Go SDK only.
+
+* Non-goals for =v1=
+
+Restated from the issue, with the reasoning for each:
+
+- *Python/Rust (or any non-Go) SDK.* Deferred until a real consumer
+  needs one; additive to =protocol/strategy/v1='s existing schema.
+- *Remote TLS deployment.* No concrete remote deployment exists yet to
+  validate a design against; the Unix-domain socket already satisfies
+  this issue's actual "out-of-process" goal without it.
+- *Hot reload* (replacing a running external strategy process without
+  restarting the host's own session). A =live= session concern, not
+  yet designed at all for the host side either.
+- *Tick streaming.* =strategy.TickHandler= is still an unpublished,
+  additive-later capability per ADR-043; there is no in-process tick
+  consumer to mirror yet.
+- *Distributed strategies* (a single logical strategy split across
+  multiple cooperating external processes). No concrete need, and a
+  significant coordination/consistency design of its own.
+- *Checkpoint/restart* for the external process itself (surviving a
+  crash mid-session with state intact). =StateManager= already exists
+  as a =strategy= capability for in-process snapshot/restore; wiring
+  it across the =v1= boundary is deferred with the other optional
+  capabilities above, not designed now.
+- *Multiple strategies per external process.* =v1='s =Handshake=
+  assumes one strategy identity per connection; a process that wants
+  to run several strategies opens several connections (or several
+  processes), rather than =v1= inventing a multiplexing scheme.
+- *MQTT transport for the strategy control plane.* ADR-010 already
+  scopes MQTT to fan-out/telemetry/dashboards/alerts, not
+  execution-critical control flow; this ADR does not change that scope
+  or design an MQTT strategy transport.
+
+* Consequences
+
+- Issue #376's own acceptance criteria are satisfied by this document:
+  dependency direction, protocol/versioning rules, process/transport
+  model, intent-construction ownership, and =v1= scope/non-goals are
+  all recorded above.
+- No code is written by this ADR. =protocol/strategy/v1=,
+  =adapters/strategy/external=, and =strategysdk= remain empty
+  proposals until a follow-on issue implements them — consistent with
+  =package-boundaries.org= rule 15 ("No empty placeholder
+  directories"), no directory is created by this ADR itself.
+- =strategy.Strategy= gains no new method, and no new public
+  =ExternalStrategy= interface is introduced — ADR-043's own
+  non-goal is reaffirmed, not revisited.
+- A future =v2= protocol revision is expected to coexist with =v1=
+  rather than replace it in place, per the versioning rule above; this
+  keeps an already-deployed =v1= external strategy working across a
+  host upgrade that also supports =v2=.
+- ADR-010 remains =Proposed=; its own MQTT-related items are still
+  open and are not resolved by this ADR.
+
+* Alternatives Considered
+
+- *A new public =ExternalStrategy= interface, distinct from
+  =strategy.Strategy=.* Rejected, consistent with ADR-043's own
+  explicit non-goal: it would fork the strategy abstraction for a
+  concern (transport) orthogonal to what a strategy actually is: a
+  policy that interprets state and emits intents. The gRPC boundary is
+  fully expressible as one more =strategy.Strategy= implementation.
+- *MQTT (or another pub/sub transport) as the strategy control
+  plane.* Rejected for the same reason ADR-010 already gave: weak
+  built-in delivery/ordering/acknowledgement semantics for
+  execution-critical request/response flow without extensive custom
+  additions gRPC already provides natively.
+- *TCP with mandatory TLS from =v1=.* Rejected for =v1=: adds real
+  deployment complexity (certificate provisioning/rotation,
+  authentication scheme) with no concrete remote consumer yet to
+  validate the design against, mirroring ADR-043's own reasoning for
+  deferring the wire protocol itself.
+- *Letting the external process mint its own intent/correlation
+  identifiers.* Rejected: would let a remote, less-trusted process
+  invent identity Trader's own journal/reconciliation machinery must
+  treat as canonical, directly undermining ADR-005's "runtime-owned
+  identity semantics" invariant. Host-minted identity from a
+  described-intent wire message, exactly as ADR-043 already analyzed,
+  preserves that invariant across the boundary.
+- *Designing full RPC shapes for =TickHandler=/=FillHandler=/
+  =AccountEventHandler=/=StateManager= now, since capability
+  negotiation is already part of =Handshake=.* Rejected: no concrete
+  consumer exists for any of the four yet (all remain unpublished,
+  additive-later =strategy= capabilities per ADR-043), and designing
+  their wire shape now would be exactly the speculative widening
+  ADR-043's own review already warned against. Handshake-level
+  capability negotiation is forward-compatible with adding them later
+  as additive RPCs without a =v1= break.
+- *A general remote query RPC for arbitrary =marketdata.Manager=
+  access, broker state, or risk evaluation.* Rejected outright, not
+  merely deferred: this would hand an external process visibility or
+  capability an in-process =strategy.Strategy= itself is
+  architecturally forbidden from having (ADR-005, ADR-006), directly
+  violating this ADR's own restated =View= invariant.
