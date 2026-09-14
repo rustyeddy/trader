@@ -137,6 +137,32 @@ func mustSnapshotWithEquity(t *testing.T, accountID id.AccountID, broker, curren
 	return snap
 }
 
+// mustSnapshotWithEquityAndBuyingPower is mustSnapshotWithEquity but
+// with an independently-set BuyingPower, for fullNotionalSizer tests
+// proving it sizes from min(Equity, BuyingPower) rather than Equity
+// alone (issue #364/ADR-061 review).
+func mustSnapshotWithEquityAndBuyingPower(t *testing.T, accountID id.AccountID, broker, currency, equity, buyingPower string) account.Snapshot {
+	t.Helper()
+	cur := num.MustParseCurrency(currency)
+	snap, err := account.NewSnapshot(account.SnapshotParams{
+		AccountID:       accountID,
+		Broker:          broker,
+		Currency:        cur,
+		AsOf:            testStart,
+		CashBalances:    []num.Money{num.MustParseMoney(equity, cur)},
+		Equity:          num.MustParseMoney(equity, cur),
+		BuyingPower:     num.MustParseMoney(buyingPower, cur),
+		MarginUsed:      num.MustParseMoney("0", cur),
+		MarginAvailable: num.MustParseMoney(buyingPower, cur),
+		RealizedPnL:     num.MustParseMoney("0", cur),
+		UnrealizedPnL:   num.MustParseMoney("0", cur),
+		Fees:            num.MustParseMoney("0", cur),
+		Financing:       num.MustParseMoney("0", cur),
+	})
+	require.NoError(t, err)
+	return snap
+}
+
 // mustSnapshotWithPositions is mustSnapshotWithEquity plus open
 // positions, for per-trade-loss tests exercising existing exposure.
 func mustSnapshotWithPositions(t *testing.T, accountID id.AccountID, broker, currency, equity string, positions ...order.Position) account.Snapshot {

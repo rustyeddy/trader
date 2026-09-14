@@ -34,35 +34,52 @@ type Input struct {
 	// is sized, planned, and risk-evaluated against.
 	Account account.Snapshot
 
-	// RiskFraction is the fraction of Account.Equity() Sizer may risk
-	// when sizing an unsized order.IntentEnter (risk.SizeInput.
-	// RiskFraction). Required, and must be positive, exactly when
-	// Intent.Kind is order.IntentEnter; ignored otherwise. Also
-	// required for order.IntentEnterWithStop (issue #351, ADR-059):
-	// submitBracket forwards it unchanged to the synthesized
-	// order.IntentEnter sub-intent it submits for the entry leg, which
-	// has this identical requirement.
+	// RiskFraction is the fraction of Account.Equity() the configured
+	// risk.Sizer may risk when sizing an unsized order.IntentEnter
+	// (risk.SizeInput.RiskFraction) — forwarded unchanged, whether or
+	// not the configured Sizer actually uses it. Required, and must be
+	// positive, only when the configured Sizer sizes from a risk
+	// fraction (the default, fixedFractionSizer); ignored by a
+	// price-based Sizer (for example the full-notional Sizer, ADR-061)
+	// and by every Intent.Kind other than order.IntentEnter/
+	// order.IntentEnterWithStop. Pipeline itself no longer enforces
+	// this field's requiredness (ADR-061) — the configured Sizer
+	// validates whatever subset of SizeInput it actually consumes and
+	// returns its own classifiable risk.ErrInvalidSizeInput, wrapped by
+	// Pipeline, when a required field is missing.
 	RiskFraction num.Rate
 
 	// AdverseDistance is the adverse price-distance assumption this
-	// intent is sized/admitted against: it is both Sizer's own
-	// StopDistance for an unsized order.IntentEnter, and the value
-	// threaded into risk.Input.AdverseDistance for any Rule that needs
-	// one (for example PerTradeLossRule, #182). Required, and must be
-	// positive, exactly when Intent.Kind is order.IntentEnter; optional
-	// otherwise — a Rule that needs it regardless of Kind and finds it
-	// nil returns its own classifiable ErrInsufficientRuleInput. Also
-	// required for order.IntentEnterWithStop, for the identical reason
-	// RiskFraction is (see its own doc comment).
+	// intent is sized/admitted against: it is both risk.SizeInput.
+	// StopDistance for an unsized order.IntentEnter — forwarded
+	// unchanged, whether or not the configured Sizer actually uses it
+	// — and the value threaded into risk.Input.AdverseDistance for any
+	// Rule that needs one (for example PerTradeLossRule, #182).
+	// Required, and must be positive, only when the configured Sizer
+	// sizes from a stop distance (the default, fixedFractionSizer); a
+	// price-based Sizer (ADR-061) ignores it for sizing purposes, but
+	// a Rule that needs it regardless and finds it nil still returns
+	// its own classifiable ErrInsufficientRuleInput. See RiskFraction's
+	// own doc comment for why Pipeline itself no longer enforces this
+	// field's requiredness.
 	AdverseDistance *num.Price
 
-	// ReferencePrice is the valuation price threaded into
+	// ReferencePrice is the valuation/sizing price threaded into both
 	// risk.Input.ReferencePrice, for a value-based Rule (for example
 	// MaxInstrumentExposureRule, #183) that needs to price a resulting
-	// position's notional exposure. Optional at this Input level for
-	// the same reason risk.Input.ReferencePrice itself is: most rules
-	// don't need one, and a rule that does and finds it nil returns its
-	// own classifiable ErrInsufficientRuleInput.
+	// position's notional exposure, and risk.SizeInput.ReferencePrice,
+	// for a price-based Sizer (for example the full-notional Sizer,
+	// ADR-061) that needs it to size an unsized order.IntentEnter — one
+	// caller-supplied price, two consumers, never a second
+	// independently-supplied value that could disagree with the first.
+	// Optional at this Input level for the same reason risk.Input.
+	// ReferencePrice itself is: most rules and the default Sizer don't
+	// need one, and a consumer that does and finds it nil returns its
+	// own classifiable error (ErrInsufficientRuleInput for a Rule,
+	// risk.ErrInvalidSizeInput for a Sizer). ReferencePrice names an
+	// honest sizing/valuation reference, never a promise about the
+	// eventual broker fill price — see risk.SizeInput.ReferencePrice's
+	// own doc comment.
 	ReferencePrice *num.Price
 }
 
@@ -199,14 +216,25 @@ func (p *Pipeline) Evaluate(ctx context.Context, in Input) (Result, error) {
 
 	var qty *num.Quantity
 	if validIntent.Kind == order.IntentEnter {
-		if in.AdverseDistance == nil || in.AdverseDistance.IsZero() {
-			return Result{}, fmt.Errorf("%w: adverse distance must be positive for %v", ErrInvalidInput, validIntent.Kind)
+		// AdverseDistance's requiredness is no longer enforced here
+		// (ADR-061): whether it — or RiskFraction, or ReferencePrice —
+		// is actually required depends on which concrete risk.Sizer is
+		// configured, which Pipeline does not (and should not) know.
+		// The zero value of a nil AdverseDistance is passed through as
+		// num.Price{}, and Sizer.Size validates whatever subset of
+		// SizeInput its own implementation consumes, returning its own
+		// classifiable risk.ErrInvalidSizeInput when a field it needs
+		// is missing.
+		var stopDistance num.Price
+		if in.AdverseDistance != nil {
+			stopDistance = *in.AdverseDistance
 		}
 		sized, err := p.deps.Sizer.Size(ctx, risk.SizeInput{
-			Account:      in.Account,
-			Listing:      in.Listing,
-			RiskFraction: in.RiskFraction,
-			StopDistance: *in.AdverseDistance,
+			Account:        in.Account,
+			Listing:        in.Listing,
+			RiskFraction:   in.RiskFraction,
+			StopDistance:   stopDistance,
+			ReferencePrice: in.ReferencePrice,
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("pipeline: sizing intent: %w", err)

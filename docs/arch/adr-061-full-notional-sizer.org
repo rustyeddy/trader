@@ -1,0 +1,274 @@
+#+title: ADR-061: risk.SizeInput.ReferencePrice and a full-notional risk.Sizer
+
+* Status
+
+Accepted
+
+* Context
+
+PR #362's rereview (issue #361) raised a methodology concern about the
+"matched ~100%-notional" walk-forward comparison =research-runs/eqs-01=
+uses to evaluate SMA Long Hold re-entry candidates: it approximates full
+notional as =risk.FixedFractionSizer= with =RiskFraction=1= and
+=AdverseDistance= re-anchored once per fold from that fold's own
+train-start price. As price moves within a fold's own ~1-year test
+window, the fixed =AdverseDistance= anchor drifts away from the
+position's real current notional, so later entries in the same fold are
+not actually sized at true 100%-of-equity.
+
+Rusty's own recommendation (issue #364): "when Long, invest current
+available equity at the actual entry price; when Flat, hold cash ... If
+Trader does not yet have an exact full-notional sizing mode, I would
+rather track that explicitly than let the current approximation become
+the canonical definition of '100% invested.'"
+
+=risk.SizeInput= (the only input a =Sizer= receives) had no price field
+at all — =risk.Sizer= was documented as never seeing the current market
+price directly, sizing being a pure function of equity/risk-fraction/
+stop-distance. There was no way to compute "shares = available capital /
+current price" through the existing =Sizer= contract.
+
+** Partial amendment of ADR-059
+
+ADR-059's own Consequences section states: "=pipeline.Input.
+RiskFraction= and =AdverseDistance= are required whenever
+=Intent.Kind= is =IntentEnterWithStop=, identically to =IntentEnter=."
+That was correct when written — =Pipeline.Evaluate= itself
+unconditionally enforced =AdverseDistance= for =IntentEnter= at the
+time. This decision removes that unconditional enforcement (see
+Decision, below): whether either field is actually required now
+depends entirely on which concrete =risk.Sizer= is configured, not on
+=Intent.Kind= alone. =RiskFraction=/=AdverseDistance= remain required,
+exactly as ADR-059 said, when the configured =Sizer= is the default
+=fixedFractionSizer=; neither is required when it is the new
+=fullNotionalSizer= this ADR adds. Recorded as a partial amendment
+(per this registry's own Partial Amendment Rules) rather than a full
+supersession: every other decision in ADR-059 — the bracket mechanism
+itself, its backtest-only scope, the =submitBracket=/=InitialStopSeeder=
+machinery — is unaffected and remains in force exactly as written.
+
+* Decision
+
+** Widen =risk.SizeInput=; keep one =Sizer= interface
+
+=risk.Sizer= stays exactly one interface
+(=Size(ctx, SizeInput) (num.Quantity, error)=). =SizeInput= gains one new
+field, =ReferencePrice *num.Price=, alongside the existing
+=RiskFraction=/=StopDistance=. Not every field is required by every
+=Sizer=: =fixedFractionSizer= uses =RiskFraction=/=StopDistance= and
+ignores =ReferencePrice=; the new =fullNotionalSizer= uses
+=ReferencePrice= and ignores =RiskFraction=/=StopDistance=.
+
+A second, parallel =Sizer=-like interface (or a =Pipeline=-side type
+switch on which concrete =Sizer= is configured) was considered and
+rejected: =Pipeline= would then need to know which concrete =Sizer= is
+injected to decide what to pass it, exactly the coupling ADR-006 keeps
+=execution=/=risk= free of. A wider =SizeInput= keeps =Pipeline=
+unchanged in shape: it always builds one =SizeInput= from
+=pipeline.Input=, and whichever concrete =Sizer= is injected picks out
+only the fields it needs.
+
+** =SizeInput.ReferencePrice= reuses =pipeline.Input.ReferencePrice=; no duplicate field
+
+=pipeline.Input= already carried =ReferencePrice *num.Price= — "the
+valuation price ... for a value-based Rule that needs to price a
+resulting position's notional exposure" (added for
+=MaxInstrumentExposureRule=, #183). A full-notional =Sizer= needs the
+identical concept: the current price to convert capital into a quantity.
+=Pipeline.Evaluate= threads =in.ReferencePrice= into both
+=risk.Input.ReferencePrice= (unchanged) and the new
+=risk.SizeInput.ReferencePrice= — one caller-supplied price, two
+consumers, never two independently-supplied values that could disagree.
+
+Naming: =SizeInput= names the field =ReferencePrice=, matching
+=pipeline.Input='s own name exactly, rather than a shorter =Price= —
+deliberately, so the contract does not imply this is an authoritative
+eventual fill price (see the fill-price caveat below).
+
+** Validation moves from one shared gate to each =Sizer=
+
+=checkSizeInput= previously required =RiskFraction=/=StopDistance=
+positive unconditionally — a full-notional =Sizer= needs neither. New
+shape: =checkSizeInput= validates only what every =Sizer= needs
+regardless of its own method (constructed =Account=/=Listing=, provider/
+broker match, settlement-currency match, ADR-030's "no implicit
+conversion" rule) — the same "small required core" split this codebase
+already uses for =risk.Rule=/=strategy.ExitRule=/etc.
+=fixedFractionSizer.Size= validates =RiskFraction=/=StopDistance= itself
+(moved, not removed); =fullNotionalSizer.Size= validates
+=ReferencePrice= itself.
+
+Symmetrically, =Pipeline.Evaluate='s own previous hard precondition —
+
+#+BEGIN_SRC go
+if in.AdverseDistance == nil || in.AdverseDistance.IsZero() {
+    return Result{}, fmt.Errorf("%w: adverse distance must be positive for %v", ErrInvalidInput, validIntent.Kind)
+}
+#+END_SRC
+
+— is removed. =AdverseDistance=/=RiskFraction= are no longer
+unconditionally required at the =pipeline.Input= level for
+=IntentEnter=/=IntentEnterWithStop=; whichever concrete =Sizer= is
+configured decides what it actually needs and returns its own
+classifiable =risk.ErrInvalidSizeInput= if something is missing, wrapped
+by =Pipeline= exactly as before (="pipeline: sizing intent: %w"=). This
+is an observable behavior change for an existing caller relying on the
+default =fixedFractionSizer= with a missing =AdverseDistance=: the
+error's sentinel changes from =pipeline.ErrInvalidInput= to
+=risk.ErrInvalidSizeInput=, still at the identical call site, before any
+broker interaction. =TestPipelineSubmit_EnterWithoutAdverseDistanceIsSizeInputError=
+is the regression proving this classification is now intentional, not
+accidental.
+
+** =fullNotionalSizer=
+
+Fully invests available capital at =ReferencePrice= when sizing a new
+position — no fractional/partial-invest variant, no reuse of
+=RiskFraction= to mean "fraction of equity to invest" (that would
+overload one field's meaning differently across =Sizer= implementations;
+=RiskFraction= means "fraction of equity to *risk*" everywhere else in
+this codebase). Whole-share rounding is =RoundDown=, matching
+=fixedFractionSizer='s own convention exactly, with the identical
+post-rounding correction loop (=DivPrice='s own nearest-rounding can push
+the raw quantity up across an increment boundary; step back down one
+increment at a time until the implied cost no longer exceeds the
+budget) — the same reasoning ADR-030 already settled for
+=fixedFractionSizer=, applied here so rounding can never spend more than
+the resource it draws from.
+
+*** Capital budget: =min(Equity, BuyingPower)=, not =Equity= alone
+
+=account.Snapshot= already distinguishes =Equity()= (net liquidation
+value) from =BuyingPower()= (funds available to open new positions,
+issue #364 review). A generic =fullNotionalSizer= computing
+=Equity / price= blindly can propose an impossible new position when the
+account already owns something, since =Equity()= includes existing
+position value. The budget is therefore
+=min(Account.Equity(), Account.BuyingPower())=: this preserves the
+intended "never exceed 100% of equity" rule while never asking to spend
+more than the broker reports available. In a normal unlevered, flat-
+before-entry backtest (this =Sizer='s own motivating use case) the two
+are equal, so canonical "100% invested" research semantics are
+unaffected by this rule; it only binds when they diverge.
+=TestFullNotionalSizerUsesLesserOfEquityAndBuyingPower= and
+=TestFullNotionalSizerUsesEquityWhenBuyingPowerIsHigher= prove both
+directions of the =min()=.
+
+*** =ReferencePrice=, not the eventual fill price
+
+=fullNotionalSizer= sizes exactly against =SizeInput.ReferencePrice= and
+makes no claim about what a market order built from the resulting
+quantity will actually fill at.
+=backtest.resolverInputBuilder= sets =ReferencePrice = event.Bar.Open= —
+an honest reference/sizing price, not a guarantee of the simulator's
+eventual fill price; slippage/fill-model choice still owns that (see
+that type's own doc comment, unchanged by this ADR). This =Sizer=
+therefore promises exact/whole-share-quantized notional *at the supplied
+ReferencePrice*, never at an unknowable future fill price.
+
+Canonical SMA Long Hold research (#365) claiming "exact 100% invested"
+must either use a fill model where a market order fills at the identical
+price =ReferencePrice= supplied (for example a next-bar-open reference
+price against a zero-slippage next-bar-open fill model), or report the
+result as reference-price-exact rather than fill-price-exact — this ADR
+does not itself select or change that research's fill-model
+configuration; that remains #365's own follow-up work, per issue #364's
+explicit "not in scope here."
+
+=TestPipelineSubmit_FullNotionalSizerIsExactOnlyAtReferencePriceNotRealFill=
+is the regression proving this: it submits with a =ReferencePrice=
+deliberately different from the sim broker's own fixed real fill price
+and confirms the resulting position's real cost does not equal
+=Equity()= — the =Sizer= never silently corrects for an execution-price
+difference it cannot know about pre-submit.
+
+*** Flat-only precondition, at the whole-account level
+
+=order.IntentEnter= means "open or increase" a position, but
+=fullNotionalSizer= always computes a brand-new order equal to its
+*entire* available budget — it is an account-level 100%-invested
+contract, not "100% of capital for one instrument alongside other
+existing exposure," which would be a materially different, narrower
+semantic this =Sizer= does not implement. =Size= therefore rejects
+outright with a new sentinel, =ErrFullNotionalRequiresFlat=, whenever
+=SizeInput.Account= holds *any* open position at all, regardless of
+instrument — not only a position in =SizeInput.Listing='s own
+instrument (PR #371 re-review corrected an earlier, narrower draft of
+this precondition: an instrument-scoped check alone does not protect
+the account-level contract, since =BuyingPower() >= Equity()= is a
+real possibility on a leveraged/margin account, and =SizeInput= places
+no upper bound on =BuyingPower= relative to =Equity=, so a second
+full-equity-notional order against a *different* instrument would
+still have been allowed through). This matches the =Sizer='s own
+motivating contract exactly: =Flat -> invest up to 100% -> Long ->
+Flat=.
+=TestFullNotionalSizerRejectsExistingPositionInSameInstrument= and
+=TestFullNotionalSizerRejectsExistingPositionInDifferentInstrument=
+prove both cases; the latter is the specific regression PR #371
+re-review required, confirmed meaningful by reverting to the
+instrument-scoped check and observing it pass incorrectly.
+
+A target-exposure/delta computation (sizing to reach 100% of equity
+*net* of an existing position, rather than rejecting outright) was
+considered and rejected as a materially larger design this issue's own
+scope excludes — see Alternatives Considered.
+
+* Consequences
+
+- =risk.SizeInput= and =pipeline.Input= are both public types; this ADR
+  changes validation ownership for both (moving field-specific
+  requiredness out of the shared gates and into each concrete consumer)
+  without changing either type's own field *shapes* beyond the one new
+  =ReferencePrice= field.
+- =cmd/trader/backtest= and =cmd/trader/execution= both still hardcode
+  =risk.NewFixedFractionSizer()= — no =Sizer=-selection surface exists
+  yet. Wiring one, and switching =research-runs/eqs-01='s own "matched
+  notional" comparison to =risk.NewFullNotionalSizer()= and re-verifying
+  prior conclusions, are both explicitly deferred follow-up work (issue
+  #364's own scope boundary), not part of this decision.
+- A caller configured with the default =fixedFractionSizer= that omits
+  =AdverseDistance= now observes =risk.ErrInvalidSizeInput= instead of
+  =pipeline.ErrInvalidInput= — see the classification-change consequence
+  above.
+
+* Alternatives Considered
+
+- *A second =Sizer=-shaped interface for price-based sizing*, dispatched
+  by =Pipeline= via a type assertion on the configured =Sizer=. Rejected:
+  couples =Pipeline= to concrete =Sizer= implementations, exactly what
+  ADR-006 already keeps =execution=/=risk= decoupled from.
+- *A second, independently-supplied price field* on =SizeInput= (for
+  example =Price=, separate from reusing =pipeline.Input.ReferencePrice=).
+  Rejected per issue #364 review: two prices that could disagree is
+  strictly worse than one, and =ReferencePrice= already names the exact
+  concept a price-based =Sizer= needs.
+- *Sizing from =Equity()= alone*, ignoring =BuyingPower()=. Rejected per
+  issue #364 review: correct only for the flat-before-entry case this
+  =Sizer='s own motivating research already assumes, and silently wrong
+  in general — =min(Equity, BuyingPower)= costs nothing in the common
+  case and is correct in the general one.
+- *A fractional/partial-invest variant now* (reusing =RiskFraction= to
+  mean "invested fraction"). Rejected per issue #364 review: overloads
+  one field's meaning differently across =Sizer= implementations for a
+  capability nothing currently needs; a natural additive follow-up once
+  a real use case exists.
+- *Claiming exact notional at the real fill price.* Rejected: not
+  knowable pre-submit given this codebase's own fill-model architecture
+  (ADR-028) — a =Sizer= that promised this would be lying about
+  something outside its own knowledge. Documented as an explicit,
+  tested boundary instead of an implicit assumption.
+- *An instrument-scoped flat check* (reject only when =Account= already
+  holds a position in =SizeInput.Listing='s own instrument, rather than
+  any instrument). This was this ADR's own first draft, corrected in PR
+  #371 re-review: it does not protect the account-level "100% invested"
+  contract this =Sizer= actually claims, since an existing position in a
+  *different* instrument can coexist with =BuyingPower() >= Equity()=
+  and still let a second full-equity-notional order through.
+- *A target-exposure/delta computation* (size to reach 100% of equity
+  net of whatever position already exists, rather than requiring
+  =Flat=). Rejected as a materially larger design — it would need its
+  own answer for partial fills, multiple existing lots, and short
+  positions — genuinely out of this issue's own scope; the flat-only
+  precondition is the smaller, sufficient change for the SMA Long Hold
+  =Flat -> invest up to 100% -> Long -> Flat= contract this =Sizer=
+  actually needs to serve.

@@ -17,18 +17,37 @@ var (
 	ErrInvalidRule = errors.New("risk: invalid rule")
 
 	// ErrInvalidSizeInput reports a SizeInput that fails validation:
-	// an unconstructed Account/Listing, a non-positive RiskFraction or
-	// StopDistance, or an account equity currency that does not match
-	// the listing's settlement currency (ADR-030: Sizer performs no
-	// implicit currency conversion).
+	// an unconstructed Account/Listing, an account equity currency
+	// that does not match the listing's settlement currency (ADR-030:
+	// Sizer performs no implicit currency conversion), or — checked by
+	// each concrete Sizer itself, not by the shared checkSizeInput
+	// (ADR-061) — a non-positive RiskFraction/StopDistance/
+	// ReferencePrice that Sizer implementation actually requires.
 	ErrInvalidSizeInput = errors.New("risk: invalid size input")
 
 	// ErrSizeRoundsToZero reports that a Sizer's raw computed quantity
 	// rounded down to zero at the listing's own quantity increment —
-	// the account's risk budget, at this StopDistance, cannot buy even
-	// one increment of this listing. This is a classifiable outcome,
-	// never a silent zero-quantity Proposal.
+	// the account's own sizing budget cannot buy even one increment of
+	// this listing at the price/distance the configured Sizer computed
+	// it from (fixedFractionSizer's risk budget at StopDistance, or
+	// fullNotionalSizer's available capital at ReferencePrice, ADR-061
+	// — the specific budget/price pairing depends on which Sizer
+	// raised it). This is a classifiable outcome, never a silent
+	// zero-quantity Proposal.
 	ErrSizeRoundsToZero = errors.New("risk: sizing rounds down to zero at this listing's quantity increment")
+
+	// ErrFullNotionalRequiresFlat reports that fullNotionalSizer
+	// (ADR-061) was asked to size a position while the account already
+	// holds an open position in *any* instrument, not only the one
+	// being sized (PR #371 re-review). order.IntentEnter means "open
+	// or increase," but fullNotionalSizer always computes a brand-new
+	// order equal to its entire available budget; sizing it while any
+	// position is already open could push total account exposure past
+	// the 100%-of-equity ceiling this Sizer's whole contract promises
+	// never to exceed. See fullNotionalSizer's own doc comment for why
+	// this is a whole-account flat-only precondition rather than a
+	// target-exposure/delta computation or an instrument-scoped check.
+	ErrFullNotionalRequiresFlat = errors.New("risk: full-notional sizing requires the account to hold no open positions")
 
 	// ErrInsufficientRuleInput reports that a Rule could not evaluate
 	// Input because it required contextual data Input did not carry —
