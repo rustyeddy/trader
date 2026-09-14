@@ -158,23 +158,23 @@ func (r *reclaimExitPriceReEntryRule) ShouldEnter(ctx ReEntryContext) bool {
 // intended for a genuine trend resumption rather than a mere pullback
 // recovery. The breakout threshold is always the high established by
 // *prior* bars since the exit, never including the current bar's own
-// new High in its own check (sinceExitHigh updates only after
-// ShouldEnter has already decided), so a bar can never trivially
-// "break out" against a high it itself just set.
+// new High in its own check, so a bar can never trivially "break out"
+// against a high it itself just set.
 //
-// Known limitation, not fixed here (PR #362 review; tracked as a
-// follow-up rather than silently changed in an unrelated issue's own
-// PR): sinceExitHigh is updated only inside ShouldEnter, which — like
-// every ReEntryRule's own ShouldEnter — is never consulted while
-// Strategy.onFlat's central SMA gate is false. This rule therefore has
-// the same latent gap nBarBreakoutReEntryRule had before this same PR
-// added ObserveFlatBar: a below-SMA stretch's own bars never update
-// sinceExitHigh, so the "since exit" high this rule tracks can
-// understate the real since-exit high whenever a meaningful new high
-// occurs while price is below the SMA. ObserveFlatBar is implemented
-// here as a no-op, preserving this rule's exact existing (buggy)
-// behavior rather than changing it as a side effect of #361's own
-// interface addition.
+// ObserveFlatBar is the sole mutator of sinceExitHigh — ShouldEnter is
+// a pure read-only comparison against whatever value ObserveFlatBar
+// has already established (issue #363, mirroring PR #362's identical
+// fix for nBarBreakoutReEntryRule below). PR #362 review found and
+// deliberately deferred this exact bug rather than fixing it as a
+// side effect of issue #361's own, unrelated scope: sinceExitHigh was
+// previously updated only inside ShouldEnter, which — like every
+// ReEntryRule's own ShouldEnter — is never consulted while
+// Strategy.onFlat's central SMA gate is false, so a below-SMA
+// stretch's own bars never updated sinceExitHigh, and the "since
+// exit" high this rule tracks could understate the real since-exit
+// high whenever a meaningful new high occurred while price was below
+// the SMA. ObserveFlatBar now runs for *every* flat bar, closing that
+// gap the same way it already does for nBarBreakoutReEntryRule.
 type breakoutReEntryRule struct {
 	sinceExitHigh num.Price
 }
@@ -187,14 +187,17 @@ func (r *breakoutReEntryRule) OnExit(_ num.Price, exitBar marketdata.Bar) {
 	r.sinceExitHigh = exitBar.High
 }
 
-func (*breakoutReEntryRule) ObserveFlatBar(marketdata.Bar) {}
+// ObserveFlatBar is the sole mutator of r.sinceExitHigh — ShouldEnter
+// is now purely a read-only comparison against whatever value
+// ObserveFlatBar has already established (issue #363 fix).
+func (r *breakoutReEntryRule) ObserveFlatBar(bar marketdata.Bar) {
+	if bar.High.Cmp(r.sinceExitHigh) > 0 {
+		r.sinceExitHigh = bar.High
+	}
+}
 
 func (r *breakoutReEntryRule) ShouldEnter(ctx ReEntryContext) bool {
-	enter := ctx.Bar.Close.Cmp(r.sinceExitHigh) > 0
-	if ctx.Bar.High.Cmp(r.sinceExitHigh) > 0 {
-		r.sinceExitHigh = ctx.Bar.High
-	}
-	return enter
+	return ctx.Bar.Close.Cmp(r.sinceExitHigh) > 0
 }
 
 // nBarBreakoutReEntryRule re-enters the first bar the close moves
