@@ -37,7 +37,16 @@ const Name = "sma-trend"
 // equivalent to, even for a config that happens to use an unrelated
 // ReEntryRuleName — OnBar's own control flow changed for every
 // config, not only the four new rule names.
-const Version = "v3"
+//
+// Bumped to "v4" by issue #363 (PR #375 review): breakoutReEntryRule
+// now updates sinceExitHigh from every flat bar via ObserveFlatBar,
+// not only bars ShouldEnter happened to be consulted on — the same
+// fix PR #362 already made for nBarBreakoutReEntryRule. A
+// ReEntryRuleName: "breakout" config can now produce different entry
+// timing than a "v3" run of the identical config whenever a below-SMA
+// stretch contains a new since-exit high, even though no committed
+// baseline is known to have used "breakout" before this fix.
+const Version = "v4"
 
 // Strategy is the SMA-trend baseline strategy.Strategy implementation
 // (issue #335, EQS-01), extended with pluggable exit/re-entry rules

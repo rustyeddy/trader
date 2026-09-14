@@ -39,27 +39,61 @@ func TestReclaimExitPriceReEntryRule_EntersOnceCloseReclaimsExitPrice(t *testing
 	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "100", "103", "99", "101")}), "close (101) strictly above the 100 exit price must enter")
 }
 
+// TestBreakoutReEntryRule_EntersOnCloseAboveSinceExitHighFromPriorBarsOnly
+// uses nBarBreakoutCheckThenObserve/nBarBreakoutOnExit (issue #363
+// fix) rather than calling ShouldEnter directly: those helpers are
+// generic over any ReEntryRule and mirror Strategy.onFlat's own real
+// call order (ShouldEnter decides first against whatever
+// ObserveFlatBar already established, then ObserveFlatBar updates
+// afterward) — the exact sequencing breakoutReEntryRule now relies on
+// for sinceExitHigh, since ShouldEnter itself no longer mutates state.
 func TestBreakoutReEntryRule_EntersOnCloseAboveSinceExitHighFromPriorBarsOnly(t *testing.T) {
 	rule, err := newBreakoutReEntryRule(Config{})
 	require.NoError(t, err)
-	rule.OnExit(num.MustParsePrice("100"), mustBar(t, "102", "105", "99", "100")) // sinceExitHigh seeded at 105
+	nBarBreakoutOnExit(rule, "100", mustBar(t, "102", "105", "99", "100")) // sinceExitHigh seeded at 105
 
 	// A close above the exit bar's own high (105) is required — not merely
 	// above the exit price itself. This bar's own High (105) must not
 	// itself exceed the seeded since-exit high, or it would ratchet
 	// sinceExitHigh upward before the next assertion gets to observe it.
-	assert.False(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "104", "105", "103", "104")}), "close (104) below the since-exit high (105) must not enter")
+	assert.False(t, nBarBreakoutCheckThenObserve(rule, mustBar(t, "104", "105", "103", "104")), "close (104) below the since-exit high (105) must not enter")
 
 	// This bar's own new High (110) must not let its own Close trivially
 	// "break out" against a high it itself just set: the check uses only
 	// the high established by prior bars (105), so a close of 106 here
 	// does break out, and sinceExitHigh only updates to 110 afterward.
-	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "105", "110", "104", "106")}), "close (106) above the prior since-exit high (105) must enter")
+	assert.True(t, nBarBreakoutCheckThenObserve(rule, mustBar(t, "105", "110", "104", "106")), "close (106) above the prior since-exit high (105) must enter")
 
 	// Now that sinceExitHigh has updated to 110, a close of 108 must not
 	// enter (confirming the update actually took effect and this rule
 	// tracks a real ratcheting high, not a one-shot exit-bar value).
-	assert.False(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "106", "109", "105", "108")}))
+	assert.False(t, nBarBreakoutCheckThenObserve(rule, mustBar(t, "106", "109", "105", "108")))
+}
+
+// TestBreakoutReEntryRule_ObserveFlatBarUpdatesSinceExitHighWithoutShouldEnterCalls
+// is the focused unit test issue #363 asks for, mirroring
+// TestNBarBreakoutReEntryRule_WindowSlidesAndEvictsTheOldestBar's own
+// proof for nBarBreakoutReEntryRule: ObserveFlatBar alone — never
+// ShouldEnter — must be sufficient to update sinceExitHigh. This is
+// exactly the call pattern Strategy.onFlat uses while price sits below
+// the SMA (ShouldEnter is never consulted there at all; only
+// ObserveFlatBar runs), and exactly the gap the pre-fix rule had: its
+// only mutation lived inside ShouldEnter, so a below-SMA bar's own new
+// high was silently forgotten.
+func TestBreakoutReEntryRule_ObserveFlatBarUpdatesSinceExitHighWithoutShouldEnterCalls(t *testing.T) {
+	rule, err := newBreakoutReEntryRule(Config{})
+	require.NoError(t, err)
+	rule.OnExit(num.MustParsePrice("100"), mustBar(t, "102", "105", "99", "100")) // sinceExitHigh seeded at 105
+
+	// Two ObserveFlatBar-only calls, no ShouldEnter — the "below SMA,
+	// ShouldEnter never consulted" pattern. The second bar's spike
+	// (130) must be captured even though nothing ever asked
+	// ShouldEnter about it.
+	rule.ObserveFlatBar(mustBar(t, "104", "106", "103", "104")) // sinceExitHigh -> 106
+	rule.ObserveFlatBar(mustBar(t, "120", "130", "119", "121")) // sinceExitHigh -> 130
+
+	assert.False(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "125", "128", "124", "127")}), "127 must not break out above 130, the real since-exit high including the below-SMA spike")
+	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "128", "132", "127", "131")}), "131 does break out above the real since-exit high of 130")
 }
 
 // nBarBreakoutCheckThenObserve mirrors Strategy.onFlat's own real call

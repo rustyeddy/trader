@@ -747,6 +747,62 @@ func TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes(t *tes
 	assert.Equal(t, order.IntentEnter, intents[0].Kind)
 }
 
+// TestStrategy_BreakoutReEntryObservesBelowSMABarsNotJustAboveSMAOnes
+// is issue #363's own required integration test, mirroring
+// TestStrategy_BreakoutNReEntryObservesBelowSMABarsNotJustAboveSMAOnes
+// exactly but for the plain, unbounded "breakout" rule rather than
+// "breakout-2": it exercises the real Strategy.onFlat wiring across
+// several below-SMA flat bars — including one with a high spike —
+// before re-entry eligibility returns, and proves sinceExitHigh
+// actually reflects that spike, not only the bars ShouldEnter
+// happened to be consulted on. Before the issue #363 fix, this
+// rule's only mutation lived inside ShouldEnter, which
+// Strategy.onFlat never calls while the central SMA gate is false;
+// that bug would have made this test's own bar10 assertion fail (the
+// below-SMA spike's own High would have been silently forgotten,
+// letting bar10's lower close incorrectly enter against a stale,
+// much smaller remembered high).
+func TestStrategy_BreakoutReEntryObservesBelowSMABarsNotJustAboveSMAOnes(t *testing.T) {
+	h := enterLongWithConfig(t, Config{SMAPeriod: 3, TrailingStopPercent: num.MustParseRate("0.10"), ReEntryRuleName: "breakout"})
+	h.onBar(6, bar{open: 103, high: 110, low: 102, close: 105}) // ratchets stop
+	h.triggerStop()
+
+	// Bar7: exit-observation bar, below its own SMA (99.0) — default
+	// branch, ShouldEnter not called, but ObserveFlatBar must still
+	// fire (sinceExitHigh seeded at the exit bar's own High, 91).
+	intents, _ := h.onBar(7, bar{open: 90, high: 91, low: 89, close: 90})
+	assert.Empty(t, intents)
+
+	// Bar8: still below SMA (93.33) — a large spike High (130) while
+	// the central gate blocks ShouldEnter entirely. If this bar were
+	// never observed (the pre-fix bug), sinceExitHigh would remain
+	// stuck at bar7's own modest 91 high indefinitely.
+	intents, _ = h.onBar(8, bar{open: 85, high: 130, low: 84, close: 85})
+	assert.Empty(t, intents)
+
+	// Bar9: still below SMA (85.0) — sinceExitHigh remains 130 (no
+	// higher High observed).
+	intents, _ = h.onBar(9, bar{open: 80, high: 82, low: 79, close: 80})
+	assert.Empty(t, intents)
+
+	// Bar10: finally above its own SMA (86.67), so ShouldEnter is
+	// consulted for the first time since the exit. Close (95) is well
+	// above bar7's own 91 high (what a rule that forgot bar8/bar9
+	// would still be comparing against) but below the real
+	// since-exit high (130, from bar8's own below-SMA spike) — this
+	// must NOT enter, proving bar8's High really is part of the value
+	// bar10 is evaluated against.
+	intents, _ = h.onBar(10, bar{open: 94, high: 96, low: 93, close: 95})
+	assert.Empty(t, intents, "95 must not break out above the real since-exit high (130, from the below-SMA bar8 spike)")
+
+	// Bar11: a close of 135 clears the real since-exit high (130) and
+	// enters — confirming the rule is not permanently stuck, only
+	// correctly stricter at bar10.
+	intents, _ = h.onBar(11, bar{open: 100, high: 136, low: 99, close: 135})
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentEnter, intents[0].Kind)
+}
+
 // ambiguousExitRule is a test double proving Strategy.onLong rejects
 // an ExitRule that returns both ExitNow and NewStop set on the same
 // decision (PR #348 review): ExitDecision's own doc comment requires
