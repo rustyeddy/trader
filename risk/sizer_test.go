@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -468,6 +469,58 @@ func TestFullNotionalSizerUsesEquityWhenBuyingPowerIsHigher(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, got.Equal(num.MustParseQuantity("100")), "got %s", got)
+}
+
+// TestFullNotionalSizerRejectsExistingPositionInSameInstrument is PR
+// #371 review's own required blocker regression: order.IntentEnter
+// means "open or increase," but fullNotionalSizer always computes a
+// brand-new order equal to its entire available budget. Sizing a
+// second such order on top of an already-open position (same
+// instrument, either side) must be rejected outright rather than
+// silently risking total exposure past 100% of equity.
+func TestFullNotionalSizerRejectsExistingPositionInSameInstrument(t *testing.T) {
+	s := NewFullNotionalSizer()
+	listing := mustListingWithSpec(t, "sim", "0.01", "1", "1", "USD")
+	accountID := mustAccountID(t)
+	existing := mustPosition(t, accountID, listing, order.Long, "10")
+	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", existing)
+	ref := num.MustParsePrice("100.00")
+
+	_, err := s.Size(context.Background(), SizeInput{
+		Account:        acc,
+		Listing:        listing,
+		ReferencePrice: &ref,
+	})
+	require.ErrorIs(t, err, ErrFullNotionalRequiresFlat)
+}
+
+// TestFullNotionalSizerRoundingNeverExceedsBudgetAtRoundingMidpoint
+// mirrors TestFixedFractionSizerRoundingNeverExceedsBudgetAtRoundingMidpoint
+// exactly: forces DivPrice's own nearest-rounding to push the raw
+// quantity to precisely the midpoint between two representable
+// quantity steps, proving the post-rounding correction loop actually
+// engages rather than merely existing unexercised (PR #371 review).
+func TestFullNotionalSizerRoundingNeverExceedsBudgetAtRoundingMidpoint(t *testing.T) {
+	s := NewFullNotionalSizer()
+	listing := mustListingWithSpec(t, "sim", "0.00000001", "0.00000001", "1", "USD")
+	accountID := mustAccountID(t)
+	acc := mustSnapshotWithEquity(t, accountID, "sim", "USD", "0.00000003")
+	ref := num.MustParsePrice("2")
+
+	got, err := s.Size(context.Background(), SizeInput{
+		Account:        acc,
+		Listing:        listing,
+		ReferencePrice: &ref,
+	})
+	require.NoError(t, err)
+
+	impliedCost, err := ref.MulQuantity(got, num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	budget := acc.Equity()
+	cmp, err := impliedCost.Cmp(budget)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, cmp, 0, "implied cost %s must not exceed budget %s (got quantity %s)", impliedCost, budget, got)
+	assert.True(t, got.Equal(num.MustParseQuantity("0.00000001")), "got %s", got)
 }
 
 func TestFullNotionalSizerPropagatesCancelledContext(t *testing.T) {

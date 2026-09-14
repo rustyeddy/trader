@@ -4,6 +4,13 @@
 
 Accepted
 
+Amended by ADR-061: the Consequences claim that =pipeline.Input.
+RiskFraction=/=AdverseDistance= "are required whenever =Intent.Kind=
+is =IntentEnterWithStop=" is corrected — that requirement now depends
+on which concrete =risk.Sizer= is configured, not unconditionally.
+See ADR-061's own Context for the exact correction; every other
+decision in this ADR is unchanged.
+
 * Context
 
 Issue #351 (raised in PR #350 review, issue #349's own smatrend

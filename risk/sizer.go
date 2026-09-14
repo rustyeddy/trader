@@ -213,6 +213,21 @@ func (fixedFractionSizer) Size(ctx context.Context, in SizeInput) (num.Quantity,
 // reference price against a zero-slippage next-bar-open fill model),
 // or report the result as reference-price-exact rather than
 // fill-price-exact.
+//
+// Flat-only (issue #364/PR #371 review): order.IntentEnter means
+// "open or increase" a position, but this Sizer always computes a
+// brand-new order equal to the *entire* available budget. If
+// SizeInput.Account already holds a position in SizeInput.Listing's
+// own instrument, sizing another full-notional order on top of it
+// would push total exposure past the 100% ceiling this Sizer's whole
+// contract promises never to exceed — min(Equity, BuyingPower) caps
+// only *this one order's* budget, not the resulting *position's*
+// total size. Rather than compute a target-exposure delta (a
+// materially larger design this issue's own scope excludes — see
+// ADR-061's own Alternatives Considered), Size rejects outright with
+// ErrFullNotionalRequiresFlat whenever Account already carries a
+// position in this instrument, keeping the semantics honest for
+// exactly the flat-before-entry use case this Sizer exists for.
 type fullNotionalSizer struct{}
 
 // NewFullNotionalSizer returns a Sizer implementing exact,
@@ -233,6 +248,11 @@ func (fullNotionalSizer) Size(ctx context.Context, in SizeInput) (num.Quantity, 
 	}
 	if in.ReferencePrice == nil || in.ReferencePrice.IsZero() {
 		return num.Quantity{}, fmt.Errorf("%w: reference price must be positive for full-notional sizing", ErrInvalidSizeInput)
+	}
+	for _, p := range in.Account.Positions() {
+		if p.Listing.InstrumentID().Equal(in.Listing.InstrumentID()) {
+			return num.Quantity{}, fmt.Errorf("%w: account already holds a %s position in %s", ErrFullNotionalRequiresFlat, p.Side, in.Listing.InstrumentID())
+		}
 	}
 
 	equity := in.Account.Equity()

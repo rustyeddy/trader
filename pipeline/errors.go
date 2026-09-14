@@ -9,23 +9,29 @@ var (
 
 	// ErrInvalidInput reports an Input that fails the structural checks
 	// Pipeline itself performs before sizing or planning is attempted:
-	// an invalid Intent (order.NewIntent's own validation), a
+	// an invalid Intent (order.NewIntent's own validation), or a
 	// deps.Broker whose Name() does not case-insensitively match
 	// in.Account.Broker() (Pipeline must never submit against a
 	// different broker than the account was sized/planned/
-	// risk-evaluated for), or an order.IntentEnter with no
-	// AdverseDistance for Sizer to size against.
+	// risk-evaluated for).
 	//
 	// Pipeline deliberately does not duplicate every structural check
 	// its own Sizer/Planner/Engine dependencies already perform: an
 	// unconstructed Listing/Account, for example, is instead reported
 	// by the underlying risk.ErrInvalidSizeInput or
-	// execution.ErrInvalidPlanInput once sizing or planning runs. Those
-	// — along with any other sizing, planning, or risk-evaluation
-	// failure — propagate as their own package's classifiable errors,
-	// wrapped but never collapsed into this sentinel, per this issue's
-	// own "explicit propagation of planning/risk failures" acceptance
-	// criterion.
+	// execution.ErrInvalidPlanInput once sizing or planning runs. This
+	// now also includes an order.IntentEnter/order.IntentEnterWithStop
+	// with a missing AdverseDistance/RiskFraction/ReferencePrice
+	// (ADR-061, issue #364, PR #371 review): Pipeline no longer
+	// hard-requires any of these itself, since which are actually
+	// required depends entirely on which concrete risk.Sizer is
+	// configured — that requirement is the configured Sizer's own
+	// classification (risk.ErrInvalidSizeInput), not a structural
+	// Pipeline.Input defect. Those — along with any other sizing,
+	// planning, or risk-evaluation failure — propagate as their own
+	// package's classifiable errors, wrapped but never collapsed into
+	// this sentinel, per this issue's own "explicit propagation of
+	// planning/risk failures" acceptance criterion.
 	ErrInvalidInput = errors.New("pipeline: invalid input")
 
 	// ErrRejected reports that risk.Engine.Evaluate returned a Decision

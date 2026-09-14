@@ -27,10 +27,26 @@ var (
 
 	// ErrSizeRoundsToZero reports that a Sizer's raw computed quantity
 	// rounded down to zero at the listing's own quantity increment —
-	// the account's risk budget, at this StopDistance, cannot buy even
-	// one increment of this listing. This is a classifiable outcome,
-	// never a silent zero-quantity Proposal.
+	// the account's own sizing budget cannot buy even one increment of
+	// this listing at the price/distance the configured Sizer computed
+	// it from (fixedFractionSizer's risk budget at StopDistance, or
+	// fullNotionalSizer's available capital at ReferencePrice, ADR-061
+	// — the specific budget/price pairing depends on which Sizer
+	// raised it). This is a classifiable outcome, never a silent
+	// zero-quantity Proposal.
 	ErrSizeRoundsToZero = errors.New("risk: sizing rounds down to zero at this listing's quantity increment")
+
+	// ErrFullNotionalRequiresFlat reports that fullNotionalSizer
+	// (ADR-061) was asked to size a position for an instrument the
+	// account already holds one in. order.IntentEnter means "open or
+	// increase," but fullNotionalSizer always computes a brand-new
+	// order equal to its entire available budget; sizing a second such
+	// order on top of an existing position could push total exposure
+	// past the 100%-of-equity ceiling this Sizer's whole contract
+	// promises never to exceed. See fullNotionalSizer's own doc
+	// comment for why this is a flat-only precondition rather than a
+	// target-exposure/delta computation.
+	ErrFullNotionalRequiresFlat = errors.New("risk: full-notional sizing requires no existing position in this instrument")
 
 	// ErrInsufficientRuleInput reports that a Rule could not evaluate
 	// Input because it required contextual data Input did not carry —

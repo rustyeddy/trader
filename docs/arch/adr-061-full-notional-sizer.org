@@ -28,6 +28,25 @@ price directly, sizing being a pure function of equity/risk-fraction/
 stop-distance. There was no way to compute "shares = available capital /
 current price" through the existing =Sizer= contract.
 
+** Partial amendment of ADR-059
+
+ADR-059's own Consequences section states: "=pipeline.Input.
+RiskFraction= and =AdverseDistance= are required whenever
+=Intent.Kind= is =IntentEnterWithStop=, identically to =IntentEnter=."
+That was correct when written — =Pipeline.Evaluate= itself
+unconditionally enforced =AdverseDistance= for =IntentEnter= at the
+time. This decision removes that unconditional enforcement (see
+Decision, below): whether either field is actually required now
+depends entirely on which concrete =risk.Sizer= is configured, not on
+=Intent.Kind= alone. =RiskFraction=/=AdverseDistance= remain required,
+exactly as ADR-059 said, when the configured =Sizer= is the default
+=fixedFractionSizer=; neither is required when it is the new
+=fullNotionalSizer= this ADR adds. Recorded as a partial amendment
+(per this registry's own Partial Amendment Rules) rather than a full
+supersession: every other decision in ADR-059 — the bracket mechanism
+itself, its backtest-only scope, the =submitBracket=/=InitialStopSeeder=
+machinery — is unaffected and remains in force exactly as written.
+
 * Decision
 
 ** Widen =risk.SizeInput=; keep one =Sizer= interface
