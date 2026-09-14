@@ -21,7 +21,7 @@
 // other reference parameter are held fixed across all five variants —
 // the only intentional strategy variable is ReEntryRuleName.
 //
-// # Primary comparison now uses exact full-notional sizing directly
+// # Primary comparison now uses reference-price-exact full-notional sizing directly
 //
 // Issue #364 (risk.NewFullNotionalSizer, ADR-061) landed after #361's
 // own walk-forward "approximately ~100%-notional" comparison was
@@ -31,12 +31,22 @@
 // #216, M5-08 review) — the real bar-open price at the actual moment
 // of each entry, not a fold-anchored approximation. Swapping in
 // risk.NewFullNotionalSizer() therefore sizes every entry exactly at
-// 100% of available capital, continuously, with no walk-forward
-// folding needed at all to keep sizing from drifting within a test
-// window (the entire reason #361's own walk-forward protocol existed
-// in the first place). slopeRetraceFullNotionalEnvironmentFactory
-// below is wfJournalEnvironmentFactory's own identical composition
-// with exactly one changed line: the Sizer.
+// 100% of available capital *at that reference price*, continuously,
+// with no walk-forward folding needed at all to keep sizing from
+// drifting within a test window (the entire reason #361's own
+// walk-forward protocol existed in the first place).
+// slopeRetraceFullNotionalEnvironmentFactory below is
+// wfJournalEnvironmentFactory's own identical composition with
+// exactly one changed line: the Sizer.
+//
+// "Reference-price-exact," not fill-price-exact (ADR-061's own
+// explicit boundary; PR #372 review): the simulated broker's own Buy
+// fill is rounded up to the listing's own tick size, which can differ
+// from the unrounded ReferencePrice the Sizer computed the quantity
+// from. This file's own results are exact at the supplied reference
+// price, not a guarantee of exact notional at the real, tick-rounded
+// fill — see risk.SizeInput.ReferencePrice's own doc comment for why
+// this Sizer makes no stronger claim.
 //
 // A secondary, sizing-independent diagnostic run (the playbook's own
 // established reference sizing: RiskFraction 0.01, fixed $20 adverse
@@ -106,7 +116,8 @@ var slopeRetraceVariants = []string{"reclaim-exit-price", "above-sma-slope-20", 
 // pipeline, simulated broker, journal recording) with exactly one
 // change: risk.NewFullNotionalSizer() instead of
 // risk.NewFixedFractionSizer() — see this file's own doc comment for
-// why that alone is now sufficient for exact 100%-invested sizing,
+// why that alone is now sufficient for reference-price-exact
+// 100%-invested sizing,
 // with no walk-forward folding required.
 type slopeRetraceFullNotionalEnvironmentFactory struct {
 	prices  map[time.Time]marketdata.Bar
@@ -175,8 +186,10 @@ func (f slopeRetraceFullNotionalEnvironmentFactory) NewEnvironment(ctx context.C
 	}, nil
 }
 
-// runSlopeRetraceFullNotionalBacktest runs one continuous exact
-// full-notional backtest. RiskFraction/AdverseDistance are passed
+// runSlopeRetraceFullNotionalBacktest runs one continuous
+// reference-price-exact full-notional backtest (see this file's own
+// doc comment for why "reference-price-exact," not fill-price-exact).
+// RiskFraction/AdverseDistance are passed
 // only because svcbacktest.RunRequest's own shape still carries them
 // (ADR-061 made both conditionally required per concrete Sizer, not
 // removed from the request shape); risk.NewFullNotionalSizer()
@@ -199,17 +212,19 @@ func runSlopeRetraceFullNotionalBacktest(ctx context.Context, mgr *marketdata.Ma
 	}
 
 	resp, err := svc.Run(ctx, svcbacktest.RunRequest{
-		Strategy:        strat,
-		Span:            span,
-		StartingCapital: startingCapital,
-		RiskFraction:    num.MustParseRate("0.01"),     // ignored by risk.NewFullNotionalSizer()
-		AdverseDistance: num.MustParsePrice("1.00000"), // ignored by risk.NewFullNotionalSizer()
+		Strategy:           strat,
+		Span:               span,
+		StartingCapital:    startingCapital,
+		RiskFraction:       num.MustParseRate("0.01"),     // ignored by risk.NewFullNotionalSizer()
+		AdverseDistance:    num.MustParsePrice("1.00000"), // ignored by risk.NewFullNotionalSizer()
+		StrategyParameters: cfg,                           // PR #372 review: without this, every variant's manifest/config digest is indistinguishable despite ReEntryRuleName differing.
 	})
 	return resp, rec, err
 }
 
 // slopeRetraceVariantResult is one re-entry variant's own full-history
-// result under exact full-notional sizing — issue #365's own required
+// result under reference-price-exact full-notional sizing — issue
+// #365's own required
 // "report at minimum" metric set, plus buy-and-hold's own row and each
 // named episode's own outcome, mirroring
 // smatrend_breakout_reentry_fullarchive_test.go's own
@@ -257,18 +272,31 @@ type slopeRetraceDiagnosticResult struct {
 // smatrend_breakout_reentry_fullarchive_test.go's own
 // namedEpisodeOutcome exactly.
 type slopeRetraceEpisodeOutcome struct {
-	ExitDate                 string  `json:"exit_date"`
-	ExitPrice                float64 `json:"exit_price"`
-	ReEntryDate              string  `json:"reentry_date"`
-	ReEntryPrice             float64 `json:"reentry_price"`
-	DaysFlat                 int     `json:"days_flat"`
-	FurtherDeclinePct        float64 `json:"further_decline_pct"`
-	ReboundBeforeReEntryPct  float64 `json:"rebound_before_reentry_pct"`
-	Classification           string  `json:"classification"`
-	DownstreamStillOpenAtEnd bool    `json:"downstream_still_open_at_end"`
-	DownstreamExitDate       string  `json:"downstream_exit_date,omitempty"`
-	DownstreamExitPrice      float64 `json:"downstream_exit_price,omitempty"`
-	DownstreamReturnPct      float64 `json:"downstream_return_pct,omitempty"`
+	ExitDate          string  `json:"exit_date"`
+	ExitPrice         float64 `json:"exit_price"`
+	PostExitLow       float64 `json:"post_exit_low"`
+	PostExitLowDate   string  `json:"post_exit_low_date"`
+	ReEntryDate       string  `json:"reentry_date"`
+	ReEntryPrice      float64 `json:"reentry_price"`
+	DaysFlat          int     `json:"days_flat"`
+	FurtherDeclinePct float64 `json:"further_decline_pct"`
+	// ReboundBeforeReEntryPct is (reentryPrice-low)/low — a general
+	// "how far above the low is the re-entry" figure, independent of
+	// any hypothesis.
+	ReboundBeforeReEntryPct float64 `json:"rebound_before_reentry_pct"`
+	// RecoveryFractionAtReEntry is (reentryPrice-low)/(exitPrice-low)
+	// — the exact quantity percentRetraceReEntryRule's own hypothesis
+	// is defined in terms of (PR #372 review: ReboundBeforeReEntryPct
+	// is a different metric and cannot verify where the 25%/50%
+	// thresholds actually fired). 1.0 when exitPrice == low (no
+	// decline occurred at all — the rule's own no-decline case, where
+	// it enters unconditionally rather than computing a ratio).
+	RecoveryFractionAtReEntry float64 `json:"recovery_fraction_at_reentry"`
+	Classification            string  `json:"classification"`
+	DownstreamStillOpenAtEnd  bool    `json:"downstream_still_open_at_end"`
+	DownstreamExitDate        string  `json:"downstream_exit_date,omitempty"`
+	DownstreamExitPrice       float64 `json:"downstream_exit_price,omitempty"`
+	DownstreamReturnPct       float64 `json:"downstream_return_pct,omitempty"`
 }
 
 // TestSMATrendSlopeRetraceReEntryComparison is issue #365's own
@@ -561,10 +589,17 @@ func slopeRetraceClassifyEpisode(t *testing.T, bars []marketdata.Bar, tr, next o
 	}
 	exitPriceF, reentryPriceF := exitPrice.Float64(), reentryPrice.Float64()
 
+	// low/lowIdx track the minimum Low (and the bar it first occurred
+	// on) across [exitIdx, reentryIdx) — the identical window
+	// percentRetraceReEntryRule's own postExitLow tracks live (issue
+	// #365's own hypothesis definition: "the lowest Low observed
+	// since exit"), including the exit bar itself.
 	low := bars[exitIdx].Low
+	lowIdx := exitIdx
 	for j := exitIdx + 1; j < reentryIdx; j++ {
 		if bars[j].Low.Cmp(low) < 0 {
 			low = bars[j].Low
+			lowIdx = j
 		}
 	}
 	lowF := low.Float64()
@@ -574,20 +609,35 @@ func slopeRetraceClassifyEpisode(t *testing.T, bars []marketdata.Bar, tr, next o
 	if lowF != 0 {
 		reboundPct = (reentryPriceF - lowF) / lowF
 	}
+	// RecoveryFractionAtReEntry is the exact quantity
+	// percentRetraceReEntryRule's own hypothesis is defined in terms
+	// of — (reentryPrice-low)/(exitPrice-low) — not
+	// ReboundBeforeReEntryPct's own different (reentryPrice-low)/low
+	// (PR #372 review). 1.0 when exitPriceF == lowF: no decline below
+	// the exit price ever occurred, the rule's own no-decline case,
+	// where it enters unconditionally rather than computing a ratio
+	// at all.
+	recoveryFraction := 1.0
+	if exitPriceF != lowF {
+		recoveryFraction = (reentryPriceF - lowF) / (exitPriceF - lowF)
+	}
 	classification := "good-defensive-exit"
 	if furtherDeclinePct <= 0.01 {
 		classification = "whipsaw"
 	}
 
 	outcome := &slopeRetraceEpisodeOutcome{
-		ExitDate:                tr.ClosedAt.Format("2006-01-02"),
-		ExitPrice:               exitPriceF,
-		ReEntryDate:             next.OpenedAt.Format("2006-01-02"),
-		ReEntryPrice:            reentryPriceF,
-		DaysFlat:                int(next.OpenedAt.Sub(tr.ClosedAt).Hours() / 24),
-		FurtherDeclinePct:       furtherDeclinePct,
-		ReboundBeforeReEntryPct: reboundPct,
-		Classification:          classification,
+		ExitDate:                  tr.ClosedAt.Format("2006-01-02"),
+		ExitPrice:                 exitPriceF,
+		PostExitLow:               lowF,
+		PostExitLowDate:           bars[lowIdx].Time.Format("2006-01-02"),
+		ReEntryDate:               next.OpenedAt.Format("2006-01-02"),
+		ReEntryPrice:              reentryPriceF,
+		DaysFlat:                  int(next.OpenedAt.Sub(tr.ClosedAt).Hours() / 24),
+		FurtherDeclinePct:         furtherDeclinePct,
+		ReboundBeforeReEntryPct:   reboundPct,
+		RecoveryFractionAtReEntry: recoveryFraction,
+		Classification:            classification,
 	}
 
 	if next.ClosedAt.IsZero() {

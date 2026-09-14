@@ -339,22 +339,55 @@ func TestPercentRetraceReEntryRule_NoDeclineEntersUnconditionally(t *testing.T) 
 	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "101", "104", "100.5", "103")}))
 }
 
-// TestPercentRetraceReEntryRule_ShouldEnterBeforeFirstObserveFlatBarIsFalse
-// proves ShouldEnter is false, not a panic or a spurious true, on the
-// exit bar itself — consulted (if the exit bar's own Close is already
-// back above the SMA) before ObserveFlatBar has run even once.
-func TestPercentRetraceReEntryRule_ShouldEnterBeforeFirstObserveFlatBarIsFalse(t *testing.T) {
+// TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnLowBeforeFirstObserveFlatBarCall
+// proves ShouldEnter never panics and correctly incorporates this
+// bar's own Low even on the exit bar itself — consulted (if the exit
+// bar's own Close is already back above the SMA) before
+// ObserveFlatBar has ever run — rather than requiring a prior
+// ObserveFlatBar call to have a low to compare against at all (PR
+// #372 review: ShouldEnter must never depend on postExitLow being
+// already non-nil to produce a correct answer).
+func TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnLowBeforeFirstObserveFlatBarCall(t *testing.T) {
 	rule, err := newPercentRetraceReEntryRule("0.25")(Config{})
 	require.NoError(t, err)
 	rule.OnExit(num.MustParsePrice("100"), mustBar(t, "100", "101", "80", "95"))
 
+	// No ObserveFlatBar call has happened yet: this bar's own Low (94)
+	// is the only low available, and is exactly what must be used.
+	// selloff = 100-94 = 6, recovery level = 94 + 0.25*6 = 95.5. Close
+	// (95) is just below it.
 	assert.False(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "95", "96", "94", "95")}))
+}
+
+// TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnNewLowerLow
+// is PR #372 review's own required regression for the blocker it
+// identified: a bar that itself sets a new, lower post-exit low and
+// also closes above the recovery threshold *that new low implies*
+// must enter on this same bar — not one bar later, once
+// ObserveFlatBar has had a chance to persist it. Verified meaningful
+// by reverting to the old "only ever compare against a prior bar's
+// own low" behavior and confirming this specific case fails.
+func TestPercentRetraceReEntryRule_ShouldEnterUsesThisBarsOwnNewLowerLow(t *testing.T) {
+	rule, err := newPercentRetraceReEntryRule("0.50")(Config{})
+	require.NoError(t, err)
+
+	// exit at 100, first observed low (via the exit bar itself) at 90:
+	// selloff 10, recovery level = 90 + 0.5*10 = 95.
+	percentRetraceOnExit(rule, "100", mustBar(t, "100", "100", "90", "95"))
+
+	// This bar's own new, lower low (70) must be used immediately:
+	// selloff becomes 30, recovery level = 70 + 0.5*30 = 85 — and this
+	// same bar's own Close (85) already clears it. Using only the
+	// stale prior low (90, recovery level 95) would incorrectly miss
+	// this entry (85 < 95).
+	assert.True(t, rule.ShouldEnter(ReEntryContext{Bar: mustBar(t, "88", "89", "70", "85")}),
+		"a bar that sets a new lower low and closes above the resulting recovery level must enter on this same bar")
 }
 
 // TestPercentRetraceReEntryRule_ResetsFromANewLowerLow proves the
 // recovery threshold genuinely resets from a new, lower low observed
-// while flat (issue #365's own explicit requirement), rather than
-// staying anchored to the original post-exit low.
+// while flat (issue #365's own explicit requirement) across multiple
+// bars, not merely within one.
 func TestPercentRetraceReEntryRule_ResetsFromANewLowerLow(t *testing.T) {
 	rule, err := newPercentRetraceReEntryRule("0.50")(Config{})
 	require.NoError(t, err)
@@ -362,12 +395,13 @@ func TestPercentRetraceReEntryRule_ResetsFromANewLowerLow(t *testing.T) {
 	// exit at 100, first observed low (via the exit bar itself) at 80:
 	// selloff 20, recovery level = 80 + 0.5*20 = 90.
 	percentRetraceOnExit(rule, "100", mustBar(t, "100", "100", "80", "90"))
-	assert.False(t, percentRetraceCheckThenObserve(rule, mustBar(t, "85", "86", "84", "85")), "85 is below the 90 recovery level")
+	assert.False(t, percentRetraceCheckThenObserve(rule, mustBar(t, "85", "86", "84", "85")), "85 is below the 90 recovery level; this bar's own low (84) is above the existing 80 low, so nothing changes")
 
-	// A new, lower low (60) resets the threshold: selloff becomes 40,
-	// recovery level = 60 + 0.5*40 = 80. A close of 85 now qualifies.
-	assert.False(t, percentRetraceCheckThenObserve(rule, mustBar(t, "84", "85", "60", "70")), "this bar's own new low (60) must not let its own close (70) satisfy its own just-reset threshold")
-	assert.True(t, percentRetraceCheckThenObserve(rule, mustBar(t, "72", "86", "65", "85")), "85 now exceeds the reset 80 recovery level")
+	// A new, lower low (60) resets the threshold immediately: selloff
+	// becomes 40, recovery level = 60 + 0.5*40 = 80 — but this bar's
+	// own close (70) still falls short of even that lowered threshold.
+	assert.False(t, percentRetraceCheckThenObserve(rule, mustBar(t, "84", "85", "60", "70")), "70 is still below the 80 recovery level the new low (60) implies")
+	assert.True(t, percentRetraceCheckThenObserve(rule, mustBar(t, "72", "86", "65", "85")), "85 now exceeds the 80 recovery level established by the prior bar's own low (60)")
 }
 
 // TestPercentRetraceReEntryRule_OnExitResetsStateBetweenEpisodes

@@ -29,7 +29,15 @@ const Name = "sma-trend"
 // recordSignal). Per ADR-044, Descriptor.Version is the discriminator
 // for exactly this kind of logic change: a "v1" run and a "v2" run of
 // an otherwise-identical config are not directly comparable results.
-const Version = "v2"
+//
+// Bumped to "v3" by issue #365 (PR #372 review): four new stateful
+// ReEntryRule behaviors (smaSlopeReEntryRule, percentRetraceReEntryRule)
+// plus unconditional per-bar SMA observation (SMAObserver) are new
+// entry-timing logic a "v2" run's own manifest cannot be assumed
+// equivalent to, even for a config that happens to use an unrelated
+// ReEntryRuleName — OnBar's own control flow changed for every
+// config, not only the four new rule names.
+const Version = "v3"
 
 // Strategy is the SMA-trend baseline strategy.Strategy implementation
 // (issue #335, EQS-01), extended with pluggable exit/re-entry rules
