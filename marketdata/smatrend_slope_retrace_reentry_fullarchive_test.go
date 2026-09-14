@@ -300,9 +300,9 @@ type slopeRetraceEpisodeOutcome struct {
 }
 
 // TestSMATrendSlopeRetraceReEntryComparison is issue #365's own
-// primary comparison: one continuous backtest per variant, at exact
-// full-notional sizing, over SPY's full Stooq history, plus a
-// buy-and-hold benchmark row over the identical span.
+// primary comparison: one continuous backtest per variant, at
+// reference-price-exact full-notional sizing, over SPY's full Stooq
+// history, plus a buy-and-hold benchmark row over the identical span.
 func TestSMATrendSlopeRetraceReEntryComparison(t *testing.T) {
 	if fullArchiveSlopeRetraceOutputDir == "" {
 		t.Skip("fullArchiveSlopeRetraceOutputDir is empty; edit the constant in this file to point at a local results directory to run this test")
