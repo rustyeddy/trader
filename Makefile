@@ -18,6 +18,24 @@ build:
 install:
 	go install ./cmd/trader
 
+# gen-proto regenerates protocol/strategy/v1's Go bindings from
+# strategy.proto (issue #377, ADR-062). Requires protoc plus
+# protoc-gen-go/protoc-gen-go-grpc on PATH:
+#
+#   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+#   go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+#
+# Not part of `make check`/`make build`: generated output is committed
+# (protocol/strategy/v1/strategy.pb.go, strategy_grpc.pb.go), so a
+# normal build/test/CI run never needs protoc installed at all — only
+# a contributor editing strategy.proto itself runs this target.
+gen-proto:
+	protoc \
+		--proto_path=protocol/strategy/v1 \
+		--go_out=protocol/strategy/v1 --go_opt=paths=source_relative \
+		--go-grpc_out=protocol/strategy/v1 --go-grpc_opt=paths=source_relative \
+		protocol/strategy/v1/strategy.proto
+
 fmt:
 	go fmt ./...
 
@@ -49,4 +67,4 @@ coverage-html: coverage
 
 check: fmt-check vet lint test race
 
-.PHONY: all build install fmt fmt-check vet test race lint coverage coverage-html check
+.PHONY: all build install gen-proto fmt fmt-check vet test race lint coverage coverage-html check

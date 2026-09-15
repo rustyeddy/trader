@@ -1,0 +1,402 @@
+// Strategy Protocol v1 (issue #377, ADR-062).
+//
+// This schema is the wire boundary for an out-of-process external
+// strategy: the Trader host process is the gRPC server
+// (StrategyHostService); an external strategy process is the gRPC
+// client that dials in over a Unix-domain socket. See ADR-062
+// (docs/arch/adr-062-external-strategy-protocol-v1.org) for the full
+// architecture and the reasoning behind every decision restated in
+// comments below.
+//
+// Nothing in this file names a Trader domain type directly (order.
+// Intent, instrument.ID, num.Price, and so on): every field here is a
+// deliberately narrow wire representation of the piece of a domain
+// value this protocol actually needs to carry, translated by a
+// conversion layer outside this package (issue #378) — never a
+// generated alias standing in for the domain type itself
+// (package-boundaries.org rule 7).
+syntax = "proto3";
+
+package trader.strategy.v1;
+
+option go_package = "github.com/rustyeddy/trader/protocol/strategy/v1;strategyv1";
+
+// ---- Enums ----
+
+// IntervalUnit mirrors marketdata.Unit's four defined values.
+enum IntervalUnit {
+  INTERVAL_UNIT_UNSPECIFIED = 0;
+  INTERVAL_UNIT_MINUTE = 1;
+  INTERVAL_UNIT_HOUR = 2;
+  INTERVAL_UNIT_DAY = 3;
+  INTERVAL_UNIT_WEEK = 4;
+}
+
+// Side mirrors order.Side (Buy/Sell) — the transaction direction a
+// DescribedIntent's own Kind requires it for (below).
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  SIDE_BUY = 1;
+  SIDE_SELL = 2;
+}
+
+// PositionSide mirrors order.PositionSide. Flat is deliberately the
+// same zero value the Go type uses, so an omitted/default field reads
+// as "no position" on both sides without a separate presence flag.
+enum PositionSide {
+  POSITION_SIDE_FLAT = 0;
+  POSITION_SIDE_LONG = 1;
+  POSITION_SIDE_SHORT = 2;
+}
+
+// IntentKind mirrors order.IntentKind's five defined values,
+// including IntentEnterWithStop (ADR-059) — PR #386 review on the
+// preceding ADR-062 caught an earlier omission of exactly this kind
+// from the design's own described-intent vocabulary; this schema does
+// not repeat that gap.
+enum IntentKind {
+  INTENT_KIND_UNSPECIFIED = 0;
+  INTENT_KIND_ENTER = 1;
+  INTENT_KIND_EXIT = 2;
+  INTENT_KIND_ADJUST_STOP = 3;
+  INTENT_KIND_TARGET_EXPOSURE = 4;
+  INTENT_KIND_ENTER_WITH_STOP = 5;
+}
+
+// Capability is v1's negotiable Handshake capability set. FILL_HANDLER
+// is the only defined value: it is the sole in-process strategy
+// optional capability actually published today (ADR-060). Adding a
+// second capability value here (for a future AccountEventHandler or
+// StateManager, once either is published in-process) is an additive,
+// wire-compatible v1 change, not a v2 break.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_FILL_HANDLER = 1;
+}
+
+// ErrorCode is v1's small, closed structured-error vocabulary — a
+// caller branches on Code, never parses Message text. New codes may
+// be added additively within v1; existing codes are never renumbered
+// or repurposed.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_PROTOCOL_VERSION_MISMATCH = 1;
+  ERROR_CODE_CAPABILITY_MISMATCH = 2;
+  // ERROR_CODE_UNKNOWN_CALLBACK: a GetHistoryBarsRequest named a
+  // callback_sequence the adapter is not currently waiting on a
+  // response for (ADR-062's own GetHistoryBars view-cutoff binding).
+  ERROR_CODE_UNKNOWN_CALLBACK = 3;
+  // ERROR_CODE_REQUIREMENT_NOT_DECLARED: a GetHistoryBarsRequest named
+  // an instrument/interval outside the Handshake-declared Requirements.
+  ERROR_CODE_REQUIREMENT_NOT_DECLARED = 4;
+  ERROR_CODE_DEADLINE_EXCEEDED = 5;
+  ERROR_CODE_INVALID_DESCRIBED_INTENT = 6;
+}
+
+// Error is a structured error value carried inside a message field
+// (for example SessionEnd, below) — distinct from, and not a
+// replacement for, gRPC's own per-RPC status/error mechanism, which
+// unary RPCs (Handshake, GetHistoryBars) continue to use directly.
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+}
+
+// ---- Common value types ----
+
+// Interval mirrors marketdata.Interval (a Unit and a count — never a
+// parsed string, per marketdata.Interval's own documented contract).
+message Interval {
+  IntervalUnit unit = 1;
+  int32 count = 2;
+}
+
+// Money mirrors num.Money: an exact decimal amount plus its currency.
+// amount is the same canonical decimal text num.Money's own
+// MarshalJSON already produces for the amount alone — never a float
+// (ADR-004) — so a conversion layer reconstructs it the same checked,
+// quantized way num.MustParseMoney/num.ParseMoney already do, not by
+// parsing an approximate binary floating-point value.
+message Money {
+  string amount = 1;
+  string currency = 2;
+}
+
+// DataRequirement mirrors strategy.DataRequirement.
+message DataRequirement {
+  // instrument_id is instrument.ID's own canonical String() form (for
+  // example "fx:EUR/USD"), the same text instrument.ID.MarshalJSON
+  // already produces — never a raw provider symbol.
+  string instrument_id = 1;
+  Interval interval = 2;
+  int32 warmup_bars = 3;
+}
+
+// StrategyDescriptor mirrors strategy.Descriptor.
+message StrategyDescriptor {
+  string name = 1;
+  string version = 2;
+  repeated DataRequirement requirements = 3;
+}
+
+// Bar mirrors marketdata.Bar's own exported fields.
+message Bar {
+  // time_unix_nanos is Bar.Time, UTC, as nanoseconds since the Unix
+  // epoch — never reconstructed from array position or fixed-duration
+  // arithmetic on the receiving side (marketdata.Bar's own documented
+  // invariant), only carried verbatim.
+  int64 time_unix_nanos = 1;
+  string open = 2;
+  string high = 3;
+  string low = 4;
+  string close = 5;
+  string avg_spread = 6;
+  string max_spread = 7;
+  int64 ticks = 8;
+}
+
+// PositionSnapshot mirrors exactly the order.Position fields a
+// current in-process strategy actually reads (issue #377's own "no
+// speculative surfaces beyond current concrete consumers": both
+// strategy/smatrend and strategy/emacross read only Listing.
+// InstrumentID(), Side, and AvgPrice from a Position). AccountID and
+// the full Listing (Spec, Provider, Symbol, Tradable) are
+// deliberately omitted from v1.
+message PositionSnapshot {
+  string instrument_id = 1;
+  PositionSide side = 2;
+  string quantity = 3;
+  // avg_price is empty when side is POSITION_SIDE_FLAT, mirroring
+  // order.Position's own "nil exactly when Side is Flat" invariant.
+  string avg_price = 4;
+}
+
+// AccountSnapshot is deliberately the minimum slice of account.
+// Snapshot any current in-process strategy actually reads (the same
+// "no speculative surfaces" reasoning as PositionSnapshot): every
+// published strategy today reads only View.Account().Positions().
+// Equity/RealizedPnL/UnrealizedPnL are included as cheap, broadly
+// useful scalars every future v1 consumer is likely to want; Open
+// Orders, CashBalances (potentially multi-currency), BuyingPower, and
+// MarginUsed/MarginAvailable are intentionally omitted until a
+// concrete v1 consumer needs them — an additive, wire-compatible v1
+// change when that happens.
+message AccountSnapshot {
+  string account_id = 1;
+  string currency = 2;
+  int64 as_of_unix_nanos = 3;
+  Money equity = 4;
+  Money realized_pnl = 5;
+  Money unrealized_pnl = 6;
+  repeated PositionSnapshot positions = 7;
+}
+
+// ---- Handshake (guest-initiated, unary; no run-scoped values) ----
+//
+// Handshake happens before the runner has necessarily called
+// Describe() on ExternalStrategyAdapter, which happens before the
+// runner calls Start(ctx, env) — so a Handshake exchange can carry a
+// complete StrategyDescriptor (ADR-062's own correction: Describe()
+// must be answerable from this payload with no further RPC round
+// trip) but genuinely cannot carry a run-scoped value like RunID or a
+// start-time clock reading, since neither exists yet at this point in
+// the lifecycle. Those are carried by SessionStart instead (below).
+
+message HandshakeRequest {
+  string protocol_version = 1;
+  // strategy_descriptor is named to avoid colliding with proto-gen-go's
+  // own generated Descriptor() method on every message type — not
+  // "descriptor".
+  StrategyDescriptor strategy_descriptor = 2;
+  repeated Capability capabilities = 3;
+}
+
+message HandshakeResponse {
+  bool accepted = 1;
+  string protocol_version = 2;
+  repeated Capability capabilities = 3;
+  // reject_reason is set only when accepted is false — for example on
+  // a protocol version or capability mismatch the host cannot bridge.
+  Error reject_reason = 4;
+}
+
+// ---- Run stream (guest-opened, bidirectional, long-lived) ----
+//
+// The guest opens Run immediately after a successful Handshake and
+// holds it for the life of the session. Its first server->client
+// message is always SessionStart, written the instant the host's own
+// Start(ctx, env) receives the real Environment — the exact point
+// RunID and a start-time clock reading genuinely become known
+// (ADR-062). Every later server->client message is a BarEvent or (if
+// CAPABILITY_FILL_HANDLER was negotiated) a FillEvent; every
+// client->server message responds to the most recently received one,
+// correlated by echoing its own sequence number back.
+
+message SessionStart {
+  string run_id = 1;
+  int64 start_time_unix_nanos = 2;
+}
+
+// SessionEnd is the Run stream's own terminal server->client message,
+// sent once before the host closes the stream. code/reason are the
+// zero value (ERROR_CODE_UNSPECIFIED, empty string) on a normal,
+// successful run completion.
+message SessionEnd {
+  ErrorCode code = 1;
+  string reason = 2;
+}
+
+// BarEvent mirrors strategy.BarEvent plus the inline account snapshot
+// ADR-062's own View decision requires: the account snapshot is
+// carried inline here, computed by the host before it writes this
+// message, so it reflects the identical no-lookahead cutoff the
+// host's own frozen View already enforces for an in-process strategy.
+message BarEvent {
+  // sequence uniquely identifies this callback within the session
+  // (monotonically increasing) — echoed back in OnBarResponse, and
+  // usable as GetHistoryBarsRequest.callback_sequence while this bar's
+  // own response is still outstanding.
+  uint64 sequence = 1;
+  string instrument_id = 2;
+  Interval interval = 3;
+  Bar bar = 4;
+  AccountSnapshot account = 5;
+}
+
+// DescribedIntent is the wire shape of a guest's requested trading
+// action — never a canonical order.Intent, and never carrying a real
+// IntentID/EventID/CorrelationID: the host mints those through its
+// own retained IntentFactory (ADR-005, ADR-062). Which of side/
+// quantity/stop_price is required depends on kind, mirroring order.
+// NewIntent's own validation exactly (issue #378's own job to
+// enforce, not this schema's).
+message DescribedIntent {
+  IntentKind kind = 1;
+  string instrument_id = 2;
+  Side side = 3;
+  string quantity = 4;
+  string stop_price = 5;
+  // correlation_token is an opaque, guest-chosen string grouping
+  // multiple described intents from one callback under one real
+  // CorrelationID (via the host's own IntentFactory.WithCorrelation) —
+  // it carries no identity meaning of its own beyond that grouping.
+  // Empty means "not grouped with any other described intent."
+  string correlation_token = 6;
+}
+
+// DescribedSignal mirrors journal.Signal verbatim (issue #384's own
+// deterministic-equivalence requirement, ADR-062): a plain,
+// string-keyed evidence bag with no translation needed, written by
+// the host through its own retained env.Journal exactly as a
+// DescribedIntent is turned into a canonical order.Intent through
+// env.Intents.
+message DescribedSignal {
+  string strategy = 1;
+  map<string, string> values = 2;
+}
+
+// OnBarResponse is the guest's own response to one BarEvent. Empty
+// intents/signals lists are valid, explicit "nothing this bar"
+// responses, not a lack of one.
+message OnBarResponse {
+  uint64 sequence = 1;
+  repeated DescribedIntent intents = 2;
+  repeated DescribedSignal signals = 3;
+}
+
+// FillEvent mirrors strategy.FillEvent/order.Fill's own identity-
+// relevant fields, delivered only when CAPABILITY_FILL_HANDLER was
+// negotiated at Handshake (ADR-060, ADR-062's own capability-wrapper
+// design).
+message FillEvent {
+  uint64 sequence = 1;
+  string order_id = 2;
+  string instrument_id = 3;
+  Side side = 4;
+  string price = 5;
+  string quantity = 6;
+  string correlation_id = 7;
+  string causation_id = 8;
+  AccountSnapshot account = 9;
+}
+
+// OnFillResponse is the guest's own response to one FillEvent.
+// strategy.FillHandler.OnFill returns only error, never intents
+// (ADR-060's own deliberate signature), so this carries no described
+// intents or signals — only the sequence being acknowledged, plus an
+// error when the guest's own OnFill returned one.
+message OnFillResponse {
+  uint64 sequence = 1;
+  Error error = 2;
+}
+
+// RunServerMessage is one message the host writes down the Run
+// stream. Exactly one field is set, matching Kind's own discriminated-
+// envelope convention already established elsewhere in this codebase
+// (journal.Record, broker.Event).
+message RunServerMessage {
+  oneof payload {
+    SessionStart session_start = 1;
+    BarEvent bar_event = 2;
+    FillEvent fill_event = 3;
+    SessionEnd session_end = 4;
+  }
+}
+
+// RunClientMessage is one message the guest writes down the Run
+// stream.
+message RunClientMessage {
+  oneof payload {
+    OnBarResponse on_bar_response = 1;
+    OnFillResponse on_fill_response = 2;
+  }
+}
+
+// ---- GetHistoryBars (guest-initiated, unary, independent of Run) ----
+
+// GetHistoryBarsRequest is bound to one specific in-flight callback's
+// own frozen view, not to whatever the host's live state happens to
+// be when the RPC arrives (ADR-062's own corrected View design):
+// callback_sequence must name a BarEvent the adapter is still waiting
+// on an OnBarResponse for, or the host rejects the request
+// (ERROR_CODE_UNKNOWN_CALLBACK). instrument_id/interval must also be
+// one of the Handshake-declared Requirements
+// (ERROR_CODE_REQUIREMENT_NOT_DECLARED otherwise).
+message GetHistoryBarsRequest {
+  uint64 callback_sequence = 1;
+  string instrument_id = 2;
+  Interval interval = 3;
+  // count is the number of most-recent bars requested, ending at the
+  // frozen callback's own cutoff (never including that callback's own
+  // current bar, which BarEvent already carried).
+  int32 count = 4;
+}
+
+message GetHistoryBarsResponse {
+  repeated Bar bars = 1;
+}
+
+// ---- Service ----
+
+// StrategyHostService is implemented by the Trader host process
+// (ExternalStrategyAdapter, issue #379) and called by an external
+// strategy process (strategysdk, issue #381) as the gRPC client —
+// ADR-062's own corrected topology, resolving GetHistoryBars's RPC
+// direction without a second connection or host-side callback
+// service.
+service StrategyHostService {
+  // Handshake is called once, before Run, carrying no run-scoped
+  // values (above).
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+
+  // Run is the guest-opened, bidirectional, long-lived session
+  // stream (above). Exactly one Run stream exists per Handshake'd
+  // connection — v1 assumes one strategy identity per connection
+  // (ADR-062's own "one external strategy process per host
+  // connection" scope statement).
+  rpc Run(stream RunClientMessage) returns (stream RunServerMessage);
+
+  // GetHistoryBars is callable at any time a callback is in flight,
+  // independent of the Run stream's own message pump (above).
+  rpc GetHistoryBars(GetHistoryBarsRequest) returns (GetHistoryBarsResponse);
+}
