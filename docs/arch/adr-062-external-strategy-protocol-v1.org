@@ -119,19 +119,23 @@ Every connection begins with an explicit handshake RPC
 (=Handshake=), carried out before any market/account data flows: the
 guest's =Handshake= request reports its own protocol version and
 declared capabilities, and the host's =Handshake= response reports its
-own supported protocol version(s), *a =start_time= reading taken
-from the host's own injected =clock.Clock.Now()= at that instant* (the
-seed value =strategysdk='s own guest-side clock uses — see the =Go
-SDK= section below for why this, not guest wall-clock time, is the
-=v1= clock-ownership answer), *and the run's own =id.RunID=* (see the
-=Go SDK= section's own =RunID=/=Journal= note below for why =RunID= is
-carried but =Journal= is not), rejecting the connection outright on a
-version or capability mismatch it cannot bridge rather than attempting
-to silently degrade. This mirrors the architecture document's own
-"Protocol version and capability negotiation occur during startup"
-requirement and gives future capability growth an explicit place to be
-negotiated rather than inferred from RPC calls that happen to succeed
-or fail.
+own supported protocol version(s), rejecting the connection outright
+on a version or capability mismatch it cannot bridge rather than
+attempting to silently degrade. This mirrors the architecture
+document's own "Protocol version and capability negotiation occur
+during startup" requirement and gives future capability growth an
+explicit place to be negotiated rather than inferred from RPC calls
+that happen to succeed or fail.
+
+*=Handshake= deliberately carries no run-scoped values at all — no
+=start_time=, no =RunID=* (review finding, corrected from an earlier
+draft that put both here: =Handshake= happens before the *runner*
+calls =Describe()= on =ExternalStrategyAdapter=, which happens before
+the runner calls =Start(ctx, env)= — and =env.RunID= is only known once
+that real =Environment= exists, exactly like any other
+=strategy.Strategy='s =Start= argument. A =Handshake= response cannot
+truthfully carry a value the host does not yet have). Run-scoped
+values are instead carried by =SessionStart= — see below.
 
 *The guest's =Handshake= request carries the complete
 =strategy.Descriptor= the guest's own wrapped strategy would return
@@ -249,10 +253,20 @@ carries every RPC direction needed:
 
 - =Handshake=: unary, guest-called once at connection start.
 - =Run=: one bidirectional-streaming RPC the guest opens immediately
-  after a successful =Handshake= and holds for the life of the
-  session. The host writes one =BarEvent= (per bar) down the stream
-  as it occurs; the guest writes back the described intents that bar
-  produced (an empty list is a valid, explicit "no intents this bar"
+  after a successful =Handshake=, *before* the host's own
+  =ExternalStrategyAdapter.Start(ctx, env)= has necessarily been
+  called by the runner — the guest simply blocks reading the first
+  message. That first message on the stream is always =SessionStart=,
+  written by the host the instant its own =Start(ctx, env)= actually
+  runs and receives the real =strategy.Environment=: it carries
+  =env.RunID= and a =start_time= clock reading (=env.Clock.Now()= at
+  that instant) — the run-scoped values =Handshake= cannot truthfully
+  provide (above), now sent at the one point they genuinely become
+  known, mirroring exactly when an in-process strategy's own =Start=
+  itself first observes them. Every message after =SessionStart= is a
+  =BarEvent= (one per bar, as it occurs); the guest writes back the
+  described intents and described signals (below) that bar produced
+  (an empty list of either is a valid, explicit "nothing this bar"
   response, not a lack of one), correlated to the triggering bar via a
   per-message sequence number the host assigns and the guest echoes
   back. This single stream is the entire =OnBar= delivery mechanism —
@@ -484,17 +498,21 @@ never construct one). =strategysdk.Strategy= mirrors
 =strategysdk= equivalents of whichever optional capability interfaces
 the wrapped logic implements) closely enough that porting an in-
 process strategy's decision logic to a =v1= guest is mostly mechanical,
-but its =OnBar= signature returns =[]strategysdk.DescribedIntent=, not
-=[]order.Intent= — the same kind/instrument/side/quantity/stop/
+but its =OnBar= signature returns =([]strategysdk.DescribedIntent,
+[]strategysdk.DescribedSignal, error)=, not =([]order.Intent, error)=
+— the intents are the same kind/instrument/side/quantity/stop/
 correlation-token shape the =Run=-stream wire message itself carries
-(intent-construction-ownership section above), with =strategysdk=
+(intent-construction-ownership section above), and the signals are
+=journal.Signal='s own shape verbatim (below), with =strategysdk=
 providing typed constructor functions (=strategysdk.Enter=,
 =strategysdk.Exit=, and so on, mirroring =IntentFactory='s own method
 names) so a guest author writes recognizably similar code without ever
-holding, or needing, a real =IntentFactory=. =strategysdk.Environment=
-(the guest's own =Start= argument) is smaller than
-=strategy.Environment= for the same reason: no =Intents= field, since
-the guest never mints canonical intents at all.
+holding, or needing, a real =IntentFactory= or =journal.Recorder=.
+=strategysdk.Environment= (the guest's own =Start= argument) is
+smaller than =strategy.Environment= for the same reason: no =Intents=
+or =Journal= field, since the guest never mints canonical intents or
+writes journal records directly — it only describes what it wants
+built, in both cases.
 
 *=strategysdk.Environment.Clock= reflects the host's own injected
 clock, never the guest's local wall clock* (review finding: an earlier
@@ -504,12 +522,13 @@ requirement and with =strategy.Environment.Clock= being the *sole*
 time source an in-process strategy may consult for reproducibility —
 a real-money live session's own real-time clock and a backtest's
 simulated clock must both flow through identically for a guest to
-behave the same way an in-process strategy would). The =Handshake=
-response carries a =start_time= field: the host's own
-=clock.Clock.Now()= reading at the instant it completes the handshake
-— identical, under a simulated clock, to whatever deterministic value
-an in-process strategy's =Start= would observe by calling
-=env.Clock.Now()= itself at that same point in the run. Every
+behave the same way an in-process strategy would). =SessionStart= (the
+=Run= stream's own first message, above) carries a =start_time= field:
+the host's own =clock.Clock.Now()= reading taken the instant its
+=Start(ctx, env)= call receives the real =Environment= — identical,
+under a simulated clock, to whatever deterministic value an in-process
+strategy's =Start= would observe by calling =env.Clock.Now()= itself
+at that same point in the run. Every
 =Run=-stream =BarEvent= additionally carries the bar's own event time,
 which is already the value an in-process strategy observes as "now"
 during =OnBar= (the scheduler advances its clock to the current bar
@@ -523,30 +542,37 @@ has, under both a real and a simulated host clock, without the guest
 ever owning a time source of its own — satisfying issue #376's clock-
 ownership requirement exactly, not deferring it.
 
-*=RunID= is carried; =Journal= is not exposed in =v1=* (review
-finding: =strategy.Environment= also carries =RunID= and an optional
-=Journal=, and issue #376 asks Trader to retain journal semantics
-across the boundary — an earlier draft of this ADR silently said
-nothing about either). The =Handshake= response carries the run's own
-=id.RunID= alongside =start_time=, so =strategysdk.Environment= always
-has it available (for logging, display, or correlation inside the
-guest process, exactly as an in-process strategy already can read
-=env.RunID=). =strategysdk.Environment=, however, has no =Journal=
-field at all in =v1=: a guest strategy cannot record its own
-=journal.KindSignal= decision-evidence records (ADR-044) through the
-host's retained =env.Journal= this version of the protocol. This is a
-deliberate =v1= non-goal (below), not silent scope-dropping —
-=journal.Recorder= is itself a narrow, already-optional in-process
-capability (=strategy.Environment.Journal= may be =nil=), so a guest
-strategy that cannot use it behaves exactly like an in-process
-strategy that chooses not to set one up; the semantic difference this
-ADR commits to is that a =v1= guest categorically *cannot* journal
-decision evidence in this version, not merely that a particular guest
-happens not to. A future version that wants guest journaling would
-need a described-evidence wire message the host writes through its
-own retained =env.Journal= (mirroring described intents exactly), which
-this ADR does not design now, consistent with the "do not widen for a
-speculative future adapter" discipline already applied throughout.
+*=RunID= is carried, and guest journaling is part of =v1= via described
+signals mirroring described intents* (review finding,
+reversed from an earlier draft that made guest journaling a =v1= non-
+goal: issue #384, in this same milestone, requires a deterministic
+equivalence test between the in-tree =strategy/smatrend= and its
+out-of-tree reference implementation that explicitly compares
+"signal/journal records where deterministic" — =smatrend= itself
+already records =journal.KindSignal= evidence through =env.Journal=
+per ADR-044, so a =v1= that cannot reproduce that behavior cannot pass
+its own milestone's completion gate. =SessionStart= carries the run's
+own =id.RunID= alongside =start_time=, so =strategysdk.Environment=
+always has it available, exactly as an in-process strategy already can
+read =env.RunID=). Alongside the described intents a =BarEvent=
+response may carry (above), it may also carry zero or more *described
+signals* — =journal.Signal='s own shape verbatim (=Strategy string=,
+=Values map[string]string=), since that type is already a plain,
+string-keyed evidence bag with no Go-interface or identity content to
+translate. =ExternalStrategyAdapter= writes each one through its own
+retained =env.Journal= exactly as it turns a described intent into a
+canonical one through =env.Intents=: it builds the record's =id.
+Metadata= via =env.Intents.NewCorrelationID()= (the same retained
+factory intent construction already uses — no second identity path)
+and the =RunID= =SessionStart= already supplied, then calls =env.
+Journal.Record= with =Kind: journal.KindSignal=. When =env.Journal= is
+=nil= (a host that configured no journal for this run at all — the
+same optional-journal case an in-process strategy already handles,
+=strategy.Environment.Journal='s own doc comment), =ExternalStrategy-
+Adapter= silently discards any described signals a guest sends rather
+than erroring, mirroring how an in-process strategy that checks
+=env.Journal != nil= before calling =Record= simply does not record
+anything when it is =nil=.
 
 =strategysdk= depends on =protocol/strategy/v1=, =order= (for the
 shared value types =DescribedIntent= itself is built from — =order.
@@ -622,16 +648,21 @@ that =ExternalStrategyAdapter= or =strategysdk= exist.
 - =Handshake= carries the guest's complete =strategy.Descriptor=
   equivalent (name, version, capabilities, and the full
   =[]DataRequirement= list), answering =Describe()= with no further
-  RPC round trip, and the host's own =Handshake= response carries a
-  =start_time= clock reading seeding =strategysdk='s host-owned guest
-  clock (below) — never guest wall-clock time — plus the run's own
-  =RunID=.
-- =Start=, =OnBar= (delivered over the =Run= stream), and the
-  account-snapshot slice of =View= (inline) plus always-available,
-  requirements-scoped =GetHistoryBars= (a direct unary RPC, not a
-  negotiated capability, and bound to the specific in-flight
-  callback's own frozen view via a per-bar sequence-number token — not
-  a live, advancing cutoff).
+  RPC round trip — but no run-scoped value (no =start_time=, no
+  =RunID=), since neither is known to the host until its own =Start=
+  runs.
+- =SessionStart=, the =Run= stream's own first message, sent the
+  instant =Start(ctx, env)= receives the real =Environment=: carries
+  =start_time= (seeding =strategysdk='s host-owned guest clock, below
+  — never guest wall-clock time) and =RunID=.
+- =OnBar= (delivered over the =Run= stream, each response carrying
+  described intents *and* described signals — =journal.Signal='s own
+  shape, written through the host's retained =env.Journal= when
+  configured), and the account-snapshot slice of =View= (inline) plus
+  always-available, requirements-scoped =GetHistoryBars= (a direct
+  unary RPC, not a negotiated capability, and bound to the specific
+  in-flight callback's own frozen view via a per-bar sequence-number
+  token — not a live, advancing cutoff).
 - =FillHandler= is the one negotiable optional capability in =v1=
   (ADR-060, the only one published in-process today), represented by
   =ExternalStrategyAdapter='s own small constructor-selected wrapper-
@@ -676,13 +707,6 @@ Restated from the issue, with the reasoning for each:
   assumes one strategy identity per connection; a process that wants
   to run several strategies opens several connections (or several
   processes), rather than =v1= inventing a multiplexing scheme.
-- *Guest journaling* — a guest recording its own decision-evidence
-  records (ADR-044's =journal.KindSignal=) through the host's retained
-  =env.Journal=. =RunID= is carried to the guest (=Go SDK= section
-  above) so a guest can at least log/correlate locally, but =v1= does
-  not expose =Journal= itself or any described-evidence wire message;
-  that would need its own design, mirroring described intents, which
-  this ADR does not attempt now.
 - *MQTT transport for the strategy control plane.* ADR-010 already
   scopes MQTT to fan-out/telemetry/dashboards/alerts, not
   execution-critical control flow; this ADR does not change that scope
@@ -754,13 +778,31 @@ Restated from the issue, with the reasoning for each:
   =GetHistoryBars= now carries the triggering bar's own per-bar
   sequence number and is resolved against that exact callback's frozen
   view, rejecting a request with no matching in-flight callback;
-  =RunID= is now carried at =Handshake=, and guest journaling is an
-  explicit, reasoned =v1= non-goal rather than an unaddressed gap. A
-  minor documentation gap (the =strategysdk= forbidden-import list
-  omitting =chart=, present in the real =strategy/boundary_test.go=)
-  was fixed in the same pass.
+  =RunID= was carried at =Handshake= (corrected again in the next
+  pass, below) and guest journaling was made an explicit =v1=
+  non-goal. A minor documentation gap (the =strategysdk=
+  forbidden-import list omitting =chart=, present in the real
+  =strategy/boundary_test.go=) was also fixed in the same pass.
+- PR #386 review (owner, fifth pass) found two further issues in the
+  round-4 fixes themselves: =RunID= cannot actually be known at
+  =Handshake= time under =v1='s own documented lifecycle (=Handshake=
+  happens before the runner calls =Describe()=, which happens before
+  the runner calls =Start(ctx, env)= — =RunID= only exists once that
+  real =Environment= does); and issue #384 (same milestone) requires a
+  deterministic in-tree-vs-out-of-tree equivalence test that explicitly
+  compares "signal/journal records where deterministic," which the
+  round-4 "guest journaling is a =v1= non-goal" decision made
+  impossible to satisfy. Both corrected above: a new =SessionStart=
+  message — the =Run= stream's own first message, sent exactly when
+  =Start(ctx, env)= receives the real =Environment= — now carries
+  =RunID=/=start_time= instead of =Handshake=; and guest journaling is
+  now part of =v1= via described signals (=journal.Signal='s own shape
+  verbatim) carried alongside described intents in each =BarEvent=
+  response, written through the host's retained =env.Journal= exactly
+  as described intents are turned into canonical ones through =env.
+  Intents=.
 
-All eleven findings across four review passes are corrected above;
+All thirteen findings across five review passes are corrected above;
 none is a mechanical revert of a review comment addressed elsewhere.
 
 * Alternatives Considered
@@ -877,24 +919,32 @@ none is a mechanical revert of a review comment addressed elsewhere.
   any =GetHistoryBars= call that does not name a callback the adapter
   is actually still waiting on, closes this without inventing a new
   correlation mechanism.
-- *Exposing =env.Journal= to =v1= guests via a described-evidence wire
-  message now, since described intents already establish the
-  pattern.* Considered, and rejected for =v1= specifically (distinct
-  from the general "do not design ahead of a real consumer" reasoning
-  applied elsewhere in this ADR): unlike =AccountEventHandler=/
-  =StateManager=, journaling guest decision evidence *does* have a
-  concrete in-process precedent to mirror (ADR-044's =journal.
-  KindSignal=), but issue #376 itself scopes this milestone to the
-  control-plane protocol — intents, market/account data, and history —
-  not research/audit tooling; designing the evidence wire shape now
-  would still be speculative relative to any actual guest-strategy
-  consumer. Carrying =RunID= alone costs nothing and unblocks local
-  guest-side logging/correlation without committing to the larger
-  design.
-- *Silently dropping =RunID=/=Journal= from the ADR's scope, as an
-  earlier draft did.* Rejected outright (review finding): issue #376
+- *Making guest journaling a =v1= non-goal, deferring the described-
+  evidence wire message to a future version.* Considered, and rejected
+  (review finding, reversing an earlier draft's own decision): unlike
+  =AccountEventHandler=/=StateManager=, where no concrete consumer
+  exists yet, issue #384 — in this same milestone — requires a
+  deterministic in-tree-vs-out-of-tree equivalence test that explicitly
+  compares "signal/journal records where deterministic" against
+  =strategy/smatrend='s own real =env.Journal= usage (ADR-044).
+  Deferring guest journaling would make that milestone's own
+  completion gate unsatisfiable by construction, which is a different
+  situation entirely from deferring a capability with no concrete
+  consumer at all. =journal.Signal='s own shape (a plain string-keyed
+  map, no Go-interface content) also makes it one of the cheapest
+  described-value mappings in this entire protocol — there is no real
+  "wire shape design" left undone the way there would be for, say,
+  =AccountEventHandler='s own richer payload.
+- *Carrying =RunID= at =Handshake=, before the real =Environment=
+  exists.* Rejected outright (review finding): =Handshake= happens
+  before the runner even calls =Describe()=, which happens before
+  =Start(ctx, env)= — a =Handshake= response cannot truthfully carry a
+  value the host does not yet have. A new first-message-on-=Run=
+  (=SessionStart=), sent at the exact moment =Start= receives the real
+  =Environment=, is the point run-scoped values genuinely become known
+  and is the only place this ADR now claims they are available.
+- *Silently dropping =RunID=/=Journal= from the ADR's scope entirely,
+  as an even earlier draft did.* Rejected outright: issue #376
   explicitly requires Trader to retain journal semantics; an ADR that
   says nothing about them is not "deferring" that requirement, it is
-  failing to address it. Stating the =v1= non-goal explicitly, with
-  reasoning, is the minimum this ADR owes issue #376 even where the
-  decision itself is "not yet."
+  failing to address it.
