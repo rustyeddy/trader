@@ -57,10 +57,12 @@ func TestHandshakeResponse_Accepted_RoundTrip(t *testing.T) {
 		Accepted:        true,
 		ProtocolVersion: ProtocolVersion,
 		Capabilities:    []Capability{Capability_CAPABILITY_FILL_HANDLER},
+		SessionId:       "sess:01J8Z...",
 	}
 	got := roundTrip(t, resp)
 	assert.True(t, proto.Equal(resp, got))
 	assert.Nil(t, got.RejectReason, "an accepted handshake must carry no reject reason")
+	assert.NotEmpty(t, got.SessionId, "an accepted handshake must issue a session_id — Run/GetHistoryBars are bound to it")
 }
 
 func TestHandshakeResponse_Rejected_CarriesStructuredError(t *testing.T) {
@@ -76,6 +78,12 @@ func TestHandshakeResponse_Rejected_CarriesStructuredError(t *testing.T) {
 	assert.True(t, proto.Equal(resp, got))
 	require.NotNil(t, got.RejectReason)
 	assert.Equal(t, ErrorCode_ERROR_CODE_PROTOCOL_VERSION_MISMATCH, got.RejectReason.Code)
+}
+
+func TestRunOpen_RoundTrip(t *testing.T) {
+	open := &RunOpen{SessionId: "sess:01J8Z..."}
+	got := roundTrip(t, open)
+	assert.True(t, proto.Equal(open, got))
 }
 
 func TestSessionStart_RoundTrip(t *testing.T) {
@@ -109,14 +117,10 @@ func mustAccountSnapshot() *AccountSnapshot {
 		AccountId:     "acct:01J8Z...",
 		Currency:      "USD",
 		AsOfUnixNanos: 1_700_000_100_000_000_000,
-		Equity:        &Money{Amount: "100523.45", Currency: "USD"},
-		RealizedPnl:   &Money{Amount: "523.45", Currency: "USD"},
-		UnrealizedPnl: &Money{Amount: "0", Currency: "USD"},
 		Positions: []*PositionSnapshot{
 			{
 				InstrumentId: "eq:NASDAQ:AAPL",
 				Side:         PositionSide_POSITION_SIDE_LONG,
-				Quantity:     "100",
 				AvgPrice:     "150.25",
 			},
 		},
@@ -138,7 +142,7 @@ func TestAccountSnapshot_FlatPosition_EmptyAvgPrice(t *testing.T) {
 	// value (POSITION_SIDE_FLAT) so both fields default together.
 	snap := &AccountSnapshot{
 		Positions: []*PositionSnapshot{
-			{InstrumentId: "fx:EUR/USD", Quantity: "0"},
+			{InstrumentId: "fx:EUR/USD"},
 		},
 	}
 	got := roundTrip(t, snap)
@@ -176,6 +180,23 @@ func TestOnBarResponse_EmptyIsExplicitNoIntents(t *testing.T) {
 	assert.True(t, proto.Equal(resp, got))
 	assert.Empty(t, got.Intents, "an empty intents list is a valid, explicit \"no intents this bar\" response")
 	assert.Empty(t, got.Signals)
+	assert.Nil(t, got.Error)
+}
+
+func TestOnBarResponse_CallbackFailure_CarriesStructuredError(t *testing.T) {
+	resp := &OnBarResponse{
+		Sequence: 7,
+		Error: &Error{
+			Code:    ErrorCode_ERROR_CODE_CALLBACK_FAILED,
+			Message: "guest OnBar handler returned an error",
+		},
+	}
+	got := roundTrip(t, resp)
+	assert.True(t, proto.Equal(resp, got))
+	require.NotNil(t, got.Error)
+	assert.Equal(t, ErrorCode_ERROR_CODE_CALLBACK_FAILED, got.Error.Code)
+	assert.Empty(t, got.Intents, "a failed callback must contribute no intents")
+	assert.Empty(t, got.Signals, "a failed callback must contribute no signals")
 }
 
 func TestOnBarResponse_DescribedIntentsAndSignals_RoundTrip(t *testing.T) {
@@ -204,6 +225,11 @@ func TestOnBarResponse_DescribedIntentsAndSignals_RoundTrip(t *testing.T) {
 					"close":     "150.90",
 					"above_sma": "true",
 				},
+				// correlation_token names the same group as the two
+				// intents above, mirroring strategy/smatrend's own
+				// recordSignal ("corr = intents[0].Metadata.
+				// CorrelationID" when intents were emitted this bar).
+				CorrelationToken: "bracket-1",
 			},
 		},
 	}
@@ -215,6 +241,26 @@ func TestOnBarResponse_DescribedIntentsAndSignals_RoundTrip(t *testing.T) {
 		"two described intents sharing one correlation token must round-trip identically")
 	require.Len(t, got.Signals, 1)
 	assert.Equal(t, "148.32", got.Signals[0].Values["sma_200"])
+	assert.Equal(t, "bracket-1", got.Signals[0].CorrelationToken,
+		"a signal's correlation_token must survive the round trip so the host can reuse the matching intent group's own real CorrelationID")
+}
+
+// TestDescribedSignal_NoIntentsThisBar_EmptyCorrelationToken mirrors
+// strategy/smatrend's own recordSignal for the "no intents emitted
+// this bar" case: corr stays the zero id.CorrelationID. The wire
+// mirror is an empty correlation_token, matching no intent group at
+// all (there is none to match).
+func TestDescribedSignal_NoIntentsThisBar_EmptyCorrelationToken(t *testing.T) {
+	resp := &OnBarResponse{
+		Sequence: 8,
+		Signals: []*DescribedSignal{
+			{Strategy: "sma-trend", Values: map[string]string{"action": "hold"}},
+		},
+	}
+	got := roundTrip(t, resp)
+	assert.True(t, proto.Equal(resp, got))
+	require.Len(t, got.Signals, 1)
+	assert.Empty(t, got.Signals[0].CorrelationToken)
 }
 
 // TestDescribedIntent_EveryKindIsRepresentable proves every current
@@ -268,14 +314,17 @@ func TestFillEvent_And_OnFillResponse_RoundTrip(t *testing.T) {
 
 	nack := &OnFillResponse{
 		Sequence: 9,
-		Error:    &Error{Code: ErrorCode_ERROR_CODE_UNSPECIFIED, Message: "guest-side handler panicked"},
+		Error:    &Error{Code: ErrorCode_ERROR_CODE_CALLBACK_FAILED, Message: "guest-side handler panicked"},
 	}
 	gotNack := roundTrip(t, nack)
 	assert.True(t, proto.Equal(nack, gotNack))
+	assert.Equal(t, ErrorCode_ERROR_CODE_CALLBACK_FAILED, gotNack.Error.Code,
+		"a callback failure must use the dedicated code, never ERROR_CODE_UNSPECIFIED (SessionEnd's own zero value already means normal completion)")
 }
 
 func TestGetHistoryBars_RoundTrip(t *testing.T) {
 	req := &GetHistoryBarsRequest{
+		SessionId:        "sess:01J8Z...",
 		CallbackSequence: 42,
 		InstrumentId:     "eq:NASDAQ:AAPL",
 		Interval:         &Interval{Unit: IntervalUnit_INTERVAL_UNIT_DAY, Count: 1},
@@ -283,7 +332,15 @@ func TestGetHistoryBars_RoundTrip(t *testing.T) {
 	}
 	got := roundTrip(t, req)
 	assert.True(t, proto.Equal(req, got))
+	assert.NotEmpty(t, got.SessionId, "a GetHistoryBarsRequest must name the session it belongs to")
 
+	// GetHistoryBarsResponse.bars is returned oldest-first, mirroring
+	// strategy.History.HistoryBars's own documented ordering — this
+	// test asserts the order a caller supplies survives the round
+	// trip unchanged (proto itself does not reorder repeated fields);
+	// the actual oldest-first *production* is issue #378/#379's own
+	// job, this schema only commits to preserving whatever order the
+	// host writes.
 	resp := &GetHistoryBarsResponse{
 		Bars: []*Bar{
 			{TimeUnixNanos: 1, Open: "1", High: "1", Low: "1", Close: "1"},
@@ -292,7 +349,9 @@ func TestGetHistoryBars_RoundTrip(t *testing.T) {
 	}
 	gotResp := roundTrip(t, resp)
 	assert.True(t, proto.Equal(resp, gotResp))
-	assert.Len(t, gotResp.Bars, 2)
+	require.Len(t, gotResp.Bars, 2)
+	assert.Less(t, gotResp.Bars[0].TimeUnixNanos, gotResp.Bars[1].TimeUnixNanos,
+		"oldest-first: bars[0] must be the earlier bar")
 }
 
 // TestRunServerMessage_OneofVariants proves each of RunServerMessage's
@@ -349,6 +408,9 @@ func TestRunClientMessage_OneofVariants(t *testing.T) {
 		name string
 		msg  *RunClientMessage
 	}{
+		{"run_open", &RunClientMessage{Payload: &RunClientMessage_RunOpen{
+			RunOpen: &RunOpen{SessionId: "sess:1"},
+		}}},
 		{"on_bar_response", &RunClientMessage{Payload: &RunClientMessage_OnBarResponse{
 			OnBarResponse: &OnBarResponse{Sequence: 1},
 		}}},
@@ -363,6 +425,9 @@ func TestRunClientMessage_OneofVariants(t *testing.T) {
 			assert.True(t, proto.Equal(tc.msg, got))
 
 			nonNil := 0
+			if got.GetRunOpen() != nil {
+				nonNil++
+			}
 			if got.GetOnBarResponse() != nil {
 				nonNil++
 			}

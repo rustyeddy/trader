@@ -332,6 +332,17 @@ const (
 	ErrorCode_ERROR_CODE_REQUIREMENT_NOT_DECLARED ErrorCode = 4
 	ErrorCode_ERROR_CODE_DEADLINE_EXCEEDED        ErrorCode = 5
 	ErrorCode_ERROR_CODE_INVALID_DESCRIBED_INTENT ErrorCode = 6
+	// ERROR_CODE_UNKNOWN_SESSION: a Run or GetHistoryBars call carried a
+	// session_id that does not match any Handshake this connection
+	// completed (review finding: UNSPECIFIED must never double as
+	// "session not found").
+	ErrorCode_ERROR_CODE_UNKNOWN_SESSION ErrorCode = 7
+	// ERROR_CODE_CALLBACK_FAILED: the guest's own OnBar or OnFill
+	// handler returned an error (review finding: a dedicated code,
+	// reserved for exactly this, rather than reusing UNSPECIFIED — which
+	// SessionEnd's own zero value already means "normal completion,"
+	// not "something failed but we don't know what").
+	ErrorCode_ERROR_CODE_CALLBACK_FAILED ErrorCode = 8
 )
 
 // Enum value maps for ErrorCode.
@@ -344,6 +355,8 @@ var (
 		4: "ERROR_CODE_REQUIREMENT_NOT_DECLARED",
 		5: "ERROR_CODE_DEADLINE_EXCEEDED",
 		6: "ERROR_CODE_INVALID_DESCRIBED_INTENT",
+		7: "ERROR_CODE_UNKNOWN_SESSION",
+		8: "ERROR_CODE_CALLBACK_FAILED",
 	}
 	ErrorCode_value = map[string]int32{
 		"ERROR_CODE_UNSPECIFIED":               0,
@@ -353,6 +366,8 @@ var (
 		"ERROR_CODE_REQUIREMENT_NOT_DECLARED":  4,
 		"ERROR_CODE_DEADLINE_EXCEEDED":         5,
 		"ERROR_CODE_INVALID_DESCRIBED_INTENT":  6,
+		"ERROR_CODE_UNKNOWN_SESSION":           7,
+		"ERROR_CODE_CALLBACK_FAILED":           8,
 	}
 )
 
@@ -493,64 +508,6 @@ func (x *Interval) GetCount() int32 {
 	return 0
 }
 
-// Money mirrors num.Money: an exact decimal amount plus its currency.
-// amount is the same canonical decimal text num.Money's own
-// MarshalJSON already produces for the amount alone — never a float
-// (ADR-004) — so a conversion layer reconstructs it the same checked,
-// quantized way num.MustParseMoney/num.ParseMoney already do, not by
-// parsing an approximate binary floating-point value.
-type Money struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Amount        string                 `protobuf:"bytes,1,opt,name=amount,proto3" json:"amount,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Money) Reset() {
-	*x = Money{}
-	mi := &file_strategy_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Money) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Money) ProtoMessage() {}
-
-func (x *Money) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Money.ProtoReflect.Descriptor instead.
-func (*Money) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *Money) GetAmount() string {
-	if x != nil {
-		return x.Amount
-	}
-	return ""
-}
-
-func (x *Money) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
 // DataRequirement mirrors strategy.DataRequirement.
 type DataRequirement struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -566,7 +523,7 @@ type DataRequirement struct {
 
 func (x *DataRequirement) Reset() {
 	*x = DataRequirement{}
-	mi := &file_strategy_proto_msgTypes[3]
+	mi := &file_strategy_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +535,7 @@ func (x *DataRequirement) String() string {
 func (*DataRequirement) ProtoMessage() {}
 
 func (x *DataRequirement) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[3]
+	mi := &file_strategy_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +548,7 @@ func (x *DataRequirement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DataRequirement.ProtoReflect.Descriptor instead.
 func (*DataRequirement) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{3}
+	return file_strategy_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DataRequirement) GetInstrumentId() string {
@@ -627,7 +584,7 @@ type StrategyDescriptor struct {
 
 func (x *StrategyDescriptor) Reset() {
 	*x = StrategyDescriptor{}
-	mi := &file_strategy_proto_msgTypes[4]
+	mi := &file_strategy_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -639,7 +596,7 @@ func (x *StrategyDescriptor) String() string {
 func (*StrategyDescriptor) ProtoMessage() {}
 
 func (x *StrategyDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[4]
+	mi := &file_strategy_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -652,7 +609,7 @@ func (x *StrategyDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StrategyDescriptor.ProtoReflect.Descriptor instead.
 func (*StrategyDescriptor) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{4}
+	return file_strategy_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *StrategyDescriptor) GetName() string {
@@ -697,7 +654,7 @@ type Bar struct {
 
 func (x *Bar) Reset() {
 	*x = Bar{}
-	mi := &file_strategy_proto_msgTypes[5]
+	mi := &file_strategy_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -709,7 +666,7 @@ func (x *Bar) String() string {
 func (*Bar) ProtoMessage() {}
 
 func (x *Bar) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[5]
+	mi := &file_strategy_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -722,7 +679,7 @@ func (x *Bar) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Bar.ProtoReflect.Descriptor instead.
 func (*Bar) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{5}
+	return file_strategy_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Bar) GetTimeUnixNanos() int64 {
@@ -785,24 +742,26 @@ func (x *Bar) GetTicks() int64 {
 // current in-process strategy actually reads (issue #377's own "no
 // speculative surfaces beyond current concrete consumers": both
 // strategy/smatrend and strategy/emacross read only Listing.
-// InstrumentID(), Side, and AvgPrice from a Position). AccountID and
-// the full Listing (Spec, Provider, Symbol, Tradable) are
-// deliberately omitted from v1.
+// InstrumentID(), Side, and AvgPrice from a Position — neither reads
+// Quantity at all). AccountID, Quantity, and the full Listing (Spec,
+// Provider, Symbol, Tradable) are deliberately omitted from v1
+// (review finding: an earlier draft included Quantity despite no
+// concrete consumer reading it, contradicting this message's own
+// "exactly" minimum-slice rationale).
 type PositionSnapshot struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	InstrumentId string                 `protobuf:"bytes,1,opt,name=instrument_id,json=instrumentId,proto3" json:"instrument_id,omitempty"`
 	Side         PositionSide           `protobuf:"varint,2,opt,name=side,proto3,enum=trader.strategy.v1.PositionSide" json:"side,omitempty"`
-	Quantity     string                 `protobuf:"bytes,3,opt,name=quantity,proto3" json:"quantity,omitempty"`
 	// avg_price is empty when side is POSITION_SIDE_FLAT, mirroring
 	// order.Position's own "nil exactly when Side is Flat" invariant.
-	AvgPrice      string `protobuf:"bytes,4,opt,name=avg_price,json=avgPrice,proto3" json:"avg_price,omitempty"`
+	AvgPrice      string `protobuf:"bytes,3,opt,name=avg_price,json=avgPrice,proto3" json:"avg_price,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PositionSnapshot) Reset() {
 	*x = PositionSnapshot{}
-	mi := &file_strategy_proto_msgTypes[6]
+	mi := &file_strategy_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -814,7 +773,7 @@ func (x *PositionSnapshot) String() string {
 func (*PositionSnapshot) ProtoMessage() {}
 
 func (x *PositionSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[6]
+	mi := &file_strategy_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -827,7 +786,7 @@ func (x *PositionSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PositionSnapshot.ProtoReflect.Descriptor instead.
 func (*PositionSnapshot) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{6}
+	return file_strategy_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PositionSnapshot) GetInstrumentId() string {
@@ -844,13 +803,6 @@ func (x *PositionSnapshot) GetSide() PositionSide {
 	return PositionSide_POSITION_SIDE_FLAT
 }
 
-func (x *PositionSnapshot) GetQuantity() string {
-	if x != nil {
-		return x.Quantity
-	}
-	return ""
-}
-
 func (x *PositionSnapshot) GetAvgPrice() string {
 	if x != nil {
 		return x.AvgPrice
@@ -859,31 +811,33 @@ func (x *PositionSnapshot) GetAvgPrice() string {
 }
 
 // AccountSnapshot is deliberately the minimum slice of account.
-// Snapshot any current in-process strategy actually reads (the same
-// "no speculative surfaces" reasoning as PositionSnapshot): every
-// published strategy today reads only View.Account().Positions().
-// Equity/RealizedPnL/UnrealizedPnL are included as cheap, broadly
-// useful scalars every future v1 consumer is likely to want; Open
-// Orders, CashBalances (potentially multi-currency), BuyingPower, and
-// MarginUsed/MarginAvailable are intentionally omitted until a
-// concrete v1 consumer needs them — an additive, wire-compatible v1
-// change when that happens.
+// Snapshot any current in-process strategy actually reads: every
+// published strategy today reads only View.Account().Positions() —
+// nothing else. Equity, RealizedPnL, and UnrealizedPnL are
+// deliberately omitted from v1 (review finding: an earlier draft
+// included them as "cheap, broadly useful scalars," but that is
+// exactly the speculative-surface reasoning issue #377 asks this
+// schema to avoid — removing a field later, once a real consumer
+// exists, is a breaking v2 change, while adding one is a free,
+// additive v1 change). OpenOrders, CashBalances, BuyingPower, and
+// MarginUsed/MarginAvailable remain omitted for the same reason.
+// account_id/currency/as_of_unix_nanos are kept as cheap identity/
+// provenance fields, the same category BarEvent.instrument_id and
+// FillEvent.order_id already are elsewhere in this schema, not
+// trading-state surfaces.
 type AccountSnapshot struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
 	AsOfUnixNanos int64                  `protobuf:"varint,3,opt,name=as_of_unix_nanos,json=asOfUnixNanos,proto3" json:"as_of_unix_nanos,omitempty"`
-	Equity        *Money                 `protobuf:"bytes,4,opt,name=equity,proto3" json:"equity,omitempty"`
-	RealizedPnl   *Money                 `protobuf:"bytes,5,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
-	UnrealizedPnl *Money                 `protobuf:"bytes,6,opt,name=unrealized_pnl,json=unrealizedPnl,proto3" json:"unrealized_pnl,omitempty"`
-	Positions     []*PositionSnapshot    `protobuf:"bytes,7,rep,name=positions,proto3" json:"positions,omitempty"`
+	Positions     []*PositionSnapshot    `protobuf:"bytes,4,rep,name=positions,proto3" json:"positions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AccountSnapshot) Reset() {
 	*x = AccountSnapshot{}
-	mi := &file_strategy_proto_msgTypes[7]
+	mi := &file_strategy_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +849,7 @@ func (x *AccountSnapshot) String() string {
 func (*AccountSnapshot) ProtoMessage() {}
 
 func (x *AccountSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[7]
+	mi := &file_strategy_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +862,7 @@ func (x *AccountSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountSnapshot.ProtoReflect.Descriptor instead.
 func (*AccountSnapshot) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{7}
+	return file_strategy_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AccountSnapshot) GetAccountId() string {
@@ -932,27 +886,6 @@ func (x *AccountSnapshot) GetAsOfUnixNanos() int64 {
 	return 0
 }
 
-func (x *AccountSnapshot) GetEquity() *Money {
-	if x != nil {
-		return x.Equity
-	}
-	return nil
-}
-
-func (x *AccountSnapshot) GetRealizedPnl() *Money {
-	if x != nil {
-		return x.RealizedPnl
-	}
-	return nil
-}
-
-func (x *AccountSnapshot) GetUnrealizedPnl() *Money {
-	if x != nil {
-		return x.UnrealizedPnl
-	}
-	return nil
-}
-
 func (x *AccountSnapshot) GetPositions() []*PositionSnapshot {
 	if x != nil {
 		return x.Positions
@@ -974,7 +907,7 @@ type HandshakeRequest struct {
 
 func (x *HandshakeRequest) Reset() {
 	*x = HandshakeRequest{}
-	mi := &file_strategy_proto_msgTypes[8]
+	mi := &file_strategy_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +919,7 @@ func (x *HandshakeRequest) String() string {
 func (*HandshakeRequest) ProtoMessage() {}
 
 func (x *HandshakeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[8]
+	mi := &file_strategy_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +932,7 @@ func (x *HandshakeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeRequest.ProtoReflect.Descriptor instead.
 func (*HandshakeRequest) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{8}
+	return file_strategy_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HandshakeRequest) GetProtocolVersion() string {
@@ -1030,14 +963,25 @@ type HandshakeResponse struct {
 	Capabilities    []Capability           `protobuf:"varint,3,rep,packed,name=capabilities,proto3,enum=trader.strategy.v1.Capability" json:"capabilities,omitempty"`
 	// reject_reason is set only when accepted is false — for example on
 	// a protocol version or capability mismatch the host cannot bridge.
-	RejectReason  *Error `protobuf:"bytes,4,opt,name=reject_reason,json=rejectReason,proto3" json:"reject_reason,omitempty"`
+	RejectReason *Error `protobuf:"bytes,4,opt,name=reject_reason,json=rejectReason,proto3" json:"reject_reason,omitempty"`
+	// session_id is a host-issued, opaque token uniquely identifying
+	// this accepted Handshake, set only when accepted is true (review
+	// finding: StrategyHostService allows several independent
+	// connections/strategies, and BarEvent.sequence is only unique
+	// *within* one session — nothing previously bound a Run stream or a
+	// GetHistoryBarsRequest to the specific Handshake/frozen-view state
+	// it belongs to). The guest must present this exact value in
+	// RunOpen (below) and in every GetHistoryBarsRequest; a value that
+	// does not match an active session is rejected
+	// (ERROR_CODE_UNKNOWN_SESSION).
+	SessionId     string `protobuf:"bytes,5,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HandshakeResponse) Reset() {
 	*x = HandshakeResponse{}
-	mi := &file_strategy_proto_msgTypes[9]
+	mi := &file_strategy_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1049,7 +993,7 @@ func (x *HandshakeResponse) String() string {
 func (*HandshakeResponse) ProtoMessage() {}
 
 func (x *HandshakeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_strategy_proto_msgTypes[9]
+	mi := &file_strategy_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1062,7 +1006,7 @@ func (x *HandshakeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeResponse.ProtoReflect.Descriptor instead.
 func (*HandshakeResponse) Descriptor() ([]byte, []int) {
-	return file_strategy_proto_rawDescGZIP(), []int{9}
+	return file_strategy_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HandshakeResponse) GetAccepted() bool {
@@ -1091,6 +1035,59 @@ func (x *HandshakeResponse) GetRejectReason() *Error {
 		return x.RejectReason
 	}
 	return nil
+}
+
+func (x *HandshakeResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// RunOpen is the Run stream's own mandatory first client->server
+// message (above).
+type RunOpen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunOpen) Reset() {
+	*x = RunOpen{}
+	mi := &file_strategy_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunOpen) ProtoMessage() {}
+
+func (x *RunOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_strategy_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunOpen.ProtoReflect.Descriptor instead.
+func (*RunOpen) Descriptor() ([]byte, []int) {
+	return file_strategy_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RunOpen) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
 }
 
 type SessionStart struct {
@@ -1389,11 +1386,25 @@ func (x *DescribedIntent) GetCorrelationToken() string {
 // DescribedIntent is turned into a canonical order.Intent through
 // env.Intents.
 type DescribedSignal struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Strategy      string                 `protobuf:"bytes,1,opt,name=strategy,proto3" json:"strategy,omitempty"`
-	Values        map[string]string      `protobuf:"bytes,2,rep,name=values,proto3" json:"values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Strategy string                 `protobuf:"bytes,1,opt,name=strategy,proto3" json:"strategy,omitempty"`
+	Values   map[string]string      `protobuf:"bytes,2,rep,name=values,proto3" json:"values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// correlation_token names the same DescribedIntent.correlation_token
+	// this signal explains, if any (review finding: strategy/smatrend's
+	// own recordSignal records a signal's journal.Record.Metadata.
+	// CorrelationID as the *emitted intent's own real CorrelationID*
+	// when one was emitted this bar, and the zero value otherwise —
+	// strategy/smatrend/strategy.go's own recordSignal, "var corr id.
+	// CorrelationID; if len(intents) > 0 { corr = intents[0].Metadata.
+	// CorrelationID }"). The host reproduces this exactly: when this
+	// token matches a token used by one or more of this same
+	// OnBarResponse's own intents, the host uses that group's own real,
+	// already-minted CorrelationID; an empty token (or one matching no
+	// intent this callback) means the zero CorrelationID, matching
+	// smatrend's own "no intents this bar" case.
+	CorrelationToken string `protobuf:"bytes,3,opt,name=correlation_token,json=correlationToken,proto3" json:"correlation_token,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *DescribedSignal) Reset() {
@@ -1440,14 +1451,29 @@ func (x *DescribedSignal) GetValues() map[string]string {
 	return nil
 }
 
+func (x *DescribedSignal) GetCorrelationToken() string {
+	if x != nil {
+		return x.CorrelationToken
+	}
+	return ""
+}
+
 // OnBarResponse is the guest's own response to one BarEvent. Empty
 // intents/signals lists are valid, explicit "nothing this bar"
-// responses, not a lack of one.
+// responses, not a lack of one. error is set only when the guest's
+// own OnBar handler itself returned an error (review finding: an
+// earlier draft had no way to represent this — a failed callback
+// would have had to collapse into stream EOF/a gRPC status, losing
+// the structured failure and giving ExternalStrategyAdapter no
+// predictable way to report it, unlike OnFillResponse, which already
+// had this field). When error is set, intents/signals must both be
+// empty — a failed callback contributes nothing.
 type OnBarResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Sequence      uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	Intents       []*DescribedIntent     `protobuf:"bytes,2,rep,name=intents,proto3" json:"intents,omitempty"`
 	Signals       []*DescribedSignal     `protobuf:"bytes,3,rep,name=signals,proto3" json:"signals,omitempty"`
+	Error         *Error                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1499,6 +1525,13 @@ func (x *OnBarResponse) GetIntents() []*DescribedIntent {
 func (x *OnBarResponse) GetSignals() []*DescribedSignal {
 	if x != nil {
 		return x.Signals
+	}
+	return nil
+}
+
+func (x *OnBarResponse) GetError() *Error {
+	if x != nil {
+		return x.Error
 	}
 	return nil
 }
@@ -1791,11 +1824,13 @@ func (*RunServerMessage_FillEvent) isRunServerMessage_Payload() {}
 func (*RunServerMessage_SessionEnd) isRunServerMessage_Payload() {}
 
 // RunClientMessage is one message the guest writes down the Run
-// stream.
+// stream. run_open is always the first message on the stream and
+// never appears again after that (above).
 type RunClientMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
 	//
+	//	*RunClientMessage_RunOpen
 	//	*RunClientMessage_OnBarResponse
 	//	*RunClientMessage_OnFillResponse
 	Payload       isRunClientMessage_Payload `protobuf_oneof:"payload"`
@@ -1840,6 +1875,15 @@ func (x *RunClientMessage) GetPayload() isRunClientMessage_Payload {
 	return nil
 }
 
+func (x *RunClientMessage) GetRunOpen() *RunOpen {
+	if x != nil {
+		if x, ok := x.Payload.(*RunClientMessage_RunOpen); ok {
+			return x.RunOpen
+		}
+	}
+	return nil
+}
+
 func (x *RunClientMessage) GetOnBarResponse() *OnBarResponse {
 	if x != nil {
 		if x, ok := x.Payload.(*RunClientMessage_OnBarResponse); ok {
@@ -1862,13 +1906,19 @@ type isRunClientMessage_Payload interface {
 	isRunClientMessage_Payload()
 }
 
+type RunClientMessage_RunOpen struct {
+	RunOpen *RunOpen `protobuf:"bytes,1,opt,name=run_open,json=runOpen,proto3,oneof"`
+}
+
 type RunClientMessage_OnBarResponse struct {
-	OnBarResponse *OnBarResponse `protobuf:"bytes,1,opt,name=on_bar_response,json=onBarResponse,proto3,oneof"`
+	OnBarResponse *OnBarResponse `protobuf:"bytes,2,opt,name=on_bar_response,json=onBarResponse,proto3,oneof"`
 }
 
 type RunClientMessage_OnFillResponse struct {
-	OnFillResponse *OnFillResponse `protobuf:"bytes,2,opt,name=on_fill_response,json=onFillResponse,proto3,oneof"`
+	OnFillResponse *OnFillResponse `protobuf:"bytes,3,opt,name=on_fill_response,json=onFillResponse,proto3,oneof"`
 }
+
+func (*RunClientMessage_RunOpen) isRunClientMessage_Payload() {}
 
 func (*RunClientMessage_OnBarResponse) isRunClientMessage_Payload() {}
 
@@ -1877,20 +1927,28 @@ func (*RunClientMessage_OnFillResponse) isRunClientMessage_Payload() {}
 // GetHistoryBarsRequest is bound to one specific in-flight callback's
 // own frozen view, not to whatever the host's live state happens to
 // be when the RPC arrives (ADR-062's own corrected View design):
-// callback_sequence must name a BarEvent the adapter is still waiting
-// on an OnBarResponse for, or the host rejects the request
-// (ERROR_CODE_UNKNOWN_CALLBACK). instrument_id/interval must also be
-// one of the Handshake-declared Requirements
+// session_id must name the active session this request belongs to
+// (ERROR_CODE_UNKNOWN_SESSION otherwise — review finding, above), and
+// callback_sequence must name a BarEvent that session's adapter is
+// still waiting on an OnBarResponse for, or the host rejects the
+// request (ERROR_CODE_UNKNOWN_CALLBACK). instrument_id/interval must
+// also be one of the Handshake-declared Requirements
 // (ERROR_CODE_REQUIREMENT_NOT_DECLARED otherwise).
 type GetHistoryBarsRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	CallbackSequence uint64                 `protobuf:"varint,1,opt,name=callback_sequence,json=callbackSequence,proto3" json:"callback_sequence,omitempty"`
-	InstrumentId     string                 `protobuf:"bytes,2,opt,name=instrument_id,json=instrumentId,proto3" json:"instrument_id,omitempty"`
-	Interval         *Interval              `protobuf:"bytes,3,opt,name=interval,proto3" json:"interval,omitempty"`
-	// count is the number of most-recent bars requested, ending at the
-	// frozen callback's own cutoff (never including that callback's own
-	// current bar, which BarEvent already carried).
-	Count         int32 `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`
+	SessionId        string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	CallbackSequence uint64                 `protobuf:"varint,2,opt,name=callback_sequence,json=callbackSequence,proto3" json:"callback_sequence,omitempty"`
+	InstrumentId     string                 `protobuf:"bytes,3,opt,name=instrument_id,json=instrumentId,proto3" json:"instrument_id,omitempty"`
+	Interval         *Interval              `protobuf:"bytes,4,opt,name=interval,proto3" json:"interval,omitempty"`
+	// count is the number of most-recent bars requested, ending strictly
+	// before the frozen callback's own current bar (never including that
+	// bar itself, which BarEvent already carried) — the same "up to n
+	// most-recently-closed bars, strictly before the current callback's
+	// own timestamp" contract strategy.History.HistoryBars already
+	// documents in-process. Fewer than count bars available (run start,
+	// or before this requirement's own data begins) is not an error: the
+	// response simply carries fewer bars, never padded.
+	Count         int32 `protobuf:"varint,5,opt,name=count,proto3" json:"count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1925,6 +1983,13 @@ func (*GetHistoryBarsRequest) Descriptor() ([]byte, []int) {
 	return file_strategy_proto_rawDescGZIP(), []int{20}
 }
 
+func (x *GetHistoryBarsRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
 func (x *GetHistoryBarsRequest) GetCallbackSequence() uint64 {
 	if x != nil {
 		return x.CallbackSequence
@@ -1953,6 +2018,13 @@ func (x *GetHistoryBarsRequest) GetCount() int32 {
 	return 0
 }
 
+// GetHistoryBarsResponse.bars is returned oldest-first (review
+// finding: this must be part of the wire contract, not left to SDK
+// convention — different guest implementations could otherwise
+// produce opposite sequences from the identical request, silently
+// changing indicator results and breaking issue #384's own
+// deterministic-equivalence requirement), mirroring strategy.History.
+// HistoryBars's own documented ordering exactly.
 type GetHistoryBarsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Bars          []*Bar                 `protobuf:"bytes,1,rep,name=bars,proto3" json:"bars,omitempty"`
@@ -2007,10 +2079,7 @@ const file_strategy_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"V\n" +
 	"\bInterval\x124\n" +
 	"\x04unit\x18\x01 \x01(\x0e2 .trader.strategy.v1.IntervalUnitR\x04unit\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x05R\x05count\";\n" +
-	"\x05Money\x12\x16\n" +
-	"\x06amount\x18\x01 \x01(\tR\x06amount\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\x91\x01\n" +
+	"\x05count\x18\x02 \x01(\x05R\x05count\"\x91\x01\n" +
 	"\x0fDataRequirement\x12#\n" +
 	"\rinstrument_id\x18\x01 \x01(\tR\finstrumentId\x128\n" +
 	"\binterval\x18\x02 \x01(\v2\x1c.trader.strategy.v1.IntervalR\binterval\x12\x1f\n" +
@@ -2030,30 +2099,31 @@ const file_strategy_proto_rawDesc = "" +
 	"avg_spread\x18\x06 \x01(\tR\tavgSpread\x12\x1d\n" +
 	"\n" +
 	"max_spread\x18\a \x01(\tR\tmaxSpread\x12\x14\n" +
-	"\x05ticks\x18\b \x01(\x03R\x05ticks\"\xa6\x01\n" +
+	"\x05ticks\x18\b \x01(\x03R\x05ticks\"\x8a\x01\n" +
 	"\x10PositionSnapshot\x12#\n" +
 	"\rinstrument_id\x18\x01 \x01(\tR\finstrumentId\x124\n" +
-	"\x04side\x18\x02 \x01(\x0e2 .trader.strategy.v1.PositionSideR\x04side\x12\x1a\n" +
-	"\bquantity\x18\x03 \x01(\tR\bquantity\x12\x1b\n" +
-	"\tavg_price\x18\x04 \x01(\tR\bavgPrice\"\xec\x02\n" +
+	"\x04side\x18\x02 \x01(\x0e2 .trader.strategy.v1.PositionSideR\x04side\x12\x1b\n" +
+	"\tavg_price\x18\x03 \x01(\tR\bavgPrice\"\xb9\x01\n" +
 	"\x0fAccountSnapshot\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12\x1a\n" +
 	"\bcurrency\x18\x02 \x01(\tR\bcurrency\x12'\n" +
-	"\x10as_of_unix_nanos\x18\x03 \x01(\x03R\rasOfUnixNanos\x121\n" +
-	"\x06equity\x18\x04 \x01(\v2\x19.trader.strategy.v1.MoneyR\x06equity\x12<\n" +
-	"\frealized_pnl\x18\x05 \x01(\v2\x19.trader.strategy.v1.MoneyR\vrealizedPnl\x12@\n" +
-	"\x0eunrealized_pnl\x18\x06 \x01(\v2\x19.trader.strategy.v1.MoneyR\runrealizedPnl\x12B\n" +
-	"\tpositions\x18\a \x03(\v2$.trader.strategy.v1.PositionSnapshotR\tpositions\"\xda\x01\n" +
+	"\x10as_of_unix_nanos\x18\x03 \x01(\x03R\rasOfUnixNanos\x12B\n" +
+	"\tpositions\x18\x04 \x03(\v2$.trader.strategy.v1.PositionSnapshotR\tpositions\"\xda\x01\n" +
 	"\x10HandshakeRequest\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\tR\x0fprotocolVersion\x12W\n" +
 	"\x13strategy_descriptor\x18\x02 \x01(\v2&.trader.strategy.v1.StrategyDescriptorR\x12strategyDescriptor\x12B\n" +
-	"\fcapabilities\x18\x03 \x03(\x0e2\x1e.trader.strategy.v1.CapabilityR\fcapabilities\"\xde\x01\n" +
+	"\fcapabilities\x18\x03 \x03(\x0e2\x1e.trader.strategy.v1.CapabilityR\fcapabilities\"\xfd\x01\n" +
 	"\x11HandshakeResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12B\n" +
 	"\fcapabilities\x18\x03 \x03(\x0e2\x1e.trader.strategy.v1.CapabilityR\fcapabilities\x12>\n" +
-	"\rreject_reason\x18\x04 \x01(\v2\x19.trader.strategy.v1.ErrorR\frejectReason\"X\n" +
+	"\rreject_reason\x18\x04 \x01(\v2\x19.trader.strategy.v1.ErrorR\frejectReason\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x05 \x01(\tR\tsessionId\"(\n" +
+	"\aRunOpen\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"X\n" +
 	"\fSessionStart\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x121\n" +
 	"\x15start_time_unix_nanos\x18\x02 \x01(\x03R\x12startTimeUnixNanos\"W\n" +
@@ -2074,17 +2144,19 @@ const file_strategy_proto_rawDesc = "" +
 	"\bquantity\x18\x04 \x01(\tR\bquantity\x12\x1d\n" +
 	"\n" +
 	"stop_price\x18\x05 \x01(\tR\tstopPrice\x12+\n" +
-	"\x11correlation_token\x18\x06 \x01(\tR\x10correlationToken\"\xb1\x01\n" +
+	"\x11correlation_token\x18\x06 \x01(\tR\x10correlationToken\"\xde\x01\n" +
 	"\x0fDescribedSignal\x12\x1a\n" +
 	"\bstrategy\x18\x01 \x01(\tR\bstrategy\x12G\n" +
-	"\x06values\x18\x02 \x03(\v2/.trader.strategy.v1.DescribedSignal.ValuesEntryR\x06values\x1a9\n" +
+	"\x06values\x18\x02 \x03(\v2/.trader.strategy.v1.DescribedSignal.ValuesEntryR\x06values\x12+\n" +
+	"\x11correlation_token\x18\x03 \x01(\tR\x10correlationToken\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa9\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xda\x01\n" +
 	"\rOnBarResponse\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12=\n" +
 	"\aintents\x18\x02 \x03(\v2#.trader.strategy.v1.DescribedIntentR\aintents\x12=\n" +
-	"\asignals\x18\x03 \x03(\v2#.trader.strategy.v1.DescribedSignalR\asignals\"\xd0\x02\n" +
+	"\asignals\x18\x03 \x03(\v2#.trader.strategy.v1.DescribedSignalR\asignals\x12/\n" +
+	"\x05error\x18\x04 \x01(\v2\x19.trader.strategy.v1.ErrorR\x05error\"\xd0\x02\n" +
 	"\tFillEvent\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x19\n" +
 	"\border_id\x18\x02 \x01(\tR\aorderId\x12#\n" +
@@ -2105,16 +2177,19 @@ const file_strategy_proto_rawDesc = "" +
 	"fill_event\x18\x03 \x01(\v2\x1d.trader.strategy.v1.FillEventH\x00R\tfillEvent\x12A\n" +
 	"\vsession_end\x18\x04 \x01(\v2\x1e.trader.strategy.v1.SessionEndH\x00R\n" +
 	"sessionEndB\t\n" +
-	"\apayload\"\xba\x01\n" +
-	"\x10RunClientMessage\x12K\n" +
-	"\x0fon_bar_response\x18\x01 \x01(\v2!.trader.strategy.v1.OnBarResponseH\x00R\ronBarResponse\x12N\n" +
-	"\x10on_fill_response\x18\x02 \x01(\v2\".trader.strategy.v1.OnFillResponseH\x00R\x0eonFillResponseB\t\n" +
-	"\apayload\"\xb9\x01\n" +
-	"\x15GetHistoryBarsRequest\x12+\n" +
-	"\x11callback_sequence\x18\x01 \x01(\x04R\x10callbackSequence\x12#\n" +
-	"\rinstrument_id\x18\x02 \x01(\tR\finstrumentId\x128\n" +
-	"\binterval\x18\x03 \x01(\v2\x1c.trader.strategy.v1.IntervalR\binterval\x12\x14\n" +
-	"\x05count\x18\x04 \x01(\x05R\x05count\"E\n" +
+	"\apayload\"\xf4\x01\n" +
+	"\x10RunClientMessage\x128\n" +
+	"\brun_open\x18\x01 \x01(\v2\x1b.trader.strategy.v1.RunOpenH\x00R\arunOpen\x12K\n" +
+	"\x0fon_bar_response\x18\x02 \x01(\v2!.trader.strategy.v1.OnBarResponseH\x00R\ronBarResponse\x12N\n" +
+	"\x10on_fill_response\x18\x03 \x01(\v2\".trader.strategy.v1.OnFillResponseH\x00R\x0eonFillResponseB\t\n" +
+	"\apayload\"\xd8\x01\n" +
+	"\x15GetHistoryBarsRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12+\n" +
+	"\x11callback_sequence\x18\x02 \x01(\x04R\x10callbackSequence\x12#\n" +
+	"\rinstrument_id\x18\x03 \x01(\tR\finstrumentId\x128\n" +
+	"\binterval\x18\x04 \x01(\v2\x1c.trader.strategy.v1.IntervalR\binterval\x12\x14\n" +
+	"\x05count\x18\x05 \x01(\x05R\x05count\"E\n" +
 	"\x16GetHistoryBarsResponse\x12+\n" +
 	"\x04bars\x18\x01 \x03(\v2\x17.trader.strategy.v1.BarR\x04bars*\x8e\x01\n" +
 	"\fIntervalUnit\x12\x1d\n" +
@@ -2142,7 +2217,7 @@ const file_strategy_proto_rawDesc = "" +
 	"\n" +
 	"Capability\x12\x1a\n" +
 	"\x16CAPABILITY_UNSPECIFIED\x10\x00\x12\x1b\n" +
-	"\x17CAPABILITY_FILL_HANDLER\x10\x01*\x8a\x02\n" +
+	"\x17CAPABILITY_FILL_HANDLER\x10\x01*\xca\x02\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12(\n" +
 	"$ERROR_CODE_PROTOCOL_VERSION_MISMATCH\x10\x01\x12\"\n" +
@@ -2150,7 +2225,9 @@ const file_strategy_proto_rawDesc = "" +
 	"\x1bERROR_CODE_UNKNOWN_CALLBACK\x10\x03\x12'\n" +
 	"#ERROR_CODE_REQUIREMENT_NOT_DECLARED\x10\x04\x12 \n" +
 	"\x1cERROR_CODE_DEADLINE_EXCEEDED\x10\x05\x12'\n" +
-	"#ERROR_CODE_INVALID_DESCRIBED_INTENT\x10\x062\xaf\x02\n" +
+	"#ERROR_CODE_INVALID_DESCRIBED_INTENT\x10\x06\x12\x1e\n" +
+	"\x1aERROR_CODE_UNKNOWN_SESSION\x10\a\x12\x1e\n" +
+	"\x1aERROR_CODE_CALLBACK_FAILED\x10\b2\xaf\x02\n" +
 	"\x13StrategyHostService\x12X\n" +
 	"\tHandshake\x12$.trader.strategy.v1.HandshakeRequest\x1a%.trader.strategy.v1.HandshakeResponse\x12U\n" +
 	"\x03Run\x12$.trader.strategy.v1.RunClientMessage\x1a$.trader.strategy.v1.RunServerMessage(\x010\x01\x12g\n" +
@@ -2179,14 +2256,14 @@ var file_strategy_proto_goTypes = []any{
 	(ErrorCode)(0),                 // 5: trader.strategy.v1.ErrorCode
 	(*Error)(nil),                  // 6: trader.strategy.v1.Error
 	(*Interval)(nil),               // 7: trader.strategy.v1.Interval
-	(*Money)(nil),                  // 8: trader.strategy.v1.Money
-	(*DataRequirement)(nil),        // 9: trader.strategy.v1.DataRequirement
-	(*StrategyDescriptor)(nil),     // 10: trader.strategy.v1.StrategyDescriptor
-	(*Bar)(nil),                    // 11: trader.strategy.v1.Bar
-	(*PositionSnapshot)(nil),       // 12: trader.strategy.v1.PositionSnapshot
-	(*AccountSnapshot)(nil),        // 13: trader.strategy.v1.AccountSnapshot
-	(*HandshakeRequest)(nil),       // 14: trader.strategy.v1.HandshakeRequest
-	(*HandshakeResponse)(nil),      // 15: trader.strategy.v1.HandshakeResponse
+	(*DataRequirement)(nil),        // 8: trader.strategy.v1.DataRequirement
+	(*StrategyDescriptor)(nil),     // 9: trader.strategy.v1.StrategyDescriptor
+	(*Bar)(nil),                    // 10: trader.strategy.v1.Bar
+	(*PositionSnapshot)(nil),       // 11: trader.strategy.v1.PositionSnapshot
+	(*AccountSnapshot)(nil),        // 12: trader.strategy.v1.AccountSnapshot
+	(*HandshakeRequest)(nil),       // 13: trader.strategy.v1.HandshakeRequest
+	(*HandshakeResponse)(nil),      // 14: trader.strategy.v1.HandshakeResponse
+	(*RunOpen)(nil),                // 15: trader.strategy.v1.RunOpen
 	(*SessionStart)(nil),           // 16: trader.strategy.v1.SessionStart
 	(*SessionEnd)(nil),             // 17: trader.strategy.v1.SessionEnd
 	(*BarEvent)(nil),               // 18: trader.strategy.v1.BarEvent
@@ -2205,47 +2282,46 @@ var file_strategy_proto_depIdxs = []int32{
 	5,  // 0: trader.strategy.v1.Error.code:type_name -> trader.strategy.v1.ErrorCode
 	0,  // 1: trader.strategy.v1.Interval.unit:type_name -> trader.strategy.v1.IntervalUnit
 	7,  // 2: trader.strategy.v1.DataRequirement.interval:type_name -> trader.strategy.v1.Interval
-	9,  // 3: trader.strategy.v1.StrategyDescriptor.requirements:type_name -> trader.strategy.v1.DataRequirement
+	8,  // 3: trader.strategy.v1.StrategyDescriptor.requirements:type_name -> trader.strategy.v1.DataRequirement
 	2,  // 4: trader.strategy.v1.PositionSnapshot.side:type_name -> trader.strategy.v1.PositionSide
-	8,  // 5: trader.strategy.v1.AccountSnapshot.equity:type_name -> trader.strategy.v1.Money
-	8,  // 6: trader.strategy.v1.AccountSnapshot.realized_pnl:type_name -> trader.strategy.v1.Money
-	8,  // 7: trader.strategy.v1.AccountSnapshot.unrealized_pnl:type_name -> trader.strategy.v1.Money
-	12, // 8: trader.strategy.v1.AccountSnapshot.positions:type_name -> trader.strategy.v1.PositionSnapshot
-	10, // 9: trader.strategy.v1.HandshakeRequest.strategy_descriptor:type_name -> trader.strategy.v1.StrategyDescriptor
-	4,  // 10: trader.strategy.v1.HandshakeRequest.capabilities:type_name -> trader.strategy.v1.Capability
-	4,  // 11: trader.strategy.v1.HandshakeResponse.capabilities:type_name -> trader.strategy.v1.Capability
-	6,  // 12: trader.strategy.v1.HandshakeResponse.reject_reason:type_name -> trader.strategy.v1.Error
-	5,  // 13: trader.strategy.v1.SessionEnd.code:type_name -> trader.strategy.v1.ErrorCode
-	7,  // 14: trader.strategy.v1.BarEvent.interval:type_name -> trader.strategy.v1.Interval
-	11, // 15: trader.strategy.v1.BarEvent.bar:type_name -> trader.strategy.v1.Bar
-	13, // 16: trader.strategy.v1.BarEvent.account:type_name -> trader.strategy.v1.AccountSnapshot
-	3,  // 17: trader.strategy.v1.DescribedIntent.kind:type_name -> trader.strategy.v1.IntentKind
-	1,  // 18: trader.strategy.v1.DescribedIntent.side:type_name -> trader.strategy.v1.Side
-	28, // 19: trader.strategy.v1.DescribedSignal.values:type_name -> trader.strategy.v1.DescribedSignal.ValuesEntry
-	19, // 20: trader.strategy.v1.OnBarResponse.intents:type_name -> trader.strategy.v1.DescribedIntent
-	20, // 21: trader.strategy.v1.OnBarResponse.signals:type_name -> trader.strategy.v1.DescribedSignal
-	1,  // 22: trader.strategy.v1.FillEvent.side:type_name -> trader.strategy.v1.Side
-	13, // 23: trader.strategy.v1.FillEvent.account:type_name -> trader.strategy.v1.AccountSnapshot
-	6,  // 24: trader.strategy.v1.OnFillResponse.error:type_name -> trader.strategy.v1.Error
-	16, // 25: trader.strategy.v1.RunServerMessage.session_start:type_name -> trader.strategy.v1.SessionStart
-	18, // 26: trader.strategy.v1.RunServerMessage.bar_event:type_name -> trader.strategy.v1.BarEvent
-	22, // 27: trader.strategy.v1.RunServerMessage.fill_event:type_name -> trader.strategy.v1.FillEvent
-	17, // 28: trader.strategy.v1.RunServerMessage.session_end:type_name -> trader.strategy.v1.SessionEnd
-	21, // 29: trader.strategy.v1.RunClientMessage.on_bar_response:type_name -> trader.strategy.v1.OnBarResponse
-	23, // 30: trader.strategy.v1.RunClientMessage.on_fill_response:type_name -> trader.strategy.v1.OnFillResponse
-	7,  // 31: trader.strategy.v1.GetHistoryBarsRequest.interval:type_name -> trader.strategy.v1.Interval
-	11, // 32: trader.strategy.v1.GetHistoryBarsResponse.bars:type_name -> trader.strategy.v1.Bar
-	14, // 33: trader.strategy.v1.StrategyHostService.Handshake:input_type -> trader.strategy.v1.HandshakeRequest
-	25, // 34: trader.strategy.v1.StrategyHostService.Run:input_type -> trader.strategy.v1.RunClientMessage
-	26, // 35: trader.strategy.v1.StrategyHostService.GetHistoryBars:input_type -> trader.strategy.v1.GetHistoryBarsRequest
-	15, // 36: trader.strategy.v1.StrategyHostService.Handshake:output_type -> trader.strategy.v1.HandshakeResponse
-	24, // 37: trader.strategy.v1.StrategyHostService.Run:output_type -> trader.strategy.v1.RunServerMessage
-	27, // 38: trader.strategy.v1.StrategyHostService.GetHistoryBars:output_type -> trader.strategy.v1.GetHistoryBarsResponse
-	36, // [36:39] is the sub-list for method output_type
-	33, // [33:36] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	11, // 5: trader.strategy.v1.AccountSnapshot.positions:type_name -> trader.strategy.v1.PositionSnapshot
+	9,  // 6: trader.strategy.v1.HandshakeRequest.strategy_descriptor:type_name -> trader.strategy.v1.StrategyDescriptor
+	4,  // 7: trader.strategy.v1.HandshakeRequest.capabilities:type_name -> trader.strategy.v1.Capability
+	4,  // 8: trader.strategy.v1.HandshakeResponse.capabilities:type_name -> trader.strategy.v1.Capability
+	6,  // 9: trader.strategy.v1.HandshakeResponse.reject_reason:type_name -> trader.strategy.v1.Error
+	5,  // 10: trader.strategy.v1.SessionEnd.code:type_name -> trader.strategy.v1.ErrorCode
+	7,  // 11: trader.strategy.v1.BarEvent.interval:type_name -> trader.strategy.v1.Interval
+	10, // 12: trader.strategy.v1.BarEvent.bar:type_name -> trader.strategy.v1.Bar
+	12, // 13: trader.strategy.v1.BarEvent.account:type_name -> trader.strategy.v1.AccountSnapshot
+	3,  // 14: trader.strategy.v1.DescribedIntent.kind:type_name -> trader.strategy.v1.IntentKind
+	1,  // 15: trader.strategy.v1.DescribedIntent.side:type_name -> trader.strategy.v1.Side
+	28, // 16: trader.strategy.v1.DescribedSignal.values:type_name -> trader.strategy.v1.DescribedSignal.ValuesEntry
+	19, // 17: trader.strategy.v1.OnBarResponse.intents:type_name -> trader.strategy.v1.DescribedIntent
+	20, // 18: trader.strategy.v1.OnBarResponse.signals:type_name -> trader.strategy.v1.DescribedSignal
+	6,  // 19: trader.strategy.v1.OnBarResponse.error:type_name -> trader.strategy.v1.Error
+	1,  // 20: trader.strategy.v1.FillEvent.side:type_name -> trader.strategy.v1.Side
+	12, // 21: trader.strategy.v1.FillEvent.account:type_name -> trader.strategy.v1.AccountSnapshot
+	6,  // 22: trader.strategy.v1.OnFillResponse.error:type_name -> trader.strategy.v1.Error
+	16, // 23: trader.strategy.v1.RunServerMessage.session_start:type_name -> trader.strategy.v1.SessionStart
+	18, // 24: trader.strategy.v1.RunServerMessage.bar_event:type_name -> trader.strategy.v1.BarEvent
+	22, // 25: trader.strategy.v1.RunServerMessage.fill_event:type_name -> trader.strategy.v1.FillEvent
+	17, // 26: trader.strategy.v1.RunServerMessage.session_end:type_name -> trader.strategy.v1.SessionEnd
+	15, // 27: trader.strategy.v1.RunClientMessage.run_open:type_name -> trader.strategy.v1.RunOpen
+	21, // 28: trader.strategy.v1.RunClientMessage.on_bar_response:type_name -> trader.strategy.v1.OnBarResponse
+	23, // 29: trader.strategy.v1.RunClientMessage.on_fill_response:type_name -> trader.strategy.v1.OnFillResponse
+	7,  // 30: trader.strategy.v1.GetHistoryBarsRequest.interval:type_name -> trader.strategy.v1.Interval
+	10, // 31: trader.strategy.v1.GetHistoryBarsResponse.bars:type_name -> trader.strategy.v1.Bar
+	13, // 32: trader.strategy.v1.StrategyHostService.Handshake:input_type -> trader.strategy.v1.HandshakeRequest
+	25, // 33: trader.strategy.v1.StrategyHostService.Run:input_type -> trader.strategy.v1.RunClientMessage
+	26, // 34: trader.strategy.v1.StrategyHostService.GetHistoryBars:input_type -> trader.strategy.v1.GetHistoryBarsRequest
+	14, // 35: trader.strategy.v1.StrategyHostService.Handshake:output_type -> trader.strategy.v1.HandshakeResponse
+	24, // 36: trader.strategy.v1.StrategyHostService.Run:output_type -> trader.strategy.v1.RunServerMessage
+	27, // 37: trader.strategy.v1.StrategyHostService.GetHistoryBars:output_type -> trader.strategy.v1.GetHistoryBarsResponse
+	35, // [35:38] is the sub-list for method output_type
+	32, // [32:35] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_strategy_proto_init() }
@@ -2260,6 +2336,7 @@ func file_strategy_proto_init() {
 		(*RunServerMessage_SessionEnd)(nil),
 	}
 	file_strategy_proto_msgTypes[19].OneofWrappers = []any{
+		(*RunClientMessage_RunOpen)(nil),
 		(*RunClientMessage_OnBarResponse)(nil),
 		(*RunClientMessage_OnFillResponse)(nil),
 	}

@@ -54,16 +54,19 @@ const (
 // service.
 type StrategyHostServiceClient interface {
 	// Handshake is called once, before Run, carrying no run-scoped
-	// values (above).
+	// values (above). Its response's own session_id is what Run and
+	// GetHistoryBars are bound to.
 	Handshake(ctx context.Context, in *HandshakeRequest, opts ...grpc.CallOption) (*HandshakeResponse, error)
 	// Run is the guest-opened, bidirectional, long-lived session
-	// stream (above). Exactly one Run stream exists per Handshake'd
-	// connection — v1 assumes one strategy identity per connection
-	// (ADR-062's own "one external strategy process per host
-	// connection" scope statement).
+	// stream (above), opened with the session_id Handshake issued via
+	// RunOpen, its own mandatory first message. Exactly one Run stream
+	// exists per Handshake'd connection — v1 assumes one strategy
+	// identity per connection (ADR-062's own "one external strategy
+	// process per host connection" scope statement).
 	Run(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RunClientMessage, RunServerMessage], error)
 	// GetHistoryBars is callable at any time a callback is in flight,
-	// independent of the Run stream's own message pump (above).
+	// independent of the Run stream's own message pump (above), and
+	// must name the same session_id Handshake issued.
 	GetHistoryBars(ctx context.Context, in *GetHistoryBarsRequest, opts ...grpc.CallOption) (*GetHistoryBarsResponse, error)
 }
 
@@ -120,16 +123,19 @@ func (c *strategyHostServiceClient) GetHistoryBars(ctx context.Context, in *GetH
 // service.
 type StrategyHostServiceServer interface {
 	// Handshake is called once, before Run, carrying no run-scoped
-	// values (above).
+	// values (above). Its response's own session_id is what Run and
+	// GetHistoryBars are bound to.
 	Handshake(context.Context, *HandshakeRequest) (*HandshakeResponse, error)
 	// Run is the guest-opened, bidirectional, long-lived session
-	// stream (above). Exactly one Run stream exists per Handshake'd
-	// connection — v1 assumes one strategy identity per connection
-	// (ADR-062's own "one external strategy process per host
-	// connection" scope statement).
+	// stream (above), opened with the session_id Handshake issued via
+	// RunOpen, its own mandatory first message. Exactly one Run stream
+	// exists per Handshake'd connection — v1 assumes one strategy
+	// identity per connection (ADR-062's own "one external strategy
+	// process per host connection" scope statement).
 	Run(grpc.BidiStreamingServer[RunClientMessage, RunServerMessage]) error
 	// GetHistoryBars is callable at any time a callback is in flight,
-	// independent of the Run stream's own message pump (above).
+	// independent of the Run stream's own message pump (above), and
+	// must name the same session_id Handshake issued.
 	GetHistoryBars(context.Context, *GetHistoryBarsRequest) (*GetHistoryBarsResponse, error)
 	mustEmbedUnimplementedStrategyHostServiceServer()
 }
