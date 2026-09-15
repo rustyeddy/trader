@@ -2,6 +2,15 @@
 # contributor and in CI, rather than silently changing behavior when a
 # new golangci-lint release adds or reconfigures linters.
 LINT_VERSION := v2.13.0
+# PROTOC_GEN_GO_VERSION/PROTOC_GEN_GO_GRPC_VERSION are pinned for the
+# same reason (review finding on PR #387: an unpinned `@latest` makes
+# `make gen-proto` non-reproducible — a later run could regenerate
+# protocol/strategy/v1's committed bindings with a different generator
+# than actually produced them). These match the versions recorded in
+# strategy.pb.go/strategy_grpc.pb.go's own "// versions:" header
+# comments; bump both together with a regeneration when either changes.
+PROTOC_GEN_GO_VERSION := v1.36.12
+PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
 COVERPROFILE := coverage.out
 BINARY := trader
 BIN_DIR := bin
@@ -17,6 +26,29 @@ build:
 # when GOBIN is unset, and requires no elevated privileges.
 install:
 	go install ./cmd/trader
+
+# gen-proto regenerates protocol/strategy/v1's Go bindings from
+# strategy.proto (issue #377, ADR-062). Installs protoc-gen-go/
+# protoc-gen-go-grpc at the pinned versions above (go install itself
+# is idempotent and fast when already at that version, mirroring
+# `lint`'s own `go run ...@$(LINT_VERSION)` pinning convention) — only
+# protoc itself (the C++ compiler binary, not a Go module `go install`
+# can pin) must already be on PATH; these bindings were last generated
+# with protoc v29.3, also recorded in the generated files' own
+# "// versions:" header comments.
+#
+# Not part of `make check`/`make build`: generated output is committed
+# (protocol/strategy/v1/strategy.pb.go, strategy_grpc.pb.go), so a
+# normal build/test/CI run never needs protoc installed at all — only
+# a contributor editing strategy.proto itself runs this target.
+gen-proto:
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+	protoc \
+		--proto_path=protocol/strategy/v1 \
+		--go_out=protocol/strategy/v1 --go_opt=paths=source_relative \
+		--go-grpc_out=protocol/strategy/v1 --go-grpc_opt=paths=source_relative \
+		protocol/strategy/v1/strategy.proto
 
 fmt:
 	go fmt ./...
@@ -49,4 +81,4 @@ coverage-html: coverage
 
 check: fmt-check vet lint test race
 
-.PHONY: all build install fmt fmt-check vet test race lint coverage coverage-html check
+.PHONY: all build install gen-proto fmt fmt-check vet test race lint coverage coverage-html check
