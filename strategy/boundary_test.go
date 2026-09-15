@@ -57,6 +57,13 @@ func TestStrategyNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T)
 		// broker; chart/boundary_test.go enforces the mirror-image
 		// direction.
 		"github.com/rustyeddy/trader/chart",
+		// Issue #378: protocol/strategy/v1's generated wire types are
+		// a transport concern for adapters/strategy/external (the host
+		// side, ADR-062) alone — a strategy contract that could name
+		// this package could be coupled to the wire format of one
+		// particular out-of-process transport, the same reasoning that
+		// already excludes broker/execution/risk/pipeline above.
+		"github.com/rustyeddy/trader/protocol",
 	}
 
 	entries, err := os.ReadDir(".")
