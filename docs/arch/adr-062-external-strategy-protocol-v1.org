@@ -119,13 +119,17 @@ Every connection begins with an explicit handshake RPC
 (=Handshake=), carried out before any market/account data flows: the
 guest's =Handshake= request reports its own protocol version and
 declared capabilities, and the host's =Handshake= response reports its
-own supported protocol version(s), rejecting the connection outright
-on a version or capability mismatch it cannot bridge rather than
-attempting to silently degrade. This mirrors the architecture
-document's own "Protocol version and capability negotiation occur
-during startup" requirement and gives future capability growth an
-explicit place to be negotiated rather than inferred from RPC calls
-that happen to succeed or fail.
+own supported protocol version(s) *and a =start_time= reading taken
+from the host's own injected =clock.Clock.Now()= at that instant* (the
+seed value =strategysdk='s own guest-side clock uses — see the =Go
+SDK= section below for why this, not guest wall-clock time, is the
+=v1= clock-ownership answer), rejecting the connection outright on a
+version or capability mismatch it cannot bridge rather than attempting
+to silently degrade. This mirrors the architecture document's own
+"Protocol version and capability negotiation occur during startup"
+requirement and gives future capability growth an explicit place to be
+negotiated rather than inferred from RPC calls that happen to succeed
+or fail.
 
 *The guest's =Handshake= request carries the complete
 =strategy.Descriptor= the guest's own wrapped strategy would return
@@ -194,24 +198,41 @@ strategy failure mode, and the architecture document's own "Strategy
 Process Contract" section already requires "timeouts and a clear
 policy when a strategy is slow, unavailable, or returns an invalid
 intent" (review finding, Copilot), =v1= adopts the following
-supervision policy rather than leaving it unspecified:
+supervision policy — corrected during a later review pass, since a
+single gRPC context deadline cannot literally apply to one message
+exchange inside an already-open, long-lived stream the way it applies
+to a unary call:
 
-- Every RPC (=Handshake=, each =Run=-stream round trip, each
-  =GetHistoryBars= call) carries a caller-supplied deadline via gRPC's
-  own context-deadline mechanism — =ExternalStrategyAdapter= sets one
-  on every call it makes, not merely relying on the guest to behave.
-- A deadline exceeded on the per-bar =Run= round trip is treated
+- =Handshake= and =GetHistoryBars= are ordinary unary RPCs the *guest*
+  initiates as the gRPC client; their deadlines are therefore set by
+  the guest/=strategysdk=, exactly like any gRPC client sets a
+  deadline on a call it makes — =ExternalStrategyAdapter= does not,
+  and cannot, impose one on an RPC it did not initiate.
+- =Run= is one long-lived bidirectional stream opened once per
+  session; a gRPC context deadline attaches to the stream as a whole,
+  not to each individual bar round trip inside it, so per-bar timeout
+  enforcement cannot be "a deadline on the call." Instead,
+  =ExternalStrategyAdapter= starts an application-level timer each
+  time it writes a =BarEvent= and is waiting for that bar's own
+  correlated response; if the timer fires before the response
+  arrives, the adapter treats the guest as unresponsive.
+- On a fired per-bar timer, =ExternalStrategyAdapter= cancels the
+  =Run= stream's own context (ending the stream) and returns an error
+  from the in-process =OnBar= call the runner is waiting on — treated
   exactly as an in-process strategy's =OnBar= returning an error would
   be: the runner's own existing slow/failed-strategy policy applies
-  (see the architecture document's own "Strategy Lifecycle" section);
+  (see the architecture document's own "Strategy Lifecycle" section).
   =v1= does not introduce a second, parallel failure-handling
   mechanism, only ensures the runner is never blocked *indefinitely*
-  waiting on a guest that has stopped responding.
-- A guest that fails its deadline repeatedly is disconnected by the
-  host rather than retried indefinitely; the exact retry/backoff
-  policy is implementation detail for the follow-on issue, not frozen
-  here, but "eventually give up and disconnect" is the =v1= contract
-  a follow-on implementation must honor.
+  waiting on a guest that has stopped responding on the stream.
+- A session whose =Run= stream has been torn down this way is not
+  silently retried; a guest must reconnect and perform a fresh
+  =Handshake= to start a new session. The exact reconnect/backoff
+  policy, and the per-bar timer's own default duration, are
+  implementation detail for the follow-on issue, not frozen here, but
+  "the host owns and enforces the per-bar timer, and tears the session
+  down rather than blocking forever" is the =v1= contract a follow-on
+  implementation must honor.
 
 *The Trader host process is the gRPC server; the external strategy
 process is the gRPC client.* The host creates the Unix-domain socket
@@ -449,12 +470,34 @@ names) so a guest author writes recognizably similar code without ever
 holding, or needing, a real =IntentFactory=. =strategysdk.Environment=
 (the guest's own =Start= argument) is smaller than
 =strategy.Environment= for the same reason: no =Intents= field, since
-the guest never mints canonical intents at all; =Clock= is supplied
-from the guest's own local wall clock (a guest process has no
-simulation-clock equivalent in =v1=, since only backtests use a
-simulated clock and =v1= itself does not yet define a backtest-guest
-determinism story — an explicit, separate future concern, not resolved
-by this ADR).
+the guest never mints canonical intents at all.
+
+*=strategysdk.Environment.Clock= reflects the host's own injected
+clock, never the guest's local wall clock* (review finding: an earlier
+draft supplied guest wall-clock time here, directly conflicting with
+issue #376's own "Trader retains ownership of ... clock semantics"
+requirement and with =strategy.Environment.Clock= being the *sole*
+time source an in-process strategy may consult for reproducibility —
+a real-money live session's own real-time clock and a backtest's
+simulated clock must both flow through identically for a guest to
+behave the same way an in-process strategy would). The =Handshake=
+response carries a =start_time= field: the host's own
+=clock.Clock.Now()= reading at the instant it completes the handshake
+— identical, under a simulated clock, to whatever deterministic value
+an in-process strategy's =Start= would observe by calling
+=env.Clock.Now()= itself at that same point in the run. Every
+=Run=-stream =BarEvent= additionally carries the bar's own event time,
+which is already the value an in-process strategy observes as "now"
+during =OnBar= (the scheduler advances its clock to the current bar
+before invoking any strategy callback). =strategysdk= provides a small
+internal =clock.Clock= implementation seeded from =start_time= and
+updated to each =BarEvent='s own time as it arrives — =Now()= returns
+whatever value the host most recently supplied, never a real
+=time.Now()= call inside the guest process. This gives a guest the
+identical clock-observation semantics an in-process strategy already
+has, under both a real and a simulated host clock, without the guest
+ever owning a time source of its own — satisfying issue #376's clock-
+ownership requirement exactly, not deferring it.
 
 =strategysdk= depends on =protocol/strategy/v1=, =order= (for the
 shared value types =DescribedIntent= itself is built from — =order.
@@ -527,7 +570,9 @@ that =ExternalStrategyAdapter= or =strategysdk= exist.
 - =Handshake= carries the guest's complete =strategy.Descriptor=
   equivalent (name, version, capabilities, and the full
   =[]DataRequirement= list), answering =Describe()= with no further
-  RPC round trip.
+  RPC round trip, and the host's own =Handshake= response carries a
+  =start_time= clock reading seeding =strategysdk='s host-owned guest
+  clock (below) — never guest wall-clock time.
 - =Start=, =OnBar= (delivered over the =Run= stream), and the
   account-snapshot slice of =View= (inline) plus always-available,
   requirements-scoped =GetHistoryBars= (a direct unary RPC, not a
@@ -620,8 +665,24 @@ Restated from the issue, with the reasoning for each:
   adjacent text explicitly contradicted; and the transport section
   overclaimed a Unix-domain socket as a security boundary against
   untrusted code, with no RPC-deadline/supervision policy for a hung
-  guest. All seven findings across both passes are corrected above;
-  none is a mechanical revert of a review comment addressed elsewhere.
+  guest.
+- PR #386 review (owner, third pass, against the corrected descriptor/
+  SDK/history contract) found two further issues: =strategysdk.
+  Environment.Clock= was supplied from guest wall-clock time, directly
+  conflicting with issue #376's own clock-ownership requirement and
+  =strategy.Environment.Clock='s reproducibility contract; and the
+  per-bar timeout policy described a gRPC context deadline attached to
+  each round trip inside the single long-lived =Run= stream, which is
+  not how gRPC deadlines actually work against an already-open stream.
+  Both corrected above: a host-supplied =start_time=/per-=BarEvent=
+  clock reading now seeds a host-owned guest clock, and the
+  supervision policy now describes an application-level per-bar timer
+  the host owns, with unary-RPC deadlines correctly attributed to
+  whichever side (guest, for =Handshake=/=GetHistoryBars=) actually
+  initiates that call.
+
+All nine findings across three review passes are corrected above;
+none is a mechanical revert of a review comment addressed elsewhere.
 
 * Alternatives Considered
 
@@ -709,3 +770,19 @@ Restated from the issue, with the reasoning for each:
   remote TCP/TLS. =v1= instead states its actual trust assumption
   plainly (a trusted-but-isolated guest) rather than either
   overclaiming or over-engineering.
+- *Supplying =strategysdk.Environment.Clock= from the guest process's
+  own real =time.Now()=.* Rejected (review finding): this directly
+  breaks reproducibility for any external strategy used in a
+  backtest — a simulated run's clock does not track wall time at all,
+  and issue #376 itself requires Trader to retain clock-semantics
+  ownership. A host-supplied clock reading, carried at =Handshake= and
+  refreshed on every =BarEvent=, gives the guest the identical
+  clock-observation behavior an in-process strategy already has under
+  both a real and a simulated host clock.
+- *A gRPC context deadline set individually on each per-bar round trip
+  inside the =Run= stream.* Rejected as unimplementable (review
+  finding): a deadline attaches to an RPC/stream as a whole, not to
+  one message exchange nested inside an already-open stream. An
+  application-level timer the host starts per bar and enforces by
+  tearing down the stream on expiry is the mechanism gRPC's own
+  semantics actually support.
