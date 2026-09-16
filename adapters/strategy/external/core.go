@@ -104,7 +104,7 @@ func (c *externalStrategyCore) Start(ctx context.Context, env strategy.Environme
 	msg := &v1.RunServerMessage{Payload: &v1.RunServerMessage_SessionStart{
 		SessionStart: ToWireSessionStart(env.RunID, env.Clock.Now()),
 	}}
-	if err := c.session.send(msg); err != nil {
+	if err := c.session.sysSend(ctx, msg); err != nil {
 		return fmt.Errorf("external: start: sending session_start: %w", err)
 	}
 	return nil
@@ -122,7 +122,7 @@ func (c *externalStrategyCore) OnBar(ctx context.Context, event strategy.BarEven
 	}
 	msg := &v1.RunServerMessage{Payload: &v1.RunServerMessage_BarEvent{BarEvent: wireEvent}}
 
-	resp, err := c.session.awaitResponse(ctx, sequence, msg, view)
+	resp, err := c.session.submit(ctx, sequence, msg, view)
 	if err != nil {
 		return nil, fmt.Errorf("external: on bar: %w", err)
 	}
@@ -183,13 +183,13 @@ func (c *externalStrategyCore) recordSignals(ctx context.Context, event strategy
 // that kept its stream open could remain "active" after Close). It is
 // not part of the strategy.Strategy contract; see newExternalStrategy
 // Adapter's own doc comment for why it is exposed anyway.
-func (c *externalStrategyCore) Close(context.Context) error {
+func (c *externalStrategyCore) Close(ctx context.Context) error {
 	end, err := ToWireSessionEnd(v1.ErrorCode_ERROR_CODE_UNSPECIFIED, nil)
 	if err != nil {
 		return fmt.Errorf("external: close: %w", err)
 	}
 	msg := &v1.RunServerMessage{Payload: &v1.RunServerMessage_SessionEnd{SessionEnd: end}}
-	if err := c.session.send(msg); err != nil {
+	if err := c.session.sysSend(ctx, msg); err != nil {
 		return fmt.Errorf("external: close: sending session_end: %w", err)
 	}
 	c.session.forceTeardown(nil) // nil: deliberate, graceful end — Run returns nil, not an error status
@@ -201,7 +201,7 @@ func (c *externalStrategyCore) Close(context.Context) error {
 // this — CAPABILITY_FILL_HANDLER was negotiated at Handshake (ADR-060).
 //
 // view is deliberately not exposed to a concurrent GetHistoryBars
-// call (awaitResponse's own nil-view parameter, below): strategy.proto's
+// call (submit's own nil-view parameter, below): strategy.proto's
 // own GetHistoryBarsRequest doc comment scopes callback_sequence to an
 // in-flight BarEvent/OnBarResponse callback only, never a fill
 // callback (review finding).
@@ -213,7 +213,7 @@ func (c *externalStrategyWithFill) OnFill(ctx context.Context, event strategy.Fi
 	}
 	msg := &v1.RunServerMessage{Payload: &v1.RunServerMessage_FillEvent{FillEvent: wireEvent}}
 
-	resp, err := c.session.awaitResponse(ctx, sequence, msg, nil)
+	resp, err := c.session.submit(ctx, sequence, msg, nil)
 	if err != nil {
 		return fmt.Errorf("external: on fill: %w", err)
 	}

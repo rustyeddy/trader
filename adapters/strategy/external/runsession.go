@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/strategy"
@@ -33,71 +36,102 @@ const DefaultAdmissionTimeout = 30 * time.Second
 // enforces that only one runSession is active on a Host at a time
 // (server.go's own Handshake).
 //
-// A runSession bridges two different call shapes: OnBar/OnFill are
-// synchronous Go calls (one in flight at a time, from the runner's own
-// single-threaded call discipline) that must block until the guest's
-// correlated response arrives on the Run stream, while the Run
-// stream's own Recv loop is a single long-lived goroutine reading
-// whatever the guest sends, whenever it arrives. sequence numbers are
-// the correlation key between the two.
+// # Design: one goroutine owns all session state
 //
-// # Callback supervision (ADR-062)
+// runSession is a small actor, not a mutex-guarded struct (review
+// finding, PR #390: the original mutex/atomic/sync.Once choreography
+// around pending callbacks, the in-flight frozen View, outbound
+// message ordering, the callback timer, and teardown all moved
+// together, which is exactly the shape an actor suits better than
+// scattered locks). newRunSession starts exactly one goroutine, run,
+// that is the *only* goroutine that ever reads or writes this
+// session's mutable state; every other goroutine (OnBar/OnFill
+// callers, the Run stream's own recv loop, GetHistoryBars) interacts
+// with it exclusively through the request/reply channels below —
+// bind, waitStream, sysSend, submit, dispatch, history, forceTeardown
+// — never a field directly. A second goroutine, the writer started
+// once bind succeeds, is the only goroutine that ever calls the bound
+// stream's own Send: run hands it outbound messages one at a time
+// over writeCh, which is what actually serializes concurrent
+// Start/OnBar/OnFill/Close sends onto one stream (gRPC requires
+// this), without a send mutex.
+//
+// # Callback supervision (ADR-062) and cancellation (review finding)
 //
 // A gRPC context deadline attaches to the whole Run stream, not to
 // one bar/fill round trip inside it, so per-callback timeout
 // enforcement cannot be "a deadline on the call" — ADR-062's own
 // corrected supervision policy instead has the host start an
 // application-level timer each time it writes a BarEvent/FillEvent
-// and is waiting for that callback's own correlated response
-// (awaitResponse, below). If the timer fires first, the session is
-// torn down (forceTeardown) and an error is returned from the
-// in-process OnBar/OnFill call the runner is waiting on — the runner's
-// own existing slow/failed-strategy policy applies from there, exactly
-// as it would for an in-process strategy whose OnBar itself returned
-// an error. A torn-down session is never silently retried; the guest
-// must reconnect and Handshake again.
+// and is waiting for that callback's own correlated response (run's
+// own handleSubmit, below). If the timer fires first, or the
+// caller's own ctx is done first, the session is torn down and an
+// error is returned from the in-process OnBar/OnFill call the runner
+// is waiting on — the runner's own existing slow/failed-strategy
+// policy applies from there, exactly as it would for an in-process
+// strategy whose OnBar itself returned an error.
+//
+// Both the timer and ctx.Done() are treated as terminal for the whole
+// session, not just the one call (review discussion on PR #390): once
+// a callback's outbound send races a caller giving up on it, the host
+// can no longer know whether that BarEvent/FillEvent actually reached
+// the guest, and v1 has no protocol mechanism to retract or
+// re-synchronize one sequence and safely continue the same session.
+// A torn-down session is never silently retried; the guest must
+// reconnect and perform a fresh Handshake to start a new session.
 type runSession struct {
 	id              string
 	descriptor      strategy.Descriptor
 	capabilities    []v1.Capability
 	callbackTimeout time.Duration
 
-	streamReady chan struct{} // closed once bindStream succeeds
+	// streamReady is closed by run, exactly once, the instant bind
+	// succeeds — a plain one-shot broadcast, not session-owned mutable
+	// state in the sense the rest of this doc comment means: once
+	// closed it never changes again, so any number of goroutines may
+	// safely read it without going through run at all.
+	streamReady chan struct{}
 
-	mu          sync.Mutex // guards stream and currentView
-	stream      v1.StrategyHostService_RunServer
-	currentView map[uint64]strategy.View // in-flight OnBar callback sequence -> its frozen View, for GetHistoryBars
+	bindCh     chan bindRequest
+	sysSendCh  chan sysSendRequest
+	submitCh   chan submitRequest
+	dispatchCh chan dispatchRequest
+	historyCh  chan historyRequest
+	teardownCh chan error
 
-	sendMu sync.Mutex // serializes the actual stream.Send call, separate from mu
+	// done is closed by run exactly once, immediately before it
+	// returns. endReason is written exactly once, by run, strictly
+	// before done is closed — the channel close is what makes reading
+	// endReason after <-done safe without any lock (a channel close
+	// happens-before every receive that observes it).
+	done      chan struct{}
+	endReason error
 
+	// seq is the one exception to "only run touches mutable state":
+	// a bare monotonic counter with no coupled invariants, exactly the
+	// case an atomic remains the simplest correct tool for (see the
+	// package's own review-response reasoning) rather than routing a
+	// pure counter increment through the actor's own channels.
 	seq atomic.Uint64
-
-	pendingMu sync.Mutex
-	pending   map[uint64]chan *v1.RunClientMessage
-
-	// teardown carries the reason Run should end this stream: nil for
-	// a deliberate, graceful end (Close); non-nil for a forced
-	// supervision failure (a fired callback timer). Buffered by one so
-	// the first cause to fire always gets recorded even if Run's own
-	// select has not reached it yet.
-	teardown     chan error
-	teardownOnce sync.Once
-
-	closed chan struct{} // closed once the session is torn down
 }
 
 func newRunSession(id string, descriptor strategy.Descriptor, capabilities []v1.Capability, callbackTimeout time.Duration) *runSession {
-	return &runSession{
+	s := &runSession{
 		id:              id,
 		descriptor:      descriptor,
 		capabilities:    capabilities,
 		callbackTimeout: callbackTimeout,
 		streamReady:     make(chan struct{}),
-		currentView:     make(map[uint64]strategy.View),
-		pending:         make(map[uint64]chan *v1.RunClientMessage),
-		teardown:        make(chan error, 1),
-		closed:          make(chan struct{}),
+		bindCh:          make(chan bindRequest),
+		sysSendCh:       make(chan sysSendRequest),
+		submitCh:        make(chan submitRequest),
+		dispatchCh:      make(chan dispatchRequest),
+		historyCh:       make(chan historyRequest),
+		teardownCh:      make(chan error),
+		done:            make(chan struct{}),
 	}
+	go s.run()
+	return s
 }
 
 // newSessionID returns a fresh, opaque session token — not one of
@@ -112,93 +146,159 @@ func newSessionID() (string, error) {
 	return "sess_" + hex.EncodeToString(b[:]), nil
 }
 
-// bindStream binds stream to this session, called once by Run after
-// validating the guest's own RunOpen names this session. Calling it
-// twice (a guest that opens Run more than once for one Handshake) is
-// rejected — v1's own "exactly one Run stream per Handshake'd
-// connection" scope statement.
-func (s *runSession) bindStream(stream v1.StrategyHostService_RunServer) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stream != nil {
-		return fmt.Errorf("external: session %s: run stream already bound", s.id)
-	}
-	s.stream = stream
-	close(s.streamReady)
-	return nil
+// bindRequest asks run to bind stream as this session's own Run
+// stream — sent once by grpcServer.Run after it validates the guest's
+// own RunOpen names this session.
+type bindRequest struct {
+	stream v1.StrategyHostService_RunServer
+	reply  chan error
 }
 
-// waitStream blocks until bindStream has succeeded, the session
-// closes, or ctx is done — whichever happens first.
-func (s *runSession) waitStream(ctx context.Context) error {
-	select {
-	case <-s.streamReady:
-		return nil
-	case <-s.closed:
-		return fmt.Errorf("external: session %s: closed before run stream opened", s.id)
-	case <-ctx.Done():
-		return ctx.Err()
+// sysSendRequest asks run to send msg down the bound stream and wait
+// for that Send call itself to complete — used for messages with no
+// correlated response (SessionStart, SessionEnd), unlike submitRequest.
+type sysSendRequest struct {
+	msg   *v1.RunServerMessage
+	reply chan error
+}
+
+// submitRequest asks run to send msg (already carrying sequence) and
+// wait for the guest's own correlated response, honoring ctx and this
+// session's own callback timer concurrently — used for BarEvent/
+// FillEvent. view is the in-flight frozen View to answer a concurrent
+// GetHistoryBars against; nil for a fill callback (GetHistoryBars is
+// scoped to an in-flight BarEvent callback only).
+type submitRequest struct {
+	ctx      context.Context
+	sequence uint64
+	msg      *v1.RunServerMessage
+	view     strategy.View
+	reply    chan submitReply
+}
+
+type submitReply struct {
+	resp *v1.RunClientMessage
+	err  error
+}
+
+// dispatchRequest delivers one received client message to run, tagged
+// with the sequence it responds to (read directly off the message by
+// the caller — grpcServer.Run's own recv loop).
+type dispatchRequest struct {
+	sequence uint64
+	msg      *v1.RunClientMessage
+}
+
+// historyRequest asks run whether sequence names the currently
+// in-flight BarEvent callback, and if so, for its own frozen View.
+type historyRequest struct {
+	sequence uint64
+	reply    chan historyReply
+}
+
+type historyReply struct {
+	view strategy.View
+	ok   bool
+}
+
+// writeRequest is run's own handoff to the dedicated writer goroutine
+// (started once bind succeeds) — the only goroutine that ever calls
+// stream.Send, which is what actually serializes concurrent senders
+// without a mutex.
+type writeRequest struct {
+	msg    *v1.RunServerMessage
+	result chan error
+}
+
+func runWriter(stream v1.StrategyHostService_RunServer, writeCh <-chan writeRequest) {
+	for req := range writeCh {
+		req.result <- stream.Send(req.msg)
 	}
 }
 
-func (s *runSession) nextSequence() uint64 {
-	return s.seq.Add(1)
-}
-
-// send writes msg down the bound Run stream. The actual stream.Send
-// call is serialized by sendMu, held across the call itself (not just
-// while reading the stream pointer) — grpc requires concurrent Send
-// calls on one stream to be serialized, and Start/OnBar/OnFill/Close
-// can all reach here.
-func (s *runSession) send(msg *v1.RunServerMessage) error {
-	s.mu.Lock()
-	stream := s.stream
-	s.mu.Unlock()
-	if stream == nil {
-		return fmt.Errorf("external: session %s: run stream not yet open", s.id)
-	}
-
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	return stream.Send(msg)
-}
-
-// awaitResponse registers sequence as awaiting a client response,
-// sends msg, and blocks until that response is dispatched, ctx is
-// done, the session closes, or this callback's own supervision timer
-// fires (see the package doc comment on callback supervision) —
-// whichever happens first. view, if non-nil, is exposed to a
-// concurrent GetHistoryBars call naming this sequence as its own
-// in-flight callback, for the duration of the wait; OnFill callbacks
-// must pass nil (GetHistoryBars is scoped to an in-flight BarEvent
-// callback only, strategy.proto's own GetHistoryBarsRequest doc
-// comment).
-//
-// send itself runs in its own goroutine so a guest that stops
-// reading (stream backpressure blocking Send) cannot itself defeat
-// ctx/timer observation — the caller-visible wait is never blocked on
-// the network write completing.
-func (s *runSession) awaitResponse(ctx context.Context, sequence uint64, msg *v1.RunServerMessage, view strategy.View) (*v1.RunClientMessage, error) {
-	ch := make(chan *v1.RunClientMessage, 1)
-
-	s.pendingMu.Lock()
-	s.pending[sequence] = ch
-	s.pendingMu.Unlock()
-
-	if view != nil {
-		s.mu.Lock()
-		s.currentView[sequence] = view
-		s.mu.Unlock()
-	}
+// run is the session's own single-goroutine event loop — see the
+// package doc comment above for why. It returns once this session
+// ends, for any reason: a deliberate Close (a nil reason reaching
+// teardownCh), a fired callback timer or caller ctx cancellation
+// (handleSubmit's own terminal cases), or the Run stream itself ending
+// (grpcServer.Run's own recv goroutine forwarding the cause via
+// forceTeardown).
+func (s *runSession) run() {
+	var stream v1.StrategyHostService_RunServer
+	var writeCh chan writeRequest
 
 	defer func() {
-		s.pendingMu.Lock()
-		delete(s.pending, sequence)
-		s.pendingMu.Unlock()
-		s.mu.Lock()
-		delete(s.currentView, sequence)
-		s.mu.Unlock()
+		if writeCh != nil {
+			close(writeCh)
+		}
 	}()
+
+	end := func(reason error) {
+		s.endReason = reason
+		close(s.done)
+	}
+
+	for {
+		select {
+		case req := <-s.bindCh:
+			if stream != nil {
+				req.reply <- fmt.Errorf("external: session %s: run stream already bound", s.id)
+				continue
+			}
+			stream = req.stream
+			writeCh = make(chan writeRequest)
+			go runWriter(stream, writeCh)
+			close(s.streamReady)
+			req.reply <- nil
+
+		case req := <-s.sysSendCh:
+			if stream == nil {
+				req.reply <- fmt.Errorf("external: session %s: run stream not yet open", s.id)
+				continue
+			}
+			result := make(chan error, 1)
+			writeCh <- writeRequest{msg: req.msg, result: result}
+			req.reply <- <-result
+
+		case req := <-s.submitCh:
+			if s.handleSubmit(req, stream, writeCh, end) {
+				return
+			}
+
+		case hreq := <-s.historyCh:
+			// No callback is in flight right now — history is only
+			// ever answerable while one is (handleSubmit's own case).
+			hreq.reply <- historyReply{ok: false}
+
+		case <-s.dispatchCh:
+			// A response naming a sequence nothing is waiting for
+			// (already timed out, already answered, or a duplicate) —
+			// dropped, matching the at-least-once delivery assumptions
+			// the architecture document's own "Delivery Semantics"
+			// section states for process boundaries generally.
+
+		case reason := <-s.teardownCh:
+			end(reason)
+			return
+		}
+	}
+}
+
+// handleSubmit drives one submit request to its own conclusion: it
+// hands msg to the writer, then waits for the correlated dispatch, a
+// fired callback timer, req.ctx.Done(), or a concurrent teardown —
+// whichever happens first — answering any GetHistoryBars naming this
+// same callback along the way. It reports whether the whole session
+// should now end (true) or run's own outer loop should simply
+// continue (false).
+func (s *runSession) handleSubmit(req submitRequest, stream v1.StrategyHostService_RunServer, writeCh chan writeRequest, end func(error)) (sessionEnded bool) {
+	if stream == nil {
+		req.reply <- submitReply{err: fmt.Errorf("external: session %s: run stream not yet open", s.id)}
+		return false
+	}
+
+	sendResult := make(chan error, 1)
+	writeCh <- writeRequest{msg: req.msg, result: sendResult}
 
 	var timerCh <-chan time.Time
 	if s.callbackTimeout > 0 {
@@ -207,81 +307,174 @@ func (s *runSession) awaitResponse(ctx context.Context, sequence uint64, msg *v1
 		timerCh = timer.C
 	}
 
-	sendErrCh := make(chan error, 1)
-	go func() { sendErrCh <- s.send(msg) }()
-
 	for {
 		select {
-		case err := <-sendErrCh:
+		case err := <-sendResult:
 			if err != nil {
-				return nil, fmt.Errorf("external: session %s: sending sequence %d: %w", s.id, sequence, err)
+				req.reply <- submitReply{err: fmt.Errorf("external: session %s: sending sequence %d: %w", s.id, req.sequence, err)}
+				return false
 			}
-			sendErrCh = nil // sent; stop selecting on this case, keep waiting for the response
-		case resp := <-ch:
-			return resp, nil
-		case <-s.closed:
-			return nil, fmt.Errorf("external: session %s: closed while awaiting sequence %d", s.id, sequence)
-		case <-ctx.Done():
-			return nil, ctx.Err()
+			sendResult = nil // sent; keep waiting for the response below
+
+		case dreq := <-s.dispatchCh:
+			if dreq.sequence != req.sequence {
+				continue // stale/duplicate; drop and keep waiting for ours
+			}
+			req.reply <- submitReply{resp: dreq.msg}
+			return false
+
+		case hreq := <-s.historyCh:
+			if req.view != nil {
+				hreq.reply <- historyReply{view: req.view, ok: true}
+			} else {
+				hreq.reply <- historyReply{ok: false}
+			}
+
+		case reason := <-s.teardownCh:
+			req.reply <- submitReply{err: fmt.Errorf("external: session %s: closed while awaiting sequence %d", s.id, req.sequence)}
+			end(reason)
+			return true
+
 		case <-timerCh:
-			err := fmt.Errorf("external: session %s: callback %d exceeded timeout %s: guest treated as unresponsive", s.id, sequence, s.callbackTimeout)
-			s.forceTeardown(err)
-			return nil, err
+			callbackErr := fmt.Errorf("external: session %s: callback %d exceeded timeout %s: guest treated as unresponsive", s.id, req.sequence, s.callbackTimeout)
+			req.reply <- submitReply{err: callbackErr}
+			end(status.Error(codes.DeadlineExceeded, callbackErr.Error()))
+			return true
+
+		case <-req.ctx.Done():
+			ctxErr := req.ctx.Err()
+			req.reply <- submitReply{err: ctxErr}
+			end(statusFromContextErr(ctxErr))
+			return true
 		}
 	}
 }
 
-// dispatch delivers a received client message to the sequence it
-// responds to, if anything is still waiting for it. A response
-// naming a sequence nothing is waiting for (already timed out, or a
-// duplicate) is silently dropped, matching the at-least-once
-// delivery assumptions the architecture document's own "Delivery
-// Semantics" section states for process boundaries generally, rather
-// than treated as a protocol violation.
+// statusFromContextErr classifies a context error as the grpc status
+// code Run should end the RPC with when a caller's own ctx ends an
+// in-flight callback (handleSubmit's own terminal ctx.Done() case).
+func statusFromContextErr(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return status.Error(codes.DeadlineExceeded, err.Error())
+	}
+	return status.Error(codes.Canceled, err.Error())
+}
+
+// bind binds stream to this session, called once by grpcServer.Run
+// after validating the guest's own RunOpen names this session.
+// Calling it twice (a guest that opens Run more than once for one
+// Handshake) is rejected — v1's own "exactly one Run stream per
+// Handshake'd connection" scope statement.
+func (s *runSession) bind(stream v1.StrategyHostService_RunServer) error {
+	reply := make(chan error, 1)
+	select {
+	case s.bindCh <- bindRequest{stream: stream, reply: reply}:
+	case <-s.done:
+		return fmt.Errorf("external: session %s: closed", s.id)
+	}
+	return <-reply
+}
+
+// waitStream blocks until bind has succeeded, the session ends, or
+// ctx is done — whichever happens first.
+func (s *runSession) waitStream(ctx context.Context) error {
+	select {
+	case <-s.streamReady:
+		return nil
+	case <-s.done:
+		return fmt.Errorf("external: session %s: closed before run stream opened", s.id)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// sysSend sends msg down the bound stream and waits for the Send call
+// itself to complete, honoring ctx and session end. Used for messages
+// with no correlated response (SessionStart, SessionEnd).
+func (s *runSession) sysSend(ctx context.Context, msg *v1.RunServerMessage) error {
+	reply := make(chan error, 1)
+	select {
+	case s.sysSendCh <- sysSendRequest{msg: msg, reply: reply}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		return fmt.Errorf("external: session %s: closed", s.id)
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-s.done:
+		return fmt.Errorf("external: session %s: closed while sending", s.id)
+	}
+}
+
+// submit sends msg (already carrying sequence) and blocks for the
+// guest's own correlated response — see handleSubmit for exactly what
+// can end the wait. view is exposed to a concurrent GetHistoryBars
+// naming sequence as its own in-flight callback; pass nil for a fill
+// callback (GetHistoryBars is scoped to an in-flight BarEvent callback
+// only, strategy.proto's own GetHistoryBarsRequest doc comment).
+func (s *runSession) submit(ctx context.Context, sequence uint64, msg *v1.RunServerMessage, view strategy.View) (*v1.RunClientMessage, error) {
+	reply := make(chan submitReply, 1)
+	req := submitRequest{ctx: ctx, sequence: sequence, msg: msg, view: view, reply: reply}
+	select {
+	case s.submitCh <- req:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, fmt.Errorf("external: session %s: closed", s.id)
+	}
+	select {
+	case r := <-reply:
+		return r.resp, r.err
+	case <-s.done:
+		return nil, fmt.Errorf("external: session %s: closed while awaiting sequence %d", s.id, sequence)
+	}
+}
+
+// dispatch delivers a received client message to run, tagged with the
+// sequence it responds to.
 func (s *runSession) dispatch(sequence uint64, msg *v1.RunClientMessage) {
-	s.pendingMu.Lock()
-	ch, ok := s.pending[sequence]
-	s.pendingMu.Unlock()
-	if !ok {
-		return
+	select {
+	case s.dispatchCh <- dispatchRequest{sequence: sequence, msg: msg}:
+	case <-s.done:
+	}
+}
+
+// history asks whether sequence names the currently in-flight
+// BarEvent callback, returning its own frozen View if so — used by
+// GetHistoryBars.
+func (s *runSession) history(sequence uint64) (strategy.View, bool) {
+	reply := make(chan historyReply, 1)
+	select {
+	case s.historyCh <- historyRequest{sequence: sequence, reply: reply}:
+	case <-s.done:
+		return nil, false
 	}
 	select {
-	case ch <- msg:
-	default:
+	case r := <-reply:
+		return r.view, r.ok
+	case <-s.done:
+		return nil, false
 	}
 }
 
-// viewFor returns the in-flight View for callbackSequence, if any —
-// used by GetHistoryBars to answer against the exact frozen view the
-// corresponding BarEvent was built from. Only ever populated for a
-// BarEvent callback (awaitResponse's own doc comment).
-func (s *runSession) viewFor(callbackSequence uint64) (strategy.View, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	v, ok := s.currentView[callbackSequence]
-	return v, ok
-}
-
-// forceTeardown records reason (nil for a deliberate, graceful end)
-// as this session's own teardown cause, for Run to observe and end
-// the stream with, and unblocks anything still in
-// awaitResponse/waitStream. Only the first call has any effect; later
-// calls (for example a fired callback timer racing a caller-driven
-// Close) are no-ops.
+// forceTeardown asks run to end this session, with reason as exactly
+// the value grpcServer.Run should itself return (nil for a
+// deliberate, graceful end; an already-classified grpc status error
+// otherwise — see handleSubmit and statusFromContextErr for how a
+// fired timer or ctx cancellation each produce one). Only the first
+// call has any effect — run's own <-s.done guard makes every later
+// call a safe no-op.
 func (s *runSession) forceTeardown(reason error) {
-	s.teardownOnce.Do(func() {
-		s.teardown <- reason
-		s.close()
-	})
+	select {
+	case s.teardownCh <- reason:
+	case <-s.done:
+	}
 }
 
-// close marks the session as no longer able to deliver responses,
-// unblocking anything still in awaitResponse/waitStream. Safe to call
-// more than once.
-func (s *runSession) close() {
-	select {
-	case <-s.closed:
-	default:
-		close(s.closed)
-	}
+// nextSequence returns the next monotonically increasing callback
+// sequence number for this session.
+func (s *runSession) nextSequence() uint64 {
+	return s.seq.Add(1)
 }

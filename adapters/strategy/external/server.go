@@ -165,7 +165,7 @@ func (g *grpcServer) expireIfNeverBound(sessionID string, sess *runSession, stra
 	delete(g.sessions, sessionID)
 	g.mu.Unlock()
 
-	sess.close()
+	sess.forceTeardown(nil)
 	g.logger.Warn("external strategy session expired before its run stream opened",
 		"session_id", sessionID, "admission_timeout", g.admissionTimeout)
 }
@@ -190,11 +190,14 @@ func negotiateCapabilities(requested []v1.Capability) []v1.Capability {
 }
 
 // Run is the guest-opened, bidirectional, long-lived session stream.
-// It ends when the guest closes its send side (io.EOF), a transport
-// error occurs, an invalid message arrives, or this session's own
-// forceTeardown fires — a fired callback-supervision timer (a
-// non-nil teardown reason) ends the RPC with an error status; a
-// deliberate, graceful end (Close, a nil reason) ends it cleanly.
+// It binds stream to the named session's own actor (runSession.run)
+// and then does nothing but relay: a background goroutine turns
+// stream.Recv into dispatch calls (or a forced teardown reason on
+// error/EOF/protocol violation), while Run itself simply waits for
+// the session to end and returns exactly the value the session
+// decided on (runSession.endReason) — never reclassifying it here.
+// See runSession's own doc comment for why the actor, not this
+// function, owns every stateful decision about the session.
 func (g *grpcServer) Run(stream v1.StrategyHostService_RunServer) error {
 	first, err := stream.Recv()
 	if err != nil {
@@ -213,61 +216,48 @@ func (g *grpcServer) Run(stream v1.StrategyHostService_RunServer) error {
 	if !ok {
 		return status.Errorf(codes.NotFound, "external: run: unknown session %q", sessionID)
 	}
-	if err := sess.bindStream(stream); err != nil {
+	if err := sess.bind(stream); err != nil {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	}
-	defer sess.close()
 	defer g.deleteSession(sessionID)
 
-	type recvResult struct {
-		msg *v1.RunClientMessage
-		err error
-	}
-	recvCh := make(chan recvResult, 1)
 	go func() {
 		for {
 			msg, err := stream.Recv()
-			recvCh <- recvResult{msg, err}
 			if err != nil {
+				if errors.Is(err, io.EOF) {
+					sess.forceTeardown(nil)
+				} else {
+					sess.forceTeardown(err) // already a grpc-native error; returned from Run as-is
+				}
+				return
+			}
+
+			switch payload := msg.GetPayload().(type) {
+			case *v1.RunClientMessage_OnBarResponse:
+				if payload.OnBarResponse == nil {
+					sess.forceTeardown(status.Error(codes.InvalidArgument, "external: run: on_bar_response payload must not be nil"))
+					return
+				}
+				sess.dispatch(payload.OnBarResponse.GetSequence(), msg)
+			case *v1.RunClientMessage_OnFillResponse:
+				if payload.OnFillResponse == nil {
+					sess.forceTeardown(status.Error(codes.InvalidArgument, "external: run: on_fill_response payload must not be nil"))
+					return
+				}
+				sess.dispatch(payload.OnFillResponse.GetSequence(), msg)
+			case *v1.RunClientMessage_RunOpen:
+				sess.forceTeardown(status.Error(codes.InvalidArgument, "external: run: run_open must be the stream's first message only"))
+				return
+			default:
+				sess.forceTeardown(status.Error(codes.InvalidArgument, "external: run: message carries no recognized payload"))
 				return
 			}
 		}
 	}()
 
-	for {
-		select {
-		case reason := <-sess.teardown:
-			if reason != nil {
-				return status.Error(codes.DeadlineExceeded, reason.Error())
-			}
-			return nil
-
-		case res := <-recvCh:
-			if res.err != nil {
-				if errors.Is(res.err, io.EOF) {
-					return nil
-				}
-				return res.err
-			}
-
-			switch payload := res.msg.GetPayload().(type) {
-			case *v1.RunClientMessage_OnBarResponse:
-				if payload.OnBarResponse == nil {
-					return status.Error(codes.InvalidArgument, "external: run: on_bar_response payload must not be nil")
-				}
-				sess.dispatch(payload.OnBarResponse.GetSequence(), res.msg)
-			case *v1.RunClientMessage_OnFillResponse:
-				if payload.OnFillResponse == nil {
-					return status.Error(codes.InvalidArgument, "external: run: on_fill_response payload must not be nil")
-				}
-				sess.dispatch(payload.OnFillResponse.GetSequence(), res.msg)
-			case *v1.RunClientMessage_RunOpen:
-				return status.Error(codes.InvalidArgument, "external: run: run_open must be the stream's first message only")
-			default:
-				return status.Error(codes.InvalidArgument, "external: run: message carries no recognized payload")
-			}
-		}
-	}
+	<-sess.done
+	return sess.endReason
 }
 
 // GetHistoryBars answers a guest's scoped history lookback request
@@ -285,7 +275,7 @@ func (g *grpcServer) GetHistoryBars(_ context.Context, req *v1.GetHistoryBarsReq
 		return nil, status.Errorf(codes.NotFound, "external: get history bars: unknown session %q", q.SessionID)
 	}
 
-	view, ok := sess.viewFor(q.CallbackSequence)
+	view, ok := sess.history(q.CallbackSequence)
 	if !ok {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"external: get history bars: callback %d is not an in-flight on-bar callback", q.CallbackSequence)

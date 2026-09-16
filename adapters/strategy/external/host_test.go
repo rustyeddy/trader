@@ -430,6 +430,59 @@ func TestHost_OnBarContextCancellation(t *testing.T) {
 
 	_, err = strat.OnBar(onBarCtx, event, view) // guest never responds
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	// A caller ctx ending an in-flight callback is terminal for the
+	// whole session (review discussion on PR #390): once a callback's
+	// outbound send races a caller giving up on it, the host can no
+	// longer know whether the guest actually received it, so the
+	// session must not continue.
+	_, err = stream.Recv() // the bar_event itself, sent but never answered
+	require.NoError(t, err)
+	_, err = stream.Recv() // the Run stream itself must now be over
+	require.Error(t, err)
+}
+
+// TestHost_OnBarCallerCancellation_TearsDownSession is
+// TestHost_OnBarContextCancellation's own explicit-Cancel (not
+// deadline) counterpart, proving the same terminal behavior for
+// context.Canceled.
+func TestHost_OnBarCallerCancellation_TearsDownSession(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	hsResp := h.handshake(ctx, simpleDescriptor(t, "guest_strategy"), nil)
+	stream := h.openRun(ctx, hsResp.GetSessionId())
+
+	strat, err := h.host.Strategy(ctx)
+	require.NoError(t, err)
+	require.NoError(t, strat.Start(ctx, testEnvironment(t)))
+	_, err = stream.Recv() // session_start
+	require.NoError(t, err)
+
+	inst := eurUSD(t)
+	iv, err := marketdata.NewInterval(marketdata.UnitHour, 1)
+	require.NoError(t, err)
+	event := strategy.BarEvent{Instrument: inst, Interval: iv, Bar: testBar(t)}
+	view := fakeView{acct: testFlatSnapshot(t)}
+
+	onBarCtx, cancelOnBar := context.WithCancel(ctx)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := strat.OnBar(onBarCtx, event, view)
+		errCh <- err
+	}()
+
+	_, err = stream.Recv() // the bar_event, never answered
+	require.NoError(t, err)
+
+	cancelOnBar()
+
+	err = <-errCh
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = stream.Recv() // the Run stream itself must now be over
+	require.Error(t, err)
 }
 
 // TestHost_FillHandlerCapabilityNegotiated proves a negotiated
