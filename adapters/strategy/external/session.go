@@ -36,10 +36,19 @@ func ToWireSessionStart(runID id.RunID, start time.Time) *v1.SessionStart {
 // produces the zero ERROR_CODE_UNSPECIFIED/empty-reason value
 // SessionEnd's own doc comment documents; otherwise code names why
 // the session ended.
-func ToWireSessionEnd(code v1.ErrorCode, err error) *v1.SessionEnd {
+//
+// A non-nil err paired with ERROR_CODE_UNSPECIFIED is rejected: v1
+// reserves that exact zero code/reason pair for normal completion
+// (SessionEnd's own doc comment), so silently accepting it would let
+// a consumer that branches on Code alone read a real failure as
+// success (review finding).
+func ToWireSessionEnd(code v1.ErrorCode, err error) (*v1.SessionEnd, error) {
+	if err != nil && code == v1.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		return nil, fmt.Errorf("%w: session end: a non-nil error must not use ERROR_CODE_UNSPECIFIED", ErrInvalidWireValue)
+	}
 	reason := ""
 	if err != nil {
 		reason = err.Error()
 	}
-	return &v1.SessionEnd{Code: code, Reason: reason}
+	return &v1.SessionEnd{Code: code, Reason: reason}, nil
 }

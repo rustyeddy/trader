@@ -43,13 +43,24 @@ func TestToWireSessionStart(t *testing.T) {
 }
 
 func TestToWireSessionEnd_NormalCompletion(t *testing.T) {
-	w := external.ToWireSessionEnd(v1.ErrorCode_ERROR_CODE_UNSPECIFIED, nil)
+	w, err := external.ToWireSessionEnd(v1.ErrorCode_ERROR_CODE_UNSPECIFIED, nil)
+	require.NoError(t, err)
 	require.Equal(t, v1.ErrorCode_ERROR_CODE_UNSPECIFIED, w.GetCode())
 	require.Empty(t, w.GetReason())
 }
 
 func TestToWireSessionEnd_Failure(t *testing.T) {
-	w := external.ToWireSessionEnd(v1.ErrorCode_ERROR_CODE_DEADLINE_EXCEEDED, errors.New("boom"))
+	w, err := external.ToWireSessionEnd(v1.ErrorCode_ERROR_CODE_DEADLINE_EXCEEDED, errors.New("boom"))
+	require.NoError(t, err)
 	require.Equal(t, v1.ErrorCode_ERROR_CODE_DEADLINE_EXCEEDED, w.GetCode())
 	require.Equal(t, "boom", w.GetReason())
+}
+
+// TestToWireSessionEnd_FailureWithUnspecifiedCodeRejected is the
+// review finding this function's own doc comment names: v1 reserves
+// the zero code/reason pair for normal completion, so a non-nil error
+// must never be paired with ERROR_CODE_UNSPECIFIED.
+func TestToWireSessionEnd_FailureWithUnspecifiedCodeRejected(t *testing.T) {
+	_, err := external.ToWireSessionEnd(v1.ErrorCode_ERROR_CODE_UNSPECIFIED, errors.New("boom"))
+	require.ErrorIs(t, err, external.ErrInvalidWireValue)
 }

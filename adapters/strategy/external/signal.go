@@ -27,6 +27,13 @@ func SignalFromWire(w *v1.DescribedSignal, tokens map[string]id.CorrelationID) (
 	if w == nil {
 		return journal.Signal{}, id.CorrelationID{}, fmt.Errorf("%w: signal must be set", ErrInvalidWireValue)
 	}
+	// journal.NewRecord rejects an empty Signal.Strategy; reject it
+	// here rather than returning an already-invalid journal.Signal a
+	// caller only discovers is broken once it tries to journal it
+	// (review finding).
+	if w.GetStrategy() == "" {
+		return journal.Signal{}, id.CorrelationID{}, fmt.Errorf("%w: signal strategy must not be empty", ErrInvalidWireValue)
+	}
 
 	values := w.GetValues()
 	var copied map[string]string

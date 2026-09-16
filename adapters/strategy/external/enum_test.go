@@ -1,6 +1,7 @@
 package external_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -49,5 +50,16 @@ func TestFromWireInterval_UnspecifiedUnitRejected(t *testing.T) {
 
 func TestFromWireInterval_InvalidCountRejected(t *testing.T) {
 	_, err := external.FromWireInterval(&v1.Interval{Unit: v1.IntervalUnit_INTERVAL_UNIT_HOUR, Count: 0})
+	require.ErrorIs(t, err, external.ErrInvalidWireValue)
+}
+
+// TestToWireInterval_CountAboveInt32RangeRejected is the review
+// finding: a domain Interval.Count above math.MaxInt32 must fail
+// explicitly rather than silently wrapping through the int32 cast.
+func TestToWireInterval_CountAboveInt32RangeRejected(t *testing.T) {
+	iv, err := marketdata.NewInterval(marketdata.UnitMinute, math.MaxInt32+1)
+	require.NoError(t, err)
+
+	_, err = external.ToWireInterval(iv)
 	require.ErrorIs(t, err, external.ErrInvalidWireValue)
 }

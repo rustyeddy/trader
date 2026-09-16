@@ -29,6 +29,15 @@ func TestSignalFromWire_NilRejected(t *testing.T) {
 	require.ErrorIs(t, err, external.ErrInvalidWireValue)
 }
 
+// TestSignalFromWire_EmptyStrategyRejected is the review finding:
+// journal.NewRecord rejects an empty Signal.Strategy, so this must
+// reject it here rather than returning an already-invalid
+// journal.Signal.
+func TestSignalFromWire_EmptyStrategyRejected(t *testing.T) {
+	_, _, err := external.SignalFromWire(&v1.DescribedSignal{Values: map[string]string{"k": "v"}}, nil)
+	require.ErrorIs(t, err, external.ErrInvalidWireValue)
+}
+
 func TestSignalFromWire_EmptyValuesIsNilMap(t *testing.T) {
 	sig, _, err := external.SignalFromWire(&v1.DescribedSignal{Strategy: "smatrend"}, nil)
 	require.NoError(t, err)

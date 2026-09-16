@@ -23,10 +23,13 @@
 // package outside this one: the only packages that will ever import
 // protocol/strategy/v1 are this one (host side, ADR-062) and the
 // future strategysdk (guest side) — never strategy, order, account,
-// marketdata, or any other domain package. That is mechanically
-// enforced the same way strategy/boundary_test.go already enforces
-// the reverse (strategy must never import adapters): see
-// boundary_test.go in this package.
+// marketdata, or any other domain package. strategy/boundary_test.go
+// mechanically enforces the strategy half of that (strategy must
+// never import protocol, the same way it must never import adapters);
+// there is no analogous boundary_test.go in this package itself, since
+// every other domain package's own existing boundary tests already
+// keep this package's only inbound dependency direction (domain ->
+// this package, never the reverse) intact.
 //
 // # Canonical identity is never minted here
 //

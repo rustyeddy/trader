@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/id"
+	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/strategy"
@@ -89,46 +90,63 @@ func describedIntentToOrderIntent(f strategy.IntentFactory, di *v1.DescribedInte
 		return order.Intent{}, err
 	}
 
+	// Every field this kind does not use must be at its own absent/
+	// zero wire value (SIDE_UNSPECIFIED, an empty quantity/stop_price
+	// string) — review finding: reading only the fields a kind
+	// requires silently accepted and discarded a forbidden field
+	// instead of rejecting it, unlike order.NewIntent's own per-Kind
+	// contract (order/intent.go's own "Field requirements are per
+	// Kind, not uniform" table), which this boundary must mirror
+	// exactly rather than loosen.
+	requireSide := kind == order.IntentEnter || kind == order.IntentTargetExposure || kind == order.IntentEnterWithStop
+	requireQuantity := kind == order.IntentTargetExposure
+	requireStopPrice := kind == order.IntentAdjustStop || kind == order.IntentEnterWithStop
+
+	if !requireSide && di.GetSide() != v1.Side_SIDE_UNSPECIFIED {
+		return order.Intent{}, fmt.Errorf("%w: side must not be set for intent kind %v", ErrInvalidWireValue, kind)
+	}
+	if !requireQuantity && di.GetQuantity() != "" {
+		return order.Intent{}, fmt.Errorf("%w: quantity must not be set for intent kind %v", ErrInvalidWireValue, kind)
+	}
+	if !requireStopPrice && di.GetStopPrice() != "" {
+		return order.Intent{}, fmt.Errorf("%w: stop_price must not be set for intent kind %v", ErrInvalidWireValue, kind)
+	}
+
+	var (
+		side      order.Side
+		quantity  num.Quantity
+		stopPrice num.Price
+	)
+	if requireSide {
+		side, err = fromWireSide(di.GetSide())
+		if err != nil {
+			return order.Intent{}, err
+		}
+	}
+	if requireQuantity {
+		quantity, err = parseQuantity("quantity", di.GetQuantity())
+		if err != nil {
+			return order.Intent{}, err
+		}
+	}
+	if requireStopPrice {
+		stopPrice, err = parsePrice("stop_price", di.GetStopPrice())
+		if err != nil {
+			return order.Intent{}, err
+		}
+	}
+
 	switch kind {
 	case order.IntentEnter:
-		side, err := fromWireSide(di.GetSide())
-		if err != nil {
-			return order.Intent{}, err
-		}
 		return f.Enter(instID, side)
-
 	case order.IntentExit:
 		return f.Exit(instID)
-
 	case order.IntentAdjustStop:
-		stopPrice, err := parsePrice("stop_price", di.GetStopPrice())
-		if err != nil {
-			return order.Intent{}, err
-		}
 		return f.AdjustStop(instID, stopPrice)
-
 	case order.IntentTargetExposure:
-		side, err := fromWireSide(di.GetSide())
-		if err != nil {
-			return order.Intent{}, err
-		}
-		quantity, err := parseQuantity("quantity", di.GetQuantity())
-		if err != nil {
-			return order.Intent{}, err
-		}
 		return f.TargetExposure(instID, side, quantity)
-
 	case order.IntentEnterWithStop:
-		side, err := fromWireSide(di.GetSide())
-		if err != nil {
-			return order.Intent{}, err
-		}
-		stopPrice, err := parsePrice("stop_price", di.GetStopPrice())
-		if err != nil {
-			return order.Intent{}, err
-		}
 		return f.EnterWithStop(instID, side, stopPrice)
-
 	default:
 		// fromWireIntentKind only ever returns one of the five cases
 		// above; this is unreachable but keeps the switch exhaustive

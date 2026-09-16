@@ -19,6 +19,23 @@ import (
 // account.Snapshot from this message, so this package exposes no
 // FromWireAccountSnapshot (see doc.go).
 func ToWireAccountSnapshot(s account.Snapshot) (*v1.AccountSnapshot, error) {
+	// account.Snapshot{} (and any other value that skipped
+	// account.NewSnapshot's own validation) is never a valid domain
+	// snapshot (account.Snapshot's own doc comment) — review finding:
+	// this must reject that rather than silently serializing empty
+	// identity/currency and a zero timestamp as if they were real,
+	// since the result is embedded in every BarEvent/FillEvent this
+	// package builds.
+	if s.AccountID().IsZero() {
+		return nil, fmt.Errorf("%w: account snapshot: account id must be set", ErrInvalidWireValue)
+	}
+	if !s.Currency().IsValid() {
+		return nil, fmt.Errorf("%w: account snapshot: currency must be valid", ErrInvalidWireValue)
+	}
+	if s.AsOf().IsZero() {
+		return nil, fmt.Errorf("%w: account snapshot: as-of time must be set", ErrInvalidWireValue)
+	}
+
 	positions := s.Positions()
 	wire := make([]*v1.PositionSnapshot, len(positions))
 	for i, p := range positions {

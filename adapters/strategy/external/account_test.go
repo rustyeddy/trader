@@ -31,6 +31,15 @@ func TestToWireAccountSnapshot(t *testing.T) {
 	require.Equal(t, pos.AvgPrice.String(), wp.GetAvgPrice())
 }
 
+// TestToWireAccountSnapshot_ZeroValueRejected is the review's blocking
+// finding: account.Snapshot{} (or any value that skipped
+// account.NewSnapshot's own validation) must not silently serialize
+// as if it carried real empty/zero identity.
+func TestToWireAccountSnapshot_ZeroValueRejected(t *testing.T) {
+	_, err := external.ToWireAccountSnapshot(account.Snapshot{})
+	require.ErrorIs(t, err, external.ErrInvalidWireValue)
+}
+
 func TestToWireAccountSnapshot_NoPositionsIsEmptySlice(t *testing.T) {
 	flat := testFlatSnapshot(t)
 

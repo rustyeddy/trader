@@ -180,6 +180,57 @@ func TestIntentsFromWire_UngroupedIntentsGetDistinctCorrelationIDs(t *testing.T)
 	require.False(t, intents[0].Metadata.CorrelationID.Equal(intents[1].Metadata.CorrelationID))
 }
 
+// TestIntentsFromWire_DistinctTokensGetDistinctCorrelationIDs is the
+// review finding that closes the gap TestIntentsFromWire_
+// CorrelationTokenGrouping alone leaves open: two distinct non-empty
+// tokens must mint two distinct CorrelationIDs, not silently collapse
+// onto whichever one is minted first.
+func TestIntentsFromWire_DistinctTokensGetDistinctCorrelationIDs(t *testing.T) {
+	factory := newIntentFactory(t, "external_test")
+	inst := eurUSD(t)
+
+	intents, tokens, err := external.IntentsFromWire([]*v1.DescribedIntent{
+		{Kind: v1.IntentKind_INTENT_KIND_EXIT, InstrumentId: inst.String(), CorrelationToken: "group-a"},
+		{Kind: v1.IntentKind_INTENT_KIND_ENTER, InstrumentId: inst.String(), Side: v1.Side_SIDE_BUY, CorrelationToken: "group-b"},
+	}, factory)
+	require.NoError(t, err)
+	require.Len(t, intents, 2)
+	require.Len(t, tokens, 2)
+
+	require.False(t, tokens["group-a"].Equal(tokens["group-b"]))
+	require.True(t, intents[0].Metadata.CorrelationID.Equal(tokens["group-a"]))
+	require.True(t, intents[1].Metadata.CorrelationID.Equal(tokens["group-b"]))
+}
+
+// TestIntentsFromWire_ForbiddenFieldsRejected is the review's blocking
+// finding: a field this kind forbids must fail explicitly, never be
+// silently ignored, mirroring order.NewIntent's own per-Kind contract.
+func TestIntentsFromWire_ForbiddenFieldsRejected(t *testing.T) {
+	inst := eurUSD(t)
+
+	tests := []struct {
+		name string
+		di   *v1.DescribedIntent
+	}{
+		{"exit with side", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_EXIT, InstrumentId: inst.String(), Side: v1.Side_SIDE_BUY}},
+		{"exit with stop_price", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_EXIT, InstrumentId: inst.String(), StopPrice: "1.1000"}},
+		{"exit with quantity", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_EXIT, InstrumentId: inst.String(), Quantity: "100"}},
+		{"enter with quantity", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_ENTER, InstrumentId: inst.String(), Side: v1.Side_SIDE_BUY, Quantity: "100"}},
+		{"enter with stop_price", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_ENTER, InstrumentId: inst.String(), Side: v1.Side_SIDE_BUY, StopPrice: "1.1000"}},
+		{"adjust_stop with side", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_ADJUST_STOP, InstrumentId: inst.String(), Side: v1.Side_SIDE_BUY, StopPrice: "1.1000"}},
+		{"adjust_stop with quantity", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_ADJUST_STOP, InstrumentId: inst.String(), StopPrice: "1.1000", Quantity: "100"}},
+		{"target_exposure with stop_price", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_TARGET_EXPOSURE, InstrumentId: inst.String(), Side: v1.Side_SIDE_BUY, Quantity: "100", StopPrice: "1.1000"}},
+		{"enter_with_stop with quantity", &v1.DescribedIntent{Kind: v1.IntentKind_INTENT_KIND_ENTER_WITH_STOP, InstrumentId: inst.String(), Side: v1.Side_SIDE_BUY, StopPrice: "1.1000", Quantity: "100"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			factory := newIntentFactory(t, "external_test")
+			_, _, err := external.IntentsFromWire([]*v1.DescribedIntent{tt.di}, factory)
+			require.ErrorIs(t, err, external.ErrInvalidWireValue)
+		})
+	}
+}
+
 func TestIntentsFromWire_NilFactoryRejected(t *testing.T) {
 	_, _, err := external.IntentsFromWire(nil, nil)
 	require.Error(t, err)
