@@ -216,6 +216,13 @@ func (g *grpcServer) Run(stream v1.StrategyHostService_RunServer) error {
 	if !ok {
 		return status.Errorf(codes.NotFound, "external: run: unknown session %q", sessionID)
 	}
+	//nolint:staticcheck // SA4023 false positive: run's own bindCh case
+	// (runsession.go) sends nil on the success path from a different
+	// goroutine via the reply channel; staticcheck's local nilness
+	// analysis of bind cannot see across that channel and wrongly
+	// concludes bind never returns nil. It demonstrably does (see
+	// TestRunSession_SysSendIsSerialized, which calls bind and asserts
+	// require.NoError).
 	if err := sess.bind(stream); err != nil {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	}

@@ -246,7 +246,20 @@ func (s *runSession) run() {
 				continue
 			}
 			stream = req.stream
-			writeCh = make(chan writeRequest)
+			// Buffered by one: lets the actor hand off the next write
+			// without blocking even while the writer is still mid-Send
+			// on the previous one — the realistic worst case given
+			// this protocol's own synchronous usage (Start's
+			// SessionStart completes, including its own wait, before
+			// any OnBar begins; Close's SessionEnd is the terminal
+			// write). See handleSubmit/handleSysSend, neither of which
+			// otherwise block the actor on this hand-off (review
+			// finding: an inline `writeCh <- ...; <-result` in the
+			// sysSendCh case blocked the whole actor — teardown,
+			// dispatch, and history all included — for as long as the
+			// guest failed to read, which could deadlock Close/Run's
+			// own shutdown entirely).
+			writeCh = make(chan writeRequest, 1)
 			go runWriter(stream, writeCh)
 			close(s.streamReady)
 			req.reply <- nil
@@ -256,9 +269,9 @@ func (s *runSession) run() {
 				req.reply <- fmt.Errorf("external: session %s: run stream not yet open", s.id)
 				continue
 			}
-			result := make(chan error, 1)
-			writeCh <- writeRequest{msg: req.msg, result: result}
-			req.reply <- <-result
+			if s.handleSysSend(req, writeCh, end) {
+				return
+			}
 
 		case req := <-s.submitCh:
 			if s.handleSubmit(req, stream, writeCh, end) {
@@ -345,6 +358,44 @@ func (s *runSession) handleSubmit(req submitRequest, stream v1.StrategyHostServi
 			ctxErr := req.ctx.Err()
 			req.reply <- submitReply{err: ctxErr}
 			end(statusFromContextErr(ctxErr))
+			return true
+		}
+	}
+}
+
+// handleSysSend drives one system-send request (SessionStart,
+// SessionEnd — messages with no correlated response) to its own
+// conclusion, exactly like handleSubmit does for a callback: it hands
+// msg to the writer and then keeps selecting rather than blocking
+// inline on the result (review finding — the earlier inline `writeCh
+// <- ...; <-result` blocked the whole actor, including teardown, for
+// as long as a stalled guest left the write pending, which could
+// deadlock Close/Run's own shutdown). A sysSend has no sequence to
+// correlate against, so a dispatch or history request arriving while
+// one is in flight is answered as "nothing in flight" rather than
+// queued — Start completes (including this same wait) before any
+// OnBar begins, and Close's SessionEnd is the terminal write, so
+// neither case has a real in-flight callback to conflict with.
+func (s *runSession) handleSysSend(req sysSendRequest, writeCh chan writeRequest, end func(error)) (sessionEnded bool) {
+	result := make(chan error, 1)
+	writeCh <- writeRequest{msg: req.msg, result: result}
+
+	for {
+		select {
+		case err := <-result:
+			req.reply <- err
+			return false
+
+		case <-s.dispatchCh:
+			// Nothing is in flight for a sysSend; drop, matching
+			// handleSubmit/run's own stale-message handling.
+
+		case hreq := <-s.historyCh:
+			hreq.reply <- historyReply{ok: false}
+
+		case reason := <-s.teardownCh:
+			req.reply <- fmt.Errorf("external: session %s: closed while sending", s.id)
+			end(reason)
 			return true
 		}
 	}

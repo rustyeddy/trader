@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -64,6 +65,66 @@ func TestRunSession_SysSendIsSerialized(t *testing.T) {
 	stream.mu.Lock()
 	defer stream.mu.Unlock()
 	require.Len(t, stream.sent, n)
+}
+
+// blockingRunStream is a fakeRunStream whose Send blocks until told
+// to proceed — used to simulate a guest that has stopped reading
+// (stream flow control stalling Send indefinitely).
+type blockingRunStream struct {
+	fakeRunStream
+	release chan struct{}
+}
+
+func newBlockingRunStream() *blockingRunStream {
+	return &blockingRunStream{release: make(chan struct{})}
+}
+
+func (f *blockingRunStream) Send(msg *v1.RunServerMessage) error {
+	<-f.release
+	return f.fakeRunStream.Send(msg)
+}
+
+// TestRunSession_ActorStaysResponsiveDuringBlockedSysSend is the
+// review's own regression: run's earlier sysSendCh case waited
+// synchronously (`writeCh <- ...; <-result`) inline in the actor's
+// own top-level select, so a stalled guest blocking Send blocked the
+// *entire actor* — teardown included, which could deadlock Close/Run
+// shutdown entirely. handleSysSend fixes this by keeping run's own
+// select loop live while a send is outstanding; this test proves a
+// concurrent forceTeardown still completes promptly even while a
+// sysSend's own Send call is deliberately left blocked.
+func TestRunSession_ActorStaysResponsiveDuringBlockedSysSend(t *testing.T) {
+	descriptor := strategy.Descriptor{Name: "x"}
+	sess := newRunSession("sess-1", descriptor, nil, 0)
+
+	stream := newBlockingRunStream()
+	require.NoError(t, sess.bind(stream))
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- sess.sysSend(context.Background(), &v1.RunServerMessage{
+			Payload: &v1.RunServerMessage_SessionStart{SessionStart: &v1.SessionStart{RunId: "r"}},
+		})
+	}()
+
+	// Give sysSend time to actually reach the writer and block in Send.
+	time.Sleep(20 * time.Millisecond)
+
+	teardownDone := make(chan struct{})
+	go func() {
+		sess.forceTeardown(nil)
+		close(teardownDone)
+	}()
+
+	select {
+	case <-teardownDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forceTeardown did not complete promptly while a sysSend was blocked in Send — the actor is wedged")
+	}
+
+	close(stream.release) // let the blocked Send finally return
+	err := <-sendDone
+	require.Error(t, err) // the session ended while this send was outstanding
 }
 
 // TestRunSession_BindTwiceRejected proves a second bind on an
