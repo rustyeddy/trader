@@ -85,6 +85,15 @@ func (c *externalStrategyCore) Start(ctx context.Context, env strategy.Environme
 		return fmt.Errorf("external: start: %w", err)
 	}
 
+	// Mirrors strategy/smatrend's own Start-time check: a Journal
+	// without a real RunID could never actually build a valid
+	// journal.Record later (journal.NewRecord requires RunID), so this
+	// fails now rather than deferring the failure until the first
+	// signal arrives (review finding).
+	if env.Journal != nil && env.RunID.IsZero() {
+		return fmt.Errorf("external: start: env.Journal is set but env.RunID is zero: every recorded signal needs a run id")
+	}
+
 	c.factory = env.Intents
 	c.runID = env.RunID
 	c.journal = env.Journal
@@ -167,8 +176,11 @@ func (c *externalStrategyCore) recordSignals(ctx context.Context, event strategy
 	return nil
 }
 
-// Close sends a normal-completion SessionEnd down the Run stream, the
-// Run stream's own documented terminal server->client message. It is
+// Close sends a normal-completion SessionEnd down the Run stream —
+// the Run stream's own documented terminal server->client message —
+// and then ends the Run RPC itself (review finding: sending
+// SessionEnd alone left the Run handler still receiving, so a guest
+// that kept its stream open could remain "active" after Close). It is
 // not part of the strategy.Strategy contract; see newExternalStrategy
 // Adapter's own doc comment for why it is exposed anyway.
 func (c *externalStrategyCore) Close(context.Context) error {
@@ -180,12 +192,19 @@ func (c *externalStrategyCore) Close(context.Context) error {
 	if err := c.session.send(msg); err != nil {
 		return fmt.Errorf("external: close: sending session_end: %w", err)
 	}
+	c.session.forceTeardown(nil) // nil: deliberate, graceful end — Run returns nil, not an error status
 	return nil
 }
 
 // OnFill writes event down the Run stream and blocks for the guest's
 // own correlated OnFillResponse. Only externalStrategyWithFill exposes
 // this — CAPABILITY_FILL_HANDLER was negotiated at Handshake (ADR-060).
+//
+// view is deliberately not exposed to a concurrent GetHistoryBars
+// call (awaitResponse's own nil-view parameter, below): strategy.proto's
+// own GetHistoryBarsRequest doc comment scopes callback_sequence to an
+// in-flight BarEvent/OnBarResponse callback only, never a fill
+// callback (review finding).
 func (c *externalStrategyWithFill) OnFill(ctx context.Context, event strategy.FillEvent, view strategy.View) error {
 	sequence := c.session.nextSequence()
 	wireEvent, err := ToWireFillEvent(sequence, event, view.Account())
@@ -194,7 +213,7 @@ func (c *externalStrategyWithFill) OnFill(ctx context.Context, event strategy.Fi
 	}
 	msg := &v1.RunServerMessage{Payload: &v1.RunServerMessage_FillEvent{FillEvent: wireEvent}}
 
-	resp, err := c.session.awaitResponse(ctx, sequence, msg, view)
+	resp, err := c.session.awaitResponse(ctx, sequence, msg, nil)
 	if err != nil {
 		return fmt.Errorf("external: on fill: %w", err)
 	}

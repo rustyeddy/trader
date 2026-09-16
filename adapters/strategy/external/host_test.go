@@ -15,6 +15,7 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/adapters/strategy/external"
 	"github.com/rustyeddy/trader/clock"
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/logging"
@@ -76,11 +77,11 @@ type testHarness struct {
 	served chan error
 }
 
-func newTestHarness(t *testing.T) *testHarness {
+func newTestHarness(t *testing.T, opts ...external.HostOption) *testHarness {
 	t.Helper()
 
 	lis := bufconn.Listen(1024 * 1024)
-	host := external.NewHost(logging.Discard())
+	host := external.NewHost(logging.Discard(), opts...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -666,4 +667,135 @@ func TestHost_Close_SendsSessionEnd(t *testing.T) {
 	end := sm.GetSessionEnd()
 	require.NotNil(t, end)
 	require.Equal(t, v1.ErrorCode_ERROR_CODE_UNSPECIFIED, end.GetCode())
+}
+
+// TestHost_Close_EndsRunStream extends TestHost_Close_SendsSessionEnd:
+// after SessionEnd is sent, the Run RPC itself must actually end (a
+// prior bug sent SessionEnd but left the Run handler still receiving,
+// so a guest that kept its stream open stayed "active" forever).
+func TestHost_Close_EndsRunStream(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	hsResp := h.handshake(ctx, simpleDescriptor(t, "guest_strategy"), nil)
+	stream := h.openRun(ctx, hsResp.GetSessionId())
+
+	strat, err := h.host.Strategy(ctx)
+	require.NoError(t, err)
+	require.NoError(t, strat.Start(ctx, testEnvironment(t)))
+	_, err = stream.Recv() // session_start
+	require.NoError(t, err)
+
+	closer, ok := strat.(interface{ Close(context.Context) error })
+	require.True(t, ok)
+	require.NoError(t, closer.Close(ctx))
+
+	_, err = stream.Recv() // session_end
+	require.NoError(t, err)
+
+	_, err = stream.Recv() // the RPC itself must now be over
+	require.Error(t, err)
+}
+
+// TestHost_CallbackTimeout_TearsDownSession is ADR-062's own
+// supervision contract end to end: a guest that never responds to a
+// BarEvent must not block OnBar (or the session) forever — the fired
+// per-callback timer both fails the in-flight OnBar call and ends the
+// Run stream, so no later callback can be sent to the unresponsive
+// guest either.
+func TestHost_CallbackTimeout_TearsDownSession(t *testing.T) {
+	h := newTestHarness(t, external.WithCallbackTimeout(100*time.Millisecond))
+	ctx := context.Background()
+
+	hsResp := h.handshake(ctx, simpleDescriptor(t, "guest_strategy"), nil)
+	stream := h.openRun(ctx, hsResp.GetSessionId())
+
+	strat, err := h.host.Strategy(ctx)
+	require.NoError(t, err)
+	require.NoError(t, strat.Start(ctx, testEnvironment(t)))
+	_, err = stream.Recv() // session_start
+	require.NoError(t, err)
+
+	inst := eurUSD(t)
+	iv, err := marketdata.NewInterval(marketdata.UnitHour, 1)
+	require.NoError(t, err)
+	event := strategy.BarEvent{Instrument: inst, Interval: iv, Bar: testBar(t)}
+	view := fakeView{acct: testFlatSnapshot(t)}
+
+	_, err = strat.OnBar(context.Background(), event, view) // guest never responds; no ctx timeout of our own
+	require.Error(t, err)
+
+	_, err = stream.Recv() // the bar_event itself, sent but never answered
+	require.NoError(t, err)
+
+	// The Run stream itself must now be over — a later callback could
+	// never reach this guest either.
+	_, err = stream.Recv()
+	require.Error(t, err)
+}
+
+// TestHost_OneSessionAtATime_EnforcedAfterClaim proves the review's
+// blocking finding is fixed: a second Handshake is rejected while the
+// first session remains active even after Host.Strategy has already
+// claimed its strategy (the old channel-buffer check alone stopped
+// enforcing once drained).
+func TestHost_OneSessionAtATime_EnforcedAfterClaim(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	hsResp := h.handshake(ctx, simpleDescriptor(t, "first"), nil)
+	require.True(t, hsResp.GetAccepted())
+	h.openRun(ctx, hsResp.GetSessionId())
+
+	_, err := h.host.Strategy(ctx) // claims the first strategy, draining any buffer
+	require.NoError(t, err)
+
+	second, err := h.client.Handshake(ctx, &v1.HandshakeRequest{
+		ProtocolVersion:    v1.ProtocolVersion,
+		StrategyDescriptor: simpleDescriptor(t, "second"),
+	})
+	require.Error(t, err, "a second handshake must be rejected while the first session is still active")
+	require.Nil(t, second)
+}
+
+// TestHost_AbandonedHandshake_ReclaimedAfterAdmissionTimeout proves a
+// Handshake that never opens its own Run stream does not hold this
+// Host's one session slot forever.
+func TestHost_AbandonedHandshake_ReclaimedAfterAdmissionTimeout(t *testing.T) {
+	h := newTestHarness(t, external.WithAdmissionTimeout(100*time.Millisecond))
+	ctx := context.Background()
+
+	hsResp := h.handshake(ctx, simpleDescriptor(t, "abandoned"), nil)
+	require.True(t, hsResp.GetAccepted())
+	// Deliberately never open Run for this session.
+
+	require.Eventually(t, func() bool {
+		resp, err := h.client.Handshake(ctx, &v1.HandshakeRequest{
+			ProtocolVersion:    v1.ProtocolVersion,
+			StrategyDescriptor: simpleDescriptor(t, "second"),
+		})
+		return err == nil && resp.GetAccepted()
+	}, 2*time.Second, 20*time.Millisecond, "the abandoned session's slot should free up after its admission timeout")
+}
+
+// TestHost_Start_RejectsJournalWithZeroRunID mirrors strategy/smatrend's
+// own Start-time check: env.Journal set with a zero env.RunID can
+// never build a valid journal.Record, so this must fail at Start,
+// not later at the first signal.
+func TestHost_Start_RejectsJournalWithZeroRunID(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	hsResp := h.handshake(ctx, simpleDescriptor(t, "guest_strategy"), nil)
+	h.openRun(ctx, hsResp.GetSessionId())
+
+	strat, err := h.host.Strategy(ctx)
+	require.NoError(t, err)
+
+	env := testEnvironment(t)
+	env.Journal = &recordingJournal{}
+	env.RunID = id.RunID{} // zero value
+
+	err = strat.Start(ctx, env)
+	require.Error(t, err)
 }

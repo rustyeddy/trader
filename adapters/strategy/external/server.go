@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,35 +26,51 @@ import (
 // must name it before the host writes anything else; GetHistoryBars
 // must name it, plus a callback_sequence naming a callback this
 // session is still waiting on a response for.
+//
+// v1 assumes one strategy identity per connection (ADR-062); grpcServer
+// enforces that only one session is active — from a successful
+// Handshake until its Run stream ends or its admission timeout
+// expires — at any time, rejecting a concurrent Handshake outright
+// rather than queuing or silently replacing the active one.
 type grpcServer struct {
 	v1.UnimplementedStrategyHostServiceServer
 
-	logger *slog.Logger
+	logger           *slog.Logger
+	callbackTimeout  time.Duration
+	admissionTimeout time.Duration
 
 	mu       sync.Mutex
 	sessions map[string]*runSession
 
-	// ready carries one successfully Handshake'd strategy.Strategy per
-	// send, consumed by Host.Strategy. It is deliberately unbuffered by
-	// more than one entry: v1 assumes one strategy identity per
-	// connection (ADR-062), so a second Handshake before the first's
-	// strategy has been claimed is rejected rather than silently
-	// queued or replacing it (see Handshake below).
-	ready chan strategy.Strategy
+	// pending is the most recently Handshake'd strategy.Strategy not
+	// yet claimed via Host.Strategy, or nil. notify is closed and
+	// replaced every time pending changes (set or cleared), so
+	// Host.Strategy can wait for the next change without polling.
+	// This — rather than a fixed-size buffered channel — is what lets
+	// an abandoned session's own admission-timeout cleanup correctly
+	// withdraw a strategy nobody ever claimed, instead of leaving a
+	// stale entry that would silently block every later session
+	// (review finding).
+	pending strategy.Strategy
+	notify  chan struct{}
 }
 
-func newGRPCServer(logger *slog.Logger) *grpcServer {
+func newGRPCServer(logger *slog.Logger, callbackTimeout, admissionTimeout time.Duration) *grpcServer {
 	return &grpcServer{
-		logger:   logger,
-		sessions: make(map[string]*runSession),
-		ready:    make(chan strategy.Strategy, 1),
+		logger:           logger,
+		callbackTimeout:  callbackTimeout,
+		admissionTimeout: admissionTimeout,
+		sessions:         make(map[string]*runSession),
+		notify:           make(chan struct{}),
 	}
 }
 
 // Handshake validates the guest's declared protocol version, decodes
 // its StrategyDescriptor, negotiates capabilities, and — on success —
 // mints a session and makes the resulting strategy.Strategy available
-// via Host.Strategy.
+// via Host.Strategy. It rejects a Handshake while any other session
+// is already active (registered in g.sessions), whether or not that
+// session's own strategy has been claimed yet.
 func (g *grpcServer) Handshake(ctx context.Context, req *v1.HandshakeRequest) (*v1.HandshakeResponse, error) {
 	if req.GetProtocolVersion() != v1.ProtocolVersion {
 		return &v1.HandshakeResponse{
@@ -76,22 +93,25 @@ func (g *grpcServer) Handshake(ctx context.Context, req *v1.HandshakeRequest) (*
 		return nil, status.Errorf(codes.Internal, "external: handshake: %v", err)
 	}
 
-	sess := newRunSession(sessionID, descriptor, negotiated)
+	sess := newRunSession(sessionID, descriptor, negotiated, g.callbackTimeout)
 	strat := newExternalStrategyAdapter(sess, g.logger)
 
-	select {
-	case g.ready <- strat:
-	default:
-		return nil, status.Error(codes.FailedPrecondition,
-			"external: handshake: a strategy from a previous handshake is still pending; v1 supports one strategy identity per connection at a time")
-	}
-
 	g.mu.Lock()
+	if len(g.sessions) > 0 {
+		g.mu.Unlock()
+		return nil, status.Error(codes.FailedPrecondition,
+			"external: handshake: a session is already active; v1 supports one strategy identity per connection at a time")
+	}
 	g.sessions[sessionID] = sess
+	g.setPendingLocked(strat)
 	g.mu.Unlock()
 
 	g.logger.InfoContext(ctx, "external strategy handshake accepted",
 		"session_id", sessionID, "strategy", descriptor.Name, "strategy_version", descriptor.Version)
+
+	if g.admissionTimeout > 0 {
+		go g.expireIfNeverBound(sessionID, sess, strat)
+	}
 
 	return &v1.HandshakeResponse{
 		Accepted:        true,
@@ -99,6 +119,55 @@ func (g *grpcServer) Handshake(ctx context.Context, req *v1.HandshakeRequest) (*
 		Capabilities:    negotiated,
 		SessionId:       sessionID,
 	}, nil
+}
+
+// setPendingLocked replaces g.pending with strat and wakes every
+// Host.Strategy call waiting on the previous notify channel. g.mu
+// must already be held.
+func (g *grpcServer) setPendingLocked(strat strategy.Strategy) {
+	g.pending = strat
+	close(g.notify)
+	g.notify = make(chan struct{})
+}
+
+// takePending claims and clears g.pending, if set, returning it and
+// true; otherwise returns the current notify channel to wait on.
+func (g *grpcServer) takePending() (strategy.Strategy, <-chan struct{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending != nil {
+		strat := g.pending
+		g.pending = nil
+		return strat, nil
+	}
+	return nil, g.notify
+}
+
+// expireIfNeverBound frees sessionID's slot if its own Run stream
+// never binds within g.admissionTimeout — a successful Handshake is
+// not guaranteed to be followed by a Run call (the guest may
+// disconnect, or the composition root driving Host.Strategy/Start may
+// itself be canceled first), and without this an abandoned Handshake
+// would hold this host's one session slot indefinitely (review
+// finding). If strat was never claimed via Host.Strategy either, it
+// is withdrawn from g.pending too.
+func (g *grpcServer) expireIfNeverBound(sessionID string, sess *runSession, strat strategy.Strategy) {
+	select {
+	case <-sess.streamReady:
+		return
+	case <-time.After(g.admissionTimeout):
+	}
+
+	g.mu.Lock()
+	if g.pending == strat {
+		g.pending = nil
+	}
+	delete(g.sessions, sessionID)
+	g.mu.Unlock()
+
+	sess.close()
+	g.logger.Warn("external strategy session expired before its run stream opened",
+		"session_id", sessionID, "admission_timeout", g.admissionTimeout)
 }
 
 // negotiateCapabilities returns the subset of requested this host
@@ -121,6 +190,11 @@ func negotiateCapabilities(requested []v1.Capability) []v1.Capability {
 }
 
 // Run is the guest-opened, bidirectional, long-lived session stream.
+// It ends when the guest closes its send side (io.EOF), a transport
+// error occurs, an invalid message arrives, or this session's own
+// forceTeardown fires — a fired callback-supervision timer (a
+// non-nil teardown reason) ends the RPC with an error status; a
+// deliberate, graceful end (Close, a nil reason) ends it cleanly.
 func (g *grpcServer) Run(stream v1.StrategyHostService_RunServer) error {
 	first, err := stream.Recv()
 	if err != nil {
@@ -145,24 +219,53 @@ func (g *grpcServer) Run(stream v1.StrategyHostService_RunServer) error {
 	defer sess.close()
 	defer g.deleteSession(sessionID)
 
-	for {
-		msg, err := stream.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
+	type recvResult struct {
+		msg *v1.RunClientMessage
+		err error
+	}
+	recvCh := make(chan recvResult, 1)
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			recvCh <- recvResult{msg, err}
+			if err != nil {
+				return
 			}
-			return err
 		}
+	}()
 
-		switch payload := msg.GetPayload().(type) {
-		case *v1.RunClientMessage_OnBarResponse:
-			sess.dispatch(payload.OnBarResponse.GetSequence(), msg)
-		case *v1.RunClientMessage_OnFillResponse:
-			sess.dispatch(payload.OnFillResponse.GetSequence(), msg)
-		case *v1.RunClientMessage_RunOpen:
-			return status.Error(codes.InvalidArgument, "external: run: run_open must be the stream's first message only")
-		default:
-			return status.Error(codes.InvalidArgument, "external: run: message carries no recognized payload")
+	for {
+		select {
+		case reason := <-sess.teardown:
+			if reason != nil {
+				return status.Error(codes.DeadlineExceeded, reason.Error())
+			}
+			return nil
+
+		case res := <-recvCh:
+			if res.err != nil {
+				if errors.Is(res.err, io.EOF) {
+					return nil
+				}
+				return res.err
+			}
+
+			switch payload := res.msg.GetPayload().(type) {
+			case *v1.RunClientMessage_OnBarResponse:
+				if payload.OnBarResponse == nil {
+					return status.Error(codes.InvalidArgument, "external: run: on_bar_response payload must not be nil")
+				}
+				sess.dispatch(payload.OnBarResponse.GetSequence(), res.msg)
+			case *v1.RunClientMessage_OnFillResponse:
+				if payload.OnFillResponse == nil {
+					return status.Error(codes.InvalidArgument, "external: run: on_fill_response payload must not be nil")
+				}
+				sess.dispatch(payload.OnFillResponse.GetSequence(), res.msg)
+			case *v1.RunClientMessage_RunOpen:
+				return status.Error(codes.InvalidArgument, "external: run: run_open must be the stream's first message only")
+			default:
+				return status.Error(codes.InvalidArgument, "external: run: message carries no recognized payload")
+			}
 		}
 	}
 }
@@ -184,7 +287,8 @@ func (g *grpcServer) GetHistoryBars(_ context.Context, req *v1.GetHistoryBarsReq
 
 	view, ok := sess.viewFor(q.CallbackSequence)
 	if !ok {
-		return nil, status.Errorf(codes.FailedPrecondition, "external: get history bars: callback %d is not in flight", q.CallbackSequence)
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"external: get history bars: callback %d is not an in-flight on-bar callback", q.CallbackSequence)
 	}
 
 	declared := false
