@@ -157,7 +157,11 @@ type bindRequest struct {
 // sysSendRequest asks run to send msg down the bound stream and wait
 // for that Send call itself to complete — used for messages with no
 // correlated response (SessionStart, SessionEnd), unlike submitRequest.
+// ctx is carried so handleSysSend can honor cancellation for as long
+// as the send is outstanding, not merely while the request is being
+// handed to the actor.
 type sysSendRequest struct {
+	ctx   context.Context
 	msg   *v1.RunServerMessage
 	reply chan error
 }
@@ -376,6 +380,16 @@ func (s *runSession) handleSubmit(req submitRequest, stream v1.StrategyHostServi
 // queued — Start completes (including this same wait) before any
 // OnBar begins, and Close's SessionEnd is the terminal write, so
 // neither case has a real in-flight callback to conflict with.
+//
+// req.ctx.Done() is honored for as long as the send is outstanding,
+// not merely while the request was being handed to the actor (review
+// finding: a first pass only observed ctx before enqueueing, so a
+// canceled Start/Close context could not interrupt an already-blocked
+// Send). Exactly like handleSubmit's own ctx.Done() case, this is
+// treated as terminal for the whole session: once an outbound system
+// message's delivery races caller cancellation, the host cannot know
+// whether the guest received it, so the session must not continue in
+// that ambiguous state.
 func (s *runSession) handleSysSend(req sysSendRequest, writeCh chan writeRequest, end func(error)) (sessionEnded bool) {
 	result := make(chan error, 1)
 	writeCh <- writeRequest{msg: req.msg, result: result}
@@ -396,6 +410,12 @@ func (s *runSession) handleSysSend(req sysSendRequest, writeCh chan writeRequest
 		case reason := <-s.teardownCh:
 			req.reply <- fmt.Errorf("external: session %s: closed while sending", s.id)
 			end(reason)
+			return true
+
+		case <-req.ctx.Done():
+			ctxErr := req.ctx.Err()
+			req.reply <- ctxErr
+			end(statusFromContextErr(ctxErr))
 			return true
 		}
 	}
@@ -445,7 +465,7 @@ func (s *runSession) waitStream(ctx context.Context) error {
 func (s *runSession) sysSend(ctx context.Context, msg *v1.RunServerMessage) error {
 	reply := make(chan error, 1)
 	select {
-	case s.sysSendCh <- sysSendRequest{msg: msg, reply: reply}:
+	case s.sysSendCh <- sysSendRequest{ctx: ctx, msg: msg, reply: reply}:
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-s.done:

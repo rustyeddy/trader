@@ -127,6 +127,51 @@ func TestRunSession_ActorStaysResponsiveDuringBlockedSysSend(t *testing.T) {
 	require.Error(t, err) // the session ended while this send was outstanding
 }
 
+// TestRunSession_SysSendHonorsCallerCtxWhileBlocked is the review's
+// own follow-up finding: an earlier fix observed req.ctx only while
+// enqueueing the sysSend request, so a caller ctx that ended while
+// the actual Send call was still blocked (guest stopped reading)
+// could not interrupt it — Start/Close could hang past their own
+// caller's deadline. This proves sysSend now returns promptly on
+// ctx cancellation even while the underlying Send is deliberately
+// left blocked, and that doing so ends the session (ambiguous
+// delivery state), exactly like a callback's own ctx cancellation.
+func TestRunSession_SysSendHonorsCallerCtxWhileBlocked(t *testing.T) {
+	descriptor := strategy.Descriptor{Name: "x"}
+	sess := newRunSession("sess-1", descriptor, nil, 0)
+
+	stream := newBlockingRunStream()
+	require.NoError(t, sess.bind(stream))
+	defer close(stream.release) // let the eventually-abandoned Send return
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- sess.sysSend(ctx, &v1.RunServerMessage{
+			Payload: &v1.RunServerMessage_SessionStart{SessionStart: &v1.SessionStart{RunId: "r"}},
+		})
+	}()
+
+	time.Sleep(20 * time.Millisecond) // let sysSend actually reach the writer and block in Send
+	cancel()
+
+	select {
+	case err := <-sendDone:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("sysSend did not observe caller ctx cancellation while Send was blocked")
+	}
+
+	// The session itself must now be over too (ambiguous delivery
+	// state, same reasoning as a callback's own ctx cancellation).
+	select {
+	case <-sess.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("session did not end after sysSend's own ctx cancellation")
+	}
+}
+
 // TestRunSession_BindTwiceRejected proves a second bind on an
 // already-bound session is rejected rather than silently replacing
 // the stream — v1's own "exactly one Run stream per Handshake'd
