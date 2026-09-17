@@ -127,17 +127,20 @@ method (core.go, issue #379) before calling =Stop=; =Stop='s own job is
 guaranteeing the OS-level process and socket are gone, not
 renegotiating the wire protocol.
 
-** stderr: captured and logged, not discarded or interleaved with stdout
+** stderr: captured and logged; stdout deliberately not connected
 
 The child's stderr is piped through a small line-buffering
 =io.Writer= that logs each complete line via the injected
 =*slog.Logger= (never through the child's inherited stdout/stderr
 file descriptors directly, and never silently discarded) — "useful
 stderr/logging on failure" per the issue's own acceptance criterion.
-stdout is left connected to the host process's own stdout unless a
-future issue needs otherwise: v1's guest processes speak gRPC over the
-Unix-domain socket, not stdio, so stdout is not a protocol channel and
-does not need interception here.
+=exec.Cmd.Stdout= is left unset, which =os/exec= itself connects to
+=/dev/null=, not the host process's own stdout: v1's guest processes
+speak gRPC over the Unix-domain socket, not stdio, so stdout is not a
+protocol channel, and leaving it unconnected avoids interleaving
+unrelated child output with the host's own stdout. A future issue that
+wants stdout captured the same way stderr is would extend =Process=
+the same way, not assume inheritance was ever the default.
 
 * Consequences
 

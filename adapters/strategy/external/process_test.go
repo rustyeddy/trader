@@ -3,6 +3,7 @@ package external_test
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,6 +89,7 @@ func TestLaunch_NormalRoundTrip(t *testing.T) {
 
 	p, err := external.Launch(ctx, cfg)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stop(context.Background()) }) // Stop is idempotent; guards every assertion below
 
 	strat := p.Strategy()
 	require.Equal(t, "fakeguest", strat.Describe().Name)
@@ -128,6 +130,8 @@ func TestLaunch_DefaultSocketPathCleanedUp(t *testing.T) {
 	ctx := context.Background()
 	p, err := external.Launch(ctx, fakeGuestConfig(t, "normal"))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
+
 	require.NoError(t, p.Stop(context.Background()))
 
 	select {
@@ -143,6 +147,7 @@ func TestLaunch_StopIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	p, err := external.Launch(ctx, fakeGuestConfig(t, "normal"))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
 
 	require.NoError(t, p.Stop(context.Background()))
 	require.NoError(t, p.Stop(context.Background()))
@@ -232,6 +237,7 @@ func TestLaunch_UnexpectedExitAfterStartup(t *testing.T) {
 func TestLaunch_StopEscalatesToSIGKILL(t *testing.T) {
 	p, err := external.Launch(context.Background(), fakeGuestConfig(t, "ignore-sigterm"))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
 
 	stopCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -247,6 +253,112 @@ func TestLaunch_StopEscalatesToSIGKILL(t *testing.T) {
 	}
 	require.Error(t, p.Err()) // killed, not a clean exit
 	require.Less(t, elapsed, 3*time.Second, "Stop should escalate to SIGKILL rather than waiting indefinitely")
+}
+
+// TestLaunch_StopHonorsConfiguredShutdownGrace proves
+// LaunchConfig.ShutdownGrace itself controls escalation timing — not
+// merely a short ctx deadline layered on top of the (much longer)
+// default, which TestLaunch_StopEscalatesToSIGKILL alone would not
+// distinguish from ShutdownGrace being silently ignored.
+func TestLaunch_StopHonorsConfiguredShutdownGrace(t *testing.T) {
+	cfg := fakeGuestConfig(t, "ignore-sigterm")
+	cfg.ShutdownGrace = 150 * time.Millisecond
+
+	p, err := external.Launch(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
+
+	start := time.Now()
+	require.NoError(t, p.Stop(context.Background())) // no ctx deadline at all
+	elapsed := time.Since(start)
+
+	require.Error(t, p.Err())
+	require.Less(t, elapsed, 3*time.Second,
+		"Stop should escalate once the configured ShutdownGrace elapses, not wait for the 5s default")
+}
+
+// TestLaunch_StopWithAlreadyCanceledContextEscalatesImmediately proves
+// an already-canceled Stop ctx (no deadline, just Done) escalates to
+// SIGKILL right away rather than waiting out ShutdownGrace.
+func TestLaunch_StopWithAlreadyCanceledContextEscalatesImmediately(t *testing.T) {
+	p, err := external.Launch(context.Background(), fakeGuestConfig(t, "ignore-sigterm"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
+
+	stopCtx, cancel := context.WithCancel(context.Background())
+	cancel() // already done before Stop is even called
+
+	start := time.Now()
+	require.NoError(t, p.Stop(stopCtx))
+	elapsed := time.Since(start)
+
+	require.Error(t, p.Err())
+	require.Less(t, elapsed, 1*time.Second,
+		"an already-canceled Stop ctx should escalate to SIGKILL immediately")
+}
+
+// TestLaunch_ExplicitSocketPathRejectsRegularFile proves Launch fails
+// outright, without touching it, when an explicit SocketPath already
+// names a plain file rather than a Unix-domain socket.
+func TestLaunch_ExplicitSocketPathRejectsRegularFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.sock")
+	require.NoError(t, os.WriteFile(path, []byte("not a socket"), 0o600))
+
+	cfg := fakeGuestConfig(t, "normal")
+	cfg.SocketPath = path
+
+	_, err := external.Launch(context.Background(), cfg)
+	require.Error(t, err)
+
+	// The file must still be exactly what it was — never deleted.
+	data, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	require.Equal(t, "not a socket", string(data))
+}
+
+// TestLaunch_ExplicitSocketPathRejectsLiveListener proves Launch
+// fails outright, without stealing the path, when another process (or
+// in this test, another listener within the same process) is already
+// listening at the explicit SocketPath.
+func TestLaunch_ExplicitSocketPathRejectsLiveListener(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.sock")
+	other, err := net.Listen("unix", path)
+	require.NoError(t, err)
+	defer func() { _ = other.Close() }()
+
+	cfg := fakeGuestConfig(t, "normal")
+	cfg.SocketPath = path
+
+	_, launchErr := external.Launch(context.Background(), cfg)
+	require.Error(t, launchErr)
+
+	// The original listener must still be alive and reachable.
+	conn, dialErr := net.Dial("unix", path)
+	require.NoError(t, dialErr)
+	require.NoError(t, conn.Close())
+}
+
+// TestLaunch_ExplicitSocketPathReusesStaleSocketFile proves Launch
+// succeeds and reuses the path when a stale Unix-domain socket file
+// (left behind by a listener that exited without unlinking it — the
+// same shape a crashed previous run would leave) already exists there.
+func TestLaunch_ExplicitSocketPathReusesStaleSocketFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.sock")
+
+	stale, err := net.Listen("unix", path)
+	require.NoError(t, err)
+	stale.(*net.UnixListener).SetUnlinkOnClose(false) // leave the file behind, simulating a crash
+	require.NoError(t, stale.Close())
+
+	_, statErr := os.Lstat(path)
+	require.NoError(t, statErr, "the stale socket file must actually be present before Launch runs")
+
+	cfg := fakeGuestConfig(t, "normal")
+	cfg.SocketPath = path
+
+	p, err := external.Launch(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
 }
 
 // TestLaunch_CommandNotFound proves an invalid executable path fails

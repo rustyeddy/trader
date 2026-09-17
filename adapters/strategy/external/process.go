@@ -56,7 +56,10 @@ type LaunchConfig struct {
 	// process's own working directory.
 	Dir string
 
-	// SocketPath pins the exact Unix-domain socket path to create. If
+	// SocketPath pins the exact Unix-domain socket path to create,
+	// resolved to an absolute path before use (a relative path would
+	// otherwise resolve differently for this process, via net.Listen,
+	// than for the child, which may run under a different Dir). If
 	// empty, Launch generates one inside a fresh temporary directory
 	// it owns and removes on Stop — the recommended default, since a
 	// fixed, well-known path cannot support more than one concurrent
@@ -66,6 +69,12 @@ type LaunchConfig struct {
 	// path's own containing directory; Process only ever removes the
 	// socket file itself in that case, never a caller-supplied
 	// directory.
+	//
+	// A pre-existing path is cleared only when Launch can positively
+	// establish it is a stale, unreachable Unix-domain socket — never
+	// a regular file, and never a socket something is still actually
+	// listening on; either of those fails Launch outright rather than
+	// silently deleting or stealing it.
 	SocketPath string
 
 	// StartupTimeout overrides DefaultStartupTimeout. <= 0 uses the
@@ -100,8 +109,9 @@ type Process struct {
 	strat  strategy.Strategy
 	logger *slog.Logger
 
-	sockPath string
-	ownedDir string // non-empty only when Launch created this directory itself
+	sockPath      string
+	ownedDir      string // non-empty only when Launch created this directory itself
+	shutdownGrace time.Duration
 
 	serveCtx    context.Context
 	serveCancel context.CancelFunc
@@ -141,6 +151,10 @@ func Launch(ctx context.Context, cfg LaunchConfig) (*Process, error) {
 	if startupTimeout <= 0 {
 		startupTimeout = DefaultStartupTimeout
 	}
+	shutdownGrace := cfg.ShutdownGrace
+	if shutdownGrace <= 0 {
+		shutdownGrace = DefaultShutdownGrace
+	}
 
 	sockPath, ownedDir, err := resolveSocketPath(cfg.SocketPath)
 	if err != nil {
@@ -162,20 +176,21 @@ func Launch(ctx context.Context, cfg LaunchConfig) (*Process, error) {
 
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.Dir
-	cmd.Env = append(append([]string{}, cfg.Env...), SocketPathEnv+"="+sockPath)
+	cmd.Env = append(filterOutEnvKey(cfg.Env, SocketPathEnv), SocketPathEnv+"="+sockPath)
 	cmd.Stderr = stderrLog
 
 	p := &Process{
-		host:        host,
-		lis:         lis,
-		logger:      logger,
-		sockPath:    sockPath,
-		ownedDir:    ownedDir,
-		serveCtx:    serveCtx,
-		serveCancel: serveCancel,
-		serveDone:   serveDone,
-		stderrLog:   stderrLog,
-		waitDone:    make(chan struct{}),
+		host:          host,
+		lis:           lis,
+		logger:        logger,
+		sockPath:      sockPath,
+		ownedDir:      ownedDir,
+		shutdownGrace: shutdownGrace,
+		serveCtx:      serveCtx,
+		serveCancel:   serveCancel,
+		serveDone:     serveDone,
+		stderrLog:     stderrLog,
+		waitDone:      make(chan struct{}),
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -189,7 +204,7 @@ func Launch(ctx context.Context, cfg LaunchConfig) (*Process, error) {
 
 	strat, err := p.awaitHandshake(ctx, startupTimeout)
 	if err != nil {
-		p.terminate(DefaultShutdownGrace)
+		p.terminate(context.Background(), p.shutdownGrace)
 		p.cleanup()
 		return nil, err
 	}
@@ -285,32 +300,31 @@ func (p *Process) reap() {
 }
 
 // Stop terminates the child process (SIGTERM, escalating to SIGKILL
-// after ShutdownGrace if it has not exited), then always tears down
-// the Host's serve loop and removes the socket file/directory —
-// regardless of which signal actually ended the child. Stop is safe
-// to call more than once and safe to call after the child has already
-// exited on its own.
+// once ShutdownGrace elapses or ctx ends, whichever happens first),
+// then always tears down the Host's serve loop and removes the socket
+// file/directory — regardless of which signal actually ended the
+// child. Stop is safe to call more than once and safe to call after
+// the child has already exited on its own.
+//
+// ctx directly bounds the SIGTERM grace wait (not merely a snapshot
+// of its deadline taken once): a ctx that is already done, or that
+// ends before ShutdownGrace elapses, escalates to SIGKILL immediately
+// rather than waiting out the full grace period regardless.
 func (p *Process) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	p.stopping = true
 	p.mu.Unlock()
 
-	grace := DefaultShutdownGrace
-	if dl, ok := ctx.Deadline(); ok {
-		if remaining := time.Until(dl); remaining > 0 && remaining < grace {
-			grace = remaining
-		}
-	}
-
-	p.terminate(grace)
+	p.terminate(ctx, p.shutdownGrace)
 	p.cleanup()
 	return nil
 }
 
-// terminate sends SIGTERM and waits up to grace for the child to
-// exit, escalating to SIGKILL if it has not. It is a no-op if the
-// child was never started or has already exited.
-func (p *Process) terminate(grace time.Duration) {
+// terminate sends SIGTERM and waits for the child to exit, escalating
+// to SIGKILL once grace elapses or ctx ends — whichever happens first
+// — and is a no-op if the child was never started or has already
+// exited.
+func (p *Process) terminate(ctx context.Context, grace time.Duration) {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return
 	}
@@ -325,14 +339,20 @@ func (p *Process) terminate(grace time.Duration) {
 		p.logger.Warn("external strategy process: sending SIGTERM", "error", err)
 	}
 
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+
 	select {
 	case <-p.waitDone:
 		return
-	case <-time.After(grace):
+	case <-ctx.Done():
+		p.logger.Warn("external strategy process: caller context ended before the child exited, sending SIGKILL",
+			"error", ctx.Err())
+	case <-timer.C:
+		p.logger.Warn("external strategy process: did not exit within shutdown grace period, sending SIGKILL",
+			"grace", grace)
 	}
 
-	p.logger.Warn("external strategy process: did not exit within shutdown grace period, sending SIGKILL",
-		"grace", grace)
 	if err := p.cmd.Process.Kill(); err != nil {
 		p.logger.Warn("external strategy process: sending SIGKILL", "error", err)
 	}
@@ -351,16 +371,24 @@ func (p *Process) cleanup() {
 }
 
 // resolveSocketPath returns the socket path Launch should listen on.
-// An explicit path is used as-is (after removing any stale file left
-// at that exact path by a previous crashed run); an empty path
-// generates a fresh temporary directory, returned as ownedDir so
-// cleanup removes it wholesale.
+// An explicit path is resolved to an absolute path — cmd.Dir may
+// differ from the host process's own working directory, so a relative
+// path would resolve differently depending on which side (this
+// process, via net.Listen, or the child, via SocketPathEnv) evaluates
+// it (review finding) — and cleared of any stale socket left at that
+// exact path by a previous crashed run (see clearStaleSocket). An
+// empty path generates a fresh temporary directory, returned as
+// ownedDir so cleanup removes it wholesale.
 func resolveSocketPath(explicit string) (sockPath, ownedDir string, err error) {
 	if explicit != "" {
-		if rmErr := os.Remove(explicit); rmErr != nil && !os.IsNotExist(rmErr) {
-			return "", "", fmt.Errorf("removing stale socket %s: %w", explicit, rmErr)
+		abs, absErr := filepath.Abs(explicit)
+		if absErr != nil {
+			return "", "", fmt.Errorf("resolving absolute socket path for %s: %w", explicit, absErr)
 		}
-		return explicit, "", nil
+		if err := clearStaleSocket(abs); err != nil {
+			return "", "", err
+		}
+		return abs, "", nil
 	}
 
 	dir, err := os.MkdirTemp("", "trader-strategy-*")
@@ -368,6 +396,57 @@ func resolveSocketPath(explicit string) (sockPath, ownedDir string, err error) {
 		return "", "", fmt.Errorf("creating socket directory: %w", err)
 	}
 	return filepath.Join(dir, "strategy.sock"), dir, nil
+}
+
+// clearStaleSocket removes path only once it positively establishes
+// that nothing is listening there — never a regular file, and never a
+// live Unix-domain socket another process still owns (review finding:
+// unconditionally removing whatever already sits at an explicit,
+// caller-supplied path could delete an unrelated file, or unlink a
+// live listener's own path out from under it while that listener is
+// still reachable by its file descriptor, silently stealing the
+// name). A path that does not exist at all is left alone — there is
+// nothing to clear.
+func clearStaleSocket(path string) error {
+	info, statErr := os.Lstat(path)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil
+		}
+		return fmt.Errorf("checking existing path %s: %w", path, statErr)
+	}
+
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("external: launch: %s already exists and is not a Unix-domain socket; refusing to remove it", path)
+	}
+
+	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
+	if dialErr == nil {
+		_ = conn.Close()
+		return fmt.Errorf("external: launch: a process is already listening on %s", path)
+	}
+
+	if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+		return fmt.Errorf("removing stale socket %s: %w", path, rmErr)
+	}
+	return nil
+}
+
+// filterOutEnvKey returns env with every entry naming key removed —
+// used so Launch's own SocketPathEnv entry can never be shadowed or
+// duplicated by a caller-supplied value of the same name (review
+// finding: appending unconditionally could leave two entries for the
+// same key on cmd.Env, whose effective value at runtime is undefined).
+func filterOutEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // removeSocketDir removes ownedDir (recursively) if set, otherwise
