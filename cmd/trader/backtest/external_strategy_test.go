@@ -28,29 +28,49 @@ import (
 // real backtest service path" acceptance criterion).
 var flipFlopPath string
 
+// fakeGuestPath is adapters/strategy/external's own fakeguest test
+// fixture (cmd/internal/fakeguest), reused here for its
+// FAKEGUEST_MODE=crash-after-handshake behavior: it completes a real
+// Handshake and opens the Run stream (declaring zero Requirements,
+// so Scheduler never needs another RPC once Start's own fire-and-
+// forget SessionStart is sent), then os.Exit(1)s immediately —
+// exactly the "external process crashes and the run must not still be
+// reported as successful" scenario the review that added
+// runWithExternalProcessMonitor asks for a regression test of.
+var fakeGuestPath string
+
 func TestMain(m *testing.M) {
 	os.Exit(runTestMain(m))
 }
 
 func runTestMain(m *testing.M) int {
-	dir, err := os.MkdirTemp("", "flipflop-bin-*")
+	dir, err := os.MkdirTemp("", "backtest-strategy-bin-*")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "backtest: building strategysdk-minimal test fixture:", err)
+		fmt.Fprintln(os.Stderr, "backtest: building test fixtures:", err)
 		return 1
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	flipFlopPath = filepath.Join(dir, "flipflop")
-	build := exec.Command("go", "build", "-o", flipFlopPath,
-		"github.com/rustyeddy/trader/examples/strategysdk-minimal")
-	build.Stdout = os.Stdout
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
+	if err := goBuild(flipFlopPath, "github.com/rustyeddy/trader/examples/strategysdk-minimal"); err != nil {
 		fmt.Fprintln(os.Stderr, "backtest: building strategysdk-minimal test fixture:", err)
 		return 1
 	}
 
+	fakeGuestPath = filepath.Join(dir, "fakeguest")
+	if err := goBuild(fakeGuestPath, "github.com/rustyeddy/trader/cmd/internal/fakeguest"); err != nil {
+		fmt.Fprintln(os.Stderr, "backtest: building fakeguest test fixture:", err)
+		return 1
+	}
+
 	return m.Run()
+}
+
+func goBuild(out, pkg string) error {
+	build := exec.Command("go", "build", "-o", out, pkg)
+	build.Stdout = os.Stdout
+	build.Stderr = os.Stderr
+	return build.Run()
 }
 
 // TestVerticalSlice_RunWithStrategyExec is issue #382's own core
@@ -111,6 +131,36 @@ func TestVerticalSlice_RunWithStrategyExec(t *testing.T) {
 	// orders the external process itself decided to submit, not merely
 	// that the process launched and exited cleanly.
 	assert.NotEmpty(t, doc.ClosedTrades, "expected at least one closed trade from the external strategy's own enter/exit cycle:\n%s", runOutput)
+}
+
+// TestVerticalSlice_RunWithStrategyExec_ProcessCrashReportedAsFailure
+// is the review regression for the "external process exits but the
+// run is still reported as successful" finding: fakeguest's own
+// crash-after-first-bar mode completes a real Handshake and Run
+// (declaring one real EUR/USD H1 requirement), answers exactly the
+// first of this range's four bars, then os.Exit(1)s immediately —
+// with three further bars still to replay, Scheduler needs more RPCs
+// from a guest that is already gone. "run" must surface this as a
+// failure (via runWithExternalProcessMonitor or the resulting RPC
+// error either way), not a clean report.
+func TestVerticalSlice_RunWithStrategyExec_ProcessCrashReportedAsFailure(t *testing.T) {
+	t.Setenv("FAKEGUEST_MODE", "crash-after-first-bar")
+
+	runCmd := cmdbacktest.New()
+	runCmd.SetArgs([]string{
+		"run",
+		"--strategy-exec", fakeGuestPath,
+		"--symbol", "EURUSD",
+		"--interval", "H1",
+		"--from", "2024-01-08T00:00:00Z",
+		"--to", "2024-01-08T04:00:00Z",
+		"--adverse-distance", "0.01000",
+		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
+		"--output-dir", t.TempDir(),
+	})
+	err := runCmd.Execute()
+	require.Error(t, err, "a crashed external strategy process must not let the run be reported as successful")
 }
 
 // TestRun_StrategyExecAndConfigMutuallyExclusive proves the invalid
