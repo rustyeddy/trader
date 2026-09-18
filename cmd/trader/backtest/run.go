@@ -239,6 +239,15 @@ func filterOutEnvKey(env []string, key string) []string {
 	return out
 }
 
+// processMonitor is the *external.Process surface
+// runWithExternalProcessMonitor needs — narrowed to an interface so a
+// deterministic fake can exercise the exact simultaneous-readiness
+// race below without timing luck (review finding).
+type processMonitor interface {
+	Done() <-chan struct{}
+	Err() error
+}
+
 // runWithExternalProcessMonitor calls svc.Run, concurrently watching
 // process.Done() (a nil process — every non-external-strategy path —
 // disables this and simply calls svc.Run directly). If the external
@@ -249,7 +258,17 @@ func filterOutEnvKey(env []string, key string) []string {
 // at all, must not let an unaffected Scheduler finish "successfully"
 // with no idea the strategy driving it is already gone (review
 // finding).
-func runWithExternalProcessMonitor(ctx context.Context, svc *svcbacktest.Service, req svcbacktest.RunRequest, process *external.Process) (svcbacktest.RunResponse, error) {
+//
+// A successful resultCh receive is not, by itself, proof the guest
+// was still alive when the run finished: Go's select chooses
+// pseudo-randomly among simultaneously ready cases, so a process that
+// exits at (or just before) the exact instant svc.Run completes can
+// still be the resultCh arm selected, silently accepting success from
+// a guest that already crashed (second-round review finding — this is
+// exactly the failure class this function exists to close). A nil-err
+// result is therefore always followed by one more non-blocking check
+// of process.Done() before it is accepted.
+func runWithExternalProcessMonitor(ctx context.Context, svc *svcbacktest.Service, req svcbacktest.RunRequest, process processMonitor) (svcbacktest.RunResponse, error) {
 	if process == nil {
 		return svc.Run(ctx, req)
 	}
@@ -257,19 +276,34 @@ func runWithExternalProcessMonitor(ctx context.Context, svc *svcbacktest.Service
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 
-	type result struct {
-		resp svcbacktest.RunResponse
-		err  error
-	}
-	resultCh := make(chan result, 1)
+	resultCh := make(chan runResult, 1)
 	go func() {
 		resp, err := svc.Run(runCtx, req)
-		resultCh <- result{resp, err}
+		resultCh <- runResult{resp, err}
 	}()
 
+	return awaitRunWithProcessMonitor(cancelRun, resultCh, process)
+}
+
+// runResult is svc.Run's own return pair, carried over resultCh.
+type runResult struct {
+	resp svcbacktest.RunResponse
+	err  error
+}
+
+// awaitRunWithProcessMonitor is runWithExternalProcessMonitor's own
+// select/race-handling logic, extracted so it can be exercised
+// directly against a synthetic resultCh and a fake processMonitor —
+// runWithExternalProcessMonitor itself needs a real *svcbacktest.
+// Service, too heavy to construct just to prove this race is closed
+// (review finding: a deterministic test, not timing luck).
+func awaitRunWithProcessMonitor(cancelRun context.CancelFunc, resultCh <-chan runResult, process processMonitor) (svcbacktest.RunResponse, error) {
 	select {
 	case r := <-resultCh:
-		return r.resp, r.err
+		if r.err != nil {
+			return r.resp, r.err
+		}
+		return r.resp, checkProcessStillAlive(process)
 	case <-process.Done():
 		cancelRun()
 		r := <-resultCh
@@ -280,6 +314,24 @@ func runWithExternalProcessMonitor(ctx context.Context, svc *svcbacktest.Service
 			return r.resp, fmt.Errorf("external strategy process exited before the run completed")
 		}
 		return r.resp, r.err
+	}
+}
+
+// checkProcessStillAlive reports the process's own exit as an error
+// if it has already exited by the time this is called (a non-blocking
+// check: Done() open means "still running," not "will never exit"),
+// nil otherwise. Called only after svc.Run itself already reported
+// success — see runWithExternalProcessMonitor's own doc comment for
+// why this second check exists.
+func checkProcessStillAlive(process processMonitor) error {
+	select {
+	case <-process.Done():
+		if err := process.Err(); err != nil {
+			return fmt.Errorf("external strategy process exited unexpectedly before the run completed: %w", err)
+		}
+		return fmt.Errorf("external strategy process exited before the run completed")
+	default:
+		return nil
 	}
 }
 
@@ -633,6 +685,17 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		return err
 	}
 
+	// externalProcess is a concrete *external.Process, possibly nil;
+	// assigning a nil *external.Process directly to a processMonitor
+	// interface variable would produce a non-nil interface wrapping a
+	// nil pointer (Go's classic "typed nil" pitfall), defeating
+	// runWithExternalProcessMonitor's own "if process == nil" check —
+	// this explicit conversion keeps monitor a true nil interface on
+	// every non-external-strategy path.
+	var monitor processMonitor
+	if externalProcess != nil {
+		monitor = externalProcess
+	}
 	resp, err := runWithExternalProcessMonitor(ctx, svc, svcbacktest.RunRequest{
 		Strategy:           strat,
 		StrategyParameters: strategyParams,
@@ -640,7 +703,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		StartingCapital:    startingCash,
 		RiskFraction:       riskFraction,
 		AdverseDistance:    adverseDistance,
-	}, externalProcess)
+	}, monitor)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
+	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 )
 
 // TestNextBarOpenAfterEntry_UsesFollowingBarOpenNotEntryBarClose is the
@@ -188,4 +190,54 @@ func TestBuildExternalLaunchConfig_NoConfigLeavesEnvironUntouched(t *testing.T) 
 	require.NoError(t, err)
 	require.Empty(t, abs)
 	require.ElementsMatch(t, environ, cfg.Env)
+}
+
+// fakeProcessMonitor is a deterministic, controllable processMonitor
+// test double — real *external.Process crash timing cannot reliably
+// force the exact "both channels ready simultaneously" race
+// awaitRunWithProcessMonitor must close (review finding).
+type fakeProcessMonitor struct {
+	done chan struct{}
+	err  error
+}
+
+func (f *fakeProcessMonitor) Done() <-chan struct{} { return f.done }
+func (f *fakeProcessMonitor) Err() error            { return f.err }
+
+// TestAwaitRunWithProcessMonitor_SimultaneousReadinessStillDetectsCrash
+// is the second-round review regression: resultCh already holds a
+// successful result AND process.Done() is already closed before
+// select ever runs, forcing Go's "choose pseudo-randomly among ready
+// cases" behavior to be exercised on every run. The fix must detect
+// the crash regardless of which case select happens to pick — run it
+// many times to give an unfixed version every realistic chance to
+// pick the resultCh arm and slip through.
+func TestAwaitRunWithProcessMonitor_SimultaneousReadinessStillDetectsCrash(t *testing.T) {
+	crashErr := errors.New("boom")
+
+	for i := 0; i < 200; i++ {
+		resultCh := make(chan runResult, 1)
+		resultCh <- runResult{resp: svcbacktest.RunResponse{}, err: nil}
+
+		done := make(chan struct{})
+		close(done)
+		process := &fakeProcessMonitor{done: done, err: crashErr}
+
+		_, err := awaitRunWithProcessMonitor(func() {}, resultCh, process)
+		require.Error(t, err, "iteration %d: a process that already exited must not let a simultaneously-ready successful result slip through", i)
+		require.ErrorIs(t, err, crashErr)
+	}
+}
+
+// TestAwaitRunWithProcessMonitor_StillRunningAcceptsSuccess proves the
+// ordinary case is unaffected: a successful result with the process
+// still running (Done() open) is accepted with no error.
+func TestAwaitRunWithProcessMonitor_StillRunningAcceptsSuccess(t *testing.T) {
+	resultCh := make(chan runResult, 1)
+	resultCh <- runResult{resp: svcbacktest.RunResponse{}, err: nil}
+
+	process := &fakeProcessMonitor{done: make(chan struct{})} // never closed: still running
+
+	_, err := awaitRunWithProcessMonitor(func() {}, resultCh, process)
+	require.NoError(t, err)
 }
