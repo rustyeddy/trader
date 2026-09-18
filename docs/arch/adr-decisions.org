@@ -170,6 +170,7 @@ the original decided, use full supersession instead.
 | 060 | strategy.FillHandler — an authoritative per-bar fill-delivery capability (in adr-060-fill-handler-capability.org) | Accepted |
 | 061 | risk.SizeInput.ReferencePrice and a full-notional risk.Sizer (in adr-061-full-notional-sizer.org) | Accepted, partial amendment of 059 |
 | 062 | External Strategy Protocol v1 and out-of-process architecture (in adr-062-external-strategy-protocol-v1.org) | Accepted |
+| 063 | External strategy process manager and Unix-domain socket transport (in adr-063-external-strategy-process-manager.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -672,6 +673,28 @@ ADR-010 keeps its own =Proposed= status, unchanged by this ADR. No
 code is introduced by this ADR: =protocol/strategy/v1=,
 =adapters/strategy/external=, and =strategysdk= remain documented
 proposals for a follow-on implementation issue.
+
+Note: ADR-063 is likewise maintained in its own file,
+=docs/arch/adr-063-external-strategy-process-manager.org=, rather than
+inline in this registry. Its own Status section is authoritative.
+Issue #380 (depends on #377/#379, both merged) asks for the local
+process/transport lifecycle ADR-062 deliberately left undesigned
+("whichever guest process is launched ... simply dials in, knowing
+only that same path") — launching a configured strategy executable,
+creating the Unix-domain socket it dials into, enforcing startup/RPC
+deadlines, and terminating it cleanly at run end. This ADR settles the
+three concrete decisions that work required: a single environment
+variable (=TRADER_STRATEGY_SOCKET=, =external.SocketPathEnv=) as the
+socket-path convention a guest reads, since no flag-parsing convention
+can be assumed across guest languages; a startup path that races the
+guest's own Handshake against early child-process death rather than
+only a bare timeout; and package placement (=adapters/strategy/
+external=, alongside =Host=/=ExternalStrategyAdapter= from #379, not a
+new package). It also records a deliberately shallow post-startup
+supervision design — =Process= exposes =Done()=/=Err()= for a
+composition root to react to, rather than restarting a crashed guest
+itself — matching the issue's own "do not let process-management
+concerns leak into Scheduler/strategy logic" constraint.
 
 * ADR-001: Modular monolith before service decomposition
 

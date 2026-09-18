@@ -1,0 +1,185 @@
+#+title: ADR-063: External strategy process manager and Unix-domain socket transport
+#+startup: overview
+
+* Status
+
+Accepted
+
+* Context
+
+ADR-062 settled Strategy Protocol v1's wire schema and the host-side
+seam (=ExternalStrategyAdapter=, issue #379, delivered as the
+=adapters/strategy/external= package's =Host=/=grpcServer=/
+=runSession= actor). It deliberately left one piece undesigned:
+
+#+BEGIN_QUOTE
+the host is the long-lived process that need not know a guest's
+address in advance — it listens on a well-known socket path, and
+whichever guest process is launched (by whatever mechanism starts it)
+simply dials in, knowing only that same path.
+#+END_QUOTE
+
+Issue #380 (depends on #377 and #379, both merged) asks for that
+mechanism: launching the configured strategy executable, creating the
+Unix-domain socket it dials into, enforcing a startup deadline on the
+handshake, detecting an unexpected child exit, and terminating the
+child cleanly at run end — without leaking any of this into
+=Scheduler= or strategy logic, per the issue's own constraint.
+
+Three concrete decisions were undesignated before this could be
+implemented:
+
+1. How does the child process learn the socket path? Nothing in
+   ADR-062 or the =strategyv1= schema carries it — Handshake happens
+   only after the guest has already dialed in.
+2. What does "detect an unexpected child exit" mean operationally,
+   both during startup (before Handshake completes) and after a
+   session is already running?
+3. Where does this new code live: a new package, or an addition to
+   the existing host-side =adapters/strategy/external= package ADR-062
+   already placed under =adapters/=?
+
+* Decision
+
+** Package placement: same package, new file
+
+The process manager lives in =adapters/strategy/external= itself
+(=process.go=), not a new package. ADR-062 already placed
+=ExternalStrategyAdapter=/=Host= there as "a concrete adapter over an
+external boundary, not a domain package" (=package-boundaries.org='s
+own placement rule); launching and supervising the exact process that
+dials into that =Host= is the same adapter's own transport lifecycle,
+not a separate architectural boundary. Splitting it into its own
+package would only relocate tightly coupled code (a =Process= is
+meaningless without a =Host= to bind its listener to) without
+clarifying any dependency direction.
+
+** Socket path convention: one environment variable
+
+The child discovers its own socket path through a single environment
+variable, =TRADER_STRATEGY_SOCKET= (exported as
+=external.SocketPathEnv=), set on the child's process environment
+before it is started. No command-line flag convention is defined: an
+environment variable requires no assumption about the guest's own
+argument parsing (=strategysdk=, issue #381, or a hand-rolled guest in
+any language), matches how the equivalent =GRPC_*=/=NO_PROXY=-style
+conventions are conventionally passed to child processes, and needs no
+escaping rules for a path that might itself contain spaces.
+
+=Process= always sets the variable; it never assumes the guest also
+accepts a flag. A future language-specific SDK is free to additionally
+expose a flag that reads the same environment variable as its default,
+but that is the SDK's own concern, not this ADR's.
+
+** Startup: bounded by a timeout, aborted early by child death
+
+=Launch(ctx, cfg)= starts the child, opens the listener, and then
+races two outcomes: the guest completing =Handshake= (successfully
+claimed via the already-existing =Host.Strategy(ctx)=), or the child
+process exiting before that happens. A combined context
+(=cfg.StartupTimeout=, default =DefaultStartupTimeout= = 30s, layered
+under the caller's own =ctx=) bounds how long =Launch= waits; the
+child's own =cmd.Wait()= result is watched concurrently so a child that
+crashes immediately during startup fails fast with a clear "exited
+before completing handshake" error instead of waiting out the full
+timeout. Both paths cancel and clean up the listener/socket/child
+before =Launch= returns an error — a failed =Launch= never leaves a
+partially started child or a stale socket file behind.
+
+** Post-startup supervision: exposed, not auto-remediated
+
+Once =Launch= returns successfully, the returned =*Process= exposes
+=Done() <-chan struct{}= (closed when the child exits, for any reason)
+and =Err() error= (the child's exit result, valid once =Done= is
+closed). =Process= does not itself restart a crashed child, and does
+not itself feed this signal into any runner's slow/failed-strategy
+policy — issue #380's own constraint ("do not let process-management
+concerns leak into Scheduler/strategy logic") means this is
+deliberately a plain, polled/selected signal a composition root
+combines with whatever run-level policy it already has, the same way
+an in-process strategy's own panic or returned error is handled by the
+runner calling it, not by a lower-level component reacting on its
+behalf. A background goroutine does react to an *unexpected* exit
+(one not caused by =Process.Stop= itself) far enough to release
+resources — canceling the host's own serve context and removing the
+socket file/directory — so a crash the caller never explicitly
+=Stop=s does not leak a listener or a stale socket path.
+
+This is a narrower supervision claim than a live-trading "kill switch"
+or guard; it is the same trust boundary ADR-062 already established
+("trusted but isolated," not a security sandbox) applied to process
+lifecycle instead of wire protocol.
+
+** Shutdown: SIGTERM, grace period, SIGKILL, always clean up
+
+=Process.Stop(ctx)= sends =SIGTERM=, waits up to
+=cfg.ShutdownGrace= (default =DefaultShutdownGrace= = 5s, bounded
+additionally by =ctx=) for the child to exit on its own, and sends
+=SIGKILL= if it has not. =Stop= always tears down the host's serve
+loop and removes the socket file (and the temporary directory
+=Launch= created for it, if any) before returning, regardless of which
+of the two signals actually ended the child, and is safe to call more
+than once (idempotent via the same cleanup path the unexpected-exit
+goroutine uses). =Stop= does not itself send a graceful
+=SessionEnd=/=Close= protocol message first — a caller that wants that
+softer sequence calls the =strategy.Strategy= value's own =Close=
+method (core.go, issue #379) before calling =Stop=; =Stop='s own job is
+guaranteeing the OS-level process and socket are gone, not
+renegotiating the wire protocol.
+
+** stderr: captured and logged; stdout deliberately not connected
+
+The child's stderr is piped through a small line-buffering
+=io.Writer= that logs each complete line via the injected
+=*slog.Logger= (never through the child's inherited stdout/stderr
+file descriptors directly, and never silently discarded) — "useful
+stderr/logging on failure" per the issue's own acceptance criterion.
+=exec.Cmd.Stdout= is left unset, which =os/exec= itself connects to
+=/dev/null=, not the host process's own stdout: v1's guest processes
+speak gRPC over the Unix-domain socket, not stdio, so stdout is not a
+protocol channel, and leaving it unconnected avoids interleaving
+unrelated child output with the host's own stdout. A future issue that
+wants stdout captured the same way stderr is would extend =Process=
+the same way, not assume inheritance was ever the default.
+
+* Consequences
+
+- A configured strategy executable can be launched, connected to, and
+  torn down without =Scheduler= or =strategy= packages knowing a
+  subprocess or socket exists at all — they still only ever see a
+  =strategy.Strategy= value (ADR-062's own architectural requirement,
+  reaffirmed).
+- The environment-variable convention is a real, load-bearing
+  contract now: any future guest SDK (=strategysdk=, issue #381) must
+  read =external.SocketPathEnv= (or the literal
+  =TRADER_STRATEGY_SOCKET= string) to find its socket.
+- Process supervision is deliberately shallow (detect and expose, not
+  restart or re-negotiate) — a future live-trading guard layer that
+  wants automatic reconnect/backoff builds on top of =Done()=/=Err()=,
+  not inside =Process= itself.
+- Tests that launch a real child process must always reach a =Stop=
+  call (typically via =t.Cleanup=) to avoid leaking sockets or zombie
+  processes; =Process= does not rely on Go finalizers or process-exit
+  hooks for this.
+
+* Alternatives Considered
+
+- *Command-line flag instead of an environment variable.* Rejected:
+  requires the process manager to assume a specific flag-parsing
+  convention (or worse, a specific flag name) for every possible guest
+  language/runtime, where an environment variable requires no argument
+  parsing.
+- *A well-known fixed socket path (for example under =/tmp=) instead of
+  a per-launch generated one.* Rejected as the default: a fixed path
+  cannot support more than one concurrent =Process= on one host and
+  risks colliding with a stale file left by an earlier crashed run.
+  =LaunchConfig.SocketPath= still allows a caller to pin an explicit
+  path when it genuinely wants one.
+- *Automatic child restart on unexpected exit.* Rejected for =v1=: this
+  is exactly the kind of runner-level policy decision issue #380 itself
+  asks to keep out of process-management code; a crashed external
+  strategy should be handled the same way a panicking in-process
+  strategy is, by whatever runner/guard policy already exists, not by
+  a second, parallel restart mechanism invented here.
+- *A new top-level package for process management.* Rejected: see
+  "Package placement" above.
