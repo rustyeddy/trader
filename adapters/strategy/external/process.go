@@ -3,6 +3,7 @@ package external
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -424,6 +425,19 @@ func clearStaleSocket(path string) error {
 	if dialErr == nil {
 		_ = conn.Close()
 		return fmt.Errorf("external: launch: a process is already listening on %s", path)
+	}
+
+	// A failed dial is not, by itself, proof that nothing owns this
+	// path (review finding): only the specific errors that positively
+	// indicate an unbound, stale Unix-domain socket — ECONNREFUSED (no
+	// listener behind the pathname), tolerating ENOENT (the path
+	// vanished between the Lstat above and this dial, so there is
+	// nothing left to remove) — authorize removal. Every other dial
+	// failure (permission denied, a transient resource error, and so
+	// on) fails closed, leaving the path untouched, rather than risk
+	// unlinking a live socket this check simply could not verify.
+	if !errors.Is(dialErr, syscall.ECONNREFUSED) && !errors.Is(dialErr, syscall.ENOENT) {
+		return fmt.Errorf("external: launch: %s exists but could not be verified as stale, refusing to remove it: %w", path, dialErr)
 	}
 
 	if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {

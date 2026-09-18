@@ -1,6 +1,9 @@
 package external
 
 import (
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,4 +60,58 @@ func TestTrimTrailingNewline(t *testing.T) {
 	require.Equal(t, "abc", trimTrailingNewline("abc\n"))
 	require.Equal(t, "abc", trimTrailingNewline("abc\r\n"))
 	require.Equal(t, "abc", trimTrailingNewline("abc"))
+}
+
+// TestClearStaleSocket_NonRefusalDialErrorFailsClosed is the review's
+// own follow-up finding: a failed dial alone is not proof a socket is
+// stale. Only ECONNREFUSED (and ENOENT) authorize removal; every other
+// dial failure — here, a permission error deliberately injected via
+// chmod — must leave the path untouched rather than risk unlinking a
+// socket this check could not actually verify.
+func TestClearStaleSocket_NonRefusalDialErrorFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file permission checks are bypassed, so this test cannot inject a non-ECONNREFUSED dial failure")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.sock")
+
+	stale, err := net.Listen("unix", path)
+	require.NoError(t, err)
+	stale.(*net.UnixListener).SetUnlinkOnClose(false) // leave the file behind once closed
+	require.NoError(t, stale.Close())
+
+	require.NoError(t, os.Chmod(path, 0o000)) // dial now fails with EACCES, not ECONNREFUSED
+
+	err = clearStaleSocket(path)
+	require.Error(t, err)
+
+	_, statErr := os.Lstat(path)
+	require.NoError(t, statErr, "the socket file must not have been removed on an unclassifiable dial error")
+
+	require.NoError(t, os.Chmod(path, 0o600)) // restore so t.TempDir's own cleanup can remove it
+}
+
+// TestClearStaleSocket_ECONNREFUSEDIsRemoved proves the positive case
+// still works: a genuinely stale socket (dial refused) is removed.
+func TestClearStaleSocket_ECONNREFUSEDIsRemoved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.sock")
+
+	stale, err := net.Listen("unix", path)
+	require.NoError(t, err)
+	stale.(*net.UnixListener).SetUnlinkOnClose(false)
+	require.NoError(t, stale.Close())
+
+	require.NoError(t, clearStaleSocket(path))
+
+	_, statErr := os.Lstat(path)
+	require.True(t, os.IsNotExist(statErr), "a genuinely stale socket should have been removed")
+}
+
+// TestClearStaleSocket_MissingPathIsANoOp proves a path that does not
+// exist at all requires no action and reports no error.
+func TestClearStaleSocket_MissingPathIsANoOp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.sock")
+	require.NoError(t, clearStaleSocket(path))
 }
