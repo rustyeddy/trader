@@ -20,6 +20,15 @@ import (
 // belongs — and so is config itself, which necessarily calls os.Getenv and
 // friends to implement the environment source.
 //
+// strategysdk is exempt for the same reason as cmd/, not a relaxation
+// of it: strategysdk.Serve reads TRADER_STRATEGY_SOCKET
+// (adapters/strategy/external's own ADR-063 launch contract) to find
+// the Unix-domain socket it must dial, and is itself this process's
+// own composition root — the guest-side equivalent of a cmd/ binary's
+// main(), just packaged as an importable library because the real
+// main() lives in an external strategy author's own repository, not
+// this one (issue #381, ADR-062's own "Go SDK/runtime" section).
+//
 // Unlike num's equivalent check (which duplicates a guarantee the Go
 // compiler already enforces via internal/ visibility), nothing stops a
 // domain package from importing "os" or "flag" today — this test is the
@@ -27,7 +36,7 @@ import (
 
 // exemptPrefixes are repository-relative path prefixes allowed to touch the
 // process environment or command-line flags directly.
-var exemptPrefixes = []string{"config", "cmd", "test", ".git"}
+var exemptPrefixes = []string{"config", "cmd", "test", "strategysdk", ".git"}
 
 func TestDomainPackagesDoNotReadEnvOrFlags(t *testing.T) {
 	root := repoRoot(t)
