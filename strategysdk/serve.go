@@ -71,7 +71,17 @@ func defaultRunConfig() runConfig {
 // guest process's own diagnostics are visible unless the caller
 // explicitly chooses otherwise.
 func WithLogger(l *slog.Logger) Option {
-	return func(c *runConfig) { c.logger = l }
+	return func(c *runConfig) {
+		// A nil l must not overwrite the non-nil default: Environment's
+		// own doc comment promises Logger is never nil, and this option
+		// applies after defaultRunConfig has already populated a real
+		// logger — silently accepting nil here would break that promise
+		// for any caller that passes a nil *slog.Logger, intentionally
+		// or not (review finding).
+		if l != nil {
+			c.logger = l
+		}
+	}
 }
 
 // WithHandshakeTimeout overrides DefaultHandshakeTimeout.
@@ -138,7 +148,17 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 
 	capabilities := negotiatedCapabilities(strat)
 
-	wireDescriptor, err := toWireDescriptor(strat.Describe())
+	// Describe() is called exactly once and its result reused for both
+	// the wire Handshake and guestRun's own local requirements set.
+	// ADR-062 defines the Handshake descriptor as the single
+	// declaration used for all later GetHistoryBars scoping; calling
+	// Describe() a second time to build guestRun.requirements let a
+	// stateful, time-sensitive, or simply buggy implementation diverge
+	// from what the host actually accepted — locally authorizing a
+	// requirement the host never saw, or rejecting one it did (review
+	// finding).
+	descriptor := strat.Describe()
+	wireDescriptor, err := toWireDescriptor(descriptor)
 	if err != nil {
 		return fmt.Errorf("strategysdk: describe: %w", err)
 	}
@@ -189,7 +209,7 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 		sessionID:          hsResp.GetSessionId(),
 		strat:              strat,
 		fillHandler:        asFillHandler(strat),
-		requirements:       strat.Describe().Requirements,
+		requirements:       descriptor.Requirements,
 		logger:             cfg.logger,
 		historyBarsTimeout: cfg.historyBarsTimeout,
 	}

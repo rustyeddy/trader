@@ -18,6 +18,7 @@ import (
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/logging"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/strategysdk"
@@ -423,4 +424,111 @@ func TestServeConn_WithLoggerIsUsedForEnvironment(t *testing.T) {
 		}
 		return false
 	}, 2*time.Second, 20*time.Millisecond, "the logger passed via WithLogger should have received the guest's own log record")
+}
+
+// describeOnceStrategy returns a different Descriptor.Requirements set
+// on its second and later Describe() calls, simulating a stateful,
+// time-sensitive, or simply buggy Describe implementation — used to
+// prove ServeConn calls Describe() exactly once and reuses that same
+// value for both the wire Handshake and its own local
+// history-authorization set (review finding).
+type describeOnceStrategy struct {
+	*testGuestStrategy
+	callCount int
+	second    strategysdk.Descriptor
+}
+
+func (s *describeOnceStrategy) Describe() strategysdk.Descriptor {
+	s.callCount++
+	if s.callCount == 1 {
+		return s.descriptor
+	}
+	return s.second
+}
+
+// TestServeConn_DescribeCalledOnceAndReused proves guestRun's own
+// history-authorization set is built from the exact Descriptor sent at
+// Handshake, not from a second, possibly divergent Describe() call.
+func TestServeConn_DescribeCalledOnceAndReused(t *testing.T) {
+	h := newTestHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first := simpleSDKDescriptor(t, "sdk_guest") // requires EUR/USD H1
+	otherInst := instrument.CurrencyPairID(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	iv := mustInterval(t)
+	second := strategysdk.Descriptor{
+		Name:    "sdk_guest",
+		Version: "1.0",
+		Requirements: []strategysdk.DataRequirement{
+			{Instrument: otherInst, Interval: iv}, // a requirement never sent at Handshake
+		},
+	}
+
+	base := newTestGuestStrategy(first)
+	guest := &describeOnceStrategy{testGuestStrategy: base, second: second}
+
+	historyCh := make(chan struct {
+		ok  bool
+		err error
+	}, 1)
+	guest.onBar = func(_ strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+		_, ok, err := view.HistoryBars(otherInst, iv, 1)
+		historyCh <- struct {
+			ok  bool
+			err error
+		}{ok, err}
+		return nil, nil, nil
+	}
+
+	conn := h.dial()
+	go func() { _ = strategysdk.ServeConn(ctx, conn, guest) }()
+
+	strat, err := h.host.Strategy(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, strat.Start(context.Background(), testEnvironment(t)))
+	<-guest.startedCh
+
+	event := strategy.BarEvent{
+		Instrument: first.Requirements[0].Instrument,
+		Interval:   first.Requirements[0].Interval,
+		Bar:        testBar(t),
+	}
+	_, err = strat.OnBar(context.Background(), event, fakeView{acct: testFlatSnapshot(t)})
+	require.NoError(t, err)
+
+	select {
+	case res := <-historyCh:
+		require.False(t, res.ok, "GBP/USD H1 was never declared at Handshake — a second, divergent Describe() call must not locally authorize it")
+		require.NoError(t, res.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnBar was never delivered to the guest")
+	}
+	require.GreaterOrEqual(t, guest.callCount, 1)
+}
+
+// TestWithLogger_NilDoesNotOverrideDefault proves passing a nil
+// *slog.Logger to WithLogger leaves the non-nil default in place,
+// honoring Environment.Logger's own "never nil" contract (review
+// finding).
+func TestWithLogger_NilDoesNotOverrideDefault(t *testing.T) {
+	h := newTestHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
+
+	conn := h.dial()
+	go func() { _ = strategysdk.ServeConn(ctx, conn, guest, strategysdk.WithLogger(nil)) }()
+
+	strat, err := h.host.Strategy(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, strat.Start(context.Background(), testEnvironment(t)))
+
+	select {
+	case env := <-guest.startedCh:
+		require.NotNil(t, env.Logger, "Environment.Logger must never be nil, even when WithLogger(nil) is passed")
+	case <-time.After(2 * time.Second):
+		t.Fatal("guest Start was never called")
+	}
 }
