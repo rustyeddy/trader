@@ -1,6 +1,7 @@
 package strategysdk
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -36,6 +37,20 @@ func TestFromWireBar(t *testing.T) {
 
 func TestFromWireBar_NilRejected(t *testing.T) {
 	_, err := fromWireBar(nil)
+	require.ErrorIs(t, err, ErrInvalidWireValue)
+}
+
+func TestFromWireBar_InvalidOHLCRejected(t *testing.T) {
+	w := testWireBar()
+	w.High = "1.0" // now below Low ("1.099")
+	_, err := fromWireBar(w)
+	require.ErrorIs(t, err, ErrInvalidWireValue)
+}
+
+func TestFromWireBar_AvgSpreadAboveMaxRejected(t *testing.T) {
+	w := testWireBar()
+	w.AvgSpread = "1.0" // now above MaxSpread ("0.0002")
+	_, err := fromWireBar(w)
 	require.ErrorIs(t, err, ErrInvalidWireValue)
 }
 
@@ -243,6 +258,34 @@ func TestFromWireFillEvent_InvalidQuantityRejected(t *testing.T) {
 func TestFromWirePositionSnapshot_InvalidSideRejected(t *testing.T) {
 	w := &v1.PositionSnapshot{InstrumentId: "fx:EUR/USD", Side: v1.PositionSide(99)}
 	_, err := fromWirePositionSnapshot(w)
+	require.ErrorIs(t, err, ErrInvalidWireValue)
+}
+
+func TestFromWirePositionSnapshot_FlatWithAvgPriceRejected(t *testing.T) {
+	w := &v1.PositionSnapshot{InstrumentId: "fx:EUR/USD", Side: v1.PositionSide_POSITION_SIDE_FLAT, AvgPrice: "1.1"}
+	_, err := fromWirePositionSnapshot(w)
+	require.ErrorIs(t, err, ErrInvalidWireValue)
+}
+
+func TestFromWirePositionSnapshot_LongWithoutAvgPriceRejected(t *testing.T) {
+	w := &v1.PositionSnapshot{InstrumentId: "fx:EUR/USD", Side: v1.PositionSide_POSITION_SIDE_LONG}
+	_, err := fromWirePositionSnapshot(w)
+	require.ErrorIs(t, err, ErrInvalidWireValue)
+}
+
+func TestToWireDataRequirement_WarmupBarsAboveInt32RangeRejected(t *testing.T) {
+	iv, err := marketdata.NewInterval(marketdata.UnitDay, 1)
+	require.NoError(t, err)
+	inst := instrument.CurrencyPairID(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	_, err = toWireDataRequirement(DataRequirement{Instrument: inst, Interval: iv, WarmupBars: math.MaxInt32 + 1})
+	require.ErrorIs(t, err, ErrInvalidWireValue)
+}
+
+func TestToWireDescribedIntent_TargetExposureZeroQuantityRejected(t *testing.T) {
+	inst := instrument.CurrencyPairID(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	zero := num.Quantity{}
+	bad := DescribedIntent{Kind: order.IntentTargetExposure, Instrument: inst, Side: order.Buy, Quantity: &zero}
+	_, err := toWireDescribedIntent(bad)
 	require.ErrorIs(t, err, ErrInvalidWireValue)
 }
 

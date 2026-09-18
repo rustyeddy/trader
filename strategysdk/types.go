@@ -100,11 +100,21 @@ type View interface {
 
 	// HistoryBars returns up to n of the most-recently-closed bars for
 	// (instID, interval), strictly before the current callback's own
-	// timestamp, oldest-first — mirroring strategy.History.HistoryBars'
-	// own contract exactly. ok is false if (instID, interval) was
-	// never declared as one of this strategy's own
-	// Descriptor.Requirements.
-	HistoryBars(instID instrument.ID, interval marketdata.Interval, n int) (bars []marketdata.Bar, ok bool)
+	// timestamp, oldest-first — the same ordering
+	// strategy.History.HistoryBars' own in-process contract documents,
+	// but with an explicit third result strategy.History does not
+	// have: ok == false alone means exactly "not available" — either
+	// (instID, interval) was never declared as one of this strategy's
+	// own Descriptor.Requirements, or this View was built for an
+	// OnFill callback, which v1 never scopes history to at all — while
+	// a non-nil err reports a genuine transport/RPC failure calling
+	// the host, distinctly (a dead host must never look identical to
+	// an ordinary undeclared-requirement response). n <= 0 is not an
+	// error: it reports an empty, non-nil slice with ok == true when
+	// the requirement is otherwise declared, mirroring
+	// backtest.Scheduler's own in-process History implementation
+	// exactly.
+	HistoryBars(instID instrument.ID, interval marketdata.Interval, n int) (bars []marketdata.Bar, ok bool, err error)
 }
 
 // Environment is Start's own injected-capability bundle — strategysdk's

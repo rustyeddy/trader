@@ -2,6 +2,7 @@ package strategysdk
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
@@ -46,7 +47,7 @@ func fromWireBar(w *v1.Bar) (marketdata.Bar, error) {
 		return marketdata.Bar{}, fmt.Errorf("%w: ticks must not be negative", ErrInvalidWireValue)
 	}
 
-	return marketdata.Bar{
+	b := marketdata.Bar{
 		Time:      time.Unix(0, w.GetTimeUnixNanos()).UTC(),
 		Open:      open,
 		High:      high,
@@ -55,7 +56,16 @@ func fromWireBar(w *v1.Bar) (marketdata.Bar, error) {
 		AvgSpread: avgSpread,
 		MaxSpread: maxSpread,
 		Ticks:     w.GetTicks(),
-	}, nil
+	}
+	// Every field parsed individually above; this additionally checks
+	// the *relationships* between them (OHLC bounds, avg <= max
+	// spread, a non-zero time) that marketdata.Bar itself defines as
+	// invariants — a malformed or malicious peer could otherwise hand
+	// strategy code an internally inconsistent Bar (review finding).
+	if err := b.Validate(); err != nil {
+		return marketdata.Bar{}, fmt.Errorf("%w: %v", ErrInvalidWireValue, err)
+	}
+	return b, nil
 }
 
 // fromWireBars reconstructs bars in the order given — oldest-first,
@@ -109,6 +119,16 @@ func fromWirePositionSnapshot(w *v1.PositionSnapshot) (PositionSnapshot, error) 
 	avgPrice, err := parseOptionalPrice("avg_price", w.GetAvgPrice())
 	if err != nil {
 		return PositionSnapshot{}, err
+	}
+	// order.Position's own invariant, restated in PositionSnapshot's
+	// own doc comment: AvgPrice is nil exactly when Side is Flat.
+	// Accepting the mismatched combinations would hand strategy code
+	// an impossible position (review finding).
+	if side == order.Flat && avgPrice != nil {
+		return PositionSnapshot{}, fmt.Errorf("%w: a flat position must not have an average price", ErrInvalidWireValue)
+	}
+	if side != order.Flat && avgPrice == nil {
+		return PositionSnapshot{}, fmt.Errorf("%w: a %s position must have an average price", ErrInvalidWireValue, side)
 	}
 	return PositionSnapshot{Instrument: instID, Side: side, AvgPrice: avgPrice}, nil
 }
@@ -173,6 +193,9 @@ func toWireDataRequirement(r DataRequirement) (*v1.DataRequirement, error) {
 	if r.WarmupBars < 0 {
 		return nil, fmt.Errorf("%w: warmup_bars must not be negative", ErrInvalidWireValue)
 	}
+	if r.WarmupBars > math.MaxInt32 {
+		return nil, fmt.Errorf("%w: warmup_bars %d exceeds int32 range", ErrInvalidWireValue, r.WarmupBars)
+	}
 	interval, err := toWireInterval(r.Interval)
 	if err != nil {
 		return nil, err
@@ -222,6 +245,14 @@ func toWireDescribedIntent(d DescribedIntent) (*v1.DescribedIntent, error) {
 	}
 	if requireQuantity && d.Quantity == nil {
 		return nil, fmt.Errorf("%w: quantity is required for intent kind %v", ErrInvalidWireValue, d.Kind)
+	}
+	if requireQuantity && d.Quantity != nil && d.Quantity.IsZero() {
+		// order.NewIntent itself requires a positive Quantity for
+		// TargetExposure; a zero (but non-nil) Quantity would
+		// otherwise cross the wire only to be rejected by the host,
+		// contradicting this function's own "malformed values fail at
+		// the guest boundary" contract (review finding).
+		return nil, fmt.Errorf("%w: quantity must be positive for intent kind %v", ErrInvalidWireValue, d.Kind)
 	}
 	if !requireQuantity && d.Quantity != nil {
 		return nil, fmt.Errorf("%w: quantity must not be set for intent kind %v", ErrInvalidWireValue, d.Kind)

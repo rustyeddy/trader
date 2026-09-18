@@ -114,11 +114,19 @@ group — matching `.WithCorrelation`'s own token to a
 
 ```go
 view.Account() AccountSnapshot
-view.HistoryBars(inst, interval, n) (bars []marketdata.Bar, ok bool)
+view.HistoryBars(inst, interval, n) (bars []marketdata.Bar, ok bool, err error)
 ```
 
 `HistoryBars` is scoped to the exact requirements you declared in
-`Describe`; asking for anything else returns `ok == false`.
+`Describe`; asking for anything else returns `ok == false, err == nil`.
+A non-nil `err` is a genuine transport/RPC failure talking to the
+host, distinct from "not declared" — check `err` first.
+
+**During `OnFill`, `HistoryBars` always returns `ok == false, err ==
+nil`, never an RPC.** Strategy Protocol v1 scopes `GetHistoryBars` to
+an in-flight `BarEvent` callback only (the same restriction the
+in-process `strategy.FillHandler` boundary already has); there is no
+separate fill-time history view.
 
 ### Handling fills (optional)
 

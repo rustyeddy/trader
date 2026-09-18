@@ -10,11 +10,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/rustyeddy/trader/adapters/strategy/external"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/logging"
 	"github.com/rustyeddy/trader/marketdata"
+	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/strategysdk"
 )
@@ -120,7 +124,8 @@ func TestServeConn_HistoryBarsRoundTrip(t *testing.T) {
 	historyResult := make(chan []marketdata.Bar, 1)
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
 	guest.onBar = func(event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
-		bars, ok := view.HistoryBars(inst, iv, 5)
+		bars, ok, err := view.HistoryBars(inst, iv, 5)
+		require.NoError(t, err)
 		require.True(t, ok)
 		historyResult <- bars
 		return nil, nil, nil
@@ -207,4 +212,215 @@ func TestServeConn_SessionEndFromHostReturnsCleanly(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("ServeConn did not return after the host's own SessionEnd")
 	}
+}
+
+// acceptingNoCapabilityHost accepts every Handshake but never
+// negotiates any capability the guest requested — used to prove
+// ServeConn's own capability-verification rejects this rather than
+// silently proceeding.
+type acceptingNoCapabilityHost struct {
+	v1.UnimplementedStrategyHostServiceServer
+}
+
+func (acceptingNoCapabilityHost) Handshake(_ context.Context, req *v1.HandshakeRequest) (*v1.HandshakeResponse, error) {
+	return &v1.HandshakeResponse{
+		Accepted:        true,
+		ProtocolVersion: v1.ProtocolVersion,
+		SessionId:       "sess-test",
+		Capabilities:    nil, // deliberately drops whatever req.GetCapabilities() requested
+	}, nil
+}
+
+func dialFakeServer(t *testing.T, srv v1.StrategyHostServiceServer) *grpc.ClientConn {
+	t.Helper()
+	lis := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	v1.RegisterStrategyHostServiceServer(server, srv)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(server.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+// TestServeConn_CapabilityNotNegotiatedRejected proves a guest that
+// implements FillHandler, but whose Handshake is accepted without
+// CAPABILITY_FILL_HANDLER actually negotiated, fails explicitly
+// rather than silently running without fills.
+func TestServeConn_CapabilityNotNegotiatedRejected(t *testing.T) {
+	conn := dialFakeServer(t, acceptingNoCapabilityHost{})
+
+	guest := &testGuestStrategyWithFill{testGuestStrategy: newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))}
+	err := strategysdk.ServeConn(context.Background(), conn, guest)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "capability")
+}
+
+// hangingHandshakeHost never responds to Handshake, used to prove
+// WithHandshakeTimeout actually bounds the wait.
+type hangingHandshakeHost struct {
+	v1.UnimplementedStrategyHostServiceServer
+}
+
+func (hangingHandshakeHost) Handshake(ctx context.Context, _ *v1.HandshakeRequest) (*v1.HandshakeResponse, error) {
+	<-ctx.Done() // block until the caller's own per-RPC deadline fires
+	return nil, ctx.Err()
+}
+
+func TestServeConn_HandshakeTimeout(t *testing.T) {
+	conn := dialFakeServer(t, hangingHandshakeHost{})
+	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
+
+	start := time.Now()
+	err := strategysdk.ServeConn(context.Background(), conn, guest, strategysdk.WithHandshakeTimeout(200*time.Millisecond))
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	require.Less(t, elapsed, 2*time.Second, "ServeConn should fail once WithHandshakeTimeout elapses, not hang forever")
+}
+
+// hangingHistoryHost accepts Handshake/Run normally but never answers
+// GetHistoryBars, used to prove WithHistoryBarsTimeout bounds that
+// RPC too.
+type hangingHistoryHost struct {
+	v1.UnimplementedStrategyHostServiceServer
+}
+
+func (hangingHistoryHost) Handshake(_ context.Context, _ *v1.HandshakeRequest) (*v1.HandshakeResponse, error) {
+	return &v1.HandshakeResponse{Accepted: true, ProtocolVersion: v1.ProtocolVersion, SessionId: "sess-test"}, nil
+}
+
+func (hangingHistoryHost) Run(stream v1.StrategyHostService_RunServer) error {
+	if _, err := stream.Recv(); err != nil { // RunOpen
+		return err
+	}
+	if err := stream.Send(&v1.RunServerMessage{Payload: &v1.RunServerMessage_SessionStart{
+		SessionStart: &v1.SessionStart{RunId: "run-test", StartTimeUnixNanos: time.Now().UnixNano()},
+	}}); err != nil {
+		return err
+	}
+	inst := "fx:EUR/USD"
+	if err := stream.Send(&v1.RunServerMessage{Payload: &v1.RunServerMessage_BarEvent{BarEvent: &v1.BarEvent{
+		Sequence:     1,
+		InstrumentId: inst,
+		Interval:     &v1.Interval{Unit: v1.IntervalUnit_INTERVAL_UNIT_HOUR, Count: 1},
+		Bar:          testWireBarForHost(),
+		Account:      &v1.AccountSnapshot{AccountId: "acc", Currency: "USD"},
+	}}}); err != nil {
+		return err
+	}
+	_, err := stream.Recv() // OnBarResponse
+	return err
+}
+
+func (hangingHistoryHost) GetHistoryBars(ctx context.Context, _ *v1.GetHistoryBarsRequest) (*v1.GetHistoryBarsResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func testWireBarForHost() *v1.Bar {
+	return &v1.Bar{
+		TimeUnixNanos: time.Date(2024, time.January, 2, 15, 0, 0, 0, time.UTC).UnixNano(),
+		Open:          "1.1", High: "1.105", Low: "1.099", Close: "1.102",
+		AvgSpread: "0.0001", MaxSpread: "0.0002", Ticks: 1,
+	}
+}
+
+func TestServeConn_HistoryBarsTimeout(t *testing.T) {
+	conn := dialFakeServer(t, hangingHistoryHost{})
+	inst := eurUSD(t)
+	iv := mustInterval(t)
+
+	guest := newTestGuestStrategy(strategysdk.Descriptor{
+		Name: "sdk_guest", Version: "1.0",
+		Requirements: []strategysdk.DataRequirement{{Instrument: inst, Interval: iv}},
+	})
+	errCh := make(chan error, 1)
+	guest.onBar = func(event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+		_, _, err := view.HistoryBars(inst, iv, 5)
+		errCh <- err
+		return nil, nil, nil
+	}
+
+	go func() {
+		_ = strategysdk.ServeConn(context.Background(), conn, guest, strategysdk.WithHistoryBarsTimeout(200*time.Millisecond))
+	}()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err, "a hanging GetHistoryBars RPC must surface as a real error, not ok=false")
+	case <-time.After(3 * time.Second):
+		t.Fatal("HistoryBars did not return after WithHistoryBarsTimeout elapsed")
+	}
+}
+
+// endlessRunHost accepts Handshake/RunOpen but never sends SessionEnd
+// before ending the stream — used to prove a bare EOF without
+// SessionEnd is treated as abnormal termination, not success.
+type endlessRunHost struct {
+	v1.UnimplementedStrategyHostServiceServer
+}
+
+func (endlessRunHost) Handshake(_ context.Context, _ *v1.HandshakeRequest) (*v1.HandshakeResponse, error) {
+	return &v1.HandshakeResponse{Accepted: true, ProtocolVersion: v1.ProtocolVersion, SessionId: "sess-test"}, nil
+}
+
+func (endlessRunHost) Run(stream v1.StrategyHostService_RunServer) error {
+	if _, err := stream.Recv(); err != nil { // RunOpen
+		return err
+	}
+	if err := stream.Send(&v1.RunServerMessage{Payload: &v1.RunServerMessage_SessionStart{
+		SessionStart: &v1.SessionStart{RunId: "run-test", StartTimeUnixNanos: time.Now().UnixNano()},
+	}}); err != nil {
+		return err
+	}
+	return nil // ends the stream (EOF client-side) without ever sending session_end
+}
+
+func TestServeConn_EOFWithoutSessionEndIsAbnormal(t *testing.T) {
+	conn := dialFakeServer(t, endlessRunHost{})
+	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
+
+	err := strategysdk.ServeConn(context.Background(), conn, guest)
+	require.Error(t, err, "a stream that ends without session_end must not look like a successful run")
+}
+
+// TestServeConn_WithLoggerIsUsedForEnvironment proves WithLogger's
+// own logger is exactly the one a guest's Start sees on
+// Environment.Logger — not a silently discarding default.
+func TestServeConn_WithLoggerIsUsedForEnvironment(t *testing.T) {
+	h := newTestHarness(t)
+	ctx, cancelGuest := context.WithCancel(context.Background())
+	defer cancelGuest()
+
+	logger, rec := logging.Capture()
+	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
+
+	conn := h.dial()
+	go func() { _ = strategysdk.ServeConn(ctx, conn, guest, strategysdk.WithLogger(logger)) }()
+
+	strat, err := h.host.Strategy(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, strat.Start(context.Background(), testEnvironment(t)))
+
+	select {
+	case env := <-guest.startedCh:
+		env.Logger.Info("hello from guest")
+	case <-time.After(2 * time.Second):
+		t.Fatal("guest Start was never called")
+	}
+
+	require.Eventually(t, func() bool {
+		for _, r := range rec.Records() {
+			if r.Message == "hello from guest" {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "the logger passed via WithLogger should have received the guest's own log record")
 }
