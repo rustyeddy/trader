@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 
 	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
 	"github.com/rustyeddy/trader/adapters/journal/jsonl"
+	"github.com/rustyeddy/trader/adapters/strategy/external"
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/instrument"
@@ -23,6 +25,20 @@ import (
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/strategy/emacross"
 )
+
+// strategyConfigPathEnv names the environment variable "trader
+// backtest run" sets on an external strategy child process (alongside
+// external.SocketPathEnv, which Launch always sets) when --strategy-
+// config is given. This is a CLI-owned convention, not part of
+// Strategy Protocol v1 itself (ADR-062 defines no config-handoff
+// mechanism — a guest's own configuration schema is entirely its
+// author's business); it exists only so an author who does want a
+// config file does not have to invent their own argv convention.
+// Named the same way external.SocketPathEnv is (an environment
+// variable, not a CLI flag) for the identical reason that constant's
+// own doc comment gives: no command-line argument-parsing convention
+// can be assumed across every possible guest language/runtime.
+const strategyConfigPathEnv = "TRADER_STRATEGY_CONFIG"
 
 // runFlags holds "trader backtest run"'s own flag values.
 type runFlags struct {
@@ -42,6 +58,10 @@ type runFlags struct {
 	fastPeriod   int
 	slowPeriod   int
 	allowedSide  string
+
+	strategyExec   string
+	strategyArgs   []string
+	strategyConfig string
 
 	dataStoreRoot string
 	dataRawRoot   string
@@ -73,6 +93,18 @@ func newRunCmd() *cobra.Command {
 			"(issue #247) and runs the real EMA crossover strategy\n" +
 			"(issue #252) instead of the demo strategy, for a single\n" +
 			"instrument; any explicit flag above still overrides its value.\n\n" +
+			"--strategy-exec runs an out-of-tree strategy executable instead\n" +
+			"(issue #382, ADR-062/ADR-063): trader launches it, completes\n" +
+			"Strategy Protocol v1's Handshake, and drives it exactly like an\n" +
+			"in-tree strategy for the rest of the run -- the executable's own\n" +
+			"Descriptor determines the instrument/interval universe, so\n" +
+			"--symbol/--interval must still be given to publish canonical\n" +
+			"data for whatever it will actually request. --strategy-args\n" +
+			"passes extra arguments to the executable unmodified;\n" +
+			"--strategy-config forwards a config file path via the " + strategyConfigPathEnv + "\n" +
+			"environment variable, never parsed by trader itself. Mutually\n" +
+			"exclusive with --config: there is no strategy registry to\n" +
+			"select an in-tree strategy and an external one at once.\n\n" +
 			"--journal optionally writes a durable JSONL audit trail of\n" +
 			"the run (adapters/journal/jsonl); off by default, and never\n" +
 			"read back by 'show' (see the package doc comment).",
@@ -98,6 +130,10 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; only used when --config is also given")
 	cmd.Flags().StringVar(&flags.allowedSide, "allowed-side", "", "restrict the EMA strategy to one position direction: both (default), long-only, or short-only; only used when --config is also given")
 
+	cmd.Flags().StringVar(&flags.strategyExec, "strategy-exec", "", "path to an out-of-tree strategy executable, launched and driven over Strategy Protocol v1 (ADR-062/ADR-063) instead of an in-tree strategy; mutually exclusive with --config")
+	cmd.Flags().StringArrayVar(&flags.strategyArgs, "strategy-args", nil, "extra argument passed to --strategy-exec's own executable, unmodified; repeatable, in order; requires --strategy-exec")
+	cmd.Flags().StringVar(&flags.strategyConfig, "strategy-config", "", "path to a config file for --strategy-exec's own executable; forwarded as the "+strategyConfigPathEnv+" environment variable, never parsed by trader itself; requires --strategy-exec")
+
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required)")
 	cmd.Flags().StringVar(&flags.provider, "provider", "oanda", "market data provider name")
@@ -114,6 +150,45 @@ func newRunCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("data-raw-root")
 
 	return cmd
+}
+
+// validateStrategySelection enforces --strategy-exec's own mutual-
+// exclusivity rules before runBacktest does anything else (issue
+// #382's own "invalid combinations fail before run starts" acceptance
+// criterion) — there is no strategy registry, so --strategy-exec and
+// --config can never both select a strategy for the same run, and
+// --strategy-args/--strategy-config are meaningless (and therefore
+// rejected, rather than silently ignored) without --strategy-exec
+// naming an executable for them to apply to.
+func validateStrategySelection(cmd *cobra.Command, flags runFlags) error {
+	if flags.strategyExec == "" {
+		if cmd.Flags().Changed("strategy-args") {
+			return fmt.Errorf("--strategy-args requires --strategy-exec")
+		}
+		if cmd.Flags().Changed("strategy-config") {
+			return fmt.Errorf("--strategy-config requires --strategy-exec")
+		}
+		return nil
+	}
+	if flags.config != "" {
+		return fmt.Errorf("--strategy-exec cannot be combined with --config: there is no strategy registry to select between an in-tree and an external strategy")
+	}
+	return nil
+}
+
+// externalStrategyParams is the report.BacktestReport-visible record
+// of how --strategy-exec launched the external strategy (never its
+// own runtime StrategyDescriptor — that already becomes the
+// manifest's own StrategyName via strat.Describe(), the same as any
+// in-tree strategy). This is deliberately the only strategy-specific
+// state this command records for an external run: the config file
+// itself, if any, is opaque to trader (see strategyConfigPathEnv's own
+// doc comment), so there is nothing further here that could be
+// meaningfully validated or replayed.
+type externalStrategyParams struct {
+	Exec   string   `json:"exec"`
+	Args   []string `json:"args,omitempty"`
+	Config string   `json:"config,omitempty"`
 }
 
 // instrumentSet is one canonically resolved, de-duplicated, order-
@@ -228,6 +303,10 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 // criterion).
 func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	ctx := cmd.Context()
+
+	if err := validateStrategySelection(cmd, flags); err != nil {
+		return err
+	}
 
 	cfg, err := buildRunConfig(cmd, flags)
 	if err != nil {
@@ -348,6 +427,55 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 
 		strat = emaStrategy
 		strategyParams = emaStrategy.Config()
+		prices = src
+	} else if flags.strategyExec != "" {
+		// The external strategy's own Descriptor (received during its
+		// Handshake, below) — not --symbol/--interval — is the actual
+		// replay universe (ADR-042's own "Strategy.Describe().
+		// Requirements is the universe boundary"); --symbol/--interval
+		// above only controls what canonical data this command
+		// publishes before launching it, which must still cover
+		// whatever the executable will actually request (documented on
+		// the --strategy-exec flag itself).
+		launchCfg := external.LaunchConfig{
+			Command: flags.strategyExec,
+			Args:    flags.strategyArgs,
+			Logger:  clictx.LoggerFromContext(ctx),
+		}
+		if flags.strategyConfig != "" {
+			abs, err := filepath.Abs(flags.strategyConfig)
+			if err != nil {
+				return fmt.Errorf("resolving --strategy-config: %w", err)
+			}
+			launchCfg.Env = []string{strategyConfigPathEnv + "=" + abs}
+		}
+
+		process, err := external.Launch(ctx, launchCfg)
+		if err != nil {
+			return fmt.Errorf("launching --strategy-exec %s: %w", flags.strategyExec, err)
+		}
+		// Process.Stop is idempotent-safe to call once at the end of this
+		// run regardless of how runBacktest returns from here on
+		// (success or any later error); a background context, not ctx,
+		// bounds it so a canceled/expiring command context cannot skip
+		// straight to SIGKILL instead of Process's own configured
+		// graceful-shutdown grace (ADR-063).
+		defer func() { _ = process.Stop(context.Background()) }()
+
+		src := newNextBarOpenPriceSource()
+		for _, instrumentID := range instruments.ids {
+			listing := instruments.simListing[instrumentID.String()]
+			if err := src.load(ctx, manager, listing.Symbol(), marketdata.BarQuery{Instrument: instrumentID, Interval: interval, Range: span}); err != nil {
+				return fmt.Errorf("loading canonical prices for %s: %w", instrumentID, err)
+			}
+		}
+
+		strat = process.Strategy()
+		strategyParams = externalStrategyParams{
+			Exec:   flags.strategyExec,
+			Args:   flags.strategyArgs,
+			Config: flags.strategyConfig,
+		}
 		prices = src
 	} else {
 		// prices accumulates one precomputed next-bar-open fill price

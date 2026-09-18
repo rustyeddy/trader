@@ -9,14 +9,15 @@
 // logic of its own, and never calls backtest.NewRunner/NewScheduler/
 // NewReplay directly (boundary_test.go enforces this mechanically).
 //
-// # Two strategy paths, no registry
+// # Three strategy paths, no registry
 //
-// "trader backtest run" selects between exactly two strategies by
-// whether --config is given — there is no strategy registry or
-// name-based lookup (ADR-039's own note on deferring strategy
-// discovery still applies beyond these two):
+// "trader backtest run" selects between exactly three strategies by
+// which of --config/--strategy-exec is given (mutually exclusive with
+// each other) — there is no strategy registry or name-based lookup
+// (ADR-039's own note on deferring strategy discovery still applies
+// beyond these three):
 //
-//   - Without --config: an unexported demoStrategy (demo_strategy.go)
+//   - Neither flag: an unexported demoStrategy (demo_strategy.go)
 //     that enters long once per requested instrument, on that
 //     instrument's own first bar, and never trades that instrument
 //     again. --symbol may be repeated (issue #224, M5-16) to run a
@@ -34,6 +35,21 @@
 //     demoStrategy's precomputed single-fill price, because a
 //     crossover strategy enters, exits, and re-enters at run-dependent
 //     bars.
+//   - With --strategy-exec (issue #382): an out-of-tree strategy
+//     executable, launched via adapters/strategy/external.Launch
+//     (ADR-063) and driven over Strategy Protocol v1 (ADR-062) exactly
+//     like any other strategy.Strategy from here on — run.go's own
+//     strategy-selection branch is the composition root that owns
+//     Process construction and its Stop-on-return lifecycle; Scheduler
+//     and the rest of the M5 pipeline never know the strategy they are
+//     driving is out-of-process. Its own Descriptor (received at
+//     Handshake), not --symbol, determines the replay universe;
+//     --symbol/--interval still control what canonical data this
+//     command publishes beforehand, and must cover whatever the
+//     executable will actually request. Like nextBarOpenPriceSource
+//     above, it gets a general per-bar-lookup FillPriceSource, since an
+//     external strategy's entry/exit timing is exactly as
+//     run-dependent as EMA crossover's.
 //
 // service/backtest.RunRequest.Strategy remains the real application
 // contract either way; this command constructs a concrete value for

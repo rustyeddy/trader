@@ -55,3 +55,28 @@ TRADER_STRATEGY_SOCKET=/tmp/trader-strategy.sock /tmp/flipflop
 Without `TRADER_STRATEGY_SOCKET` set, or with nothing listening at
 that path, it exits immediately with a clear error rather than
 hanging — see `strategysdk.SocketPathEnv`'s own doc comment.
+
+## Running it through "trader backtest run" (issue #382)
+
+`--strategy-exec` runs this (or any) out-of-tree strategy executable
+through a real backtest, in place of an in-tree strategy — trader
+launches it, completes the Handshake, and drives it exactly like
+`strategy/emacross` or the CLI's own demo strategy for the rest of the
+run:
+
+```sh
+go build -o /tmp/flipflop ./examples/strategysdk-minimal
+
+trader backtest run \
+  --strategy-exec /tmp/flipflop \
+  --symbol EURUSD --interval H1 \
+  --from 2024-01-08 --to 2024-01-09 \
+  --adverse-distance 0.01000 \
+  --data-raw-root /srv/trading/data/raw/oanda
+```
+
+`flipFlop`'s own `Describe()` (not `--symbol`) determines the actual
+replay universe; `--symbol`/`--interval` here only control what
+canonical data `run` publishes beforehand, which must still cover
+whatever the executable will request. See `trader backtest run --help`
+for `--strategy-args`/`--strategy-config`.
