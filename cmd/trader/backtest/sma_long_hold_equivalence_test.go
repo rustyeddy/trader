@@ -16,11 +16,13 @@ package backtest
 // correlation relationships, orders/fills, closed/open trades, final
 // equity, the equity curve, signal/journal records, and manifest
 // identity — all driven through the real service/backtest runtime
-// (never a private shortcut), with every intentionally different
-// transport-only field (Descriptor.Name/Version, Manifest.StrategyName/
-// StrategyParameters, and journal.Signal.Strategy — the two
-// implementations' own separate identities) explicitly named and
-// excluded below, not silently ignored.
+// (never a private shortcut). Manifest.StrategyParameters is
+// normalized and compared (smaLongHoldSemanticIdentity, below) rather
+// than excluded, since it is exactly the "manifest strategy/config
+// identity" issue #384 asks for; only each side's own separate
+// implementation identity (Descriptor.Name/Version, Manifest.
+// StrategyName, and journal.Signal.Strategy) is intentionally
+// excluded, named explicitly wherever it is, not silently ignored.
 //
 // Reused technique: backtest/determinism_test.go's own idNormalizer
 // (issue #223) proved that two independently-seeded runs of the
@@ -520,50 +522,38 @@ func assertRequiredKindsPresent(t *testing.T, records []journal.Record) {
 // Kind) field by field, normalizing every opaque ID through each
 // run's own idNormalizer first — never comparing raw ULIDs, which are
 // never expected to be literally equal between two independent
-// implementations/runs. This is a full copy of backtest/
+// implementations/runs. Started as a full copy of backtest/
 // determinism_test.go's own current function of the same name (see
-// this file's own doc comment for why it is duplicated, not shared,
-// and review finding: an earlier version of this function silently
-// dropped several fields that comparer already checks — decision
-// violations/warnings and per-rule-result violations/warnings,
-// order AcceptedLimitPrice/AcceptedQuantity, and fill commission/
-// BrokerOrderID/Metadata — weakening this milestone gate below the
-// bar the existing determinism suite already set, and risking this
-// gate silently drifting out of sync as that canonical comparer
-// evolves). Two additions beyond that copy: journal.KindReplaceRequest
-// (this scenario's three ratcheting AdjustStop intents all take that
-// path, ADR-054) and journal.KindSignal (decision evidence, unique to
-// this gate — see its own case below for why Strategy specifically is
-// excluded). One deliberate omission, matching the source function
-// exactly: journal.KindAccount, unreachable from any sim.Broker-backed
-// run today.
+// this file's own doc comment for why it is duplicated, not shared),
+// then extended further (review finding, second round): Intent's own
+// Quantity/StopPrice/Metadata, Proposal's own LimitPrice/StopPrice/
+// ReduceOnly/Metadata, and Request's full embedded Proposal semantics
+// were compared even more narrowly than the source function itself —
+// this gate now compares strictly more than that source, factored
+// through compareMetadata/compareIntent/compareProposal/
+// compareRequest so Proposal/Request/Order's shared embedded-Proposal
+// semantics are checked identically everywhere they appear, rather
+// than three independent, driftable hand-copies of the same fields.
+// Two additions beyond backtest/determinism_test.go's own kinds:
+// journal.KindReplaceRequest (this scenario's three ratcheting
+// AdjustStop intents all take that path, ADR-054) and
+// journal.KindSignal (decision evidence, unique to this gate — see
+// its own case below for why Strategy specifically is excluded). One
+// deliberate omission, matching the source function exactly:
+// journal.KindAccount, unreachable from any sim.Broker-backed run
+// today.
 func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *idNormalizer) {
 	t.Helper()
 
-	e1, c1, cause1 := n1.metadata(r1.Metadata)
-	e2, c2, cause2 := n2.metadata(r2.Metadata)
-	assert.Equalf(t, e1, e2, "record[%d]: metadata event id shape mismatch", i)
-	assert.Equalf(t, c1, c2, "record[%d]: metadata correlation id shape mismatch", i)
-	assert.Equalf(t, cause1, cause2, "record[%d]: metadata causation id shape mismatch", i)
-	assert.Truef(t, r1.Metadata.Timestamp.Equal(r2.Metadata.Timestamp), "record[%d]: metadata timestamp mismatch: got %s want %s", i, r2.Metadata.Timestamp, r1.Metadata.Timestamp)
+	compareMetadata(t, i, "record", r1.Metadata, r2.Metadata, n1, n2)
 
 	switch r1.Kind {
 	case journal.KindRunStarted:
 		assert.Equalf(t, n1.run(r1.RunStarted.RunID), n2.run(r2.RunStarted.RunID), "record[%d]/run_started: run id shape mismatch", i)
 	case journal.KindIntent:
-		in1, in2 := r1.Intent, r2.Intent
-		assert.Equalf(t, in1.Kind, in2.Kind, "record[%d]/intent: kind mismatch", i)
-		assert.Truef(t, in1.Instrument.Equal(in2.Instrument), "record[%d]/intent: instrument mismatch", i)
-		assert.Equalf(t, in1.Side, in2.Side, "record[%d]/intent: side mismatch", i)
-		assert.Equalf(t, n1.intent(in1.IntentID), n2.intent(in2.IntentID), "record[%d]/intent: intent id shape mismatch", i)
+		compareIntent(t, i, "intent", *r1.Intent, *r2.Intent, n1, n2)
 	case journal.KindProposal:
-		p1, p2 := r1.Proposal, r2.Proposal
-		assert.Truef(t, p1.Listing.InstrumentID().Equal(p2.Listing.InstrumentID()), "record[%d]/proposal: instrument mismatch", i)
-		assert.Equalf(t, p1.Side, p2.Side, "record[%d]/proposal: side mismatch", i)
-		assert.Equalf(t, p1.Type, p2.Type, "record[%d]/proposal: type mismatch", i)
-		assert.Equalf(t, p1.TimeInForce, p2.TimeInForce, "record[%d]/proposal: time in force mismatch", i)
-		assert.Truef(t, p1.Quantity.Equal(p2.Quantity), "record[%d]/proposal: quantity mismatch: got %s want %s", i, p2.Quantity, p1.Quantity)
-		assert.Equalf(t, n1.account(p1.AccountID), n2.account(p2.AccountID), "record[%d]/proposal: account id shape mismatch", i)
+		compareProposal(t, i, "proposal", *r1.Proposal, *r2.Proposal, n1, n2)
 	case journal.KindDecision:
 		d1, d2 := r1.Decision, r2.Decision
 		assert.Equalf(t, d1.Allowed, d2.Allowed, "record[%d]/decision: allowed mismatch", i)
@@ -577,11 +567,7 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 			compareWarnings(t, i, fmt.Sprintf("decision.rule_results[%d]", j), rr1.Warnings, rr2.Warnings)
 		}
 	case journal.KindRequest:
-		req1, req2 := r1.Request, r2.Request
-		assert.Truef(t, req1.Listing.InstrumentID().Equal(req2.Listing.InstrumentID()), "record[%d]/request: instrument mismatch", i)
-		assert.Equalf(t, req1.Side, req2.Side, "record[%d]/request: side mismatch", i)
-		assert.Truef(t, req1.Quantity.Equal(req2.Quantity), "record[%d]/request: quantity mismatch", i)
-		assert.Equalf(t, n1.order(req1.OrderID), n2.order(req2.OrderID), "record[%d]/request: order id shape mismatch", i)
+		compareRequest(t, i, "request", *r1.Request, *r2.Request, n1, n2)
 	case journal.KindReplaceRequest:
 		rr1, rr2 := r1.ReplaceRequest, r2.ReplaceRequest
 		assert.Equalf(t, n1.order(rr1.OrderID), n2.order(rr2.OrderID), "record[%d]/replace_request: order id shape mismatch", i)
@@ -594,8 +580,15 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		}
 	case journal.KindOrder:
 		o1, o2 := r1.Order, r2.Order
+		// The embedded Request carries the order's own full Proposal
+		// semantics (type/TIF/limit/stop/reduce-only/account/metadata)
+		// — compared here via the identical compareRequest helper
+		// KindRequest itself uses (review finding: an earlier version
+		// represented the embedded Request by OrderID alone, so a
+		// divergence there could hide behind an earlier, separately-
+		// passing KindRequest record for the same order).
+		compareRequest(t, i, "order.request", o1.Request, o2.Request, n1, n2)
 		assert.Equalf(t, o1.Status, o2.Status, "record[%d]/order: status mismatch", i)
-		assert.Equalf(t, n1.order(o1.Request.OrderID), n2.order(o2.Request.OrderID), "record[%d]/order: order id shape mismatch", i)
 		assert.Equalf(t, n1.brokerOrderID(o1.BrokerOrderID), n2.brokerOrderID(o2.BrokerOrderID), "record[%d]/order: broker order id shape mismatch", i)
 		comparePrice(t, i, "order.accepted_limit_price", o1.AcceptedLimitPrice, o2.AcceptedLimitPrice)
 		comparePrice(t, i, "order.accepted_stop_price", o1.AcceptedStopPrice, o2.AcceptedStopPrice)
@@ -616,12 +609,17 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		assert.Equalf(t, n1.fill(f1.FillID), n2.fill(f2.FillID), "record[%d]/fill: fill id shape mismatch", i)
 		assert.Equalf(t, n1.order(f1.OrderID), n2.order(f2.OrderID), "record[%d]/fill: order id shape mismatch", i)
 		assert.Equalf(t, n1.brokerOrderID(f1.BrokerOrderID), n2.brokerOrderID(f2.BrokerOrderID), "record[%d]/fill: broker order id shape mismatch", i)
+		// BrokerFillID: adapters/broker/sim never populates order.Fill.
+		// BrokerFillID (its own NewFill call omits the field, staying
+		// permanently ""), so both sides always compare "" == "" today
+		// — a plain equality check, not a normalizer, since there is
+		// no non-empty broker-assigned value to normalize yet. Kept as
+		// an explicit check (rather than omitted) so this comparison
+		// does not silently stop protecting the field the day sim
+		// starts populating it (review finding).
+		assert.Equalf(t, f1.BrokerFillID, f2.BrokerFillID, "record[%d]/fill: broker fill id mismatch", i)
 		assert.Equalf(t, n1.account(f1.AccountID), n2.account(f2.AccountID), "record[%d]/fill: account id shape mismatch", i)
-		fe1, fc1, fcause1 := n1.metadata(f1.Metadata)
-		fe2, fc2, fcause2 := n2.metadata(f2.Metadata)
-		assert.Equalf(t, fe1, fe2, "record[%d]/fill: metadata event id shape mismatch", i)
-		assert.Equalf(t, fc1, fc2, "record[%d]/fill: metadata correlation id shape mismatch", i)
-		assert.Equalf(t, fcause1, fcause2, "record[%d]/fill: metadata causation id shape mismatch", i)
+		compareMetadata(t, i, "fill", f1.Metadata, f2.Metadata, n1, n2)
 	case journal.KindTrade:
 		compareTrades(t, i, *r1.Trade, *r2.Trade, n1, n2)
 	case journal.KindSignal:
@@ -667,6 +665,76 @@ func compareWarnings(t *testing.T, i int, label string, w1, w2 []risk.Warning) {
 		assert.Equalf(t, w1[j].Rule, w2[j].Rule, "record[%d]/%s: warnings[%d].rule mismatch", i, label, j)
 		assert.Equalf(t, w1[j].Message, w2[j].Message, "record[%d]/%s: warnings[%d].message mismatch", i, label, j)
 	}
+}
+
+// compareMetadata compares two id.Metadata values — every opaque ID
+// normalized through each run's own idNormalizer, timestamps compared
+// directly — factored out (review finding) so the top-level per-
+// record Metadata check and every embedded Metadata field (Intent,
+// Proposal, Fill) use the identical comparison rather than three
+// independent hand-copies.
+func compareMetadata(t *testing.T, i int, label string, m1, m2 id.Metadata, n1, n2 *idNormalizer) {
+	t.Helper()
+	e1, c1, cause1 := n1.metadata(m1)
+	e2, c2, cause2 := n2.metadata(m2)
+	assert.Equalf(t, e1, e2, "record[%d]/%s: metadata event id shape mismatch", i, label)
+	assert.Equalf(t, c1, c2, "record[%d]/%s: metadata correlation id shape mismatch", i, label)
+	assert.Equalf(t, cause1, cause2, "record[%d]/%s: metadata causation id shape mismatch", i, label)
+	assert.Truef(t, m1.Timestamp.Equal(m2.Timestamp), "record[%d]/%s: metadata timestamp mismatch: got %s want %s", i, label, m2.Timestamp, m1.Timestamp)
+}
+
+// compareIntent compares two order.Intent values field by field
+// (review finding: an earlier version omitted Quantity, StopPrice,
+// and the intent's own Metadata — this scenario's every AdjustStop
+// intent carries a non-nil StopPrice, so omitting it let two
+// implementations choose different stop prices at the intent stage
+// and still pass).
+func compareIntent(t *testing.T, i int, label string, in1, in2 order.Intent, n1, n2 *idNormalizer) {
+	t.Helper()
+	assert.Equalf(t, in1.Kind, in2.Kind, "record[%d]/%s: kind mismatch", i, label)
+	assert.Truef(t, in1.Instrument.Equal(in2.Instrument), "record[%d]/%s: instrument mismatch", i, label)
+	assert.Equalf(t, in1.Side, in2.Side, "record[%d]/%s: side mismatch", i, label)
+	if in1.Quantity != nil && in2.Quantity != nil {
+		assert.Truef(t, in1.Quantity.Equal(*in2.Quantity), "record[%d]/%s: quantity mismatch", i, label)
+	} else {
+		assert.Equalf(t, in1.Quantity == nil, in2.Quantity == nil, "record[%d]/%s: quantity nilness mismatch", i, label)
+	}
+	comparePrice(t, i, label+".stop_price", in1.StopPrice, in2.StopPrice)
+	assert.Equalf(t, n1.intent(in1.IntentID), n2.intent(in2.IntentID), "record[%d]/%s: intent id shape mismatch", i, label)
+	compareMetadata(t, i, label+".metadata", in1.Metadata, in2.Metadata, n1, n2)
+}
+
+// compareProposal compares two order.Proposal values field by field
+// (review finding: an earlier version omitted LimitPrice, StopPrice,
+// ReduceOnly, and Metadata — execution-planning semantics a diverging
+// proposal should fail on immediately, at the record where the
+// divergence actually occurred).
+func compareProposal(t *testing.T, i int, label string, p1, p2 order.Proposal, n1, n2 *idNormalizer) {
+	t.Helper()
+	assert.Truef(t, p1.Listing.InstrumentID().Equal(p2.Listing.InstrumentID()), "record[%d]/%s: instrument mismatch", i, label)
+	assert.Equalf(t, p1.Side, p2.Side, "record[%d]/%s: side mismatch", i, label)
+	assert.Equalf(t, p1.Type, p2.Type, "record[%d]/%s: type mismatch", i, label)
+	assert.Equalf(t, p1.TimeInForce, p2.TimeInForce, "record[%d]/%s: time in force mismatch", i, label)
+	assert.Truef(t, p1.Quantity.Equal(p2.Quantity), "record[%d]/%s: quantity mismatch: got %s want %s", i, label, p2.Quantity, p1.Quantity)
+	comparePrice(t, i, label+".limit_price", p1.LimitPrice, p2.LimitPrice)
+	comparePrice(t, i, label+".stop_price", p1.StopPrice, p2.StopPrice)
+	assert.Equalf(t, p1.ReduceOnly, p2.ReduceOnly, "record[%d]/%s: reduce_only mismatch", i, label)
+	assert.Equalf(t, n1.account(p1.AccountID), n2.account(p2.AccountID), "record[%d]/%s: account id shape mismatch", i, label)
+	compareMetadata(t, i, label+".metadata", p1.Metadata, p2.Metadata, n1, n2)
+}
+
+// compareRequest compares two order.Request values: its own OrderID,
+// plus its full embedded Proposal via compareProposal (review
+// finding: an earlier version represented the embedded Proposal by
+// instrument/side/quantity alone, so a Type/TIF/limit/stop/reduce-
+// only/account/metadata divergence could hide behind an earlier,
+// separately-passing KindProposal record for the same decision).
+// KindOrder's own case reuses this identical helper for its embedded
+// Request, rather than a fourth independent hand-copy.
+func compareRequest(t *testing.T, i int, label string, req1, req2 order.Request, n1, n2 *idNormalizer) {
+	t.Helper()
+	compareProposal(t, i, label, req1.Proposal, req2.Proposal, n1, n2)
+	assert.Equalf(t, n1.order(req1.OrderID), n2.order(req2.OrderID), "record[%d]/%s: order id shape mismatch", i, label)
 }
 
 func comparePrice(t *testing.T, i int, label string, p1, p2 *num.Price) {
@@ -726,13 +794,14 @@ func compareTrades(t *testing.T, i int, tr1, tr2 order.Trade, n1, n2 *idNormaliz
 // Fields intentionally different between the two runs, and therefore
 // never compared for equality below: Descriptor.Name/Version (each
 // side's own strategy identity — "sma-trend"/"v4" in-tree,
-// "sma-long-hold"/"v1" external), Manifest.StrategyName/
-// StrategyParameters (the same identity, recorded into the manifest),
-// and journal.Signal.Strategy (ditto). Every opaque identifier
-// (RunID, AccountID, IntentID, OrderID, FillID, EventID/
-// CorrelationID/CausationID) is normalized through idNormalizer
-// before comparison, never compared as a literal ULID — see that
-// type's own doc comment.
+// "sma-long-hold"/"v1" external), the resulting Manifest.StrategyName,
+// and journal.Signal.Strategy (ditto identity, recorded per signal).
+// Manifest.StrategyParameters is normalized and compared, not
+// excluded — see smaLongHoldSemanticIdentity's own doc comment. Every
+// opaque identifier (RunID, AccountID, IntentID, OrderID, FillID,
+// EventID/CorrelationID/CausationID) is normalized through
+// idNormalizer before comparison, never compared as a literal ULID —
+// see that type's own doc comment.
 func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 	params := defaultSMALongHoldEquivalenceParams(t)
 
