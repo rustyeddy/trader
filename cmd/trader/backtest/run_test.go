@@ -3,6 +3,7 @@ package backtest
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -281,4 +282,57 @@ func TestAwaitRunWithProcessMonitor_StillRunningAcceptsSuccess(t *testing.T) {
 
 	_, err := awaitRunWithProcessMonitor(func() {}, resultCh, process)
 	require.NoError(t, err)
+}
+
+// TestFileContentDigest_EmptyFileHashesDeterministically covers the
+// boundary case of an empty file — the well-known sha256 of zero
+// bytes — proving the hashing loop handles zero-length input, not
+// only the more common non-empty case exercised indirectly by every
+// --strategy-exec vertical-slice test.
+func TestFileContentDigest_EmptyFileHashesDeterministically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+	got, err := fileContentDigest(context.Background(), path)
+	require.NoError(t, err)
+	assert.Equal(t, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", got)
+}
+
+// TestFileContentDigest_NonExistentFileIsAnError covers the os.Open
+// failure path directly (the full CLI integration test,
+// TestRun_StrategyExecLaunchFailureReportedClearly, exercises this
+// only indirectly through the whole run command).
+func TestFileContentDigest_NonExistentFileIsAnError(t *testing.T) {
+	_, err := fileContentDigest(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"))
+	require.Error(t, err)
+}
+
+// TestFileContentDigest_UnreadableFileIsAnError covers a permission-
+// denied failure distinctly from not-found — the same os.Open call
+// site, but a materially different, realistic failure mode a caller
+// deploying trader under restrictive file permissions could actually
+// hit.
+func TestFileContentDigest_UnreadableFileIsAnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file permissions do not block reads")
+	}
+	path := filepath.Join(t.TempDir(), "unreadable")
+	require.NoError(t, os.WriteFile(path, []byte("secret"), 0o000))
+
+	_, err := fileContentDigest(context.Background(), path)
+	require.Error(t, err)
+}
+
+// TestFileContentDigest_CanceledContextFailsFast proves an
+// already-canceled ctx is honored before any file I/O is attempted.
+func TestFileContentDigest_CanceledContextFailsFast(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "irrelevant")
+	require.NoError(t, os.WriteFile(path, []byte("data"), 0o600))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := fileContentDigest(ctx, path)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }

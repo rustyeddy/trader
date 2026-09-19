@@ -254,7 +254,21 @@ type externalStrategyParams struct {
 // once) — matching backtest.Manifest.ConfigDigest's own "sha256:<hex>"
 // convention. Shared by both the executable and the strategy config's
 // own digest.
-func fileContentDigest(path string) (string, error) {
+// ctx bounds this operation per the architecture document's own
+// "Use context.Context on operations that may block, perform I/O, or
+// span a use case" convention, matching every other I/O call in this
+// file (src.load, nextBarOpenAfterEntry). Checked once, before
+// opening the file: a canceled/expired ctx fails fast rather than
+// still reading and hashing a potentially large executable no caller
+// will use the result of. The read itself is local disk I/O expected
+// to complete quickly, so io.Copy is not further split into a
+// ctx-selecting loop mid-stream (review finding raised the missing
+// parameter; this is the proportionate response for a bounded local
+// file read, not network I/O).
+func fileContentDigest(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("computing content digest: %w", err)
@@ -715,13 +729,13 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		// executed) — this is the closest practical guarantee against
 		// that TOCTOU race without launching from an already-open file
 		// descriptor.
-		execDigest, err := fileContentDigest(execAbs)
+		execDigest, err := fileContentDigest(ctx, execAbs)
 		if err != nil {
 			return err
 		}
 		var configDigest string
 		if strategyConfigAbs != "" {
-			configDigest, err = fileContentDigest(strategyConfigAbs)
+			configDigest, err = fileContentDigest(ctx, strategyConfigAbs)
 			if err != nil {
 				return err
 			}
