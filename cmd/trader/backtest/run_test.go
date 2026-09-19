@@ -3,11 +3,14 @@ package backtest
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/clock"
@@ -144,11 +147,14 @@ func newGappedFixtureManager(t *testing.T) (*marketdata.Manager, instrument.ID) 
 func TestBuildExternalLaunchConfig_InheritsEnvironAndAppendsConfigPath(t *testing.T) {
 	environ := []string{"PATH=/usr/bin:/bin", "HOME=/home/op"}
 
-	cfg, abs, err := buildExternalLaunchConfig(runFlags{
+	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(runFlags{
 		strategyExec:   "/bin/true",
 		strategyConfig: "strategy.yaml",
 	}, environ, nil)
 	require.NoError(t, err)
+
+	require.Equal(t, "/bin/true", resolvedExec)
+	require.Equal(t, resolvedExec, cfg.Command, "LaunchConfig.Command must be the exact resolved path this function itself returns")
 
 	require.Contains(t, cfg.Env, "PATH=/usr/bin:/bin")
 	require.Contains(t, cfg.Env, "HOME=/home/op")
@@ -164,7 +170,7 @@ func TestBuildExternalLaunchConfig_InheritsEnvironAndAppendsConfigPath(t *testin
 func TestBuildExternalLaunchConfig_ReplacesPreexistingConfigEnvEntry(t *testing.T) {
 	environ := []string{"PATH=/usr/bin", strategyConfigPathEnv + "=/stale/path.yaml"}
 
-	cfg, abs, err := buildExternalLaunchConfig(runFlags{
+	cfg, _, abs, err := buildExternalLaunchConfig(runFlags{
 		strategyExec:   "/bin/true",
 		strategyConfig: "strategy.yaml",
 	}, environ, nil)
@@ -186,10 +192,46 @@ func TestBuildExternalLaunchConfig_ReplacesPreexistingConfigEnvEntry(t *testing.
 func TestBuildExternalLaunchConfig_NoConfigLeavesEnvironUntouched(t *testing.T) {
 	environ := []string{"PATH=/usr/bin", "HOME=/home/op"}
 
-	cfg, abs, err := buildExternalLaunchConfig(runFlags{strategyExec: "/bin/true"}, environ, nil)
+	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(runFlags{strategyExec: "/bin/true"}, environ, nil)
 	require.NoError(t, err)
+	require.Equal(t, "/bin/true", resolvedExec)
 	require.Empty(t, abs)
 	require.ElementsMatch(t, environ, cfg.Env)
+}
+
+// TestResolveStrategyExecutable_BareNameUsesPATHLookup proves a bare
+// command name (no path separator) is resolved via exec.LookPath —
+// os/exec's own PATH-search behavior — not filepath.Abs against the
+// current directory, which would silently name a different, likely
+// nonexistent file (review finding).
+func TestResolveStrategyExecutable_BareNameUsesPATHLookup(t *testing.T) {
+	want, err := exec.LookPath("true")
+	require.NoError(t, err, "this test environment must have 'true' on PATH")
+
+	got, err := resolveStrategyExecutable("true")
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+// TestResolveStrategyExecutable_PathSeparatorNeverSearchesPATH proves
+// a name containing a path separator is resolved with plain
+// filepath.Abs, matching os/exec's own literal-path handling — never
+// looked up on PATH, even if a same-named file also happens to exist
+// there.
+func TestResolveStrategyExecutable_PathSeparatorNeverSearchesPATH(t *testing.T) {
+	got, err := resolveStrategyExecutable("./bin/true")
+	require.NoError(t, err)
+	wantSuffix := string(filepath.Separator) + filepath.Join("bin", "true")
+	assert.True(t, strings.HasSuffix(got, wantSuffix), "expected %q to end with %q", got, wantSuffix)
+	assert.True(t, filepath.IsAbs(got))
+}
+
+// TestResolveStrategyExecutable_UnresolvableBareNameIsAnError proves a
+// bare name not found on PATH fails clearly rather than silently
+// falling back to a relative-path interpretation.
+func TestResolveStrategyExecutable_UnresolvableBareNameIsAnError(t *testing.T) {
+	_, err := resolveStrategyExecutable("this-command-should-not-exist-anywhere-on-path")
+	require.Error(t, err)
 }
 
 // fakeProcessMonitor is a deterministic, controllable processMonitor
@@ -240,4 +282,57 @@ func TestAwaitRunWithProcessMonitor_StillRunningAcceptsSuccess(t *testing.T) {
 
 	_, err := awaitRunWithProcessMonitor(func() {}, resultCh, process)
 	require.NoError(t, err)
+}
+
+// TestFileContentDigest_EmptyFileHashesDeterministically covers the
+// boundary case of an empty file — the well-known sha256 of zero
+// bytes — proving the hashing loop handles zero-length input, not
+// only the more common non-empty case exercised indirectly by every
+// --strategy-exec vertical-slice test.
+func TestFileContentDigest_EmptyFileHashesDeterministically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+	got, err := fileContentDigest(context.Background(), path)
+	require.NoError(t, err)
+	assert.Equal(t, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", got)
+}
+
+// TestFileContentDigest_NonExistentFileIsAnError covers the os.Open
+// failure path directly (the full CLI integration test,
+// TestRun_StrategyExecLaunchFailureReportedClearly, exercises this
+// only indirectly through the whole run command).
+func TestFileContentDigest_NonExistentFileIsAnError(t *testing.T) {
+	_, err := fileContentDigest(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"))
+	require.Error(t, err)
+}
+
+// TestFileContentDigest_UnreadableFileIsAnError covers a permission-
+// denied failure distinctly from not-found — the same os.Open call
+// site, but a materially different, realistic failure mode a caller
+// deploying trader under restrictive file permissions could actually
+// hit.
+func TestFileContentDigest_UnreadableFileIsAnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file permissions do not block reads")
+	}
+	path := filepath.Join(t.TempDir(), "unreadable")
+	require.NoError(t, os.WriteFile(path, []byte("secret"), 0o000))
+
+	_, err := fileContentDigest(context.Background(), path)
+	require.Error(t, err)
+}
+
+// TestFileContentDigest_CanceledContextFailsFast proves an
+// already-canceled ctx is honored before any file I/O is attempted.
+func TestFileContentDigest_CanceledContextFailsFast(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "irrelevant")
+	require.NoError(t, os.WriteFile(path, []byte("data"), 0o600))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := fileContentDigest(ctx, path)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }

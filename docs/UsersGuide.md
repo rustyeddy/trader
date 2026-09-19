@@ -244,15 +244,19 @@ persists/renders its result. Canonical market data must already exist
 under `--data-store-root`/`--data-raw-root` (via `trader data build` /
 `trader data sync`) — `run` never syncs from a live provider itself.
 
-There are two strategy paths:
+There are three strategy paths:
 
-- **Without `--config`:** a provisional demo strategy — one buy-and-hold
-  entry per instrument's first bar. `--symbol` may be repeated for a
-  multi-instrument run (one shared account/pipeline, not a per-symbol
+- **Without `--config`/`--strategy-exec`:** a provisional demo strategy — one
+  buy-and-hold entry per instrument's first bar. `--symbol` may be repeated
+  for a multi-instrument run (one shared account/pipeline, not a per-symbol
   engine).
 - **With `--config`:** the real `strategy/emacross` EMA-crossover strategy,
   for exactly one instrument, configured from a YAML file (see below). Any
   explicit flag still overrides its corresponding config-file value.
+- **With `--strategy-exec`:** an out-of-tree strategy executable, launched
+  and driven over Strategy Protocol v1 — see
+  [External strategies](#external-strategies) below. Mutually exclusive
+  with `--config`.
 
 | Flag                 | Default                         | Meaning                                                                                |
 |----------------------|---------------------------------|----------------------------------------------------------------------------------------|
@@ -273,6 +277,9 @@ There are two strategy paths:
 | `--fast-period`      | —                               | EMA fast period (only with `--config`)                                                 |
 | `--slow-period`      | —                               | EMA slow period (only with `--config`)                                                 |
 | `--allowed-side`     | `both`                          | restrict the EMA strategy: `both`, `long-only`, or `short-only` (only with `--config`) |
+| `--strategy-exec`    | —                               | path to an out-of-tree strategy executable; mutually exclusive with `--config`         |
+| `--strategy-args`    | —                               | extra argument passed to `--strategy-exec`'s own executable, unmodified; repeatable    |
+| `--strategy-config`  | —                               | path to a config file for `--strategy-exec`'s own executable (see below)               |
 | `--journal`          | —                               | optional path to write a durable JSONL audit trail; path must not already exist        |
 | `--output-dir`       | `./backtest-runs`               | where run snapshots are written / `show` reads from                                    |
 | `--format`           | `table`                         | `table`, `json`, or `org`                                                              |
@@ -317,6 +324,140 @@ is: explicit CLI flag > `--config` file value > `TRADER_BACKTEST_*`/
 `--data-raw-root`, `--provider`, `--journal`, `--output-dir`, `--format`,
 and `--warmup-bars` are plain CLI flags with no `--config`/environment-
 variable backing at all — see the flag table above for which is which.
+
+### External strategies
+
+`--strategy-exec` runs an out-of-tree strategy executable instead of an
+in-tree one, launched by `trader` itself and driven over Strategy Protocol
+v1 — a gRPC protocol over a Unix-domain socket (ADR-062, ADR-063). The
+executable's own `Describe()` — not `--symbol`/`--interval` — determines
+the actual replay universe; `--symbol`/`--interval` only control what
+canonical data `run` publishes beforehand, which must still cover whatever
+the executable will request.
+
+#### Building a Go external strategy
+
+Import [`strategysdk`](../strategysdk) and implement its `Strategy`
+interface (`Describe`/`Start`/`OnBar`, plus the optional `FillHandler`
+capability). `strategysdk.Serve(yourStrategy)` is normally the entire body
+of `main()`:
+
+```go
+func main() {
+    if err := strategysdk.Serve(NewMyStrategy(cfg)); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+See [`examples/strategysdk-minimal`](../examples/strategysdk-minimal) for
+the smallest complete, compiling example, and
+[`examples/sma-long-hold`](../examples/sma-long-hold) for a real,
+non-trivial one (SMA/indicator state, a ratcheting protective stop,
+decision-evidence signals) that is proven byte-for-byte equivalent to its
+in-tree counterpart, `strategy/smatrend`, by
+`cmd/trader/backtest/sma_long_hold_equivalence_test.go`.
+
+An external strategy never receives a broker handle, never evaluates risk,
+and never submits an order directly — it only describes intents, exactly
+like an in-tree `strategy.Strategy`. `strategysdk` itself, and every
+strategy built on it, is architecturally barred from importing Trader's
+`strategy`, `backtest`, `service`, `cmd`, `adapters`, `broker`, `execution`,
+`risk`, or `pipeline` packages.
+
+#### Running it
+
+```sh
+go build -o /tmp/my-strategy ./cmd/my-strategy
+
+trader backtest run \
+  --strategy-exec /tmp/my-strategy \
+  --strategy-config my-strategy.json \
+  --symbol EURUSD --interval H1 --from 2024-01-01 --to 2024-06-01 \
+  --adverse-distance 0.0050 \
+  --data-raw-root /path/to/raw/oanda
+```
+
+`--strategy-config`'s path is forwarded to the child process via the
+`TRADER_STRATEGY_CONFIG` environment variable — a `trader`-owned
+convention, not part of Strategy Protocol v1 itself, so a config file's
+own schema is entirely the strategy author's choice (`json.Unmarshal` a
+struct, parse YAML, whatever the strategy needs). `--strategy-args` passes
+additional arguments straight through to the executable, unmodified.
+
+#### Process lifecycle and logs
+
+`trader` launches the executable, creates a fresh Unix-domain socket per
+run, and waits for it to complete Strategy Protocol v1's Handshake before
+the backtest replay begins; a child that fails to start, or exits before
+completing Handshake, fails the run immediately with a clear error rather
+than hanging. The child's own environment is inherited from `trader`'s own
+process (`PATH`, `HOME`, credentials, etc.), not a stripped one. The
+child's stderr is captured and logged as structured warning records under
+`external strategy stderr`; its stdout is not touched. On success, `trader`
+sends a normal-completion `SessionEnd` before terminating the process; on
+any other exit path the process still receives `SIGTERM`, escalating to
+`SIGKILL` after a grace period. A child that exits unexpectedly mid-run —
+even between two strategy callbacks that would not otherwise have
+surfaced the crash — is detected and reported as a run failure, never
+silently treated as a successful backtest.
+
+#### Protocol/version mismatch behavior
+
+`trader` and the strategy negotiate a Strategy Protocol version and a
+capability set (for example, whether the strategy implements
+`FillHandler`) during Handshake. A version the host does not recognize, or
+a capability the strategy's own guest-side runtime requires but the host's
+accepted response omits, fails the Handshake explicitly — `run` reports
+this as a clear startup error, never a silent degradation to a subset of
+behavior.
+
+#### Reproducibility
+
+Every external run's persisted report records unambiguous provenance
+under `run.strategy_parameters`, alongside the strategy's own
+`run.strategy_name`/`run.strategy_version` (from its Handshake
+`Descriptor`, the same fields any in-tree strategy's manifest carries):
+
+```json
+{
+  "mode": "external",
+  "strategy_name": "my-strategy",
+  "strategy_version": "1.0.0",
+  "protocol_version": "v1",
+  "transport": "unix",
+  "exec": "/tmp/my-strategy",
+  "exec_digest": "sha256:...",
+  "args": [],
+  "config": "/home/you/my-strategy.json",
+  "config_digest": "sha256:..."
+}
+```
+
+`exec_digest`/`config_digest` are content digests of the executable file
+and the `--strategy-config` file itself, both computed immediately before
+launch — they distinguish two different builds behind the identical
+`--strategy-exec` path, or two different config files behind the identical
+`--strategy-config` path (for example, the same path edited in place
+between two runs), neither of which a path/name alone can. `config_digest`
+is empty when `--strategy-config` is not given. The ephemeral Unix-domain
+socket path `trader` generates for that one run is never recorded anywhere
+in this provenance: it has no reproducibility meaning and is specific to
+that single process's lifetime.
+
+#### v1 limitations / non-goals
+
+- Only a local executable form is supported (`--strategy-exec /path/to/binary`
+  plus `--strategy-args`); `unix://`/`grpc://` remote endpoint forms are not
+  implemented in v1.
+- Exactly one strategy executable per run; there is no multi-strategy or
+  multi-process orchestration.
+- No sandboxing beyond normal OS process isolation — an external strategy
+  executable runs with the same OS-level privileges as the `trader`
+  process that launches it (though never with broker/risk/execution
+  access at the protocol level, per Strategy Protocol v1's own design).
+- Config-file schema is entirely the strategy author's own responsibility;
+  `trader` never parses or validates it.
 
 ### `trader backtest show <run-id>`
 

@@ -2,9 +2,13 @@ package backtest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,6 +24,7 @@ import (
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
+	strategyv1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/report"
 	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 	svcmarketdata "github.com/rustyeddy/trader/service/marketdata"
@@ -187,38 +192,157 @@ func validateStrategySelection(cmd *cobra.Command, flags runFlags) error {
 // doc comment), so there is nothing further here that could be
 // meaningfully validated or replayed.
 type externalStrategyParams struct {
-	Exec   string   `json:"exec"`
-	Args   []string `json:"args,omitempty"`
-	Config string   `json:"config,omitempty"`
+	// Mode is always "external" — a fixed, explicit marker
+	// distinguishing this run's own manifest provenance shape from
+	// the in-tree EMA/demo paths' own StrategyParameters shapes at a
+	// glance (issue #385).
+	Mode string `json:"mode"`
+	// StrategyName/StrategyVersion are the external strategy's own
+	// Descriptor (ADR-062), received during Handshake — the actual
+	// strategy identity that ran, independent of --strategy-exec's
+	// own path/name. Manifest.StrategyName() also already carries
+	// StrategyName (via strat.Describe(), the same as any in-tree
+	// strategy); it is repeated here so it travels with the rest of
+	// this run's own external-specific provenance in one place.
+	StrategyName    string `json:"strategy_name"`
+	StrategyVersion string `json:"strategy_version"`
+	// ProtocolVersion is the Strategy Protocol version this run
+	// actually negotiated (ADR-062) — recorded so a manifest from a
+	// future, incompatible protocol revision is distinguishable at a
+	// glance, without cross-referencing the trader binary's own build
+	// version.
+	ProtocolVersion string `json:"protocol_version"`
+	// Transport is always "unix" for Strategy Protocol v1 (ADR-063) —
+	// the endpoint/transport kind issue #385 asks be recorded. No
+	// other transport exists yet, but naming it explicitly avoids a
+	// silent assumption once one does. Never the ephemeral Unix-domain
+	// socket *path* itself: Launch generates a fresh one per run
+	// (external.LaunchConfig.SocketPath's own doc comment), and issue
+	// #385 explicitly excludes any such machine-specific, ephemeral
+	// value from a run's semantic identity.
+	Transport string `json:"transport"`
+	// Exec is the resolved absolute path to the launched executable —
+	// never a relative spelling that would resolve differently from a
+	// different working directory (the same reason Config, below, is
+	// already resolved to an absolute path).
+	Exec string `json:"exec"`
+	// ExecDigest is a "sha256:<hex>" content digest of the executable
+	// at Exec, computed at launch time — matching backtest.Manifest.
+	// ConfigDigest's own convention. Exec's path/name alone cannot
+	// distinguish two different builds behind the identical
+	// --strategy-exec path (issue #385's own explicit acceptance
+	// criterion: "executable identity/digest is stable enough to
+	// distinguish different builds").
+	ExecDigest string   `json:"exec_digest"`
+	Args       []string `json:"args,omitempty"`
+	Config     string   `json:"config,omitempty"`
+	// ConfigDigest is a "sha256:<hex>" content digest of the exact
+	// bytes at Config, computed before launch (review finding: Config
+	// alone records only a *path*, not the bytes at that path — a
+	// config file edited in place between two runs using the identical
+	// path would otherwise let both runs record the same provenance
+	// despite the guest actually consuming different configuration,
+	// defeating this issue's own reproducibility goal). Empty exactly
+	// when Config is empty (no --strategy-config given).
+	ConfigDigest string `json:"config_digest,omitempty"`
+}
+
+// fileContentDigest returns a deterministic "sha256:<hex>" content
+// digest of the file at path — streamed via io.Copy into the hash
+// rather than os.ReadFile (review finding: provenance hashing has no
+// need to allocate an executable's entire content into memory at
+// once) — matching backtest.Manifest.ConfigDigest's own "sha256:<hex>"
+// convention. Shared by both the executable and the strategy config's
+// own digest.
+// ctx bounds this operation per the architecture document's own
+// "Use context.Context on operations that may block, perform I/O, or
+// span a use case" convention, matching every other I/O call in this
+// file (src.load, nextBarOpenAfterEntry). Checked once, before
+// opening the file: a canceled/expired ctx fails fast rather than
+// still reading and hashing a potentially large executable no caller
+// will use the result of. The read itself is local disk I/O expected
+// to complete quickly, so io.Copy is not further split into a
+// ctx-selecting loop mid-stream (review finding raised the missing
+// parameter; this is the proportionate response for a bounded local
+// file read, not network I/O).
+func fileContentDigest(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("computing content digest: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("computing content digest: %w", err)
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// resolveStrategyExecutable resolves flags.strategyExec to the exact
+// absolute path external.Launch will actually execute (review
+// finding): filepath.Abs(name) alone is not equivalent to what
+// os/exec does with a bare command name containing no path
+// separator, which searches PATH (exec.LookPath) rather than
+// resolving relative to the current directory — using the wrong one
+// could hash and record a different file than the one that actually
+// ran. A name that does contain a path separator is never looked up
+// on PATH by os/exec either way, so it is resolved with plain
+// filepath.Abs, matching os/exec's own literal-path handling exactly.
+func resolveStrategyExecutable(name string) (string, error) {
+	resolved := name
+	if !strings.ContainsRune(name, os.PathSeparator) {
+		p, err := exec.LookPath(name)
+		if err != nil {
+			return "", fmt.Errorf("resolving --strategy-exec: %w", err)
+		}
+		resolved = p
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolving --strategy-exec: %w", err)
+	}
+	return abs, nil
 }
 
 // buildExternalLaunchConfig assembles the external.LaunchConfig
-// --strategy-exec launches with, and the resolved absolute
-// --strategy-config path (empty if none was given) to record in
-// externalStrategyParams. Pulled out as its own pure function, rather
-// than inlined in runBacktest's own strategy-selection branch, so its
-// env-inheritance and config-path-resolution behavior can be unit
-// tested directly against a synthetic environ, without spawning a
-// real process (review finding: an earlier version of this command
-// left Env nil/near-empty instead of starting from the operator's own
-// inherited environment — see filterOutEnvKey's own doc comment for
-// why environ is filtered before strategyConfigPathEnv is appended).
-func buildExternalLaunchConfig(flags runFlags, environ []string, logger *slog.Logger) (external.LaunchConfig, string, error) {
-	cfg := external.LaunchConfig{
-		Command: flags.strategyExec,
+// --strategy-exec launches with (LaunchConfig.Command set to the
+// exact resolved executable path resolveStrategyExecutable returns —
+// review finding: an earlier version passed flags.strategyExec
+// verbatim, which could resolve to a different file than whatever
+// this function's own caller separately hashed for provenance), and
+// the resolved absolute --strategy-config path (empty if none was
+// given) to record in externalStrategyParams. Pulled out as its own
+// pure function, rather than inlined in runBacktest's own strategy-
+// selection branch, so its env-inheritance and path-resolution
+// behavior can be unit tested directly against a synthetic environ,
+// without spawning a real process (review finding: an earlier version
+// of this command left Env nil/near-empty instead of starting from
+// the operator's own inherited environment — see filterOutEnvKey's
+// own doc comment for why environ is filtered before
+// strategyConfigPathEnv is appended).
+func buildExternalLaunchConfig(flags runFlags, environ []string, logger *slog.Logger) (cfg external.LaunchConfig, resolvedExec, configAbs string, err error) {
+	resolvedExec, err = resolveStrategyExecutable(flags.strategyExec)
+	if err != nil {
+		return external.LaunchConfig{}, "", "", err
+	}
+	cfg = external.LaunchConfig{
+		Command: resolvedExec,
 		Args:    flags.strategyArgs,
 		Env:     filterOutEnvKey(environ, strategyConfigPathEnv),
 		Logger:  logger,
 	}
 	if flags.strategyConfig == "" {
-		return cfg, "", nil
+		return cfg, resolvedExec, "", nil
 	}
 	abs, err := filepath.Abs(flags.strategyConfig)
 	if err != nil {
-		return external.LaunchConfig{}, "", fmt.Errorf("resolving --strategy-config: %w", err)
+		return external.LaunchConfig{}, "", "", fmt.Errorf("resolving --strategy-config: %w", err)
 	}
 	cfg.Env = append(cfg.Env, strategyConfigPathEnv+"="+abs)
-	return cfg, abs, nil
+	return cfg, resolvedExec, abs, nil
 }
 
 // filterOutEnvKey returns env with every entry naming key removed —
@@ -590,9 +714,31 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		// whatever the executable will actually request (documented on
 		// the --strategy-exec flag itself).
 		//
-		launchCfg, strategyConfigAbs, err := buildExternalLaunchConfig(flags, os.Environ(), clictx.LoggerFromContext(ctx))
+		launchCfg, execAbs, strategyConfigAbs, err := buildExternalLaunchConfig(flags, os.Environ(), clictx.LoggerFromContext(ctx))
 		if err != nil {
 			return err
+		}
+
+		// Both digests are computed from the exact resolved paths
+		// buildExternalLaunchConfig itself will hand to external.Launch
+		// below, and before Launch ever runs (review finding: an
+		// earlier version hashed the executable only after the child
+		// had already started and completed Handshake, so a file
+		// replaced/removed during startup could make the recorded
+		// digest describe different bytes than the process actually
+		// executed) — this is the closest practical guarantee against
+		// that TOCTOU race without launching from an already-open file
+		// descriptor.
+		execDigest, err := fileContentDigest(ctx, execAbs)
+		if err != nil {
+			return err
+		}
+		var configDigest string
+		if strategyConfigAbs != "" {
+			configDigest, err = fileContentDigest(ctx, strategyConfigAbs)
+			if err != nil {
+				return err
+			}
 		}
 
 		process, err := external.Launch(ctx, launchCfg)
@@ -621,6 +767,8 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		}
 
 		strat = process.Strategy()
+		descriptor := strat.Describe()
+
 		// strategyConfigAbs, not flags.strategyConfig verbatim: the
 		// manifest must record the exact path actually handed to the
 		// child (via strategyConfigPathEnv, above), not the CLI's own
@@ -628,9 +776,16 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		// different working directory would not match what this run
 		// actually consumed (review finding).
 		strategyParams = externalStrategyParams{
-			Exec:   flags.strategyExec,
-			Args:   flags.strategyArgs,
-			Config: strategyConfigAbs,
+			Mode:            "external",
+			StrategyName:    descriptor.Name,
+			StrategyVersion: descriptor.Version,
+			ProtocolVersion: strategyv1.ProtocolVersion,
+			Transport:       "unix",
+			Exec:            execAbs,
+			ExecDigest:      execDigest,
+			ConfigDigest:    configDigest,
+			Args:            flags.strategyArgs,
+			Config:          strategyConfigAbs,
 		}
 		prices = src
 		externalProcess = process
