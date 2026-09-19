@@ -23,6 +23,13 @@ coverage.html
 # make build output
 /bin/
 
+# `go build ./...` from the repo root writes a binary for every main
+# package it finds directly into the current directory when no -o is
+# given (unlike `make build`, which always targets /bin/) — each
+# examples/*/main.go adds one more of these to guard against.
+/sma-long-hold
+/trader
+
 # Go workspace file
 go.work
 go.work.sum

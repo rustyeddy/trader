@@ -36,7 +36,12 @@ import (
 
 // exemptPrefixes are repository-relative path prefixes allowed to touch the
 // process environment or command-line flags directly.
-var exemptPrefixes = []string{"config", "cmd", "test", "strategysdk", ".git"}
+//
+// examples/sma-long-hold is exempt for the same reason strategysdk and
+// cmd already are: its main() is an out-of-tree guest binary's own
+// composition root (issue #383), reading TRADER_STRATEGY_CONFIG the
+// same way strategysdk's own Serve reads TRADER_STRATEGY_SOCKET.
+var exemptPrefixes = []string{"config", "cmd", "test", "strategysdk", "examples/sma-long-hold", ".git"}
 
 func TestDomainPackagesDoNotReadEnvOrFlags(t *testing.T) {
 	root := repoRoot(t)
