@@ -10,11 +10,11 @@ package backtest
 // would build it — not a simplified stand-in.
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -31,38 +31,27 @@ import (
 	"github.com/rustyeddy/trader/strategy/smatrend"
 )
 
-// smaLongHoldBuildOnce/smaLongHoldPath build examples/sma-long-hold
-// once for every test in this file — this file has its own build step
-// rather than reusing external_strategy_test.go's TestMain (package
-// backtest_test, a different Go package sharing this directory) since
-// a test binary may define only one TestMain across every _test.go
-// file in a directory, internal and external test packages alike.
-var (
-	smaLongHoldBuildOnce sync.Once
-	smaLongHoldPath      string
-	smaLongHoldBuildErr  error
-)
-
+// buildSMALongHoldBinary builds examples/sma-long-hold into t's own
+// t.TempDir() (automatically removed once t ends — review nit: an
+// earlier version of this helper cached the build in a package-level
+// sync.Once/os.MkdirTemp directory that nothing ever removed) — this
+// file has its own build step rather than reusing
+// external_strategy_test.go's TestMain (package backtest_test, a
+// different Go package sharing this directory) since a test binary
+// may define only one TestMain across every _test.go file in a
+// directory, internal and external test packages alike. Only one test
+// in this file currently calls this; if a second one is added later
+// that also wants the build cached across tests, reach for a
+// TestMain-based fixture (matching external_strategy_test.go's own
+// pattern) rather than reintroducing an uncleaned package-level cache.
 func buildSMALongHoldBinary(t *testing.T) string {
 	t.Helper()
-	smaLongHoldBuildOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "sma-long-hold-bin-*")
-		if err != nil {
-			smaLongHoldBuildErr = err
-			return
-		}
-		out := filepath.Join(dir, "sma-long-hold")
-		build := exec.Command("go", "build", "-o", out, "github.com/rustyeddy/trader/examples/sma-long-hold")
-		build.Stdout = os.Stdout
-		build.Stderr = os.Stderr
-		if err := build.Run(); err != nil {
-			smaLongHoldBuildErr = err
-			return
-		}
-		smaLongHoldPath = out
-	})
-	require.NoError(t, smaLongHoldBuildErr)
-	return smaLongHoldPath
+	out := filepath.Join(t.TempDir(), "sma-long-hold")
+	build := exec.Command("go", "build", "-o", out, "github.com/rustyeddy/trader/examples/sma-long-hold")
+	build.Stdout = os.Stdout
+	build.Stderr = os.Stderr
+	require.NoError(t, build.Run())
+	return out
 }
 
 // smaLongHoldEquivalenceListing mirrors run_test.go's own
@@ -202,7 +191,12 @@ func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolv
 		Env:     append(os.Environ(), "TRADER_STRATEGY_CONFIG="+configPath),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = process.Stop(t.Context()) })
+	// context.Background(), not t.Context() (review nit): Process.Stop's
+	// own SIGTERM-then-grace-then-SIGKILL shutdown should run to
+	// completion on its own configured grace period, not be coupled to
+	// whatever timing t.Context()'s own cancellation happens to have
+	// relative to t.Cleanup's own invocation.
+	t.Cleanup(func() { _ = process.Stop(context.Background()) })
 
 	src := newNextBarOpenPriceSource()
 	require.NoError(t, src.load(ctx, manager, simListing.Symbol(), marketdata.BarQuery{
