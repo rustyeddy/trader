@@ -20,6 +20,15 @@
 //   - "exit-immediately": exit 0 without ever dialing.
 //   - "crash-after-handshake": Handshake and open Run normally, then
 //     os.Exit(1) immediately without answering any BarEvent.
+//   - "crash-after-first-bar": like "normal", except this mode alone
+//     declares one EUR/USD H1 DataRequirement at Handshake (every
+//     other mode leaves Requirements empty), answers exactly the
+//     first BarEvent, then os.Exit(1)s immediately — a real crash
+//     between two Scheduler callbacks, for cmd/trader/backtest's own
+//     "an external process exit mid-run is reported as a run failure"
+//     regression (issue #382 review), which a zero-Requirements crash
+//     cannot exercise since backtest.Runner already rejects an empty
+//     universe outright before Scheduler ever runs.
 package main
 
 import (
@@ -80,13 +89,30 @@ func run() error {
 	client := v1.NewStrategyHostServiceClient(conn)
 	ctx := context.Background()
 
+	descriptor := &v1.StrategyDescriptor{
+		Name:    "fakeguest",
+		Version: "0.0.0",
+	}
+	if mode == "crash-after-first-bar" {
+		// Only this mode declares a requirement — every other mode's
+		// Requirements stays empty, unchanged, so existing tests
+		// against this fixture keep seeing exactly the behavior they
+		// already assert. This one requirement gives Scheduler a real,
+		// single bar to deliver before this process exits mid-run,
+		// exercising the "process exits between callbacks" case a
+		// zero-Requirements crash cannot (backtest.Runner already
+		// rejects an empty universe outright, before Scheduler ever
+		// runs).
+		descriptor.Requirements = []*v1.DataRequirement{{
+			InstrumentId: "fx:EUR/USD",
+			Interval:     &v1.Interval{Unit: v1.IntervalUnit_INTERVAL_UNIT_HOUR, Count: 1},
+		}}
+	}
+
 	hsResp, err := client.Handshake(ctx, &v1.HandshakeRequest{
-		ProtocolVersion: v1.ProtocolVersion,
-		StrategyDescriptor: &v1.StrategyDescriptor{
-			Name:    "fakeguest",
-			Version: "0.0.0",
-		},
-		Capabilities: []v1.Capability{v1.Capability_CAPABILITY_FILL_HANDLER},
+		ProtocolVersion:    v1.ProtocolVersion,
+		StrategyDescriptor: descriptor,
+		Capabilities:       []v1.Capability{v1.Capability_CAPABILITY_FILL_HANDLER},
 	})
 	if err != nil {
 		return fmt.Errorf("handshake: %w", err)
@@ -139,6 +165,9 @@ func run() error {
 				OnBarResponse: &v1.OnBarResponse{Sequence: payload.BarEvent.GetSequence()},
 			}}); err != nil {
 				return fmt.Errorf("responding to bar_event: %w", err)
+			}
+			if mode == "crash-after-first-bar" {
+				os.Exit(1)
 			}
 		case *v1.RunServerMessage_FillEvent:
 			if err := stream.Send(&v1.RunClientMessage{Payload: &v1.RunClientMessage_OnFillResponse{

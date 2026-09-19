@@ -3,7 +3,9 @@ package backtest
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -11,6 +13,7 @@ import (
 
 	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
 	"github.com/rustyeddy/trader/adapters/journal/jsonl"
+	"github.com/rustyeddy/trader/adapters/strategy/external"
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/instrument"
@@ -23,6 +26,20 @@ import (
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/strategy/emacross"
 )
+
+// strategyConfigPathEnv names the environment variable "trader
+// backtest run" sets on an external strategy child process (alongside
+// external.SocketPathEnv, which Launch always sets) when --strategy-
+// config is given. This is a CLI-owned convention, not part of
+// Strategy Protocol v1 itself (ADR-062 defines no config-handoff
+// mechanism — a guest's own configuration schema is entirely its
+// author's business); it exists only so an author who does want a
+// config file does not have to invent their own argv convention.
+// Named the same way external.SocketPathEnv is (an environment
+// variable, not a CLI flag) for the identical reason that constant's
+// own doc comment gives: no command-line argument-parsing convention
+// can be assumed across every possible guest language/runtime.
+const strategyConfigPathEnv = "TRADER_STRATEGY_CONFIG"
 
 // runFlags holds "trader backtest run"'s own flag values.
 type runFlags struct {
@@ -42,6 +59,10 @@ type runFlags struct {
 	fastPeriod   int
 	slowPeriod   int
 	allowedSide  string
+
+	strategyExec   string
+	strategyArgs   []string
+	strategyConfig string
 
 	dataStoreRoot string
 	dataRawRoot   string
@@ -73,6 +94,18 @@ func newRunCmd() *cobra.Command {
 			"(issue #247) and runs the real EMA crossover strategy\n" +
 			"(issue #252) instead of the demo strategy, for a single\n" +
 			"instrument; any explicit flag above still overrides its value.\n\n" +
+			"--strategy-exec runs an out-of-tree strategy executable instead\n" +
+			"(issue #382, ADR-062/ADR-063): trader launches it, completes\n" +
+			"Strategy Protocol v1's Handshake, and drives it exactly like an\n" +
+			"in-tree strategy for the rest of the run -- the executable's own\n" +
+			"Descriptor determines the instrument/interval universe, so\n" +
+			"--symbol/--interval must still be given to publish canonical\n" +
+			"data for whatever it will actually request. --strategy-args\n" +
+			"passes extra arguments to the executable unmodified;\n" +
+			"--strategy-config forwards a config file path via the " + strategyConfigPathEnv + "\n" +
+			"environment variable, never parsed by trader itself. Mutually\n" +
+			"exclusive with --config: there is no strategy registry to\n" +
+			"select an in-tree strategy and an external one at once.\n\n" +
 			"--journal optionally writes a durable JSONL audit trail of\n" +
 			"the run (adapters/journal/jsonl); off by default, and never\n" +
 			"read back by 'show' (see the package doc comment).",
@@ -98,6 +131,10 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; only used when --config is also given")
 	cmd.Flags().StringVar(&flags.allowedSide, "allowed-side", "", "restrict the EMA strategy to one position direction: both (default), long-only, or short-only; only used when --config is also given")
 
+	cmd.Flags().StringVar(&flags.strategyExec, "strategy-exec", "", "path to an out-of-tree strategy executable, launched and driven over Strategy Protocol v1 (ADR-062/ADR-063) instead of an in-tree strategy; mutually exclusive with --config")
+	cmd.Flags().StringArrayVar(&flags.strategyArgs, "strategy-args", nil, "extra argument passed to --strategy-exec's own executable, unmodified; repeatable, in order; requires --strategy-exec")
+	cmd.Flags().StringVar(&flags.strategyConfig, "strategy-config", "", "path to a config file for --strategy-exec's own executable; forwarded as the "+strategyConfigPathEnv+" environment variable, never parsed by trader itself; requires --strategy-exec")
+
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required)")
 	cmd.Flags().StringVar(&flags.provider, "provider", "oanda", "market data provider name")
@@ -114,6 +151,188 @@ func newRunCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("data-raw-root")
 
 	return cmd
+}
+
+// validateStrategySelection enforces --strategy-exec's own mutual-
+// exclusivity rules before runBacktest does anything else (issue
+// #382's own "invalid combinations fail before run starts" acceptance
+// criterion) — there is no strategy registry, so --strategy-exec and
+// --config can never both select a strategy for the same run, and
+// --strategy-args/--strategy-config are meaningless (and therefore
+// rejected, rather than silently ignored) without --strategy-exec
+// naming an executable for them to apply to.
+func validateStrategySelection(cmd *cobra.Command, flags runFlags) error {
+	if flags.strategyExec == "" {
+		if cmd.Flags().Changed("strategy-args") {
+			return fmt.Errorf("--strategy-args requires --strategy-exec")
+		}
+		if cmd.Flags().Changed("strategy-config") {
+			return fmt.Errorf("--strategy-config requires --strategy-exec")
+		}
+		return nil
+	}
+	if flags.config != "" {
+		return fmt.Errorf("--strategy-exec cannot be combined with --config: there is no strategy registry to select between an in-tree and an external strategy")
+	}
+	return nil
+}
+
+// externalStrategyParams is the report.BacktestReport-visible record
+// of how --strategy-exec launched the external strategy (never its
+// own runtime StrategyDescriptor — that already becomes the
+// manifest's own StrategyName via strat.Describe(), the same as any
+// in-tree strategy). This is deliberately the only strategy-specific
+// state this command records for an external run: the config file
+// itself, if any, is opaque to trader (see strategyConfigPathEnv's own
+// doc comment), so there is nothing further here that could be
+// meaningfully validated or replayed.
+type externalStrategyParams struct {
+	Exec   string   `json:"exec"`
+	Args   []string `json:"args,omitempty"`
+	Config string   `json:"config,omitempty"`
+}
+
+// buildExternalLaunchConfig assembles the external.LaunchConfig
+// --strategy-exec launches with, and the resolved absolute
+// --strategy-config path (empty if none was given) to record in
+// externalStrategyParams. Pulled out as its own pure function, rather
+// than inlined in runBacktest's own strategy-selection branch, so its
+// env-inheritance and config-path-resolution behavior can be unit
+// tested directly against a synthetic environ, without spawning a
+// real process (review finding: an earlier version of this command
+// left Env nil/near-empty instead of starting from the operator's own
+// inherited environment — see filterOutEnvKey's own doc comment for
+// why environ is filtered before strategyConfigPathEnv is appended).
+func buildExternalLaunchConfig(flags runFlags, environ []string, logger *slog.Logger) (external.LaunchConfig, string, error) {
+	cfg := external.LaunchConfig{
+		Command: flags.strategyExec,
+		Args:    flags.strategyArgs,
+		Env:     filterOutEnvKey(environ, strategyConfigPathEnv),
+		Logger:  logger,
+	}
+	if flags.strategyConfig == "" {
+		return cfg, "", nil
+	}
+	abs, err := filepath.Abs(flags.strategyConfig)
+	if err != nil {
+		return external.LaunchConfig{}, "", fmt.Errorf("resolving --strategy-config: %w", err)
+	}
+	cfg.Env = append(cfg.Env, strategyConfigPathEnv+"="+abs)
+	return cfg, abs, nil
+}
+
+// filterOutEnvKey returns env with every entry naming key removed —
+// used so a caller-controlled Env value (os.Environ(), here) can never
+// end up with two entries for the same key once this command's own
+// value is appended, whose effective value at runtime is undefined;
+// mirrors external.Launch's own identical filter for its socket
+// variable (adapters/strategy/external/process.go).
+func filterOutEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+// processMonitor is the *external.Process surface
+// runWithExternalProcessMonitor needs — narrowed to an interface so a
+// deterministic fake can exercise the exact simultaneous-readiness
+// race below without timing luck (review finding).
+type processMonitor interface {
+	Done() <-chan struct{}
+	Err() error
+}
+
+// runWithExternalProcessMonitor calls svc.Run, concurrently watching
+// process.Done() (a nil process — every non-external-strategy path —
+// disables this and simply calls svc.Run directly). If the external
+// process exits before svc.Run itself returns, the run's own context
+// is canceled and the process's exit is reported as the failure
+// reason: a guest that crashes (or exits cleanly but unexpectedly)
+// between callbacks, or during a replay that never calls back into it
+// at all, must not let an unaffected Scheduler finish "successfully"
+// with no idea the strategy driving it is already gone (review
+// finding).
+//
+// A successful resultCh receive is not, by itself, proof the guest
+// was still alive when the run finished: Go's select chooses
+// pseudo-randomly among simultaneously ready cases, so a process that
+// exits at (or just before) the exact instant svc.Run completes can
+// still be the resultCh arm selected, silently accepting success from
+// a guest that already crashed (second-round review finding — this is
+// exactly the failure class this function exists to close). A nil-err
+// result is therefore always followed by one more non-blocking check
+// of process.Done() before it is accepted.
+func runWithExternalProcessMonitor(ctx context.Context, svc *svcbacktest.Service, req svcbacktest.RunRequest, process processMonitor) (svcbacktest.RunResponse, error) {
+	if process == nil {
+		return svc.Run(ctx, req)
+	}
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	resultCh := make(chan runResult, 1)
+	go func() {
+		resp, err := svc.Run(runCtx, req)
+		resultCh <- runResult{resp, err}
+	}()
+
+	return awaitRunWithProcessMonitor(cancelRun, resultCh, process)
+}
+
+// runResult is svc.Run's own return pair, carried over resultCh.
+type runResult struct {
+	resp svcbacktest.RunResponse
+	err  error
+}
+
+// awaitRunWithProcessMonitor is runWithExternalProcessMonitor's own
+// select/race-handling logic, extracted so it can be exercised
+// directly against a synthetic resultCh and a fake processMonitor —
+// runWithExternalProcessMonitor itself needs a real *svcbacktest.
+// Service, too heavy to construct just to prove this race is closed
+// (review finding: a deterministic test, not timing luck).
+func awaitRunWithProcessMonitor(cancelRun context.CancelFunc, resultCh <-chan runResult, process processMonitor) (svcbacktest.RunResponse, error) {
+	select {
+	case r := <-resultCh:
+		if r.err != nil {
+			return r.resp, r.err
+		}
+		return r.resp, checkProcessStillAlive(process)
+	case <-process.Done():
+		cancelRun()
+		r := <-resultCh
+		if procErr := process.Err(); procErr != nil {
+			return r.resp, fmt.Errorf("external strategy process exited unexpectedly before the run completed: %w", procErr)
+		}
+		if r.err == nil {
+			return r.resp, fmt.Errorf("external strategy process exited before the run completed")
+		}
+		return r.resp, r.err
+	}
+}
+
+// checkProcessStillAlive reports the process's own exit as an error
+// if it has already exited by the time this is called (a non-blocking
+// check: Done() open means "still running," not "will never exit"),
+// nil otherwise. Called only after svc.Run itself already reported
+// success — see runWithExternalProcessMonitor's own doc comment for
+// why this second check exists.
+func checkProcessStillAlive(process processMonitor) error {
+	select {
+	case <-process.Done():
+		if err := process.Err(); err != nil {
+			return fmt.Errorf("external strategy process exited unexpectedly before the run completed: %w", err)
+		}
+		return fmt.Errorf("external strategy process exited before the run completed")
+	default:
+		return nil
+	}
 }
 
 // instrumentSet is one canonically resolved, de-duplicated, order-
@@ -229,6 +448,10 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	ctx := cmd.Context()
 
+	if err := validateStrategySelection(cmd, flags); err != nil {
+		return err
+	}
+
 	cfg, err := buildRunConfig(cmd, flags)
 	if err != nil {
 		return err
@@ -312,6 +535,14 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	var strat strategy.Strategy
 	var strategyParams any
 	var prices simbroker.FillPriceSource
+	// externalProcess is set only on the --strategy-exec path, below —
+	// used after svc.Run to distinguish a genuinely successful run from
+	// one where the external process exited (crashed or otherwise) at
+	// some point during it (review finding: a guest that exits between
+	// Start and its first/next callback, or during an empty replay that
+	// never calls back into it at all, would otherwise let Scheduler
+	// finish "successfully" without ever noticing).
+	var externalProcess *external.Process
 
 	if flags.config != "" {
 		// There is no strategy registry: strategy.name (--strategy-name)
@@ -349,6 +580,60 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		strat = emaStrategy
 		strategyParams = emaStrategy.Config()
 		prices = src
+	} else if flags.strategyExec != "" {
+		// The external strategy's own Descriptor (received during its
+		// Handshake, below) — not --symbol/--interval — is the actual
+		// replay universe (ADR-042's own "Strategy.Describe().
+		// Requirements is the universe boundary"); --symbol/--interval
+		// above only controls what canonical data this command
+		// publishes before launching it, which must still cover
+		// whatever the executable will actually request (documented on
+		// the --strategy-exec flag itself).
+		//
+		launchCfg, strategyConfigAbs, err := buildExternalLaunchConfig(flags, os.Environ(), clictx.LoggerFromContext(ctx))
+		if err != nil {
+			return err
+		}
+
+		process, err := external.Launch(ctx, launchCfg)
+		if err != nil {
+			return fmt.Errorf("launching --strategy-exec %s: %w", flags.strategyExec, err)
+		}
+		// Process.Stop is idempotent-safe to call once at the end of this
+		// run regardless of how runBacktest returns from here on
+		// (success or any later error); a background context, not ctx,
+		// bounds it so a canceled/expiring command context cannot skip
+		// straight to SIGKILL instead of Process's own configured
+		// graceful-shutdown grace (ADR-063). This always runs; the
+		// graceful strategy-level Close below, called explicitly right
+		// before svc.Run returns on the success path, is the additional
+		// step ADR-063's own Process docs ask a caller to perform first
+		// when it wants a normal Strategy Protocol v1 SessionEnd instead
+		// of Stop's own SIGTERM-based teardown (review finding).
+		defer func() { _ = process.Stop(context.Background()) }()
+
+		src := newNextBarOpenPriceSource()
+		for _, instrumentID := range instruments.ids {
+			listing := instruments.simListing[instrumentID.String()]
+			if err := src.load(ctx, manager, listing.Symbol(), marketdata.BarQuery{Instrument: instrumentID, Interval: interval, Range: span}); err != nil {
+				return fmt.Errorf("loading canonical prices for %s: %w", instrumentID, err)
+			}
+		}
+
+		strat = process.Strategy()
+		// strategyConfigAbs, not flags.strategyConfig verbatim: the
+		// manifest must record the exact path actually handed to the
+		// child (via strategyConfigPathEnv, above), not the CLI's own
+		// possibly-relative spelling, or a later replay from a
+		// different working directory would not match what this run
+		// actually consumed (review finding).
+		strategyParams = externalStrategyParams{
+			Exec:   flags.strategyExec,
+			Args:   flags.strategyArgs,
+			Config: strategyConfigAbs,
+		}
+		prices = src
+		externalProcess = process
 	} else {
 		// prices accumulates one precomputed next-bar-open fill price
 		// per instrument (never a live per-bar feed — see
@@ -400,16 +685,46 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		return err
 	}
 
-	resp, err := svc.Run(ctx, svcbacktest.RunRequest{
+	// externalProcess is a concrete *external.Process, possibly nil;
+	// assigning a nil *external.Process directly to a processMonitor
+	// interface variable would produce a non-nil interface wrapping a
+	// nil pointer (Go's classic "typed nil" pitfall), defeating
+	// runWithExternalProcessMonitor's own "if process == nil" check —
+	// this explicit conversion keeps monitor a true nil interface on
+	// every non-external-strategy path.
+	var monitor processMonitor
+	if externalProcess != nil {
+		monitor = externalProcess
+	}
+	resp, err := runWithExternalProcessMonitor(ctx, svc, svcbacktest.RunRequest{
 		Strategy:           strat,
 		StrategyParameters: strategyParams,
 		Span:               span,
 		StartingCapital:    startingCash,
 		RiskFraction:       riskFraction,
 		AdverseDistance:    adverseDistance,
-	})
+	}, monitor)
 	if err != nil {
 		return err
+	}
+
+	// A successful run gets the external strategy's own graceful
+	// Strategy Protocol v1 shutdown (a normal-completion SessionEnd)
+	// before the deferred Process.Stop's SIGTERM-based teardown runs —
+	// ADR-063's own Process docs ask a caller wanting this to call the
+	// strategy's Close before Stop, rather than let every run end by
+	// SIGTERM regardless of outcome (review finding). Best-effort: a
+	// Close failure here does not fail an otherwise-successful backtest,
+	// since Process.Stop still guarantees the child is terminated and
+	// its socket cleaned up either way.
+	if externalProcess != nil {
+		if closer, ok := externalProcess.Strategy().(interface{ Close(context.Context) error }); ok {
+			closeCtx, cancel := context.WithTimeout(context.Background(), external.DefaultShutdownGrace)
+			if err := closer.Close(closeCtx); err != nil {
+				clictx.LoggerFromContext(ctx).Warn("external strategy: graceful close failed, falling back to process termination", "error", err)
+			}
+			cancel()
+		}
 	}
 
 	if journalWriter != nil {
