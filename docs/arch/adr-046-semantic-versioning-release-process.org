@@ -3,6 +3,17 @@
 
 * Status
 
+Superseded by ADR-064 (docs/arch/adr-064-git-describe-version-metadata.org).
+Issue #389 asks for Trader's version to be derived automatically from
+git tags, with no manual source-version bump required before a
+release tag — the opposite of this ADR's own central "hand-maintained
+const" decision below. ADR-064 replaces that mechanism (and this
+ADR's own rejection of ldflags and of a =trader version= subcommand)
+outright; this ADR's own Context/Decision/Consequences/Alternatives
+Considered sections below are left unchanged, per the registry's own
+non-rewrite rule for a superseded ADR — they remain an accurate record
+of what Trader decided at issue #288.
+
 Accepted. Issue #288 asks Trader to begin real semantic versioning at
 =v0.0.1=, with a mechanism for tagging and releasing. ADR-011
 (docs/arch/adr-decisions.org) already commits Trader to semver while

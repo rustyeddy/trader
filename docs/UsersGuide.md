@@ -27,19 +27,40 @@ Every command accepts these, inherited from the root command:
 
 ## Versioning
 
-`trader --version` prints Trader's current semantic version, e.g.
-`trader version 0.0.1`. When built from a local git checkout (`make
-build`, or a bare `go build`/`go install` run from a clone of this
-repository) it also includes the commit it was built from, e.g.
-`trader version 0.0.1 (a1b2c3d4e5f6)`, or `... (a1b2c3d4e5f6, dirty)`
-if the working tree had uncommitted changes. A version-qualified
-module install (`go install .../trader@v0.0.1`) reports the version
-alone, with no commit info — Go does not stamp VCS metadata for that
-install form. Trader follows semantic versioning while remaining at
-`v0` (ADR-011, ADR-046 in
-[`docs/arch/adr-decisions.org`](arch/adr-decisions.org)); see
-[`CONTRIBUTING.org`](../CONTRIBUTING.org)'s "Releasing" section for how
-a version is tagged and released.
+Trader's version is derived automatically from git tags at build time
+(ADR-064) — no source file is bumped by hand before a release.
+
+`trader --version`/`trader -v` prints the compact form, e.g. `trader
+version v0.3.0` for a build made exactly at tag `v0.3.0`, or `trader
+version v0.3.0-12-gabc1234-dirty` for a development build 12 commits
+past that tag with uncommitted local changes.
+
+`trader version` prints a fuller, multi-line report:
+
+```
+trader v0.3.0
+commit: abc1234def012
+built: 2026-09-15T18:00:00Z
+```
+
+Both forms require a build made via `make build`/`make install` (which
+inject `git describe --tags --always --dirty` output at build time) to
+report the exact git-describe version. A plain `go build`/`go install
+./cmd/trader` run outside `make`, from a local git checkout, instead
+falls back to Go's own module-version inference (already a real,
+usable value on a modern toolchain) or, failing that, a
+`devel+<revision>` placeholder — still traceable to the exact commit,
+just not necessarily the exact git-describe string. A version-qualified module install
+(`go install .../trader@v0.3.0`) reports that exact version alone,
+with no commit info, since Go does not stamp VCS metadata for that
+install form. See
+[`cmd/trader/internal/version`](../cmd/trader/internal/version)'s own
+doc comment for the complete precedence/fallback chain.
+
+Trader follows semantic versioning while remaining at `v0` (ADR-011,
+ADR-064 in [`docs/arch/adr-decisions.org`](arch/adr-decisions.org));
+see [`CONTRIBUTING.org`](../CONTRIBUTING.org)'s "Releasing" section for
+how a version is tagged and released.
 
 ## Command Overview
 
@@ -59,9 +80,10 @@ trader
 ├── execution   execution/risk pipeline inspection and order submission
 │   ├── evaluate    size, plan, and risk-evaluate an intent (no submission)
 │   └── submit      size, plan, risk-evaluate, and submit an intent
-└── backtest    run backtests and inspect their results
-    ├── run         run a backtest and render/persist its result
-    └── show        render a previously run backtest's persisted result
+├── backtest    run backtests and inspect their results
+│   ├── run         run a backtest and render/persist its result
+│   └── show        render a previously run backtest's persisted result
+└── version     print Trader's version and build metadata (see Versioning above)
 ```
 
 `trader completion` also exists (standard Cobra shell-completion

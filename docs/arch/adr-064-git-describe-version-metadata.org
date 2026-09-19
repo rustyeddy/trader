@@ -1,0 +1,236 @@
+#+TITLE: Git-Describe-Derived Version and Build Metadata ADR-064
+#+STARTUP: overview indent
+
+* Status
+
+Accepted.
+
+Supersedes ADR-046 (docs/arch/adr-decisions.org). ADR-046 remains a
+historically accurate record of what Trader decided at issue #288;
+this ADR replaces its core version-derivation mechanism outright, per
+this registry's own supersession rules (a partial amendment is
+reserved for correcting one sub-decision within an ADR that bundles
+several independent ones — this ADR instead replaces the central
+decision ADR-046 exists to make, so full supersession is the correct
+mechanism, not a partial amendment).
+
+* Context
+
+Issue #389 asks for Trader's version to be derived automatically from
+git tags, with two requirements ADR-046's design cannot satisfy as
+written:
+
+#+BEGIN_QUOTE
+The codebase should not require developers to manually edit a second
+version constant every time a release is tagged.
+#+END_QUOTE
+
+and, among its acceptance criteria:
+
+#+BEGIN_QUOTE
+no manual source-version bump is required solely because a Git tag was
+created
+#+END_QUOTE
+
+ADR-046's own decision was exactly the opposite: "One source of truth:
+a Go const, bumped manually" — =cmd/trader/internal/version.Version=,
+edited by hand in its own commit immediately before every tag. That
+ADR's own "Alternatives Considered" section explicitly weighed and
+rejected deriving the version from =git describe= at build time,
+reasoning that it "would make the 'current version' depend on local
+tag state at build time rather than being reviewable in the source
+itself." Issue #389 asks for precisely that tradeoff to be made the
+other way: zero-manual-bump reproducibility takes priority over a
+diff-reviewable version bump.
+
+Issue #389 also asks for two things ADR-046 explicitly declined: a
+=trader version= subcommand (ADR-046: "Rejected as redundant... Cobra's
+built-in flag is sufficient") and a small, reusable Go version/build
+API usable outside =cmd/trader= itself (backtest manifests, research
+artifacts, structured logs, external-strategy protocol diagnostics,
+bug reports) — ADR-046's =version.String()= existed only to back
+Cobra's own =--version= flag, with no such external contract in mind.
+
+Given how much of ADR-046's own decision this reopens — the version
+source of truth itself, the ldflags rejection, and the no-subcommand
+decision — this is recorded as a full supersession, not a partial
+amendment naming one narrow sub-decision.
+
+* Decision
+
+** Git tags remain the release mechanism
+
+Unchanged from ADR-046: a release is a git tag of the form
+=vMAJOR.MINOR.PATCH= plus a corresponding GitHub release. This part of
+ADR-046 is not being replaced, only restated here for a complete
+picture — see CONTRIBUTING.org's own "Releasing" section (updated
+alongside this ADR) for the authoritative, current steps.
+
+** Version derived from =git describe= at build time, not a hand-maintained const
+
+=cmd/trader/internal/version.Version= (the const) is removed. In its
+place, =cmd/trader/internal/version= gains a private,
+=-ldflags -X=-injected variable, =gitDescribe=, set by the Makefile's
+=build=/=install= targets to the output of:
+
+#+BEGIN_SRC sh
+git describe --tags --always --dirty
+#+END_SRC
+
+run at build time. This produces:
+
+- the exact tag (e.g. =v0.3.0=) when =HEAD= is exactly that tag and the
+  working tree is clean;
+- =v0.3.0-12-gabc1234= for 12 commits past that tag;
+- =v0.3.0-12-gabc1234-dirty= (or =v0.3.0-dirty= at the tag itself) when
+  the working tree has uncommitted changes;
+- a bare abbreviated commit hash when the repository has no tags at
+  all yet (=git describe='s own =--always= fallback).
+
+No source file is generated or committed for this; the Makefile
+computes it fresh on every invocation of =make build=/=make install=,
+via =$(shell git describe ...)=. A build attempted outside any git
+repository (or before the first commit) is not treated as an error —
+the shell command's failure is swallowed (=2>/dev/null || true=),
+leaving =gitDescribe= empty, which =version.Current= treats identically
+to "no ldflags were provided."
+
+** Public =Info= type and =Current()= function
+
+#+BEGIN_SRC go
+package version
+
+type Info struct {
+    Version  string
+    Revision string
+    Time     time.Time
+    Dirty    bool
+}
+
+func Current() Info
+#+END_SRC
+
+=Info= is the exact shape issue #389's own "Suggested API shape"
+proposed. =Current= resolves =Version= with this precedence:
+
+1. =gitDescribe=, when the build went through =make build=/=make
+   install= (the documented, recommended way to build Trader).
+2. Otherwise, the main module's own version from
+   =runtime/debug.ReadBuildInfo=, when it is a real version rather than
+   Go's =(devel)= placeholder — the shape only a version-qualified
+   =go install github.com/rustyeddy/trader/cmd/trader@vX.Y.Z= produces,
+   since that build has no local git checkout (and therefore no
+   Makefile-injected ldflags) to derive =gitDescribe= from.
+3. Otherwise, if VCS build-info is available at all (a bare =go
+   build=/=go install= run from a local git checkout, without going
+   through =make=), a =devel+<revision>[.dirty]= placeholder — not a
+   tag-derived version, but still traceable to the exact commit and
+   working-tree state.
+4. =unknown=, when none of the above applies.
+
+=Revision=/=Time=/=Dirty= are read from
+=runtime/debug.ReadBuildInfo='s VCS settings (=vcs.revision=,
+=vcs.time=, =vcs.modified=) — the identical mechanism ADR-046 already
+established, kept unchanged here — independent of which case above
+resolved =Version=, so they remain populated (for any git-checkout
+build) even in case 2 above, where =Version= itself came from the main
+module instead.
+
+** =trader version= subcommand, alongside the existing =--version= flag
+
+=cmd.Version = version.Current().String()= (=Info.String()=, which is
+simply =Version= alone) continues to back Cobra's built-in
+=--version=/=-v= flag, unchanged in spirit from ADR-046. A new
+=trader version= subcommand additionally prints =Info.Report()=, a
+multi-line form surfacing =Revision=/=Time=/=Dirty= explicitly,
+matching issue #389's own worked example:
+
+#+BEGIN_EXAMPLE
+trader v0.3.0
+commit: abc1234def012
+built: 2026-09-15T18:00:00Z
+#+END_EXAMPLE
+
+A field the report cannot determine (no VCS build-info at all, for
+example) is omitted from its own line entirely, never printed with an
+empty or zero value.
+
+** Release process
+
+CONTRIBUTING.org's "Releasing" section drops ADR-046's first step
+("bump the Version const... in its own commit/PR") entirely: cutting a
+release is now just tagging the commit on =main= and creating the
+GitHub release from it — no code change, no PR, required first.
+
+* Consequences
+
+- No PR is required solely to bump a version constant before tagging —
+  issue #389's own explicit acceptance criterion.
+- =trader --version=/=trader -v=/=trader version= all report an
+  accurate, git-tag-derived version for any build made via =make
+  build=/=make install=, with no risk of the binary and the tag
+  disagreeing (the version is derived directly from the tag at build
+  time, not hand-copied into a separate constant that could drift).
+- A plain =go build ./cmd/trader= run outside =make= no longer reports
+  the exact =git describe= string — it falls back to case 2 or case 3
+  above instead. In practice this is often still a reasonable value:
+  modern Go toolchains (observed on go1.25) already derive a real
+  main-module pseudo-version (case 2) from nearby VCS tags for an
+  ordinary local build, not only for a version-qualified =go install
+  module@vX.Y.Z=; the =devel+<revision>= placeholder (case 3) is
+  reached only when that is unavailable too (an older Go toolchain, or
+  =-buildvcs=false=). Either way, this is a known, deliberate departure
+  from ADR-046's own zero-Makefile-involvement guarantee, and the
+  exact tradeoff ADR-046's own "Alternatives Considered" flagged
+  against ldflags. It is accepted now because issue #389 explicitly
+  prioritizes zero-manual-bump reproducibility over guaranteeing an
+  exact git-describe string outside =make=, and =make build=/=make
+  install= remain the documented, recommended way to build Trader.
+- =version.Info= is now a small, dependency-free type importable by any
+  package that wants to record Trader's own build identity (backtest
+  run manifests, external-strategy provenance, structured startup
+  logs, research artifacts) without depending on Cobra or any command
+  package — issue #389's own "reusable Go API" acceptance criterion.
+  Actually wiring =Info= into those specific consumers (manifests,
+  external-strategy provenance, and so on) is deliberately left as
+  future, additive follow-on work — issue #389's own acceptance
+  criteria require only that the reusable package and the CLI-level
+  reporting exist, not that every listed "follow-on consumer" is
+  updated in this same change.
+- A version-qualified module install (=go install .../trader@vX.Y.Z=)
+  continues to report that exact version with no commit/dirty
+  information, unchanged from ADR-046 — Go does not stamp VCS metadata
+  for that install form, a property of the Go toolchain itself, not of
+  this design.
+- The displayed version string now always carries its tag's own
+  leading =v= (e.g. =v0.3.0=, since tags themselves are created with
+  that prefix and =git describe= reproduces it verbatim), where
+  ADR-046's hand-maintained const never included one (e.g. plain
+  =0.0.1=). This is a cosmetic, one-time display change; the CONTRIBUTING.org
+  tag-naming convention itself (=vMAJOR.MINOR.PATCH=) is unchanged.
+
+* Alternatives Considered
+
+- *Keep ADR-046's hand-maintained const unchanged.* Rejected: directly
+  contradicts issue #389's own explicit, repeated requirement that no
+  manual bump be required.
+- *A committed =VERSION= file, generated by a pre-tag script and read
+  by both the Makefile and a Go =//go:embed=.* Rejected for the same
+  reason ADR-046 already rejected it: an extra file that must stay
+  synchronized with the tag, for no benefit over deriving directly
+  from git at build time.
+- *Rely solely on =runtime/debug='s main-module version (no ldflags at
+  all), using only =go install module@vX.Y.Z= to obtain a real tag.*
+  Rejected: this only works for module-installed binaries, not local-
+  checkout builds (=make build=/=make install=), which is exactly the
+  build path issue #389 needs an automatic, zero-manual-bump version
+  for.
+- *Compute and embed the full =Info= (including commit time) via
+  ldflags too, rather than relying on =runtime/debug= for
+  =Revision=/=Time=/=Dirty=.* Rejected as unnecessary duplication: Go's
+  own automatic VCS build-info stamping already provides these for
+  every git-checkout build with zero Makefile involvement (the exact
+  property ADR-046 already established and this ADR keeps), and mixing
+  two injection mechanisms for logically related fields would be
+  harder to reason about than one ldflags variable (=gitDescribe=) plus
+  one already-automatic mechanism (VCS build-info).

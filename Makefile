@@ -15,17 +15,34 @@ COVERPROFILE := coverage.out
 BINARY := trader
 BIN_DIR := bin
 
+# GIT_DESCRIBE/LDFLAGS (issue #389, ADR-064): the build/install targets
+# below inject the current `git describe --tags --always --dirty`
+# output into cmd/trader/internal/version's own gitDescribe var — the
+# primary version-derivation mechanism, replacing ADR-046's earlier
+# hand-maintained Version const. No manual edit is required solely
+# because a new tag was created; see that package's own doc comment
+# for the complete precedence/fallback chain this enables (in
+# particular, for a plain `go build ./cmd/trader` run outside `make`,
+# which never sees these ldflags at all). The `2>/dev/null || true`
+# guards a build attempted outside any git repository (or before the
+# very first commit) from failing outright merely because git describe
+# itself has nothing to report — gitDescribe is simply empty in that
+# case, and version.Current() falls back accordingly.
+GIT_DESCRIBE := $(shell git describe --tags --always --dirty 2>/dev/null || true)
+VERSION_PKG := github.com/rustyeddy/trader/cmd/trader/internal/version
+LDFLAGS := -X $(VERSION_PKG).gitDescribe=$(GIT_DESCRIBE)
+
 all: check
 
 # build compiles the trader CLI (cmd/trader) to ./bin/trader.
 build:
-	go build -o $(BIN_DIR)/$(BINARY) ./cmd/trader
+	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/trader
 
 # install builds and installs trader via `go install`, the standard Go
 # convention: it lands in $GOBIN, or $GOPATH/bin (~/go/bin by default)
 # when GOBIN is unset, and requires no elevated privileges.
 install:
-	go install ./cmd/trader
+	go install -ldflags "$(LDFLAGS)" ./cmd/trader
 
 # gen-proto regenerates protocol/strategy/v1's Go bindings from
 # strategy.proto (issue #377, ADR-062). Installs protoc-gen-go/

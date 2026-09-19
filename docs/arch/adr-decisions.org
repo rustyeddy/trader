@@ -153,7 +153,7 @@ the original decided, use full supersession instead.
 | 043 | External/private strategy integration seam (in adr-043-strategy-integration-seam.org) | Accepted |
 | 044 | Strategy decision evidence (in adr-044-strategy-decision-evidence.org) | Accepted |
 | 045 | Direct Price-to-float64 analytical conversion boundary (in adr-045-analytical-float64-conversion-boundary.org) | Accepted |
-| 046 | Semantic versioning, version reporting, and release process (in adr-046-semantic-versioning-release-process.org) | Accepted |
+| 046 | Semantic versioning, version reporting, and release process (in adr-046-semantic-versioning-release-process.org) | Superseded, see note below |
 | 047 | Equities Phase 1 domain semantics and scope (in adr-047-equities-phase1-scope.org) | Accepted |
 | 048 | Canonical equity bar adjustment semantics (in adr-048-equity-bar-adjustment-semantics.org) | Accepted |
 | 049 | US equity market calendar and trading-session semantics (in adr-049-us-equity-market-calendar.org) | Accepted |
@@ -171,6 +171,7 @@ the original decided, use full supersession instead.
 | 061 | risk.SizeInput.ReferencePrice and a full-notional risk.Sizer (in adr-061-full-notional-sizer.org) | Accepted, partial amendment of 059 |
 | 062 | External Strategy Protocol v1 and out-of-process architecture (in adr-062-external-strategy-protocol-v1.org) | Accepted |
 | 063 | External strategy process manager and Unix-domain socket transport (in adr-063-external-strategy-process-manager.org) | Accepted |
+| 064 | Git-describe-derived version and build metadata (in adr-064-git-describe-version-metadata.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -487,7 +488,13 @@ one source of truth, VCS metadata via =runtime/debug.ReadBuildInfo()=
 rather than ldflags, and Cobra's built-in =--version= flag — without
 resolving ADR-011's own still-open items, which is why ADR-011 keeps
 its =Proposed= status rather than being marked =Accepted= by this
-work.
+work.  ADR-046 is now =Superseded= by ADR-064 (issue #389): its own
+hand-maintained-const mechanism, its rejection of ldflags, and its
+rejection of a =trader version= subcommand are all replaced —
+git-tag-derived versioning is now automatic, requiring no manual
+constant bump before a release tag.  ADR-046's own text is left
+unchanged, per this registry's non-rewrite rule; only its own Status
+section gains a =Superseded by ADR-064= line.
 
 Note: ADR-047 is likewise maintained in its own file,
 =docs/arch/adr-047-equities-phase1-scope.org=, rather than inline in
@@ -1555,6 +1562,21 @@ Considered.
   stated H4 boundary) for an interval used throughout =marketdata=; per
   =CONTRIBUTING.org=, that requires a recorded decision, not a quiet
   code change.
+
+Note: ADR-064 is likewise maintained in its own file,
+=docs/arch/adr-064-git-describe-version-metadata.org=, rather than
+inline in this registry.  Its own Status section is authoritative.
+Issue #389 asks for Trader's version to be derived automatically from
+git tags, with no manual source-bump required before a release tag —
+directly reopening ADR-046's own central decision (a hand-maintained
+=Version= const, bumped by hand every release). This ADR records the
+resulting mechanism — a =-ldflags -X=-injected =gitDescribe= variable
+computed by the Makefile from =git describe --tags --always --dirty=,
+a small reusable =version.Info=/=Current()= API, and a new
+=trader version= subcommand alongside the existing =--version= flag —
+and fully supersedes ADR-046 (per this registry's own supersession
+rules: the change touches most of what ADR-046 decided, so full
+supersession applies rather than a partial amendment).
 
 * ADR Template                                                       :noexport:
 

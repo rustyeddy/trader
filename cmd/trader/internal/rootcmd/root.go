@@ -107,9 +107,10 @@ func New() (*cobra.Command, func() error) {
 		Short: "Trader is a framework for testing and executing algorithmic trading.",
 		// Version enables Cobra's own built-in --version flag; the
 		// printed template is "trader version {{.Version}}" (issue
-		// #288). See cmd/trader/internal/version's own doc comment for
-		// why this needs no ldflags/build-time injection.
-		Version: version.String(),
+		// #288, reworked by issue #389/ADR-064 to derive from git tags
+		// at build time — see cmd/trader/internal/version's own doc
+		// comment for exactly how).
+		Version: version.Current().String(),
 		// SilenceUsage/SilenceErrors: trader prints its own error (see
 		// main.run), so Cobra's default double-printing (usage banner
 		// plus a second "Error:" line) is suppressed here.
@@ -158,6 +159,7 @@ func New() (*cobra.Command, func() error) {
 	cmd.AddCommand(broker.New())
 	cmd.AddCommand(execution.New())
 	cmd.AddCommand(cmdbacktest.New())
+	cmd.AddCommand(newVersionCmd())
 
 	cleanup := func() error {
 		if closer == nil {
