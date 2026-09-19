@@ -22,15 +22,29 @@ intents through `strategysdk`.
 
 ## Equivalence with the in-tree strategy
 
-`cmd/trader/backtest/sma_long_hold_equivalence_test.go` runs this
+`cmd/trader/backtest/sma_long_hold_equivalence_test.go` (issue #384,
+the milestone-completion gate for External Strategies v1) runs this
 binary (via `--strategy-exec`) and `strategy/smatrend` (in-process,
 `ExitRuleName: "trailing-stop"`, `ReEntryRuleName: "fresh-cross"`,
 `InitialEntryModeName: "fresh-cross"`) side by side over identical
-canonical market data and asserts their trades and final account state
-are identical — the concrete proof that an out-of-tree
-`strategysdk.Strategy` produces the same trading decisions as its
-in-tree `strategy.Strategy` counterpart when they implement the same
-logic.
+canonical market data and asserts they are identical across every
+observable dimension: data requirements, journaled intent/order/
+replace-request/fill/trade records (ordering and correlation
+included, every opaque ID normalized rather than compared literally),
+decision-evidence signals, closed/open trades, the equity curve, and
+final account state. Every intentionally different, transport-only
+field (each side's own `Descriptor.Name`/`Version`, and the resulting
+`Manifest.StrategyName`/`StrategyParameters`) is named explicitly in
+that test's own doc comment, not silently skipped. This is the
+concrete proof that an out-of-tree `strategysdk.Strategy` produces
+the same trading decisions — not merely the same final numbers — as
+its in-tree `strategy.Strategy` counterpart when they implement the
+same logic.
+
+This binary's own `signal` method (in `main.go`) deliberately mirrors
+`strategy/smatrend.Strategy.recordSignal`'s Values map shape and keys
+exactly, so the two sides' decision evidence compares byte for byte
+in that test.
 
 ## Configuration
 

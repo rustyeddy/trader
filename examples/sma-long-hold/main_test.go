@@ -181,10 +181,13 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 	crossBar := testBar(t, 3, "1.10300", "1.11050", "1.10250", "1.11000")
 	intents, signals, err := strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: crossBar}, fakeView{inst: strat.inst, side: order.Flat})
 	require.NoError(t, err)
-	assert.Empty(t, signals)
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.IntentEnter, intents[0].Kind)
 	assert.Equal(t, order.Buy, intents[0].Side)
+	require.Len(t, signals, 1, "an entry must also record its own decision evidence")
+	assert.Equal(t, "enter-long", signals[0].Values["action"])
+	assert.Equal(t, intents[0].CorrelationToken, signals[0].CorrelationToken,
+		"the signal must share the entry intent's own correlation token")
 
 	// Position now observed Long (as if the Enter filled): the entry
 	// bar's own High seeds the high-water mark, and the first
@@ -193,7 +196,7 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 	// bar the position is first observed Long.
 	entryFillBar := testBar(t, 4, "1.11000", "1.11200", "1.10900", "1.11100")
 	entryPrice := num.MustParsePrice("1.11000")
-	intents, _, err = strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: entryFillBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
+	intents, signals, err = strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: entryFillBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
 	require.NoError(t, err)
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.IntentAdjustStop, intents[0].Kind)
@@ -201,6 +204,9 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 	wantFirstStop, err := num.MustParsePrice("1.11200").MulRate(num.MustParseRate("0.98"))
 	require.NoError(t, err)
 	assert.True(t, firstStop.Equal(wantFirstStop), "expected %s, got %s", wantFirstStop, firstStop)
+	require.Len(t, signals, 1)
+	assert.Equal(t, "adjust-stop", signals[0].Values["action"])
+	assert.Equal(t, firstStop.String(), signals[0].Values["stop_price"])
 
 	// A higher High ratchets the stop upward.
 	higherBar := testBar(t, 5, "1.11100", "1.11500", "1.11000", "1.11400")
