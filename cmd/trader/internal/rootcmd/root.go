@@ -35,9 +35,9 @@ import (
 	"github.com/rustyeddy/trader/cmd/trader/data"
 	"github.com/rustyeddy/trader/cmd/trader/execution"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/cmd/trader/internal/version"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/logging"
+	"github.com/rustyeddy/trader/version"
 )
 
 // rootFlags holds the root command's persistent flag values. Cobra
@@ -108,8 +108,8 @@ func New() (*cobra.Command, func() error) {
 		// Version enables Cobra's own built-in --version flag; the
 		// printed template is "trader version {{.Version}}" (issue
 		// #288, reworked by issue #389/ADR-064 to derive from git tags
-		// at build time — see cmd/trader/internal/version's own doc
-		// comment for exactly how).
+		// at build time — see the version package's own doc comment
+		// for exactly how).
 		Version: version.Current().String(),
 		// SilenceUsage/SilenceErrors: trader prints its own error (see
 		// main.run), so Cobra's default double-printing (usage banner

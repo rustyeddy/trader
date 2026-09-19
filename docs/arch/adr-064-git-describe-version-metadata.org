@@ -66,32 +66,53 @@ ADR-046 is not being replaced, only restated here for a complete
 picture — see CONTRIBUTING.org's own "Releasing" section (updated
 alongside this ADR) for the authoritative, current steps.
 
+** A repository-level, importable =version= package
+
+The version-resolution logic lives in a new top-level package,
+=github.com/rustyeddy/trader/version= — not under =cmd/trader/internal=
+(review finding: an initial implementation placed it under
+=cmd/trader/internal/version=, which Go's own internal-visibility
+rules made unimportable by any package outside =cmd/trader=, directly
+contradicting this ADR's own "reusable Go API" goal below). Only
+=cmd/trader/internal/rootcmd= imports it to back the CLI's own
+=--version=/=trader version= surface; nothing about the package itself
+requires that caller.
+
 ** Version derived from =git describe= at build time, not a hand-maintained const
 
-=cmd/trader/internal/version.Version= (the const) is removed. In its
-place, =cmd/trader/internal/version= gains a private,
-=-ldflags -X=-injected variable, =gitDescribe=, set by the Makefile's
-=build=/=install= targets to the output of:
+=cmd/trader/internal/version.Version= (the const ADR-046 established)
+is removed outright. In its place, the new =version= package gains a
+private, =-ldflags -X=-injected variable, =gitDescribe=, set by the
+Makefile's =build=/=install= targets to the output of:
 
 #+BEGIN_SRC sh
-git describe --tags --always --dirty
+git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --always --dirty
 #+END_SRC
 
-run at build time. This produces:
+run at build time. The =--match= restriction is deliberate (review
+finding): a bare =--tags= considers *every* reachable tag in the
+repository, so an unrelated future tag (=research-2026-09=,
+=strategy-sdk-v1=, and so on) could otherwise become Trader's own
+reported application version, depending on reachability/distance. Only
+tags shaped like this ADR's own =vMAJOR.MINOR.PATCH= release
+convention are eligible.
+
+This produces:
 
 - the exact tag (e.g. =v0.3.0=) when =HEAD= is exactly that tag and the
   working tree is clean;
 - =v0.3.0-12-gabc1234= for 12 commits past that tag;
 - =v0.3.0-12-gabc1234-dirty= (or =v0.3.0-dirty= at the tag itself) when
   the working tree has uncommitted changes;
-- a bare abbreviated commit hash when the repository has no tags at
-  all yet (=git describe='s own =--always= fallback).
+- a bare abbreviated commit hash when the repository has no matching
+  release tag at all yet (=git describe='s own =--always= fallback).
 
 No source file is generated or committed for this; the Makefile
 computes it fresh on every invocation of =make build=/=make install=,
 via =$(shell git describe ...)=. A build attempted outside any git
-repository (or before the first commit) is not treated as an error —
-the shell command's failure is swallowed (=2>/dev/null || true=),
+repository (or before the first matching tag exists) is not treated as
+an error — the shell command's failure is swallowed (=2>/dev/null ||
+true=),
 leaving =gitDescribe= empty, which =version.Current= treats identically
 to "no ldflags were provided."
 
@@ -101,17 +122,19 @@ to "no ldflags were provided."
 package version
 
 type Info struct {
-    Version  string
-    Revision string
-    Time     time.Time
-    Dirty    bool
+    Version    string
+    Revision   string
+    CommitTime time.Time
+    Dirty      bool
 }
 
 func Current() Info
 #+END_SRC
 
-=Info= is the exact shape issue #389's own "Suggested API shape"
-proposed. =Current= resolves =Version= with this precedence:
+=Info= is the shape issue #389's own "Suggested API shape" proposed,
+with one field renamed: =Time= became =CommitTime= (review finding —
+see the =Report= format below for why). =Current= resolves =Version=
+with this precedence:
 
 1. =gitDescribe=, when the build went through =make build=/=make
    install= (the documented, recommended way to build Trader).
@@ -128,7 +151,7 @@ proposed. =Current= resolves =Version= with this precedence:
    working-tree state.
 4. =unknown=, when none of the above applies.
 
-=Revision=/=Time=/=Dirty= are read from
+=Revision=/=CommitTime=/=Dirty= are read from
 =runtime/debug.ReadBuildInfo='s VCS settings (=vcs.revision=,
 =vcs.time=, =vcs.modified=) — the identical mechanism ADR-046 already
 established, kept unchanged here — independent of which case above
@@ -136,20 +159,44 @@ resolved =Version=, so they remain populated (for any git-checkout
 build) even in case 2 above, where =Version= itself came from the main
 module instead.
 
+=Current= itself is a thin runtime wrapper: the actual precedence
+logic is a pure function, =resolveInfo(gitDescribe string, meta
+buildMetadata) Info=, taking build info as a plain struct parameter
+rather than calling =runtime/debug.ReadBuildInfo= itself (review
+finding: an initial implementation had the precedence branches call
+=debug.ReadBuildInfo= directly, so the branches' own behavior depended
+on whatever build info the *test* binary happened to have — never
+controllable, so the precedence chain was never actually exercised
+deterministically). =resolveInfo= is covered by a table test driving
+every branch (exact injected tag, injected dev string, module-version
+fallback, =(devel)= rejection, VCS-revision fallback, dirty-VCS
+fallback, and the fully-unknown case) against synthetic input, with no
+dependence on the test binary's own build info at all.
+
 ** =trader version= subcommand, alongside the existing =--version= flag
 
 =cmd.Version = version.Current().String()= (=Info.String()=, which is
 simply =Version= alone) continues to back Cobra's built-in
 =--version=/=-v= flag, unchanged in spirit from ADR-046. A new
 =trader version= subcommand additionally prints =Info.Report()=, a
-multi-line form surfacing =Revision=/=Time=/=Dirty= explicitly,
-matching issue #389's own worked example:
+multi-line form surfacing =Revision=/=CommitTime=/=Dirty= explicitly,
+matching issue #389's own worked example (adapted to name the field
+=commit-time=, not =built=; see below):
 
 #+BEGIN_EXAMPLE
 trader v0.3.0
 commit: abc1234def012
-built: 2026-09-15T18:00:00Z
+commit-time: 2026-09-15T18:00:00Z
 #+END_EXAMPLE
+
+=commit-time= is deliberately named that, not =built= (review
+finding): the underlying value (=vcs.time=) is =Revision='s own commit
+timestamp, not when this particular binary happened to be compiled —
+Trader records no separate build-wall-clock timestamp at all. Commit
+time plus dirty state plus the git-describe/module version already
+identify the exact source a binary was built from, which is what
+matters for reproducibility, and stays stable across two builds of
+identical source — unlike a build timestamp would.
 
 A field the report cannot determine (no VCS build-info at all, for
 example) is omitted from its own line entirely, never printed with an
@@ -227,7 +274,7 @@ GitHub release from it — no code change, no PR, required first.
   for.
 - *Compute and embed the full =Info= (including commit time) via
   ldflags too, rather than relying on =runtime/debug= for
-  =Revision=/=Time=/=Dirty=.* Rejected as unnecessary duplication: Go's
+  =Revision=/=CommitTime=/=Dirty=.* Rejected as unnecessary duplication: Go's
   own automatic VCS build-info stamping already provides these for
   every git-checkout build with zero Makefile involvement (the exact
   property ADR-046 already established and this ADR keeps), and mixing

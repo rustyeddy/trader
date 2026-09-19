@@ -12,9 +12,10 @@ ADR's own rejection of ldflags and of a =trader version= subcommand)
 outright; this ADR's own Context/Decision/Consequences/Alternatives
 Considered sections below are left unchanged, per the registry's own
 non-rewrite rule for a superseded ADR — they remain an accurate record
-of what Trader decided at issue #288.
+of what Trader decided at issue #288, and of the =Accepted= status
+this ADR held from that point until superseded above.
 
-Accepted. Issue #288 asks Trader to begin real semantic versioning at
+Issue #288 asks Trader to begin real semantic versioning at
 =v0.0.1=, with a mechanism for tagging and releasing. ADR-011
 (docs/arch/adr-decisions.org) already commits Trader to semver while
 remaining at =v0=, but explicitly defers "exact deprecation,

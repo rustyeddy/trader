@@ -40,21 +40,27 @@ past that tag with uncommitted local changes.
 ```
 trader v0.3.0
 commit: abc1234def012
-built: 2026-09-15T18:00:00Z
+commit-time: 2026-09-15T18:00:00Z
 ```
 
+(`commit-time` is that commit's own timestamp, not when this
+particular binary happened to be compiled — Trader records no
+separate build-wall-clock timestamp.)
+
 Both forms require a build made via `make build`/`make install` (which
-inject `git describe --tags --always --dirty` output at build time) to
-report the exact git-describe version. A plain `go build`/`go install
-./cmd/trader` run outside `make`, from a local git checkout, instead
-falls back to Go's own module-version inference (already a real,
-usable value on a modern toolchain) or, failing that, a
-`devel+<revision>` placeholder — still traceable to the exact commit,
-just not necessarily the exact git-describe string. A version-qualified module install
-(`go install .../trader@v0.3.0`) reports that exact version alone,
-with no commit info, since Go does not stamp VCS metadata for that
-install form. See
-[`cmd/trader/internal/version`](../cmd/trader/internal/version)'s own
+inject `git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --always
+--dirty` output at build time — restricted to Trader's own release-tag
+namespace, so an unrelated repository tag can never become Trader's
+own reported version) to report the exact git-describe version. A
+plain `go build`/`go install ./cmd/trader` run outside `make`, from a
+local git checkout, instead falls back to Go's own module-version
+inference (already a real, usable value on a modern toolchain) or,
+failing that, a `devel+<revision>` placeholder — still traceable to
+the exact commit, just not necessarily the exact git-describe string.
+A version-qualified module install (`go install .../trader@v0.3.0`)
+reports that exact version alone, with no commit info, since Go does
+not stamp VCS metadata for that install form. See
+[`version`](../version)'s own
 doc comment for the complete precedence/fallback chain.
 
 Trader follows semantic versioning while remaining at `v0` (ADR-011,

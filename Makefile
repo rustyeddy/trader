@@ -16,20 +16,29 @@ BINARY := trader
 BIN_DIR := bin
 
 # GIT_DESCRIBE/LDFLAGS (issue #389, ADR-064): the build/install targets
-# below inject the current `git describe --tags --always --dirty`
-# output into cmd/trader/internal/version's own gitDescribe var — the
-# primary version-derivation mechanism, replacing ADR-046's earlier
-# hand-maintained Version const. No manual edit is required solely
-# because a new tag was created; see that package's own doc comment
-# for the complete precedence/fallback chain this enables (in
-# particular, for a plain `go build ./cmd/trader` run outside `make`,
-# which never sees these ldflags at all). The `2>/dev/null || true`
-# guards a build attempted outside any git repository (or before the
-# very first commit) from failing outright merely because git describe
-# itself has nothing to report — gitDescribe is simply empty in that
-# case, and version.Current() falls back accordingly.
-GIT_DESCRIBE := $(shell git describe --tags --always --dirty 2>/dev/null || true)
-VERSION_PKG := github.com/rustyeddy/trader/cmd/trader/internal/version
+# below inject the current `git describe` output into the version
+# package's own gitDescribe var — the primary version-derivation
+# mechanism, replacing ADR-046's earlier hand-maintained Version
+# const. No manual edit is required solely because a new tag was
+# created; see that package's own doc comment for the complete
+# precedence/fallback chain this enables (in particular, for a plain
+# `go build ./cmd/trader` run outside `make`, which never sees these
+# ldflags at all).
+#
+# --match 'v[0-9]*.[0-9]*.[0-9]*' restricts git describe to Trader's
+# own vMAJOR.MINOR.PATCH release-tag namespace (review finding: a bare
+# `--tags` considers every reachable tag in the repository — an
+# unrelated future tag such as "research-2026-09" could otherwise
+# become Trader's own reported application version, depending on
+# reachability/distance).
+#
+# The `2>/dev/null || true` guards a build attempted outside any git
+# repository (or before the very first matching tag exists) from
+# failing outright merely because git describe itself has nothing to
+# report — gitDescribe is simply empty in that case, and
+# version.Current() falls back accordingly.
+GIT_DESCRIBE := $(shell git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --always --dirty 2>/dev/null || true)
+VERSION_PKG := github.com/rustyeddy/trader/version
 LDFLAGS := -X $(VERSION_PKG).gitDescribe=$(GIT_DESCRIBE)
 
 all: check

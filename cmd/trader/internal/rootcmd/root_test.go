@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/cmd/trader/internal/version"
+	"github.com/rustyeddy/trader/version"
 )
 
 func TestNewRootCmd_HelpSucceeds(t *testing.T) {
