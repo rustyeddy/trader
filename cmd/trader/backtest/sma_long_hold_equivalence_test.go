@@ -38,6 +38,7 @@ package backtest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,6 +56,7 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
+	"github.com/rustyeddy/trader/risk"
 	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/strategy/smatrend"
@@ -102,6 +104,52 @@ func smaLongHoldEquivalenceListing(t *testing.T, provider string) instrument.Lis
 	})
 	require.NoError(t, err)
 	return listing
+}
+
+// smaLongHoldExitRule/smaLongHoldReEntryRule/smaLongHoldInitialEntryMode
+// name the exact rule identities this scenario holds constant on both
+// sides — smatrend.DefaultExitRuleName/DefaultReEntryRuleName's own
+// literal values, plus InitialEntryModeName's identical default
+// (smatrend exports no matching InitialEntryModeName constant to
+// import; this literal must be kept in sync with that package's own
+// DefaultInitialEntryModeName by hand).
+const (
+	smaLongHoldExitRule         = "trailing-stop"
+	smaLongHoldReEntryRule      = "fresh-cross"
+	smaLongHoldInitialEntryMode = "fresh-cross"
+)
+
+// smaLongHoldSemanticIdentity is the normalized, cross-implementation
+// strategy configuration issue #384 asks be compared as "manifest
+// strategy/config identity" (review finding: an earlier version of
+// this test excluded StrategyParameters from comparison entirely,
+// rather than normalizing it) — the actual tuning knobs governing
+// trading behavior, independent of each side's own separate
+// Descriptor.Name/Version implementation identity (see this file's
+// own doc comment for why those remain excluded, not normalized: they
+// identify *which code ran*, not *what it was configured to do*).
+//
+// JSON tags deliberately match smatrend.Config's own tags exactly, so
+// json.Unmarshal(inTree.resp.Manifest.StrategyParameters(), ...)
+// decodes smatrend's real Config directly into this narrower shape
+// (SMAPeriod/TrailingStopPercent/ExitRuleName/ReEntryRuleName/
+// InitialEntryModeName is a superset of this type's own fields). The
+// external run's own RunRequest.StrategyParameters (below) is built
+// directly as this same type, so both manifests decode into it
+// symmetrically — this is a deliberate divergence from run.go's own
+// real --strategy-exec convention (which records launch metadata —
+// exec/args/config path — as StrategyParameters, not the guest's
+// decoded internal config, since the host never learns that value
+// over the wire): this dedicated equivalence test needs the actual
+// semantic configuration to assert against, which the guest process
+// here happens to know precisely because this test wrote its own
+// config file for it moments before launch.
+type smaLongHoldSemanticIdentity struct {
+	SMAPeriod            int    `json:"sma_period"`
+	TrailingStopPercent  string `json:"trailing_stop_percent"`
+	ExitRuleName         string `json:"exit_rule"`
+	ReEntryRuleName      string `json:"reentry_rule"`
+	InitialEntryModeName string `json:"initial_entry_mode"`
 }
 
 // smaLongHoldEquivalenceParams is the one configuration both sides of
@@ -260,9 +308,23 @@ func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver in
 	trailingStopPercent, err := num.ParseRate(p.trailingStopPercent)
 	require.NoError(t, err)
 
+	// ExitRuleName/ReEntryRuleName/InitialEntryModeName are set
+	// explicitly to their own default values here (review finding),
+	// not left empty: Config.exitRuleName()/reEntryRuleName()/
+	// initialEntryModeName() resolve an empty field to
+	// DefaultExitRuleName/DefaultReEntryRuleName/
+	// DefaultInitialEntryModeName at read time, but strat.Config()
+	// below returns the raw, unresolved Config struct — leaving these
+	// empty would record an empty string in the manifest's own
+	// StrategyParameters, not the actual resolved semantic identity
+	// this test's own "manifest strategy/config identity" comparison
+	// needs to assert against.
 	strat, err := smatrend.New(simListing.InstrumentID(), interval, smatrend.Config{
-		SMAPeriod:           p.smaPeriod,
-		TrailingStopPercent: trailingStopPercent,
+		SMAPeriod:            p.smaPeriod,
+		TrailingStopPercent:  trailingStopPercent,
+		ExitRuleName:         smaLongHoldExitRule,
+		ReEntryRuleName:      smaLongHoldReEntryRule,
+		InitialEntryModeName: smaLongHoldInitialEntryMode,
 	})
 	require.NoError(t, err)
 	descriptor := strat.Describe()
@@ -338,7 +400,18 @@ func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolv
 	require.NoError(t, err)
 
 	resp, err := svc.Run(ctx, svcbacktest.RunRequest{
-		Strategy:        process.Strategy(),
+		Strategy: process.Strategy(),
+		// See smaLongHoldSemanticIdentity's own doc comment for why
+		// this is the guest's actual decoded semantic configuration,
+		// not run.go's own real --strategy-exec launch-metadata
+		// convention.
+		StrategyParameters: smaLongHoldSemanticIdentity{
+			SMAPeriod:            p.smaPeriod,
+			TrailingStopPercent:  p.trailingStopPercent,
+			ExitRuleName:         smaLongHoldExitRule,
+			ReEntryRuleName:      smaLongHoldReEntryRule,
+			InitialEntryModeName: smaLongHoldInitialEntryMode,
+		},
 		Span:            p.span,
 		StartingCapital: p.startingCapital,
 		RiskFraction:    p.riskFraction,
@@ -447,11 +520,23 @@ func assertRequiredKindsPresent(t *testing.T, records []journal.Record) {
 // Kind) field by field, normalizing every opaque ID through each
 // run's own idNormalizer first — never comparing raw ULIDs, which are
 // never expected to be literally equal between two independent
-// implementations/runs. Closely mirrors backtest/determinism_test.go's
-// own function of the same name (see this file's own doc comment for
-// why it is duplicated, not shared), with one addition —
-// journal.KindSignal — and one deliberate omission — journal.
-// KindAccount, matching that file's own reasoning.
+// implementations/runs. This is a full copy of backtest/
+// determinism_test.go's own current function of the same name (see
+// this file's own doc comment for why it is duplicated, not shared,
+// and review finding: an earlier version of this function silently
+// dropped several fields that comparer already checks — decision
+// violations/warnings and per-rule-result violations/warnings,
+// order AcceptedLimitPrice/AcceptedQuantity, and fill commission/
+// BrokerOrderID/Metadata — weakening this milestone gate below the
+// bar the existing determinism suite already set, and risking this
+// gate silently drifting out of sync as that canonical comparer
+// evolves). Two additions beyond that copy: journal.KindReplaceRequest
+// (this scenario's three ratcheting AdjustStop intents all take that
+// path, ADR-054) and journal.KindSignal (decision evidence, unique to
+// this gate — see its own case below for why Strategy specifically is
+// excluded). One deliberate omission, matching the source function
+// exactly: journal.KindAccount, unreachable from any sim.Broker-backed
+// run today.
 func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *idNormalizer) {
 	t.Helper()
 
@@ -482,9 +567,14 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 	case journal.KindDecision:
 		d1, d2 := r1.Decision, r2.Decision
 		assert.Equalf(t, d1.Allowed, d2.Allowed, "record[%d]/decision: allowed mismatch", i)
+		compareViolations(t, i, "decision", d1.Violations, d2.Violations)
+		compareWarnings(t, i, "decision", d1.Warnings, d2.Warnings)
 		require.Equalf(t, len(d1.RuleResults), len(d2.RuleResults), "record[%d]/decision: rule result count mismatch", i)
 		for j := range d1.RuleResults {
-			assert.Equalf(t, d1.RuleResults[j].Rule, d2.RuleResults[j].Rule, "record[%d]/decision: rule_results[%d] name mismatch", i, j)
+			rr1, rr2 := d1.RuleResults[j], d2.RuleResults[j]
+			assert.Equalf(t, rr1.Rule, rr2.Rule, "record[%d]/decision: rule_results[%d] name mismatch", i, j)
+			compareViolations(t, i, fmt.Sprintf("decision.rule_results[%d]", j), rr1.Violations, rr2.Violations)
+			compareWarnings(t, i, fmt.Sprintf("decision.rule_results[%d]", j), rr1.Warnings, rr2.Warnings)
 		}
 	case journal.KindRequest:
 		req1, req2 := r1.Request, r2.Request
@@ -493,10 +583,6 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		assert.Truef(t, req1.Quantity.Equal(req2.Quantity), "record[%d]/request: quantity mismatch", i)
 		assert.Equalf(t, n1.order(req1.OrderID), n2.order(req2.OrderID), "record[%d]/request: order id shape mismatch", i)
 	case journal.KindReplaceRequest:
-		// AdjustStop intents replace the resting stop on an already-
-		// working order (ADR-054), rather than submitting a new
-		// order.Request — this scenario's own three ratcheting stop
-		// adjustments (bars 10-12) all take this path.
 		rr1, rr2 := r1.ReplaceRequest, r2.ReplaceRequest
 		assert.Equalf(t, n1.order(rr1.OrderID), n2.order(rr2.OrderID), "record[%d]/replace_request: order id shape mismatch", i)
 		comparePrice(t, i, "replace_request.new_stop_price", rr1.NewStopPrice, rr2.NewStopPrice)
@@ -511,8 +597,14 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		assert.Equalf(t, o1.Status, o2.Status, "record[%d]/order: status mismatch", i)
 		assert.Equalf(t, n1.order(o1.Request.OrderID), n2.order(o2.Request.OrderID), "record[%d]/order: order id shape mismatch", i)
 		assert.Equalf(t, n1.brokerOrderID(o1.BrokerOrderID), n2.brokerOrderID(o2.BrokerOrderID), "record[%d]/order: broker order id shape mismatch", i)
+		comparePrice(t, i, "order.accepted_limit_price", o1.AcceptedLimitPrice, o2.AcceptedLimitPrice)
 		comparePrice(t, i, "order.accepted_stop_price", o1.AcceptedStopPrice, o2.AcceptedStopPrice)
 		assert.Truef(t, o1.FilledQuantity.Equal(o2.FilledQuantity), "record[%d]/order: filled quantity mismatch: got %s want %s", i, o2.FilledQuantity, o1.FilledQuantity)
+		if o1.AcceptedQuantity != nil && o2.AcceptedQuantity != nil {
+			assert.Truef(t, o1.AcceptedQuantity.Equal(*o2.AcceptedQuantity), "record[%d]/order: accepted quantity mismatch", i)
+		} else {
+			assert.Equalf(t, o1.AcceptedQuantity == nil, o2.AcceptedQuantity == nil, "record[%d]/order: accepted quantity nilness mismatch", i)
+		}
 	case journal.KindFill:
 		f1, f2 := r1.Fill, r2.Fill
 		assert.Truef(t, f1.Listing.InstrumentID().Equal(f2.Listing.InstrumentID()), "record[%d]/fill: instrument mismatch", i)
@@ -520,9 +612,16 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		assert.Truef(t, f1.Price.Equal(f2.Price), "record[%d]/fill: price mismatch: got %s want %s", i, f2.Price, f1.Price)
 		assert.Truef(t, f1.Quantity.Equal(f2.Quantity), "record[%d]/fill: quantity mismatch", i)
 		assert.Truef(t, f1.Timestamp.Equal(f2.Timestamp), "record[%d]/fill: timestamp mismatch: got %s want %s", i, f2.Timestamp, f1.Timestamp)
+		compareMoney(t, i, "fill.commission", f1.Commission, f2.Commission)
 		assert.Equalf(t, n1.fill(f1.FillID), n2.fill(f2.FillID), "record[%d]/fill: fill id shape mismatch", i)
 		assert.Equalf(t, n1.order(f1.OrderID), n2.order(f2.OrderID), "record[%d]/fill: order id shape mismatch", i)
+		assert.Equalf(t, n1.brokerOrderID(f1.BrokerOrderID), n2.brokerOrderID(f2.BrokerOrderID), "record[%d]/fill: broker order id shape mismatch", i)
 		assert.Equalf(t, n1.account(f1.AccountID), n2.account(f2.AccountID), "record[%d]/fill: account id shape mismatch", i)
+		fe1, fc1, fcause1 := n1.metadata(f1.Metadata)
+		fe2, fc2, fcause2 := n2.metadata(f2.Metadata)
+		assert.Equalf(t, fe1, fe2, "record[%d]/fill: metadata event id shape mismatch", i)
+		assert.Equalf(t, fc1, fc2, "record[%d]/fill: metadata correlation id shape mismatch", i)
+		assert.Equalf(t, fcause1, fcause2, "record[%d]/fill: metadata causation id shape mismatch", i)
 	case journal.KindTrade:
 		compareTrades(t, i, *r1.Trade, *r2.Trade, n1, n2)
 	case journal.KindSignal:
@@ -544,6 +643,32 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 	}
 }
 
+// compareViolations compares two []risk.Violation slices field-by-field
+// with a named index/field on mismatch, matching backtest/
+// determinism_test.go's own identical helper.
+func compareViolations(t *testing.T, i int, label string, v1, v2 []risk.Violation) {
+	t.Helper()
+	require.Equalf(t, len(v1), len(v2), "record[%d]/%s: violation count mismatch", i, label)
+	for j := range v1 {
+		assert.Equalf(t, v1[j].Rule, v2[j].Rule, "record[%d]/%s: violations[%d].rule mismatch", i, label, j)
+		assert.Equalf(t, v1[j].Message, v2[j].Message, "record[%d]/%s: violations[%d].message mismatch", i, label, j)
+		assert.Equalf(t, v1[j].Measured, v2[j].Measured, "record[%d]/%s: violations[%d].measured mismatch", i, label, j)
+		assert.Equalf(t, v1[j].Limit, v2[j].Limit, "record[%d]/%s: violations[%d].limit mismatch", i, label, j)
+	}
+}
+
+// compareWarnings compares two []risk.Warning slices field-by-field
+// with a named index/field on mismatch, matching backtest/
+// determinism_test.go's own identical helper.
+func compareWarnings(t *testing.T, i int, label string, w1, w2 []risk.Warning) {
+	t.Helper()
+	require.Equalf(t, len(w1), len(w2), "record[%d]/%s: warning count mismatch", i, label)
+	for j := range w1 {
+		assert.Equalf(t, w1[j].Rule, w2[j].Rule, "record[%d]/%s: warnings[%d].rule mismatch", i, label, j)
+		assert.Equalf(t, w1[j].Message, w2[j].Message, "record[%d]/%s: warnings[%d].message mismatch", i, label, j)
+	}
+}
+
 func comparePrice(t *testing.T, i int, label string, p1, p2 *num.Price) {
 	t.Helper()
 	if p1 == nil || p2 == nil {
@@ -551,6 +676,15 @@ func comparePrice(t *testing.T, i int, label string, p1, p2 *num.Price) {
 		return
 	}
 	assert.Truef(t, p1.Equal(*p2), "record[%d]/%s: mismatch: got %s want %s", i, label, *p2, *p1)
+}
+
+func compareMoney(t *testing.T, i int, label string, m1, m2 *num.Money) {
+	t.Helper()
+	if m1 == nil || m2 == nil {
+		assert.Equalf(t, m1 == nil, m2 == nil, "record[%d]/%s: nilness mismatch", i, label)
+		return
+	}
+	assert.Truef(t, m1.Equal(*m2), "record[%d]/%s: mismatch: got %s want %s", i, label, *m2, *m1)
 }
 
 // compareTrades compares two order.Trade values (either two closed
@@ -640,11 +774,27 @@ func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("manifest strategy/config identity", func(t *testing.T) {
+		// StrategyName is each side's own Descriptor.Name (see this
+		// test's own doc comment) — deliberately not compared. The
+		// normalized semantic configuration StrategyParameters
+		// actually encodes is compared directly, decoding both
+		// manifests' own recorded StrategyParameters into the shared
+		// smaLongHoldSemanticIdentity shape (review finding: an
+		// earlier version of this test excluded StrategyParameters
+		// from comparison entirely — a regression that dropped or
+		// changed the external run's own recorded configuration would
+		// have still passed).
+		var s1, s2 smaLongHoldSemanticIdentity
+		require.NoError(t, json.Unmarshal(inTree.resp.Manifest.StrategyParameters(), &s1))
+		require.NoError(t, json.Unmarshal(external.resp.Manifest.StrategyParameters(), &s2))
+		assert.Equal(t, s1, s2, "normalized strategy semantic identity must match between manifests")
+		// ConfigDigest incorporates StrategyName (which legitimately
+		// differs) and is therefore expected to differ too — not
+		// compared.
+	})
+
 	t.Run("manifest universe and dataset", func(t *testing.T) {
-		// StrategyName/StrategyParameters deliberately not compared —
-		// see this test's own doc comment. ConfigDigest is therefore
-		// also expected to differ (it incorporates StrategyParameters)
-		// and is not compared either.
 		u1, u2 := inTree.resp.Manifest.Universe(), external.resp.Manifest.Universe()
 		require.Equalf(t, len(u1), len(u2), "universe length mismatch")
 		for i := range u1 {
@@ -658,6 +808,10 @@ func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 			assert.Equalf(t, d1[i].Provider, d2[i].Provider, "dataset[%d]: provider mismatch", i)
 			assert.Truef(t, d1[i].Instrument.Equal(d2[i].Instrument), "dataset[%d]: instrument mismatch", i)
 			assert.Equalf(t, d1[i].Interval, d2[i].Interval, "dataset[%d]: interval mismatch", i)
+			assert.Truef(t, d1[i].Span.Start().Equal(d2[i].Span.Start()), "dataset[%d]: span start mismatch: got %s want %s", i, d2[i].Span.Start(), d1[i].Span.Start())
+			assert.Truef(t, d1[i].Span.End().Equal(d2[i].Span.End()), "dataset[%d]: span end mismatch: got %s want %s", i, d2[i].Span.End(), d1[i].Span.End())
+			assert.Equalf(t, d1[i].Basis, d2[i].Basis, "dataset[%d]: basis mismatch", i)
+			assert.Equalf(t, d1[i].RawFingerprint, d2[i].RawFingerprint, "dataset[%d]: raw fingerprint mismatch", i)
 			assert.Equalf(t, d1[i].Revision(), d2[i].Revision(), "dataset[%d]: revision mismatch — both runs must read the identical canonical data", i)
 		}
 	})
