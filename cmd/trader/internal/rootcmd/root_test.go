@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/cmd/trader/internal/version"
+	"github.com/rustyeddy/trader/version"
 )
 
 func TestNewRootCmd_HelpSucceeds(t *testing.T) {
@@ -28,11 +28,11 @@ func TestNewRootCmd_HelpSucceeds(t *testing.T) {
 }
 
 // TestNewRootCmd_VersionFlagReportsVersion proves issue #288's own
-// acceptance criterion: --version reports Trader's semantic version.
-// Cobra's built-in --version support (enabled by setting cmd.Version)
-// prints via a fixed template this test does not re-verify verbatim —
-// only that the version string itself (cmd/trader/internal/version's
-// own Version const) appears in the output.
+// acceptance criterion: --version reports Trader's version. Cobra's
+// built-in --version support (enabled by setting cmd.Version) prints
+// via a fixed template this test does not re-verify verbatim — only
+// that the version string itself (version.Current().Version, issue
+// #389/ADR-064) appears in the output.
 func TestNewRootCmd_VersionFlagReportsVersion(t *testing.T) {
 	root, cleanup := New()
 	defer func() { _ = cleanup() }()
@@ -43,7 +43,25 @@ func TestNewRootCmd_VersionFlagReportsVersion(t *testing.T) {
 
 	err := root.ExecuteContext(context.Background())
 	require.NoError(t, err)
-	require.Contains(t, out.String(), version.Version)
+	require.Contains(t, out.String(), version.Current().Version)
+}
+
+// TestNewRootCmd_VersionCommandReportsMultilineInfo proves issue
+// #389's own core acceptance criterion: "trader version" prints
+// Trader's version, distinct from the compact --version flag output
+// above — a full version.Info.Report(), always starting with "trader
+// " followed by the version itself.
+func TestNewRootCmd_VersionCommandReportsMultilineInfo(t *testing.T) {
+	root, cleanup := New()
+	defer func() { _ = cleanup() }()
+	var out strings.Builder
+	root.SetArgs([]string{"version"})
+	root.SetOut(&out)
+	root.SetErr(&out)
+
+	err := root.ExecuteContext(context.Background())
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(out.String(), "trader "+version.Current().Version))
 }
 
 func TestNewRootCmd_DataGroupExists(t *testing.T) {
