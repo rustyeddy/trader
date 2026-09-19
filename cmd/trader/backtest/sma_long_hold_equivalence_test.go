@@ -228,7 +228,12 @@ func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolv
 // every identifier (AccountID, FillIDs) deliberately excluded — the
 // in-tree and external runs use independently generated IDs and are
 // never expected to agree on those, only on what actually happened.
+// Instrument is included (review finding): omitting it would let two
+// runs that happened to agree on every other field but traded
+// different instruments still compare equal, which is not what
+// "identical results" claims.
 type tradeKey struct {
+	Instrument  string
 	Side        order.PositionSide
 	OpenedAt    time.Time
 	ClosedAt    time.Time
@@ -240,11 +245,43 @@ func tradeKeys(trades []order.Trade) []tradeKey {
 	keys := make([]tradeKey, len(trades))
 	for i, tr := range trades {
 		keys[i] = tradeKey{
+			Instrument:  tr.Listing.InstrumentID().String(),
 			Side:        tr.Side,
 			OpenedAt:    tr.OpenedAt.UTC(),
 			ClosedAt:    tr.ClosedAt.UTC(),
 			RealizedPnL: tr.RealizedPnL.String(),
 			Costs:       tr.Costs.String(),
+		}
+	}
+	return keys
+}
+
+// positionKey is one open account.Position's own economically
+// meaningful content — instrument, side, quantity, and average
+// price, the same "no IDs, but everything that describes what is
+// actually held" discipline tradeKey follows (review finding: the
+// original version of this test compared only the *number* of open
+// positions, which two runs holding different instruments/sides/
+// sizes at the same count could still pass).
+type positionKey struct {
+	Instrument string
+	Side       order.PositionSide
+	Quantity   string
+	AvgPrice   string
+}
+
+func positionKeys(positions []order.Position) []positionKey {
+	keys := make([]positionKey, len(positions))
+	for i, p := range positions {
+		var avgPrice string
+		if p.AvgPrice != nil {
+			avgPrice = p.AvgPrice.String()
+		}
+		keys[i] = positionKey{
+			Instrument: p.Listing.InstrumentID().String(),
+			Side:       p.Side,
+			Quantity:   p.Quantity.String(),
+			AvgPrice:   avgPrice,
 		}
 	}
 	return keys
@@ -302,5 +339,6 @@ func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 		"final account equity must match: in-tree %s, external %s", inTree.Account.Equity(), external.Account.Equity())
 	assert.True(t, inTree.Account.RealizedPnL().Equal(external.Account.RealizedPnL()),
 		"final realized PnL must match: in-tree %s, external %s", inTree.Account.RealizedPnL(), external.Account.RealizedPnL())
-	assert.Equal(t, len(inTree.Account.Positions()), len(external.Account.Positions()))
+	assert.Equal(t, positionKeys(inTree.Account.Positions()), positionKeys(external.Account.Positions()),
+		"final open positions must be identical, not merely the same count")
 }

@@ -37,9 +37,14 @@ func TestNewLongHold_RejectsInvalidConfig(t *testing.T) {
 		{"non-positive sma period", func(c fileConfig) fileConfig { c.SMAPeriod = 0; return c }},
 		{"bad base currency", func(c fileConfig) fileConfig { c.Base = "???"; return c }},
 		{"bad quote currency", func(c fileConfig) fileConfig { c.Quote = "???"; return c }},
+		{"base equals quote", func(c fileConfig) fileConfig { c.Quote = c.Base; return c }},
 		{"bad interval unit", func(c fileConfig) fileConfig { c.IntervalUnit = "fortnight"; return c }},
 		{"bad interval count", func(c fileConfig) fileConfig { c.IntervalCount = -1; return c }},
 		{"bad trailing stop percent", func(c fileConfig) fileConfig { c.TrailingStopPercent = "not-a-rate"; return c }},
+		{"zero trailing stop percent", func(c fileConfig) fileConfig { c.TrailingStopPercent = "0"; return c }},
+		{"negative trailing stop percent", func(c fileConfig) fileConfig { c.TrailingStopPercent = "-0.01"; return c }},
+		{"trailing stop percent equal to 1", func(c fileConfig) fileConfig { c.TrailingStopPercent = "1"; return c }},
+		{"trailing stop percent above 1", func(c fileConfig) fileConfig { c.TrailingStopPercent = "1.50"; return c }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

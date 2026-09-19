@@ -147,6 +147,17 @@ func newLongHold(cfg fileConfig) (*longHold, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sma-long-hold: quote currency: %w", err)
 	}
+	// instrument.NewCurrencyPair, not instrument.CurrencyPairID
+	// directly (review finding): CurrencyPairID alone would happily
+	// construct a semantically invalid instrument for base == quote
+	// (for example USD/USD) — NewCurrencyPair rejects that, matching
+	// what constructing a real strategy/smatrend in-tree Strategy
+	// against the same config would already reject one layer up, at
+	// instrument.NewCurrencyPair itself.
+	pair, err := instrument.NewCurrencyPair(base, quote)
+	if err != nil {
+		return nil, fmt.Errorf("sma-long-hold: %w", err)
+	}
 	unit, err := parseIntervalUnit(cfg.IntervalUnit)
 	if err != nil {
 		return nil, err
@@ -159,7 +170,21 @@ func newLongHold(cfg fileConfig) (*longHold, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sma-long-hold: trailing_stop_percent: %w", err)
 	}
+	// Mirrors strategy/smatrend.Config.Validate's own bounds for the
+	// "trailing-stop" rule exactly (review finding): 0 or negative
+	// would place the stop at or above the high-water mark itself
+	// (triggering on the very next downtick, or immediately), and 1 or
+	// more would place it at or below zero. Parsing alone does not
+	// reject any of these, and this reference claims equivalence with
+	// smatrend's own default configuration — a value smatrend itself
+	// would reject must not silently behave differently out-of-tree.
 	one := num.MustParseRate("1")
+	if trailingStopPercent.Sign() <= 0 {
+		return nil, fmt.Errorf("sma-long-hold: trailing_stop_percent must be positive, got %s", trailingStopPercent)
+	}
+	if trailingStopPercent.Cmp(one) >= 0 {
+		return nil, fmt.Errorf("sma-long-hold: trailing_stop_percent must be less than 1, got %s", trailingStopPercent)
+	}
 	retain, err := one.Sub(trailingStopPercent)
 	if err != nil {
 		return nil, fmt.Errorf("sma-long-hold: computing stop retention fraction: %w", err)
@@ -171,7 +196,7 @@ func newLongHold(cfg fileConfig) (*longHold, error) {
 	}
 
 	return &longHold{
-		inst:           instrument.CurrencyPairID(base, quote),
+		inst:           pair.ID(),
 		interval:       interval,
 		retainFraction: retain,
 		sma:            sma,
