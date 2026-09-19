@@ -2,6 +2,8 @@ package backtest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,6 +22,7 @@ import (
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
+	strategyv1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/report"
 	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 	svcmarketdata "github.com/rustyeddy/trader/service/marketdata"
@@ -187,9 +190,62 @@ func validateStrategySelection(cmd *cobra.Command, flags runFlags) error {
 // doc comment), so there is nothing further here that could be
 // meaningfully validated or replayed.
 type externalStrategyParams struct {
-	Exec   string   `json:"exec"`
-	Args   []string `json:"args,omitempty"`
-	Config string   `json:"config,omitempty"`
+	// Mode is always "external" — a fixed, explicit marker
+	// distinguishing this run's own manifest provenance shape from
+	// the in-tree EMA/demo paths' own StrategyParameters shapes at a
+	// glance (issue #385).
+	Mode string `json:"mode"`
+	// StrategyName/StrategyVersion are the external strategy's own
+	// Descriptor (ADR-062), received during Handshake — the actual
+	// strategy identity that ran, independent of --strategy-exec's
+	// own path/name. Manifest.StrategyName() also already carries
+	// StrategyName (via strat.Describe(), the same as any in-tree
+	// strategy); it is repeated here so it travels with the rest of
+	// this run's own external-specific provenance in one place.
+	StrategyName    string `json:"strategy_name"`
+	StrategyVersion string `json:"strategy_version"`
+	// ProtocolVersion is the Strategy Protocol version this run
+	// actually negotiated (ADR-062) — recorded so a manifest from a
+	// future, incompatible protocol revision is distinguishable at a
+	// glance, without cross-referencing the trader binary's own build
+	// version.
+	ProtocolVersion string `json:"protocol_version"`
+	// Transport is always "unix" for Strategy Protocol v1 (ADR-063) —
+	// the endpoint/transport kind issue #385 asks be recorded. No
+	// other transport exists yet, but naming it explicitly avoids a
+	// silent assumption once one does. Never the ephemeral Unix-domain
+	// socket *path* itself: Launch generates a fresh one per run
+	// (external.LaunchConfig.SocketPath's own doc comment), and issue
+	// #385 explicitly excludes any such machine-specific, ephemeral
+	// value from a run's semantic identity.
+	Transport string `json:"transport"`
+	// Exec is the resolved absolute path to the launched executable —
+	// never a relative spelling that would resolve differently from a
+	// different working directory (the same reason Config, below, is
+	// already resolved to an absolute path).
+	Exec string `json:"exec"`
+	// ExecDigest is a "sha256:<hex>" content digest of the executable
+	// at Exec, computed at launch time — matching backtest.Manifest.
+	// ConfigDigest's own convention. Exec's path/name alone cannot
+	// distinguish two different builds behind the identical
+	// --strategy-exec path (issue #385's own explicit acceptance
+	// criterion: "executable identity/digest is stable enough to
+	// distinguish different builds").
+	ExecDigest string   `json:"exec_digest"`
+	Args       []string `json:"args,omitempty"`
+	Config     string   `json:"config,omitempty"`
+}
+
+// execContentDigest returns a deterministic "sha256:<hex>" content
+// digest of the file at path, matching backtest.Manifest.
+// ConfigDigest's own "sha256:<hex>" convention.
+func execContentDigest(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("computing executable content digest: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // buildExternalLaunchConfig assembles the external.LaunchConfig
@@ -621,6 +677,17 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		}
 
 		strat = process.Strategy()
+		descriptor := strat.Describe()
+
+		execAbs, err := filepath.Abs(flags.strategyExec)
+		if err != nil {
+			return fmt.Errorf("resolving --strategy-exec: %w", err)
+		}
+		execDigest, err := execContentDigest(execAbs)
+		if err != nil {
+			return err
+		}
+
 		// strategyConfigAbs, not flags.strategyConfig verbatim: the
 		// manifest must record the exact path actually handed to the
 		// child (via strategyConfigPathEnv, above), not the CLI's own
@@ -628,9 +695,15 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		// different working directory would not match what this run
 		// actually consumed (review finding).
 		strategyParams = externalStrategyParams{
-			Exec:   flags.strategyExec,
-			Args:   flags.strategyArgs,
-			Config: strategyConfigAbs,
+			Mode:            "external",
+			StrategyName:    descriptor.Name,
+			StrategyVersion: descriptor.Version,
+			ProtocolVersion: strategyv1.ProtocolVersion,
+			Transport:       "unix",
+			Exec:            execAbs,
+			ExecDigest:      execDigest,
+			Args:            flags.strategyArgs,
+			Config:          strategyConfigAbs,
 		}
 		prices = src
 		externalProcess = process

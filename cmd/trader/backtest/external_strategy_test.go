@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -131,6 +132,86 @@ func TestVerticalSlice_RunWithStrategyExec(t *testing.T) {
 	// orders the external process itself decided to submit, not merely
 	// that the process launched and exited cleanly.
 	assert.NotEmpty(t, doc.ClosedTrades, "expected at least one closed trade from the external strategy's own enter/exit cycle:\n%s", runOutput)
+}
+
+// TestVerticalSlice_RunWithStrategyExec_RecordsProvenance is issue
+// #385's own core acceptance path: an external run's persisted
+// manifest carries unambiguous strategy/protocol/config provenance —
+// execution mode, the guest's own Descriptor identity, the negotiated
+// Strategy Protocol version, transport kind, the launched
+// executable's resolved absolute path and content digest, and the
+// resolved config path — read back from the same real "trader
+// backtest run" JSON output every other vertical-slice test in this
+// file already exercises, not a private shortcut into run.go's own
+// internals.
+func TestVerticalSlice_RunWithStrategyExec_RecordsProvenance(t *testing.T) {
+	outputDir := t.TempDir()
+
+	configPath := filepath.Join(t.TempDir(), "flipflop.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+
+	runCmd := cmdbacktest.New()
+	var runOut bytes.Buffer
+	runCmd.SetOut(&runOut)
+	runCmd.SetArgs([]string{
+		"run",
+		"--strategy-exec", flipFlopPath,
+		"--strategy-config", configPath,
+		"--symbol", "EURUSD",
+		"--interval", "H1",
+		"--from", "2024-01-08T00:00:00Z",
+		"--to", "2024-01-08T04:00:00Z",
+		"--adverse-distance", "0.01000",
+		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
+		"--output-dir", outputDir,
+		"--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+
+	var doc struct {
+		Run struct {
+			StrategyName       string          `json:"strategy_name"`
+			StrategyVersion    string          `json:"strategy_version"`
+			StrategyParameters json.RawMessage `json:"strategy_parameters"`
+		} `json:"run"`
+	}
+	require.NoError(t, json.Unmarshal(runOut.Bytes(), &doc))
+
+	var params struct {
+		Mode            string   `json:"mode"`
+		StrategyName    string   `json:"strategy_name"`
+		StrategyVersion string   `json:"strategy_version"`
+		ProtocolVersion string   `json:"protocol_version"`
+		Transport       string   `json:"transport"`
+		Exec            string   `json:"exec"`
+		ExecDigest      string   `json:"exec_digest"`
+		Args            []string `json:"args"`
+		Config          string   `json:"config"`
+	}
+	require.NoError(t, json.Unmarshal(doc.Run.StrategyParameters, &params))
+
+	assert.Equal(t, "external", params.Mode)
+	assert.Equal(t, "flipflop", params.StrategyName)
+	assert.Equal(t, "flipflop", doc.Run.StrategyName, "Manifest.StrategyName must agree with the provenance recorded in StrategyParameters")
+	assert.Equal(t, "0.1.0", params.StrategyVersion)
+	assert.Equal(t, "0.1.0", doc.Run.StrategyVersion)
+	assert.Equal(t, "v1", params.ProtocolVersion)
+	assert.Equal(t, "unix", params.Transport)
+	assert.True(t, filepath.IsAbs(params.Exec), "exec path must be absolute, got %q", params.Exec)
+	assert.Equal(t, flipFlopPath, params.Exec)
+	assert.True(t, strings.HasPrefix(params.ExecDigest, "sha256:"), "expected a sha256: content digest, got %q", params.ExecDigest)
+	assert.Len(t, params.ExecDigest, len("sha256:")+64)
+	assert.True(t, filepath.IsAbs(params.Config), "config path must be absolute, got %q", params.Config)
+
+	// The ephemeral Unix-domain socket path Launch generates for this
+	// specific run must never leak into recorded provenance (issue
+	// #385's own explicit "no ... machine-specific ephemeral socket
+	// paths ... as semantic identity" exclusion) — checked here against
+	// the raw JSON, not just the typed fields above, so a future field
+	// added to externalStrategyParams that happens to carry it would
+	// still be caught.
+	assert.NotContains(t, string(doc.Run.StrategyParameters), "trader-strategy-", "a run's own ephemeral socket directory name must never appear in recorded provenance")
 }
 
 // TestVerticalSlice_RunWithStrategyExec_ProcessCrashReportedAsFailure
