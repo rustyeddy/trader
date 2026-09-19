@@ -8,6 +8,32 @@ package backtest
 // --config/EMA-crossover path, so the in-tree side of this comparison
 // is built the identical way a real "trader backtest run" invocation
 // would build it — not a simplified stand-in.
+//
+// This is issue #384's own milestone-completion gate, superseding
+// #383's narrower trades/account-only comparison with the full
+// "compare at minimum" list that issue asks for: strategy descriptor/
+// data requirements, emitted intent semantics and ordering,
+// correlation relationships, orders/fills, closed/open trades, final
+// equity, the equity curve, signal/journal records, and manifest
+// identity — all driven through the real service/backtest runtime
+// (never a private shortcut), with every intentionally different
+// transport-only field (Descriptor.Name/Version, Manifest.StrategyName/
+// StrategyParameters, and journal.Signal.Strategy — the two
+// implementations' own separate identities) explicitly named and
+// excluded below, not silently ignored.
+//
+// Reused technique: backtest/determinism_test.go's own idNormalizer
+// (issue #223) proved that two independently-seeded runs of the
+// *same* strategy produce the identical *causal shape* despite
+// entirely different literal ULIDs. The identical technique applies
+// unchanged to two *different* Strategy implementations of the same
+// trading logic: neither run's IDs are ever expected to be literally
+// equal, only their relative shape. idNormalizer/compareTrades below
+// are close ports of that file's own versions (this package cannot
+// import backtest_test's unexported helpers, so they are duplicated,
+// not shared, matching strategysdk's own "each side of a boundary
+// owns its own half of the translation logic" precedent elsewhere in
+// this codebase).
 
 import (
 	"context"
@@ -23,27 +49,24 @@ import (
 
 	"github.com/rustyeddy/trader/adapters/strategy/external"
 	"github.com/rustyeddy/trader/clock"
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	svcbacktest "github.com/rustyeddy/trader/service/backtest"
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/strategy/smatrend"
 )
 
 // buildSMALongHoldBinary builds examples/sma-long-hold into t's own
-// t.TempDir() (automatically removed once t ends — review nit: an
-// earlier version of this helper cached the build in a package-level
-// sync.Once/os.MkdirTemp directory that nothing ever removed) — this
-// file has its own build step rather than reusing
-// external_strategy_test.go's TestMain (package backtest_test, a
-// different Go package sharing this directory) since a test binary
-// may define only one TestMain across every _test.go file in a
-// directory, internal and external test packages alike. Only one test
-// in this file currently calls this; if a second one is added later
-// that also wants the build cached across tests, reach for a
-// TestMain-based fixture (matching external_strategy_test.go's own
-// pattern) rather than reintroducing an uncleaned package-level cache.
+// t.TempDir() (automatically removed once t ends) — this file has its
+// own build step rather than reusing external_strategy_test.go's
+// TestMain (package backtest_test, a different Go package sharing
+// this directory) since a test binary may define only one TestMain
+// across every _test.go file in a directory, internal and external
+// test packages alike.
 func buildSMALongHoldBinary(t *testing.T) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "sma-long-hold")
@@ -123,11 +146,113 @@ func defaultSMALongHoldEquivalenceParams(t *testing.T) smaLongHoldEquivalencePar
 	}
 }
 
+// capturingRecorder is an in-memory journal.Recorder collecting every
+// Record it receives, in call order — the same fixture backtest/
+// determinism_test.go's own capturingRecorder is, duplicated here
+// (see this file's own doc comment for why).
+type capturingRecorder struct {
+	records []journal.Record
+}
+
+func (r *capturingRecorder) Record(_ context.Context, rec journal.Record) error {
+	r.records = append(r.records, rec)
+	return nil
+}
+
+func (r *capturingRecorder) Close() error { return nil }
+
+// idNormalizer maps every opaque, run-local identifier it sees (in
+// first-seen order, scoped to one run) to a stable "<kind>-<n>" token
+// — see backtest/determinism_test.go's own identical type for the
+// full rationale. Applied here across two *different* Strategy
+// implementations rather than two seeds of the same one: the claim
+// being tested is still "same causal graph," which literal ID
+// equality was never expected to prove either way.
+type idNormalizer struct {
+	tokens map[string]string
+	next   map[string]int
+}
+
+func newIDNormalizer() *idNormalizer {
+	return &idNormalizer{tokens: map[string]string{}, next: map[string]int{}}
+}
+
+func (n *idNormalizer) token(kind, raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if tok, ok := n.tokens[kind+":"+raw]; ok {
+		return tok
+	}
+	n.next[kind]++
+	tok := kind + "-" + strconvItoa(n.next[kind])
+	n.tokens[kind+":"+raw] = tok
+	return tok
+}
+
+// strconvItoa avoids importing strconv solely for this; every count
+// here is small (well under 100 records per test run) — matching
+// backtest/determinism_test.go's own identical itoa helper.
+func strconvItoa(i int) string {
+	digits := "0123456789"
+	if i == 0 {
+		return "0"
+	}
+	var buf []byte
+	for i > 0 {
+		buf = append([]byte{digits[i%10]}, buf...)
+		i /= 10
+	}
+	return string(buf)
+}
+
+func (n *idNormalizer) run(v id.RunID) string       { return n.token("run", v.String()) }
+func (n *idNormalizer) intent(v id.IntentID) string { return n.token("intent", v.String()) }
+func (n *idNormalizer) event(v id.EventID) string   { return n.token("event", v.String()) }
+func (n *idNormalizer) correlation(v id.CorrelationID) string {
+	return n.token("correlation", v.String())
+}
+func (n *idNormalizer) account(v id.AccountID) string { return n.token("account", v.String()) }
+func (n *idNormalizer) order(v id.OrderID) string     { return n.token("order", v.String()) }
+func (n *idNormalizer) fill(v id.FillID) string       { return n.token("fill", v.String()) }
+
+// brokerOrderID normalizes sim's own "sim-<OrderID>" BrokerOrderID
+// convention, matching backtest/determinism_test.go's own identical
+// helper.
+func (n *idNormalizer) brokerOrderID(v string) string {
+	const prefix = "sim-"
+	if len(v) <= len(prefix) || v[:len(prefix)] != prefix {
+		return n.token("broker-order-raw", v)
+	}
+	return prefix + n.token("order", v[len(prefix):])
+}
+
+func (n *idNormalizer) metadata(m id.Metadata) (event, correlation, causation string) {
+	event = n.event(m.EventID)
+	correlation = n.correlation(m.CorrelationID)
+	if !m.CausationID.IsZero() {
+		causation = n.event(m.CausationID)
+	}
+	return
+}
+
+// smaLongHoldRun is one side's complete observable output: the
+// service response, this side's own Descriptor (captured before
+// Start, the same shape both implementations expose since
+// ExternalStrategyAdapter itself implements strategy.Strategy), and
+// the captured journal alongside a fresh idNormalizer for it.
+type smaLongHoldRun struct {
+	resp       svcbacktest.RunResponse
+	descriptor strategy.Descriptor
+	records    []journal.Record
+	norm       *idNormalizer
+}
+
 // runInTreeSMATrend drives strategy/smatrend through service/backtest
 // exactly like run.go's own --config path does, configured to
 // smatrend's own EQS-01 defaults (trailing-stop/fresh-cross/
 // fresh-cross) — the same defaults examples/sma-long-hold reproduces.
-func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) svcbacktest.RunResponse {
+func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) smaLongHoldRun {
 	t.Helper()
 	ctx := t.Context()
 
@@ -140,13 +265,15 @@ func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver in
 		TrailingStopPercent: trailingStopPercent,
 	})
 	require.NoError(t, err)
+	descriptor := strat.Describe()
 
 	src := newNextBarOpenPriceSource()
 	require.NoError(t, src.load(ctx, manager, simListing.Symbol(), marketdata.BarQuery{
 		Instrument: simListing.InstrumentID(), Interval: interval, Range: p.span,
 	}))
 
-	factory := environmentFactory{prices: src}
+	rec := &capturingRecorder{}
+	factory := environmentFactory{prices: src, journal: rec}
 	svc, err := svcbacktest.New(manager, simResolver, factory, nil)
 	require.NoError(t, err)
 
@@ -159,7 +286,7 @@ func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver in
 		AdverseDistance:    p.adverseDistance,
 	})
 	require.NoError(t, err)
-	return resp
+	return smaLongHoldRun{resp: resp, descriptor: descriptor, records: rec.records, norm: newIDNormalizer()}
 }
 
 // runExternalSMALongHold drives examples/sma-long-hold through the
@@ -170,7 +297,7 @@ func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver in
 // rendering) so its RunResponse can be compared field-for-field
 // against runInTreeSMATrend's, with no serialization round trip in
 // between.
-func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) svcbacktest.RunResponse {
+func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) smaLongHoldRun {
 	t.Helper()
 	ctx := t.Context()
 
@@ -191,19 +318,22 @@ func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolv
 		Env:     append(os.Environ(), "TRADER_STRATEGY_CONFIG="+configPath),
 	})
 	require.NoError(t, err)
-	// context.Background(), not t.Context() (review nit): Process.Stop's
-	// own SIGTERM-then-grace-then-SIGKILL shutdown should run to
+	// context.Background(), not t.Context(): Process.Stop's own
+	// SIGTERM-then-grace-then-SIGKILL shutdown should run to
 	// completion on its own configured grace period, not be coupled to
 	// whatever timing t.Context()'s own cancellation happens to have
 	// relative to t.Cleanup's own invocation.
 	t.Cleanup(func() { _ = process.Stop(context.Background()) })
+
+	descriptor := process.Strategy().Describe()
 
 	src := newNextBarOpenPriceSource()
 	require.NoError(t, src.load(ctx, manager, simListing.Symbol(), marketdata.BarQuery{
 		Instrument: simListing.InstrumentID(), Interval: interval, Range: p.span,
 	}))
 
-	factory := environmentFactory{prices: src}
+	rec := &capturingRecorder{}
+	factory := environmentFactory{prices: src, journal: rec}
 	svc, err := svcbacktest.New(manager, simResolver, factory, nil)
 	require.NoError(t, err)
 
@@ -215,17 +345,22 @@ func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolv
 		AdverseDistance: p.adverseDistance,
 	})
 	require.NoError(t, err)
-	return resp
+
+	// A normal-completion SessionEnd before this run's own process.Stop
+	// (deferred above) fires — mirroring run.go's own --strategy-exec
+	// two-phase shutdown — so the external process's own logs read as
+	// a clean exit, not a SIGTERM interrupting an active Run stream.
+	if closer, ok := process.Strategy().(interface{ Close(context.Context) error }); ok {
+		_ = closer.Close(context.Background())
+	}
+
+	return smaLongHoldRun{resp: resp, descriptor: descriptor, records: rec.records, norm: newIDNormalizer()}
 }
 
 // tradeKey is a trade's own economically meaningful content, with
 // every identifier (AccountID, FillIDs) deliberately excluded — the
 // in-tree and external runs use independently generated IDs and are
 // never expected to agree on those, only on what actually happened.
-// Instrument is included (review finding): omitting it would let two
-// runs that happened to agree on every other field but traded
-// different instruments still compare equal, which is not what
-// "identical results" claims.
 type tradeKey struct {
 	Instrument  string
 	Side        order.PositionSide
@@ -251,12 +386,7 @@ func tradeKeys(trades []order.Trade) []tradeKey {
 }
 
 // positionKey is one open account.Position's own economically
-// meaningful content — instrument, side, quantity, and average
-// price, the same "no IDs, but everything that describes what is
-// actually held" discipline tradeKey follows (review finding: the
-// original version of this test compared only the *number* of open
-// positions, which two runs holding different instruments/sides/
-// sizes at the same count could still pass).
+// meaningful content — instrument, side, quantity, and average price.
 type positionKey struct {
 	Instrument string
 	Side       order.PositionSide
@@ -281,14 +411,194 @@ func positionKeys(positions []order.Position) []positionKey {
 	return keys
 }
 
+// requiredKinds mirrors backtest/determinism_test.go's own identical
+// list (minus KindAccount, unreachable from any sim.Broker-backed run
+// today — see that file's own doc comment) plus KindSignal, which
+// this scenario's own engineered episode is specifically built to
+// produce from both sides (an enter-long and at least one
+// adjust-stop, each recording decision evidence) — issue #384's own
+// "signal/journal records where deterministic" bullet.
+var requiredKinds = []journal.Kind{
+	journal.KindRunStarted,
+	journal.KindIntent,
+	journal.KindProposal,
+	journal.KindDecision,
+	journal.KindRequest,
+	journal.KindReplaceRequest,
+	journal.KindOrder,
+	journal.KindFill,
+	journal.KindTrade,
+	journal.KindSignal,
+	journal.KindRunCompleted,
+}
+
+func assertRequiredKindsPresent(t *testing.T, records []journal.Record) {
+	t.Helper()
+	seen := map[journal.Kind]bool{}
+	for _, rec := range records {
+		seen[rec.Kind] = true
+	}
+	for _, k := range requiredKinds {
+		assert.Truef(t, seen[k], "expected at least one %s record in the journal, found none — this equivalence gate cannot protect a kind it never observes", k)
+	}
+}
+
+// compareRecordSemantics compares r1/r2 (already known to share a
+// Kind) field by field, normalizing every opaque ID through each
+// run's own idNormalizer first — never comparing raw ULIDs, which are
+// never expected to be literally equal between two independent
+// implementations/runs. Closely mirrors backtest/determinism_test.go's
+// own function of the same name (see this file's own doc comment for
+// why it is duplicated, not shared), with one addition —
+// journal.KindSignal — and one deliberate omission — journal.
+// KindAccount, matching that file's own reasoning.
+func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *idNormalizer) {
+	t.Helper()
+
+	e1, c1, cause1 := n1.metadata(r1.Metadata)
+	e2, c2, cause2 := n2.metadata(r2.Metadata)
+	assert.Equalf(t, e1, e2, "record[%d]: metadata event id shape mismatch", i)
+	assert.Equalf(t, c1, c2, "record[%d]: metadata correlation id shape mismatch", i)
+	assert.Equalf(t, cause1, cause2, "record[%d]: metadata causation id shape mismatch", i)
+	assert.Truef(t, r1.Metadata.Timestamp.Equal(r2.Metadata.Timestamp), "record[%d]: metadata timestamp mismatch: got %s want %s", i, r2.Metadata.Timestamp, r1.Metadata.Timestamp)
+
+	switch r1.Kind {
+	case journal.KindRunStarted:
+		assert.Equalf(t, n1.run(r1.RunStarted.RunID), n2.run(r2.RunStarted.RunID), "record[%d]/run_started: run id shape mismatch", i)
+	case journal.KindIntent:
+		in1, in2 := r1.Intent, r2.Intent
+		assert.Equalf(t, in1.Kind, in2.Kind, "record[%d]/intent: kind mismatch", i)
+		assert.Truef(t, in1.Instrument.Equal(in2.Instrument), "record[%d]/intent: instrument mismatch", i)
+		assert.Equalf(t, in1.Side, in2.Side, "record[%d]/intent: side mismatch", i)
+		assert.Equalf(t, n1.intent(in1.IntentID), n2.intent(in2.IntentID), "record[%d]/intent: intent id shape mismatch", i)
+	case journal.KindProposal:
+		p1, p2 := r1.Proposal, r2.Proposal
+		assert.Truef(t, p1.Listing.InstrumentID().Equal(p2.Listing.InstrumentID()), "record[%d]/proposal: instrument mismatch", i)
+		assert.Equalf(t, p1.Side, p2.Side, "record[%d]/proposal: side mismatch", i)
+		assert.Equalf(t, p1.Type, p2.Type, "record[%d]/proposal: type mismatch", i)
+		assert.Equalf(t, p1.TimeInForce, p2.TimeInForce, "record[%d]/proposal: time in force mismatch", i)
+		assert.Truef(t, p1.Quantity.Equal(p2.Quantity), "record[%d]/proposal: quantity mismatch: got %s want %s", i, p2.Quantity, p1.Quantity)
+		assert.Equalf(t, n1.account(p1.AccountID), n2.account(p2.AccountID), "record[%d]/proposal: account id shape mismatch", i)
+	case journal.KindDecision:
+		d1, d2 := r1.Decision, r2.Decision
+		assert.Equalf(t, d1.Allowed, d2.Allowed, "record[%d]/decision: allowed mismatch", i)
+		require.Equalf(t, len(d1.RuleResults), len(d2.RuleResults), "record[%d]/decision: rule result count mismatch", i)
+		for j := range d1.RuleResults {
+			assert.Equalf(t, d1.RuleResults[j].Rule, d2.RuleResults[j].Rule, "record[%d]/decision: rule_results[%d] name mismatch", i, j)
+		}
+	case journal.KindRequest:
+		req1, req2 := r1.Request, r2.Request
+		assert.Truef(t, req1.Listing.InstrumentID().Equal(req2.Listing.InstrumentID()), "record[%d]/request: instrument mismatch", i)
+		assert.Equalf(t, req1.Side, req2.Side, "record[%d]/request: side mismatch", i)
+		assert.Truef(t, req1.Quantity.Equal(req2.Quantity), "record[%d]/request: quantity mismatch", i)
+		assert.Equalf(t, n1.order(req1.OrderID), n2.order(req2.OrderID), "record[%d]/request: order id shape mismatch", i)
+	case journal.KindReplaceRequest:
+		// AdjustStop intents replace the resting stop on an already-
+		// working order (ADR-054), rather than submitting a new
+		// order.Request — this scenario's own three ratcheting stop
+		// adjustments (bars 10-12) all take this path.
+		rr1, rr2 := r1.ReplaceRequest, r2.ReplaceRequest
+		assert.Equalf(t, n1.order(rr1.OrderID), n2.order(rr2.OrderID), "record[%d]/replace_request: order id shape mismatch", i)
+		comparePrice(t, i, "replace_request.new_stop_price", rr1.NewStopPrice, rr2.NewStopPrice)
+		comparePrice(t, i, "replace_request.new_limit_price", rr1.NewLimitPrice, rr2.NewLimitPrice)
+		if rr1.NewQuantity != nil && rr2.NewQuantity != nil {
+			assert.Truef(t, rr1.NewQuantity.Equal(*rr2.NewQuantity), "record[%d]/replace_request: new quantity mismatch", i)
+		} else {
+			assert.Equalf(t, rr1.NewQuantity == nil, rr2.NewQuantity == nil, "record[%d]/replace_request: new quantity nilness mismatch", i)
+		}
+	case journal.KindOrder:
+		o1, o2 := r1.Order, r2.Order
+		assert.Equalf(t, o1.Status, o2.Status, "record[%d]/order: status mismatch", i)
+		assert.Equalf(t, n1.order(o1.Request.OrderID), n2.order(o2.Request.OrderID), "record[%d]/order: order id shape mismatch", i)
+		assert.Equalf(t, n1.brokerOrderID(o1.BrokerOrderID), n2.brokerOrderID(o2.BrokerOrderID), "record[%d]/order: broker order id shape mismatch", i)
+		comparePrice(t, i, "order.accepted_stop_price", o1.AcceptedStopPrice, o2.AcceptedStopPrice)
+		assert.Truef(t, o1.FilledQuantity.Equal(o2.FilledQuantity), "record[%d]/order: filled quantity mismatch: got %s want %s", i, o2.FilledQuantity, o1.FilledQuantity)
+	case journal.KindFill:
+		f1, f2 := r1.Fill, r2.Fill
+		assert.Truef(t, f1.Listing.InstrumentID().Equal(f2.Listing.InstrumentID()), "record[%d]/fill: instrument mismatch", i)
+		assert.Equalf(t, f1.Side, f2.Side, "record[%d]/fill: side mismatch", i)
+		assert.Truef(t, f1.Price.Equal(f2.Price), "record[%d]/fill: price mismatch: got %s want %s", i, f2.Price, f1.Price)
+		assert.Truef(t, f1.Quantity.Equal(f2.Quantity), "record[%d]/fill: quantity mismatch", i)
+		assert.Truef(t, f1.Timestamp.Equal(f2.Timestamp), "record[%d]/fill: timestamp mismatch: got %s want %s", i, f2.Timestamp, f1.Timestamp)
+		assert.Equalf(t, n1.fill(f1.FillID), n2.fill(f2.FillID), "record[%d]/fill: fill id shape mismatch", i)
+		assert.Equalf(t, n1.order(f1.OrderID), n2.order(f2.OrderID), "record[%d]/fill: order id shape mismatch", i)
+		assert.Equalf(t, n1.account(f1.AccountID), n2.account(f2.AccountID), "record[%d]/fill: account id shape mismatch", i)
+	case journal.KindTrade:
+		compareTrades(t, i, *r1.Trade, *r2.Trade, n1, n2)
+	case journal.KindSignal:
+		// Strategy is deliberately excluded: it is each side's own
+		// Descriptor.Name ("sma-trend" in-tree, "sma-long-hold"
+		// external) — an intentional identity difference, documented
+		// on TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig's
+		// own doc comment, not a divergence to catch. Values is the
+		// actual decision-evidence content and is compared byte for
+		// byte — examples/sma-long-hold's own signal method mirrors
+		// strategy/smatrend.recordSignal's Values map shape and keys
+		// exactly for this reason.
+		s1, s2 := r1.Signal, r2.Signal
+		assert.Equalf(t, s1.Values, s2.Values, "record[%d]/signal: values mismatch", i)
+	case journal.KindRunCompleted:
+		assert.Equalf(t, r1.RunCompleted.EntryCount, r2.RunCompleted.EntryCount, "record[%d]/run_completed: entry count mismatch", i)
+	default:
+		t.Fatalf("record[%d]: unhandled journal.Kind %s in this equivalence gate — add a semantic comparison case for it", i, r1.Kind)
+	}
+}
+
+func comparePrice(t *testing.T, i int, label string, p1, p2 *num.Price) {
+	t.Helper()
+	if p1 == nil || p2 == nil {
+		assert.Equalf(t, p1 == nil, p2 == nil, "record[%d]/%s: nilness mismatch", i, label)
+		return
+	}
+	assert.Truef(t, p1.Equal(*p2), "record[%d]/%s: mismatch: got %s want %s", i, label, *p2, *p1)
+}
+
+// compareTrades compares two order.Trade values (either two closed
+// trades at the same index, or the payload of two KindTrade journal
+// records), normalizing AccountID/fill IDs and comparing every
+// economically meaningful field directly.
+func compareTrades(t *testing.T, i int, tr1, tr2 order.Trade, n1, n2 *idNormalizer) {
+	t.Helper()
+	assert.Truef(t, tr1.Listing.InstrumentID().Equal(tr2.Listing.InstrumentID()), "trade[%d]: instrument mismatch", i)
+	assert.Equalf(t, tr1.Side, tr2.Side, "trade[%d]: side mismatch", i)
+	assert.Truef(t, tr1.OpenedAt.Equal(tr2.OpenedAt), "trade[%d]: opened_at mismatch: got %s want %s", i, tr2.OpenedAt, tr1.OpenedAt)
+	assert.Truef(t, tr1.ClosedAt.Equal(tr2.ClosedAt), "trade[%d]: closed_at mismatch: got %s want %s", i, tr2.ClosedAt, tr1.ClosedAt)
+	assert.Truef(t, tr1.RealizedPnL.Equal(tr2.RealizedPnL), "trade[%d]: realized pnl mismatch: got %s want %s", i, tr2.RealizedPnL, tr1.RealizedPnL)
+	assert.Truef(t, tr1.Costs.Equal(tr2.Costs), "trade[%d]: costs mismatch: got %s want %s", i, tr2.Costs, tr1.Costs)
+	assert.Equalf(t, n1.account(tr1.AccountID), n2.account(tr2.AccountID), "trade[%d]: account id shape mismatch", i)
+
+	require.Equalf(t, len(tr1.EntryFillIDs), len(tr2.EntryFillIDs), "trade[%d]: entry fill count mismatch", i)
+	for j := range tr1.EntryFillIDs {
+		assert.Equalf(t, n1.fill(tr1.EntryFillIDs[j]), n2.fill(tr2.EntryFillIDs[j]), "trade[%d]: entry_fill_ids[%d] shape mismatch", i, j)
+	}
+	require.Equalf(t, len(tr1.ExitFillIDs), len(tr2.ExitFillIDs), "trade[%d]: exit fill count mismatch", i)
+	for j := range tr1.ExitFillIDs {
+		assert.Equalf(t, n1.fill(tr1.ExitFillIDs[j]), n2.fill(tr2.ExitFillIDs[j]), "trade[%d]: exit_fill_ids[%d] shape mismatch", i, j)
+	}
+}
+
 // TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig is issue
-// #383's own core acceptance criterion: examples/sma-long-hold,
-// driven as a real out-of-process guest, produces the identical
-// trades and final account state as strategy/smatrend's own default
-// configuration (trailing-stop/fresh-cross/fresh-cross) over
-// identical canonical market data — proving Strategy Protocol v1 with
-// a real, non-trivial strategy, not merely that a trivial guest can
-// complete a Handshake.
+// #384's own milestone-completion gate: examples/sma-long-hold, driven
+// as a real out-of-process guest through the normal backtest service/
+// runtime (never a private shortcut — both sides call
+// svcbacktest.Service.Run, the identical entry point run.go itself
+// uses), produces the identical trading behavior as strategy/
+// smatrend's own default configuration (trailing-stop/fresh-cross/
+// fresh-cross) over identical canonical market data, held-constant
+// sizing/risk/fill configuration, and independently-seeded clocks/IDs
+// — proving Strategy Protocol v1 with a real, non-trivial strategy,
+// not merely that a trivial guest can complete a Handshake.
+//
+// Fields intentionally different between the two runs, and therefore
+// never compared for equality below: Descriptor.Name/Version (each
+// side's own strategy identity — "sma-trend"/"v4" in-tree,
+// "sma-long-hold"/"v1" external), Manifest.StrategyName/
+// StrategyParameters (the same identity, recorded into the manifest),
+// and journal.Signal.Strategy (ditto). Every opaque identifier
+// (RunID, AccountID, IntentID, OrderID, FillID, EventID/
+// CorrelationID/CausationID) is normalized through idNormalizer
+// before comparison, never compared as a literal ULID — see that
+// type's own doc comment.
 func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 	params := defaultSMALongHoldEquivalenceParams(t)
 
@@ -318,21 +628,77 @@ func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 	inTree := runInTreeSMATrend(t, manager, simResolver, simListing, params)
 	external := runExternalSMALongHold(t, manager, simResolver, simListing, params)
 
-	// A meaningful equivalence proof requires the scenario to have
-	// actually traded — an equivalence assertion over two runs that
-	// both did nothing at all would pass trivially without proving
-	// anything about OnBar/intent-translation correctness.
-	require.NotEmpty(t, inTree.Trades, "the in-tree fixture/config must produce at least one closed trade for this comparison to be meaningful")
+	t.Run("strategy descriptor / data requirements", func(t *testing.T) {
+		// Name/Version deliberately not compared — see this test's own
+		// doc comment.
+		require.Equal(t, len(inTree.descriptor.Requirements), len(external.descriptor.Requirements), "requirement count mismatch")
+		for i := range inTree.descriptor.Requirements {
+			r1, r2 := inTree.descriptor.Requirements[i], external.descriptor.Requirements[i]
+			assert.Truef(t, r1.Instrument.Equal(r2.Instrument), "requirements[%d]: instrument mismatch", i)
+			assert.Equalf(t, r1.Interval, r2.Interval, "requirements[%d]: interval mismatch", i)
+			assert.Equalf(t, r1.WarmupBars, r2.WarmupBars, "requirements[%d]: warmup bars mismatch", i)
+		}
+	})
 
-	assert.Equal(t, tradeKeys(inTree.Trades), tradeKeys(external.Trades),
-		"closed trades must be identical between the in-tree and external runs")
-	assert.Equal(t, tradeKeys(inTree.OpenTrades), tradeKeys(external.OpenTrades),
-		"any still-open trade must be identical between the in-tree and external runs")
+	t.Run("manifest universe and dataset", func(t *testing.T) {
+		// StrategyName/StrategyParameters deliberately not compared —
+		// see this test's own doc comment. ConfigDigest is therefore
+		// also expected to differ (it incorporates StrategyParameters)
+		// and is not compared either.
+		u1, u2 := inTree.resp.Manifest.Universe(), external.resp.Manifest.Universe()
+		require.Equalf(t, len(u1), len(u2), "universe length mismatch")
+		for i := range u1 {
+			assert.Truef(t, u1[i].Instrument.Equal(u2[i].Instrument), "universe[%d]: instrument mismatch", i)
+			assert.Equalf(t, u1[i].Interval, u2[i].Interval, "universe[%d]: interval mismatch", i)
+		}
 
-	assert.True(t, inTree.Account.Equity().Equal(external.Account.Equity()),
-		"final account equity must match: in-tree %s, external %s", inTree.Account.Equity(), external.Account.Equity())
-	assert.True(t, inTree.Account.RealizedPnL().Equal(external.Account.RealizedPnL()),
-		"final realized PnL must match: in-tree %s, external %s", inTree.Account.RealizedPnL(), external.Account.RealizedPnL())
-	assert.Equal(t, positionKeys(inTree.Account.Positions()), positionKeys(external.Account.Positions()),
-		"final open positions must be identical, not merely the same count")
+		d1, d2 := inTree.resp.Manifest.Dataset(), external.resp.Manifest.Dataset()
+		require.Equalf(t, len(d1), len(d2), "dataset length mismatch")
+		for i := range d1 {
+			assert.Equalf(t, d1[i].Provider, d2[i].Provider, "dataset[%d]: provider mismatch", i)
+			assert.Truef(t, d1[i].Instrument.Equal(d2[i].Instrument), "dataset[%d]: instrument mismatch", i)
+			assert.Equalf(t, d1[i].Interval, d2[i].Interval, "dataset[%d]: interval mismatch", i)
+			assert.Equalf(t, d1[i].Revision(), d2[i].Revision(), "dataset[%d]: revision mismatch — both runs must read the identical canonical data", i)
+		}
+	})
+
+	t.Run("journal contains every required event kind", func(t *testing.T) {
+		assertRequiredKindsPresent(t, inTree.records)
+		assertRequiredKindsPresent(t, external.records)
+	})
+
+	t.Run("journal: intent ordering, correlation, orders, fills, signals", func(t *testing.T) {
+		require.Equal(t, len(inTree.records), len(external.records), "journal record count must match")
+		for i := range inTree.records {
+			r1, r2 := inTree.records[i], external.records[i]
+			require.Equalf(t, r1.Kind, r2.Kind, "record %d: kind mismatch (first semantic divergence)", i)
+			compareRecordSemantics(t, i, r1, r2, inTree.norm, external.norm)
+		}
+	})
+
+	t.Run("closed and open trades", func(t *testing.T) {
+		require.NotEmpty(t, inTree.resp.Trades, "the fixture/config must produce at least one closed trade for this comparison to be meaningful")
+		assert.Equal(t, tradeKeys(inTree.resp.Trades), tradeKeys(external.resp.Trades),
+			"closed trades must be identical between the in-tree and external runs")
+		assert.Equal(t, tradeKeys(inTree.resp.OpenTrades), tradeKeys(external.resp.OpenTrades),
+			"any still-open trade must be identical between the in-tree and external runs")
+	})
+
+	t.Run("equity curve", func(t *testing.T) {
+		require.Equal(t, len(inTree.resp.EquityCurve), len(external.resp.EquityCurve), "equity curve length must match")
+		for i := range inTree.resp.EquityCurve {
+			p1, p2 := inTree.resp.EquityCurve[i], external.resp.EquityCurve[i]
+			assert.Truef(t, p1.Timestamp.Equal(p2.Timestamp), "equity_curve[%d]: timestamp mismatch: got %s want %s", i, p2.Timestamp, p1.Timestamp)
+			assert.Truef(t, p1.Equity.Equal(p2.Equity), "equity_curve[%d]: equity mismatch: got %s want %s", i, p2.Equity, p1.Equity)
+		}
+	})
+
+	t.Run("final account state", func(t *testing.T) {
+		assert.True(t, inTree.resp.Account.Equity().Equal(external.resp.Account.Equity()),
+			"final account equity must match: in-tree %s, external %s", inTree.resp.Account.Equity(), external.resp.Account.Equity())
+		assert.True(t, inTree.resp.Account.RealizedPnL().Equal(external.resp.Account.RealizedPnL()),
+			"final realized PnL must match: in-tree %s, external %s", inTree.resp.Account.RealizedPnL(), external.resp.Account.RealizedPnL())
+		assert.Equal(t, positionKeys(inTree.resp.Account.Positions()), positionKeys(external.resp.Account.Positions()),
+			"final open positions must be identical, not merely the same count")
+	})
 }

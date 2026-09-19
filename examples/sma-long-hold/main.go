@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/instrument"
@@ -266,13 +267,18 @@ func (s *longHold) OnBar(_ context.Context, event strategysdk.BarEvent, view str
 
 	side := currentPositionSide(view, s.inst)
 
+	smaValue := s.sma.Value()
+
 	switch side {
 	case order.Flat:
 		s.sideLastBar = order.Flat
 		if !crossedAbove {
 			return nil, nil, nil
 		}
-		return []strategysdk.DescribedIntent{strategysdk.Enter(s.inst, order.Buy)}, nil, nil
+		const token = "action"
+		in := strategysdk.Enter(s.inst, order.Buy).WithCorrelation(token)
+		sig := s.signal(close, smaValue, "enter-long", nil).WithCorrelation(token)
+		return []strategysdk.DescribedIntent{in}, []strategysdk.DescribedSignal{sig}, nil
 
 	case order.Long:
 		if s.sideLastBar != order.Long {
@@ -297,11 +303,43 @@ func (s *longHold) OnBar(_ context.Context, event strategysdk.BarEvent, view str
 			return nil, nil, nil
 		}
 		s.lastStop = &newStop
-		return []strategysdk.DescribedIntent{strategysdk.AdjustStop(s.inst, newStop)}, nil, nil
+		const token = "action"
+		in := strategysdk.AdjustStop(s.inst, newStop).WithCorrelation(token)
+		sig := s.signal(close, smaValue, "adjust-stop", &newStop).WithCorrelation(token)
+		return []strategysdk.DescribedIntent{in}, []strategysdk.DescribedSignal{sig}, nil
 
 	default:
 		return nil, nil, fmt.Errorf("sma-long-hold: unexpected position side %v (long-only strategy)", side)
 	}
+}
+
+// signal builds this bar's decision-evidence record, deliberately
+// mirroring strategy/smatrend.Strategy.recordSignal's own Values map
+// shape and keys exactly (close/sma/action/exit_rule/reentry_rule/
+// phase[/stop_price]) — the two implementations' equivalence test
+// (cmd/trader/backtest/sma_long_hold_equivalence_test.go) compares
+// Values directly, byte for byte, while deliberately excluding
+// Strategy (this binary's own Descriptor.Name, "sma-long-hold",
+// intentionally differs from smatrend's "sma-trend" — see that test's
+// own doc comment for the full list of intentionally-different,
+// documented fields). exit_rule/reentry_rule/phase are fixed literals
+// here, not derived state, since this reference implementation only
+// ever reproduces smatrend's own default configuration (trailing-stop/
+// fresh-cross/fresh-cross, always PhaseFlat — see this package's own
+// doc comment).
+func (s *longHold) signal(close, smaValue float64, action string, stopPrice *num.Price) strategysdk.DescribedSignal {
+	values := map[string]string{
+		"close":        strconv.FormatFloat(close, 'f', -1, 64),
+		"sma":          strconv.FormatFloat(smaValue, 'f', -1, 64),
+		"action":       action,
+		"exit_rule":    "trailing-stop",
+		"reentry_rule": "fresh-cross",
+		"phase":        "flat",
+	}
+	if stopPrice != nil {
+		values["stop_price"] = stopPrice.String()
+	}
+	return strategysdk.Signal("sma-long-hold", values)
 }
 
 // currentPositionSide mirrors strategy/smatrend's own identical
