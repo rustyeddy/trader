@@ -2,6 +2,8 @@ package backtest_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -188,6 +190,7 @@ func TestVerticalSlice_RunWithStrategyExec_RecordsProvenance(t *testing.T) {
 		ExecDigest      string   `json:"exec_digest"`
 		Args            []string `json:"args"`
 		Config          string   `json:"config"`
+		ConfigDigest    string   `json:"config_digest"`
 	}
 	require.NoError(t, json.Unmarshal(doc.Run.StrategyParameters, &params))
 
@@ -203,6 +206,15 @@ func TestVerticalSlice_RunWithStrategyExec_RecordsProvenance(t *testing.T) {
 	assert.True(t, strings.HasPrefix(params.ExecDigest, "sha256:"), "expected a sha256: content digest, got %q", params.ExecDigest)
 	assert.Len(t, params.ExecDigest, len("sha256:")+64)
 	assert.True(t, filepath.IsAbs(params.Config), "config path must be absolute, got %q", params.Config)
+
+	// ConfigDigest must match the exact bytes actually at configPath —
+	// verified against the fixture file's own real content, not just
+	// checked for the right shape, so a regression that hashed the
+	// wrong file (or nothing at all) would be caught (review finding).
+	configBytes, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	sum := sha256.Sum256(configBytes)
+	assert.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), params.ConfigDigest)
 
 	// The ephemeral Unix-domain socket path Launch generates for this
 	// specific run must never leak into recorded provenance (issue
@@ -282,8 +294,12 @@ func TestRun_StrategyArgsWithoutStrategyExecRejected(t *testing.T) {
 
 // TestRun_StrategyExecLaunchFailureReportedClearly proves a
 // --strategy-exec pointing at a nonexistent executable fails with a
-// clear error from Launch itself, rather than a confusing failure
-// deeper in the pipeline.
+// clear error, rather than a confusing failure deeper in the
+// pipeline. This now fails even before Launch is ever called (issue
+// #385): the executable's own content digest is computed up front,
+// for provenance, so a missing file is caught there — strictly better
+// than failing inside Launch, since no child process is ever even
+// attempted.
 func TestRun_StrategyExecLaunchFailureReportedClearly(t *testing.T) {
 	runCmd := cmdbacktest.New()
 	runCmd.SetArgs([]string{
@@ -300,7 +316,7 @@ func TestRun_StrategyExecLaunchFailureReportedClearly(t *testing.T) {
 	})
 	err := runCmd.Execute()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "launching --strategy-exec")
+	assert.Contains(t, err.Error(), "does-not-exist")
 }
 
 func TestRun_StrategyConfigWithoutStrategyExecRejected(t *testing.T) {

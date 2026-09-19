@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -234,47 +236,99 @@ type externalStrategyParams struct {
 	ExecDigest string   `json:"exec_digest"`
 	Args       []string `json:"args,omitempty"`
 	Config     string   `json:"config,omitempty"`
+	// ConfigDigest is a "sha256:<hex>" content digest of the exact
+	// bytes at Config, computed before launch (review finding: Config
+	// alone records only a *path*, not the bytes at that path — a
+	// config file edited in place between two runs using the identical
+	// path would otherwise let both runs record the same provenance
+	// despite the guest actually consuming different configuration,
+	// defeating this issue's own reproducibility goal). Empty exactly
+	// when Config is empty (no --strategy-config given).
+	ConfigDigest string `json:"config_digest,omitempty"`
 }
 
-// execContentDigest returns a deterministic "sha256:<hex>" content
-// digest of the file at path, matching backtest.Manifest.
-// ConfigDigest's own "sha256:<hex>" convention.
-func execContentDigest(path string) (string, error) {
-	data, err := os.ReadFile(path)
+// fileContentDigest returns a deterministic "sha256:<hex>" content
+// digest of the file at path — streamed via io.Copy into the hash
+// rather than os.ReadFile (review finding: provenance hashing has no
+// need to allocate an executable's entire content into memory at
+// once) — matching backtest.Manifest.ConfigDigest's own "sha256:<hex>"
+// convention. Shared by both the executable and the strategy config's
+// own digest.
+func fileContentDigest(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("computing executable content digest: %w", err)
+		return "", fmt.Errorf("computing content digest: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("computing content digest: %w", err)
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// resolveStrategyExecutable resolves flags.strategyExec to the exact
+// absolute path external.Launch will actually execute (review
+// finding): filepath.Abs(name) alone is not equivalent to what
+// os/exec does with a bare command name containing no path
+// separator, which searches PATH (exec.LookPath) rather than
+// resolving relative to the current directory — using the wrong one
+// could hash and record a different file than the one that actually
+// ran. A name that does contain a path separator is never looked up
+// on PATH by os/exec either way, so it is resolved with plain
+// filepath.Abs, matching os/exec's own literal-path handling exactly.
+func resolveStrategyExecutable(name string) (string, error) {
+	resolved := name
+	if !strings.ContainsRune(name, os.PathSeparator) {
+		p, err := exec.LookPath(name)
+		if err != nil {
+			return "", fmt.Errorf("resolving --strategy-exec: %w", err)
+		}
+		resolved = p
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolving --strategy-exec: %w", err)
+	}
+	return abs, nil
 }
 
 // buildExternalLaunchConfig assembles the external.LaunchConfig
-// --strategy-exec launches with, and the resolved absolute
-// --strategy-config path (empty if none was given) to record in
-// externalStrategyParams. Pulled out as its own pure function, rather
-// than inlined in runBacktest's own strategy-selection branch, so its
-// env-inheritance and config-path-resolution behavior can be unit
-// tested directly against a synthetic environ, without spawning a
-// real process (review finding: an earlier version of this command
-// left Env nil/near-empty instead of starting from the operator's own
-// inherited environment — see filterOutEnvKey's own doc comment for
-// why environ is filtered before strategyConfigPathEnv is appended).
-func buildExternalLaunchConfig(flags runFlags, environ []string, logger *slog.Logger) (external.LaunchConfig, string, error) {
-	cfg := external.LaunchConfig{
-		Command: flags.strategyExec,
+// --strategy-exec launches with (LaunchConfig.Command set to the
+// exact resolved executable path resolveStrategyExecutable returns —
+// review finding: an earlier version passed flags.strategyExec
+// verbatim, which could resolve to a different file than whatever
+// this function's own caller separately hashed for provenance), and
+// the resolved absolute --strategy-config path (empty if none was
+// given) to record in externalStrategyParams. Pulled out as its own
+// pure function, rather than inlined in runBacktest's own strategy-
+// selection branch, so its env-inheritance and path-resolution
+// behavior can be unit tested directly against a synthetic environ,
+// without spawning a real process (review finding: an earlier version
+// of this command left Env nil/near-empty instead of starting from
+// the operator's own inherited environment — see filterOutEnvKey's
+// own doc comment for why environ is filtered before
+// strategyConfigPathEnv is appended).
+func buildExternalLaunchConfig(flags runFlags, environ []string, logger *slog.Logger) (cfg external.LaunchConfig, resolvedExec, configAbs string, err error) {
+	resolvedExec, err = resolveStrategyExecutable(flags.strategyExec)
+	if err != nil {
+		return external.LaunchConfig{}, "", "", err
+	}
+	cfg = external.LaunchConfig{
+		Command: resolvedExec,
 		Args:    flags.strategyArgs,
 		Env:     filterOutEnvKey(environ, strategyConfigPathEnv),
 		Logger:  logger,
 	}
 	if flags.strategyConfig == "" {
-		return cfg, "", nil
+		return cfg, resolvedExec, "", nil
 	}
 	abs, err := filepath.Abs(flags.strategyConfig)
 	if err != nil {
-		return external.LaunchConfig{}, "", fmt.Errorf("resolving --strategy-config: %w", err)
+		return external.LaunchConfig{}, "", "", fmt.Errorf("resolving --strategy-config: %w", err)
 	}
 	cfg.Env = append(cfg.Env, strategyConfigPathEnv+"="+abs)
-	return cfg, abs, nil
+	return cfg, resolvedExec, abs, nil
 }
 
 // filterOutEnvKey returns env with every entry naming key removed —
@@ -646,9 +700,31 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		// whatever the executable will actually request (documented on
 		// the --strategy-exec flag itself).
 		//
-		launchCfg, strategyConfigAbs, err := buildExternalLaunchConfig(flags, os.Environ(), clictx.LoggerFromContext(ctx))
+		launchCfg, execAbs, strategyConfigAbs, err := buildExternalLaunchConfig(flags, os.Environ(), clictx.LoggerFromContext(ctx))
 		if err != nil {
 			return err
+		}
+
+		// Both digests are computed from the exact resolved paths
+		// buildExternalLaunchConfig itself will hand to external.Launch
+		// below, and before Launch ever runs (review finding: an
+		// earlier version hashed the executable only after the child
+		// had already started and completed Handshake, so a file
+		// replaced/removed during startup could make the recorded
+		// digest describe different bytes than the process actually
+		// executed) — this is the closest practical guarantee against
+		// that TOCTOU race without launching from an already-open file
+		// descriptor.
+		execDigest, err := fileContentDigest(execAbs)
+		if err != nil {
+			return err
+		}
+		var configDigest string
+		if strategyConfigAbs != "" {
+			configDigest, err = fileContentDigest(strategyConfigAbs)
+			if err != nil {
+				return err
+			}
 		}
 
 		process, err := external.Launch(ctx, launchCfg)
@@ -679,15 +755,6 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		strat = process.Strategy()
 		descriptor := strat.Describe()
 
-		execAbs, err := filepath.Abs(flags.strategyExec)
-		if err != nil {
-			return fmt.Errorf("resolving --strategy-exec: %w", err)
-		}
-		execDigest, err := execContentDigest(execAbs)
-		if err != nil {
-			return err
-		}
-
 		// strategyConfigAbs, not flags.strategyConfig verbatim: the
 		// manifest must record the exact path actually handed to the
 		// child (via strategyConfigPathEnv, above), not the CLI's own
@@ -702,6 +769,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 			Transport:       "unix",
 			Exec:            execAbs,
 			ExecDigest:      execDigest,
+			ConfigDigest:    configDigest,
 			Args:            flags.strategyArgs,
 			Config:          strategyConfigAbs,
 		}

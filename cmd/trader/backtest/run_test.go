@@ -3,11 +3,13 @@ package backtest
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/clock"
@@ -144,11 +146,14 @@ func newGappedFixtureManager(t *testing.T) (*marketdata.Manager, instrument.ID) 
 func TestBuildExternalLaunchConfig_InheritsEnvironAndAppendsConfigPath(t *testing.T) {
 	environ := []string{"PATH=/usr/bin:/bin", "HOME=/home/op"}
 
-	cfg, abs, err := buildExternalLaunchConfig(runFlags{
+	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(runFlags{
 		strategyExec:   "/bin/true",
 		strategyConfig: "strategy.yaml",
 	}, environ, nil)
 	require.NoError(t, err)
+
+	require.Equal(t, "/bin/true", resolvedExec)
+	require.Equal(t, resolvedExec, cfg.Command, "LaunchConfig.Command must be the exact resolved path this function itself returns")
 
 	require.Contains(t, cfg.Env, "PATH=/usr/bin:/bin")
 	require.Contains(t, cfg.Env, "HOME=/home/op")
@@ -164,7 +169,7 @@ func TestBuildExternalLaunchConfig_InheritsEnvironAndAppendsConfigPath(t *testin
 func TestBuildExternalLaunchConfig_ReplacesPreexistingConfigEnvEntry(t *testing.T) {
 	environ := []string{"PATH=/usr/bin", strategyConfigPathEnv + "=/stale/path.yaml"}
 
-	cfg, abs, err := buildExternalLaunchConfig(runFlags{
+	cfg, _, abs, err := buildExternalLaunchConfig(runFlags{
 		strategyExec:   "/bin/true",
 		strategyConfig: "strategy.yaml",
 	}, environ, nil)
@@ -186,10 +191,46 @@ func TestBuildExternalLaunchConfig_ReplacesPreexistingConfigEnvEntry(t *testing.
 func TestBuildExternalLaunchConfig_NoConfigLeavesEnvironUntouched(t *testing.T) {
 	environ := []string{"PATH=/usr/bin", "HOME=/home/op"}
 
-	cfg, abs, err := buildExternalLaunchConfig(runFlags{strategyExec: "/bin/true"}, environ, nil)
+	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(runFlags{strategyExec: "/bin/true"}, environ, nil)
 	require.NoError(t, err)
+	require.Equal(t, "/bin/true", resolvedExec)
 	require.Empty(t, abs)
 	require.ElementsMatch(t, environ, cfg.Env)
+}
+
+// TestResolveStrategyExecutable_BareNameUsesPATHLookup proves a bare
+// command name (no path separator) is resolved via exec.LookPath —
+// os/exec's own PATH-search behavior — not filepath.Abs against the
+// current directory, which would silently name a different, likely
+// nonexistent file (review finding).
+func TestResolveStrategyExecutable_BareNameUsesPATHLookup(t *testing.T) {
+	want, err := exec.LookPath("true")
+	require.NoError(t, err, "this test environment must have 'true' on PATH")
+
+	got, err := resolveStrategyExecutable("true")
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+// TestResolveStrategyExecutable_PathSeparatorNeverSearchesPATH proves
+// a name containing a path separator is resolved with plain
+// filepath.Abs, matching os/exec's own literal-path handling — never
+// looked up on PATH, even if a same-named file also happens to exist
+// there.
+func TestResolveStrategyExecutable_PathSeparatorNeverSearchesPATH(t *testing.T) {
+	got, err := resolveStrategyExecutable("./bin/true")
+	require.NoError(t, err)
+	wantSuffix := string(filepath.Separator) + filepath.Join("bin", "true")
+	assert.True(t, strings.HasSuffix(got, wantSuffix), "expected %q to end with %q", got, wantSuffix)
+	assert.True(t, filepath.IsAbs(got))
+}
+
+// TestResolveStrategyExecutable_UnresolvableBareNameIsAnError proves a
+// bare name not found on PATH fails clearly rather than silently
+// falling back to a relative-path interpretation.
+func TestResolveStrategyExecutable_UnresolvableBareNameIsAnError(t *testing.T) {
+	_, err := resolveStrategyExecutable("this-command-should-not-exist-anywhere-on-path")
+	require.Error(t, err)
 }
 
 // fakeProcessMonitor is a deterministic, controllable processMonitor

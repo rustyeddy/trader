@@ -429,16 +429,21 @@ under `run.strategy_parameters`, alongside the strategy's own
   "exec": "/tmp/my-strategy",
   "exec_digest": "sha256:...",
   "args": [],
-  "config": "/home/you/my-strategy.json"
+  "config": "/home/you/my-strategy.json",
+  "config_digest": "sha256:..."
 }
 ```
 
-`exec_digest` is a content digest of the executable file itself, computed
-at launch time — it distinguishes two different builds sitting behind the
-identical `--strategy-exec` path, which the path/name alone cannot. The
-ephemeral Unix-domain socket path `trader` generates for that one run is
-never recorded anywhere in this provenance: it has no reproducibility
-meaning and is specific to that single process's lifetime.
+`exec_digest`/`config_digest` are content digests of the executable file
+and the `--strategy-config` file itself, both computed immediately before
+launch — they distinguish two different builds behind the identical
+`--strategy-exec` path, or two different config files behind the identical
+`--strategy-config` path (for example, the same path edited in place
+between two runs), neither of which a path/name alone can. `config_digest`
+is empty when `--strategy-config` is not given. The ephemeral Unix-domain
+socket path `trader` generates for that one run is never recorded anywhere
+in this provenance: it has no reproducibility meaning and is specific to
+that single process's lifetime.
 
 #### v1 limitations / non-goals
 
