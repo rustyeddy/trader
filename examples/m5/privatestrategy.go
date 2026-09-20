@@ -22,12 +22,10 @@ import (
 	"github.com/rustyeddy/trader/order"
 )
 
-// PrivateStrategy is the representative external strategy
-// implementation. It is exported (unlike cmd/trader/backtest's own
-// unexported demoStrategy) specifically so privatestrategy_test.go —
-// standing in for a separate application built on top of a private
-// strategy — can construct it using nothing but this package's own
-// public API, the way a real external consumer would.
+// PrivateStrategy is the representative in-tree private/runtime strategy
+// used by the M5 example and its composition test. It is exported so that
+// privatestrategy_test.go can construct it while exercising the internal
+// runtime contract; it is not an external-consumer API.
 type PrivateStrategy struct {
 	instrumentID instrument.ID
 	interval     marketdata.Interval
