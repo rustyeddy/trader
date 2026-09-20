@@ -8,7 +8,8 @@
 // # What it does, and does not, do
 //
 // This package imports Stooq's own native single-file-per-instrument
-// CSV export into Trader's raw-archive partition layout, and then reads
+// CSV-like export, including the daily .txt archive files, into Trader's
+// raw-archive partition layout, and then reads
 // and inspects that raw archive the same way marketdata/internal/
 // provider/oanda reads its own. It does not choose Trader's canonical
 // storage format, resample, or apply any corporate-action adjustment —
@@ -20,7 +21,7 @@
 // own explicit constraint — "should not require network access to
 // Stooq"). There is no Sync-equivalent network fetch; Import (import.go)
 // is the one, explicit, operator-run acquisition step, reading a
-// caller-supplied Stooq CSV export once and writing it out as raw
+// caller-supplied Stooq archive export once and writing it out as raw
 // partitions. Running Import again over an updated Stooq export is how
 // a caller brings the raw archive current — there is no automatic
 // "extend" the way oanda.Client.FetchCandles provides.

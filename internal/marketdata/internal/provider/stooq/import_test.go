@@ -2,8 +2,10 @@ package stooq
 
 import (
 	"context"
+	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,85 @@ func TestImport_SmallFixtureSplitsIntoMonthlyPartitions(t *testing.T) {
 	snapJune, err := ReadPartitionSnapshot(ctx, rawRoot, "SPY", 2020, time.June)
 	require.NoError(t, err)
 	require.Len(t, snapJune.Records, 1)
+}
+
+func TestImportArchive_SPYD1PreservesSourceAndPartitionsMonthly(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "deep path", "daily", "us", "nyse etfs", "2", "spy.us.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	content := archiveHeader + "\r\n" +
+		"SPY.US,D,20200131,000000,100.00,101.00,99.00,100.50,1000,0\r\n" +
+		"SPY.US,D,20200203,000000,100.50,102.00,100.00,101.50,2000,0\r\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	before := sha256.Sum256([]byte(content))
+
+	r, err := ImportArchive(ctx, path, filepath.Join(root, "raw"), "SPY")
+	require.NoError(t, err)
+	require.Equal(t, 2, r.RowsImported)
+	require.Equal(t, 2, r.MonthsWritten)
+	require.Equal(t, time.Date(2020, time.January, 31, 0, 0, 0, 0, time.UTC), r.FirstDate)
+	require.Equal(t, time.Date(2020, time.February, 3, 0, 0, 0, 0, time.UTC), r.LastDate)
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, before, sha256.Sum256(after), "native archive must remain byte-for-byte unchanged")
+	snap, err := ReadPartitionSnapshot(ctx, filepath.Join(root, "raw"), "SPY", 2020, time.February)
+	require.NoError(t, err)
+	require.Len(t, snap.Records, 1)
+	require.Equal(t, "101.5", snap.Records[0].Close.String())
+}
+
+func TestImportArchive_RejectsNonDailyRows(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempCSV(t, dir, "spy.us.txt", archiveHeader+"\nSPY.US,H1,20200131,000000,100,101,99,100.5,1000,0\n")
+	_, err := ImportArchive(context.Background(), path, t.TempDir(), "SPY")
+	require.ErrorIs(t, err, ErrMalformedData)
+}
+
+func TestImportArchive_RejectsMalformedRowsWithContext(t *testing.T) {
+	valid := []string{"SPY.US", "D", "20200131", "000000", "100", "101", "99", "100.5", "1000", "0"}
+	cases := []struct {
+		name   string
+		modify func([]string) []string
+	}{
+		{name: "field count", modify: func(fields []string) []string { return fields[:9] }},
+		{name: "ticker mismatch", modify: func(fields []string) []string { fields[0] = "QQQ.US"; return fields }},
+		{name: "period", modify: func(fields []string) []string { fields[1] = "H1"; return fields }},
+		{name: "time", modify: func(fields []string) []string { fields[3] = "093000"; return fields }},
+		{name: "date", modify: func(fields []string) []string { fields[2] = "2020-01-31"; return fields }},
+		{name: "open", modify: func(fields []string) []string { fields[4] = "bad"; return fields }},
+		{name: "high", modify: func(fields []string) []string { fields[5] = "bad"; return fields }},
+		{name: "low", modify: func(fields []string) []string { fields[6] = "bad"; return fields }},
+		{name: "close", modify: func(fields []string) []string { fields[7] = "bad"; return fields }},
+		{name: "volume", modify: func(fields []string) []string { fields[8] = "bad"; return fields }},
+		{name: "negative volume", modify: func(fields []string) []string { fields[8] = "-1"; return fields }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := tc.modify(append([]string(nil), valid...))
+			dir := t.TempDir()
+			path := filepath.Join(dir, "nested path", "spy.us.txt")
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			content := archiveHeader + "\n" + strings.Join(fields, ",") + "\n"
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+			_, err := ImportArchive(context.Background(), path, filepath.Join(dir, "raw"), "SPY")
+			require.ErrorIs(t, err, ErrMalformedData)
+			require.ErrorContains(t, err, path)
+			require.ErrorContains(t, err, ":2:")
+		})
+	}
+}
+
+func TestImportArchive_RejectsWrongHeaderWithPathContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested path", "spy.us.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("wrong,header\n"), 0o644))
+	_, err := ImportArchive(context.Background(), path, t.TempDir(), "SPY")
+	require.ErrorIs(t, err, ErrMalformedData)
+	require.ErrorContains(t, err, path)
 }
 
 // TestImport_FirstLastDateAreMinMaxNotScanOrder confirms
