@@ -1,20 +1,9 @@
-// Package m5 contains a representative "private strategy" — a
-// strategy.Strategy implementation written the way real code living
-// outside this module would write one (issue #225, M5-17). It is not
-// itself a separate Go module (a genuinely external repository is not
-// meaningfully different from this file for the purpose of this
-// proof, and keeping it in-tree lets boundary_test.go and
-// privatestrategy_test.go mechanically verify the property rather than
-// merely assert it), but its own imports are deliberately restricted
-// to exactly the public contract strategy/doc.go documents, plus the
-// standard library's context: context, order, marketdata, instrument,
-// and strategy itself. It never
-// imports backtest, service, cmd, or adapters — see boundary_test.go
-// for the mechanical guard, and privatestrategy_test.go for the
-// composition-root glue (which legitimately does import those
-// packages, the same way a real application built on top of a private
-// strategy would) that actually runs it through backtest.Runner via
-// service/backtest.Service.
+// Package m5 contains a representative in-tree private/runtime strategy
+// (issue #225, M5-17). It demonstrates how Trader's own composition root can
+// wire an internal strategy into the backtest runtime. Its imports deliberately
+// use internal/strategy and internal/order, so this example is not an external
+// consumer boundary test. External strategy authors should use sdk and the
+// separate-module checks in test/architecture instead.
 //
 // privateStrategy itself does nothing sophisticated: it enters long
 // once on its one required instrument's own first bar and never

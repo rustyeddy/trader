@@ -1,7 +1,7 @@
 # Trader
 
-Trader is a Go framework for algorithmic trading research and execution. It is
-being designed as a modular, API-first library for:
+Trader is a Go algorithmic-trading framework with a supported external
+strategy/research API. Its private runtime provides capabilities for:
 
 - market research
 - backtesting
