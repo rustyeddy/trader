@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"log/slog"
@@ -12,7 +12,7 @@ import (
 )
 
 // Descriptor identifies one strategy and states what data it needs —
-// strategysdk's own counterpart to strategy.Descriptor, carried
+// sdk's own counterpart to strategy.Descriptor, carried
 // verbatim in Handshake so the host can answer its own Describe()
 // with no further RPC round trip (ADR-062).
 type Descriptor struct {
@@ -27,7 +27,7 @@ type Descriptor struct {
 
 // DataRequirement names one instrument/interval this strategy needs
 // bars for, and how many bars of warm-up history it needs first —
-// strategysdk's own counterpart to strategy.DataRequirement.
+// sdk's own counterpart to strategy.DataRequirement.
 type DataRequirement struct {
 	Instrument instrument.ID
 	Interval   marketdata.Interval
@@ -35,7 +35,7 @@ type DataRequirement struct {
 }
 
 // BarEvent is one instrument's completed bar, the trigger for OnBar —
-// strategysdk's own counterpart to strategy.BarEvent.
+// sdk's own counterpart to strategy.BarEvent.
 type BarEvent struct {
 	Instrument instrument.ID
 	Interval   marketdata.Interval
@@ -43,7 +43,7 @@ type BarEvent struct {
 }
 
 // FillEvent is one execution report delivered to a strategy
-// implementing FillHandler — strategysdk's own counterpart to
+// implementing FillHandler — sdk's own counterpart to
 // strategy.FillEvent, carrying exactly the minimal slice
 // FillEvent.proto documents (never a reconstructed order.Fill: the
 // wire message itself omits FillID/BrokerOrderID/BrokerFillID/
@@ -63,7 +63,7 @@ type FillEvent struct {
 }
 
 // AccountSnapshot is the deliberately minimal account/view slice v1
-// carries inline with every BarEvent/FillEvent — strategysdk's own
+// carries inline with every BarEvent/FillEvent — sdk's own
 // counterpart to the read-only fields an in-process strategy would
 // read via View.Account(). See strategy.proto's own AccountSnapshot
 // doc comment for exactly why it is this narrow.
@@ -74,7 +74,7 @@ type AccountSnapshot struct {
 	Positions []PositionSnapshot
 }
 
-// PositionSnapshot is one open position — strategysdk's own
+// PositionSnapshot is one open position — sdk's own
 // counterpart to the fields of order.Position current in-process
 // strategies actually read (instrument, side, and average price;
 // never quantity or the full Listing — see strategy.proto's own
@@ -88,7 +88,7 @@ type PositionSnapshot struct {
 }
 
 // View is the read-only market/portfolio state OnBar/OnFill may
-// consult — strategysdk's own counterpart to strategy.View, plus
+// consult — sdk's own counterpart to strategy.View, plus
 // strategy.History's own capability folded in as a required method
 // rather than a separately negotiated one: v1 makes GetHistoryBars
 // always available, scoped to the guest's own declared
@@ -117,7 +117,7 @@ type View interface {
 	HistoryBars(instID instrument.ID, interval marketdata.Interval, n int) (bars []marketdata.Bar, ok bool, err error)
 }
 
-// Environment is Start's own injected-capability bundle — strategysdk's
+// Environment is Start's own injected-capability bundle — sdk's
 // own counterpart to strategy.Environment, deliberately smaller: no
 // Intents or Journal field, since a guest never mints a canonical
 // order.Intent or writes a journal.Record directly (see the package

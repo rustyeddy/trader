@@ -33,7 +33,7 @@ package backtest
 // equal, only their relative shape. idNormalizer/compareTrades below
 // are close ports of that file's own versions (this package cannot
 // import backtest_test's unexported helpers, so they are duplicated,
-// not shared, matching strategysdk's own "each side of a boundary
+// not shared, matching sdk's own "each side of a boundary
 // owns its own half of the translation logic" precedent elsewhere in
 // this codebase).
 

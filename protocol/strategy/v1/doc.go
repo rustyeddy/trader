@@ -11,7 +11,7 @@
 //
 //   - The host side (ExternalStrategyAdapter, implementing the gRPC
 //     server) is issue #379.
-//   - The guest side (strategysdk, the gRPC client) is issue #381.
+//   - The guest side (sdk, the gRPC client) is issue #381.
 //   - The translation between these wire types and Trader's own
 //     domain types (order.Intent, instrument.ID, num.Price, and so
 //     on) is issue #378, in its own package — never here.

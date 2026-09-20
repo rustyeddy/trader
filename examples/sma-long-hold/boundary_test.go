@@ -12,11 +12,11 @@ import (
 
 // forbiddenRoots mirrors examples/m5's own identical list — issue
 // #383's explicit constraint: "No broker/risk/execution access may be
-// added to the external side." strategysdk's own boundary_test.go
+// added to the external side." sdk's own boundary_test.go
 // already enforces the deeper "never imports strategy/backtest/
 // service/cmd/adapters/broker/execution/risk/pipeline" rule for
-// strategysdk itself; this test enforces the identical rule for this
-// binary's own code, which imports strategysdk but is not part of it.
+// sdk itself; this test enforces the identical rule for this
+// binary's own code, which imports sdk but is not part of it.
 var forbiddenRoots = []string{
 	"github.com/rustyeddy/trader/strategy",
 	"github.com/rustyeddy/trader/backtest",

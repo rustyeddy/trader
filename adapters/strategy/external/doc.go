@@ -22,7 +22,7 @@
 // No function here returns a *v1.* type to, or accepts one from, any
 // package outside this one: the only packages that will ever import
 // protocol/strategy/v1 are this one (host side, ADR-062) and the
-// future strategysdk (guest side) — never strategy, order, account,
+// future sdk (guest side) — never strategy, order, account,
 // marketdata, or any other domain package. strategy/boundary_test.go
 // mechanically enforces the strategy half of that (strategy must
 // never import protocol, the same way it must never import adapters);

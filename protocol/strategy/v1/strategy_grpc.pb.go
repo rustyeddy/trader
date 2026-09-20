@@ -48,7 +48,7 @@ const (
 //
 // StrategyHostService is implemented by the Trader host process
 // (ExternalStrategyAdapter, issue #379) and called by an external
-// strategy process (strategysdk, issue #381) as the gRPC client —
+// strategy process (sdk, issue #381) as the gRPC client —
 // ADR-062's own corrected topology, resolving GetHistoryBars's RPC
 // direction without a second connection or host-side callback
 // service.
@@ -117,7 +117,7 @@ func (c *strategyHostServiceClient) GetHistoryBars(ctx context.Context, in *GetH
 //
 // StrategyHostService is implemented by the Trader host process
 // (ExternalStrategyAdapter, issue #379) and called by an external
-// strategy process (strategysdk, issue #381) as the gRPC client —
+// strategy process (sdk, issue #381) as the gRPC client —
 // ADR-062's own corrected topology, resolving GetHistoryBars's RPC
 // direction without a second connection or host-side callback
 // service.

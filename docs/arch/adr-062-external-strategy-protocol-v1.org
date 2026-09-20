@@ -211,7 +211,7 @@ to a unary call:
 
 - =Handshake= and =GetHistoryBars= are ordinary unary RPCs the *guest*
   initiates as the gRPC client; their deadlines are therefore set by
-  the guest/=strategysdk=, exactly like any gRPC client sets a
+  the guest/=sdk=, exactly like any gRPC client sets a
   deadline on a call it makes — =ExternalStrategyAdapter= does not,
   and cannot, impose one on an RPC it did not initiate.
 - =Run= is one long-lived bidirectional stream opened once per
@@ -476,7 +476,13 @@ risk queries, and no capability this ADR has not explicitly listed.
 
 ** Go SDK/runtime: guest-side, first-class; other languages later
 
-A public =strategysdk= package (top-level, alongside =tradertest= as a
+Package naming update (issue #398): the public Go guest package is =sdk=,
+imported as =github.com/rustyeddy/trader/sdk=. Consumers must update imports
+and package qualifiers; no compatibility package is retained. SDK error
+prefixes use =sdk:=. Protocol v1 and the guest-side responsibilities below
+are unchanged.
+
+A public =sdk= package (top-level, alongside =tradertest= as a
 public non-domain framework package — see =package-boundaries.org='s
 own "Test infrastructure intended for users belongs in a public
 =tradertest= package" precedent for a public package that exists to
@@ -487,34 +493,34 @@ the host's Unix-domain socket as a =v1= gRPC *client*, performs the
 =GetHistoryBars= directly when the wrapped strategy's =View= needs it
 — all as the actual gRPC client, per the corrected topology above.
 
-*=strategysdk.Strategy= is its own interface, not
+*=sdk.Strategy= is its own interface, not
 =strategy.Strategy=* (review finding: an earlier draft claimed the SDK
 interface is "shaped identically to =strategy.Strategy=," which
 directly contradicts this ADR's own intent-construction-ownership
 section — =strategy.Strategy.OnBar= returns real, canonical
 =[]order.Intent= built through =Environment.Intents=, but a guest must
-never construct one). =strategysdk.Strategy= mirrors
+never construct one). =sdk.Strategy= mirrors
 =strategy.Strategy='s *shape* (=Describe=, =Start=, =OnBar=, plus
-=strategysdk= equivalents of whichever optional capability interfaces
+=sdk= equivalents of whichever optional capability interfaces
 the wrapped logic implements) closely enough that porting an in-
 process strategy's decision logic to a =v1= guest is mostly mechanical,
-but its =OnBar= signature returns =([]strategysdk.DescribedIntent,
-[]strategysdk.DescribedSignal, error)=, not =([]order.Intent, error)=
+but its =OnBar= signature returns =([]sdk.DescribedIntent,
+[]sdk.DescribedSignal, error)=, not =([]order.Intent, error)=
 — the intents are the same kind/instrument/side/quantity/stop/
 correlation-token shape the =Run=-stream wire message itself carries
 (intent-construction-ownership section above), and the signals are
-=journal.Signal='s own shape verbatim (below), with =strategysdk=
-providing typed constructor functions (=strategysdk.Enter=,
-=strategysdk.Exit=, and so on, mirroring =IntentFactory='s own method
+=journal.Signal='s own shape verbatim (below), with =sdk=
+providing typed constructor functions (=sdk.Enter=,
+=sdk.Exit=, and so on, mirroring =IntentFactory='s own method
 names) so a guest author writes recognizably similar code without ever
 holding, or needing, a real =IntentFactory= or =journal.Recorder=.
-=strategysdk.Environment= (the guest's own =Start= argument) is
+=sdk.Environment= (the guest's own =Start= argument) is
 smaller than =strategy.Environment= for the same reason: no =Intents=
 or =Journal= field, since the guest never mints canonical intents or
 writes journal records directly — it only describes what it wants
 built, in both cases.
 
-*=strategysdk.Environment.Clock= reflects the host's own injected
+*=sdk.Environment.Clock= reflects the host's own injected
 clock, never the guest's local wall clock* (review finding: an earlier
 draft supplied guest wall-clock time here, directly conflicting with
 issue #376's own "Trader retains ownership of ... clock semantics"
@@ -532,7 +538,7 @@ at that same point in the run. Every
 =Run=-stream =BarEvent= additionally carries the bar's own event time,
 which is already the value an in-process strategy observes as "now"
 during =OnBar= (the scheduler advances its clock to the current bar
-before invoking any strategy callback). =strategysdk= provides a small
+before invoking any strategy callback). =sdk= provides a small
 internal =clock.Clock= implementation seeded from =start_time= and
 updated to each =BarEvent='s own time as it arrives — =Now()= returns
 whatever value the host most recently supplied, never a real
@@ -552,7 +558,7 @@ out-of-tree reference implementation that explicitly compares
 already records =journal.KindSignal= evidence through =env.Journal=
 per ADR-044, so a =v1= that cannot reproduce that behavior cannot pass
 its own milestone's completion gate. =SessionStart= carries the run's
-own =id.RunID= alongside =start_time=, so =strategysdk.Environment=
+own =id.RunID= alongside =start_time=, so =sdk.Environment=
 always has it available, exactly as an in-process strategy already can
 read =env.RunID=). Alongside the described intents a =BarEvent=
 response may carry (above), it may also carry zero or more *described
@@ -574,10 +580,10 @@ than erroring, mirroring how an in-process strategy that checks
 =env.Journal != nil= before calling =Record= simply does not record
 anything when it is =nil=.
 
-=strategysdk= depends on =protocol/strategy/v1=, =order= (for the
+=sdk= depends on =protocol/strategy/v1=, =order= (for the
 shared value types =DescribedIntent= itself is built from — =order.
 Side=, =num.Price=, =num.Quantity=, and =instrument.ID= — not for
-=order.Intent= or =order.NewIntent= themselves, which =strategysdk=
+=order.Intent= or =order.NewIntent= themselves, which =sdk=
 never calls), =marketdata=, =instrument=, and =num= — never on
 =strategy= itself, and never on =backtest=, =service=, =cmd=,
 =adapters=, =broker=, =execution=, =risk=, =pipeline=, or =chart=,
@@ -610,7 +616,7 @@ deferring this costs nothing forward-compatibility-wise.
     root exactly like any other             |
     strategy.Strategy)                      |
                                              |
-                              strategysdk ---+
+                                      sdk ---+
                        (guest-side gRPC client, its own
                         Strategy/DescribedIntent interface —
                         not strategy.Strategy/order.Intent;
@@ -628,11 +634,11 @@ edge from it to =strategy=, correcting an earlier draft that drew one
 package on either side of this boundary that actually constructs
 values through =strategy='s own contract (=strategy.Strategy=,
 =strategy.Environment=, =order.Intent= via the retained
-=IntentFactory=). =strategysdk= imports =order=, =marketdata=,
+=IntentFactory=). =sdk= imports =order=, =marketdata=,
 =instrument=, and =num= for shared value types, but never =strategy=
-itself, since =strategysdk.Strategy= is its own interface (above), not
+itself, since =sdk.Strategy= is its own interface (above), not
 an alias of =strategy.Strategy=. Both =adapters/strategy/external= and
-=strategysdk= depend on =protocol/strategy/v1=, doing the
+=sdk= depend on =protocol/strategy/v1=, doing the
 field-by-field translation in both directions independently — the
 translation logic is not shared code between host and guest, since
 each side owns a different half of the mapping (constructing domain
@@ -640,7 +646,7 @@ values host-side from wire messages; constructing wire messages
 guest-side from whatever the guest's own strategy logic returns).
 Neither package imports the other. =strategy= itself gains no new
 dependency at all: it remains exactly as ADR-043 left it, unaware
-that =ExternalStrategyAdapter= or =strategysdk= exist.
+that =ExternalStrategyAdapter= or =sdk= exist.
 
 ** =v1= scope
 
@@ -653,7 +659,7 @@ that =ExternalStrategyAdapter= or =strategysdk= exist.
   runs.
 - =SessionStart=, the =Run= stream's own first message, sent the
   instant =Start(ctx, env)= receives the real =Environment=: carries
-  =start_time= (seeding =strategysdk='s host-owned guest clock, below
+  =start_time= (seeding =sdk='s host-owned guest clock, below
   — never guest wall-clock time) and =RunID=.
 - =OnBar= (delivered over the =Run= stream, each response carrying
   described intents *and* described signals — =journal.Signal='s own
@@ -719,7 +725,7 @@ Restated from the issue, with the reasoning for each:
   model, intent-construction ownership, and =v1= scope/non-goals are
   all recorded above.
 - No code is written by this ADR. =protocol/strategy/v1=,
-  =adapters/strategy/external=, and =strategysdk= remain empty
+  =adapters/strategy/external=, and =sdk= remain empty
   proposals until a follow-on issue implements them — consistent with
   =package-boundaries.org= rule 15 ("No empty placeholder
   directories"), no directory is created by this ADR itself.
@@ -742,7 +748,7 @@ Restated from the issue, with the reasoning for each:
 - PR #386 review (owner and Copilot, second pass, against the
   corrected topology) found four further contract inconsistencies:
   =Handshake= did not actually carry the full =strategy.Descriptor= a
-  runner reads before =Start=; =strategysdk= was described as
+  runner reads before =Start=; =sdk= was described as
   "identical to =strategy.Strategy=" despite that interface's
   =OnBar= returning canonical intents a guest must never construct;
   =GetHistoryBars= was simultaneously described as both
@@ -753,7 +759,7 @@ Restated from the issue, with the reasoning for each:
   untrusted code, with no RPC-deadline/supervision policy for a hung
   guest.
 - PR #386 review (owner, third pass, against the corrected descriptor/
-  SDK/history contract) found two further issues: =strategysdk.
+  SDK/history contract) found two further issues: =sdk.
   Environment.Clock= was supplied from guest wall-clock time, directly
   conflicting with issue #376's own clock-ownership requirement and
   =strategy.Environment.Clock='s reproducibility contract; and the
@@ -780,7 +786,7 @@ Restated from the issue, with the reasoning for each:
   view, rejecting a request with no matching in-flight callback;
   =RunID= was carried at =Handshake= (corrected again in the next
   pass, below) and guest journaling was made an explicit =v1=
-  non-goal. A minor documentation gap (the =strategysdk=
+  non-goal. A minor documentation gap (the =sdk=
   forbidden-import list omitting =chart=, present in the real
   =strategy/boundary_test.go=) was also fixed in the same pass.
 - PR #386 review (owner, fifth pass) found two further issues in the
@@ -869,7 +875,7 @@ none is a mechanical revert of a review comment addressed elsewhere.
   regardless — adding a second mandatory RPC only to carry a few more
   fields of the same logical value would not simplify anything a
   richer =Handshake= response does not already handle.
-- *Claiming =strategysdk.Strategy= as a type alias or embedding of
+- *Claiming =sdk.Strategy= as a type alias or embedding of
   =strategy.Strategy=, letting a guest reuse its exact type
   signature.* Rejected: =strategy.Strategy.OnBar= is typed to return
   real =[]order.Intent=, which requires an =IntentFactory= a guest
@@ -891,7 +897,7 @@ none is a mechanical revert of a review comment addressed elsewhere.
   remote TCP/TLS. =v1= instead states its actual trust assumption
   plainly (a trusted-but-isolated guest) rather than either
   overclaiming or over-engineering.
-- *Supplying =strategysdk.Environment.Clock= from the guest process's
+- *Supplying =sdk.Environment.Clock= from the guest process's
   own real =time.Now()=.* Rejected (review finding): this directly
   breaks reproducibility for any external strategy used in a
   backtest — a simulated run's clock does not track wall time at all,

@@ -365,20 +365,20 @@ the executable will request.
 
 #### Building a Go external strategy
 
-Import [`strategysdk`](../strategysdk) and implement its `Strategy`
+Import [`sdk`](../sdk) and implement its `Strategy`
 interface (`Describe`/`Start`/`OnBar`, plus the optional `FillHandler`
-capability). `strategysdk.Serve(yourStrategy)` is normally the entire body
+capability). `sdk.Serve(yourStrategy)` is normally the entire body
 of `main()`:
 
 ```go
 func main() {
-    if err := strategysdk.Serve(NewMyStrategy(cfg)); err != nil {
+    if err := sdk.Serve(NewMyStrategy(cfg)); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-See [`examples/strategysdk-minimal`](../examples/strategysdk-minimal) for
+See [`examples/sdk-minimal`](../examples/sdk-minimal) for
 the smallest complete, compiling example, and
 [`examples/sma-long-hold`](../examples/sma-long-hold) for a real,
 non-trivial one (SMA/indicator state, a ratcheting protective stop,
@@ -388,7 +388,7 @@ in-tree counterpart, `strategy/smatrend`, by
 
 An external strategy never receives a broker handle, never evaluates risk,
 and never submits an order directly — it only describes intents, exactly
-like an in-tree `strategy.Strategy`. `strategysdk` itself, and every
+like an in-tree `strategy.Strategy`. `sdk` itself, and every
 strategy built on it, is architecturally barred from importing Trader's
 `strategy`, `backtest`, `service`, `cmd`, `adapters`, `broker`, `execution`,
 `risk`, or `pipeline` packages.

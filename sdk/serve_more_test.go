@@ -1,4 +1,4 @@
-package strategysdk_test
+package sdk_test
 
 import (
 	"context"
@@ -20,30 +20,30 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
+	"github.com/rustyeddy/trader/sdk"
 	"github.com/rustyeddy/trader/strategy"
-	"github.com/rustyeddy/trader/strategysdk"
 )
 
 // TestServe_MissingSocketPathEnvProducesClearError exercises Serve
 // itself (not just ServeContext), covering its own OS-signal-context
 // setup/teardown wrapper.
 func TestServe_MissingSocketPathEnvProducesClearError(t *testing.T) {
-	require.NoError(t, os.Unsetenv(strategysdk.SocketPathEnv))
-	err := strategysdk.Serve(newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest")))
+	require.NoError(t, os.Unsetenv(sdk.SocketPathEnv))
+	err := sdk.Serve(newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest")))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), strategysdk.SocketPathEnv)
+	require.Contains(t, err.Error(), sdk.SocketPathEnv)
 }
 
 // TestServeContext_MissingSocketPathEnvProducesClearError proves
 // ServeContext fails immediately and explicitly when
 // TRADER_STRATEGY_SOCKET is not set, rather than hanging or panicking.
 func TestServeContext_MissingSocketPathEnvProducesClearError(t *testing.T) {
-	t.Setenv(strategysdk.SocketPathEnv, "")
-	require.NoError(t, os.Unsetenv(strategysdk.SocketPathEnv))
+	t.Setenv(sdk.SocketPathEnv, "")
+	require.NoError(t, os.Unsetenv(sdk.SocketPathEnv))
 
-	err := strategysdk.ServeContext(context.Background(), newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest")))
+	err := sdk.ServeContext(context.Background(), newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest")))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), strategysdk.SocketPathEnv)
+	require.Contains(t, err.Error(), sdk.SocketPathEnv)
 }
 
 // TestServeContext_RealUnixSocket proves Serve/ServeContext actually
@@ -65,14 +65,14 @@ func TestServeContext_RealUnixSocket(t *testing.T) {
 		<-served
 	})
 
-	t.Setenv(strategysdk.SocketPathEnv, sockPath)
+	t.Setenv(sdk.SocketPathEnv, sockPath)
 
 	guestCtx, cancelGuest := context.WithCancel(context.Background())
 	defer cancelGuest()
 
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
 	serveErrCh := make(chan error, 1)
-	go func() { serveErrCh <- strategysdk.ServeContext(guestCtx, guest) }()
+	go func() { serveErrCh <- sdk.ServeContext(guestCtx, guest) }()
 
 	strat, err := host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestServeConn_HistoryBarsRoundTrip(t *testing.T) {
 
 	historyResult := make(chan []marketdata.Bar, 1)
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
-	guest.onBar = func(event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+	guest.onBar = func(event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 		bars, ok, err := view.HistoryBars(inst, iv, 5)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -133,7 +133,7 @@ func TestServeConn_HistoryBarsRoundTrip(t *testing.T) {
 	}
 
 	conn := h.dial()
-	go func() { _ = strategysdk.ServeConn(ctx, conn, guest) }()
+	go func() { _ = sdk.ServeConn(ctx, conn, guest) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -167,12 +167,12 @@ func TestServeConn_OnBarCallbackErrorReportedToHost(t *testing.T) {
 	defer cancelGuest()
 
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
-	guest.onBar = func(event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+	guest.onBar = func(event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 		return nil, nil, fmt.Errorf("boom")
 	}
 
 	conn := h.dial()
-	go func() { _ = strategysdk.ServeConn(ctx, conn, guest) }()
+	go func() { _ = sdk.ServeConn(ctx, conn, guest) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestServeConn_SessionEndFromHostReturnsCleanly(t *testing.T) {
 
 	conn := h.dial()
 	serveErrCh := make(chan error, 1)
-	go func() { serveErrCh <- strategysdk.ServeConn(ctx, conn, guest) }()
+	go func() { serveErrCh <- sdk.ServeConn(ctx, conn, guest) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestServeConn_CapabilityNotNegotiatedRejected(t *testing.T) {
 	conn := dialFakeServer(t, acceptingNoCapabilityHost{})
 
 	guest := &testGuestStrategyWithFill{testGuestStrategy: newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))}
-	err := strategysdk.ServeConn(context.Background(), conn, guest)
+	err := sdk.ServeConn(context.Background(), conn, guest)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "capability")
 }
@@ -278,7 +278,7 @@ func TestServeConn_HandshakeTimeout(t *testing.T) {
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
 
 	start := time.Now()
-	err := strategysdk.ServeConn(context.Background(), conn, guest, strategysdk.WithHandshakeTimeout(200*time.Millisecond))
+	err := sdk.ServeConn(context.Background(), conn, guest, sdk.WithHandshakeTimeout(200*time.Millisecond))
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -337,19 +337,19 @@ func TestServeConn_HistoryBarsTimeout(t *testing.T) {
 	inst := eurUSD(t)
 	iv := mustInterval(t)
 
-	guest := newTestGuestStrategy(strategysdk.Descriptor{
+	guest := newTestGuestStrategy(sdk.Descriptor{
 		Name: "sdk_guest", Version: "1.0",
-		Requirements: []strategysdk.DataRequirement{{Instrument: inst, Interval: iv}},
+		Requirements: []sdk.DataRequirement{{Instrument: inst, Interval: iv}},
 	})
 	errCh := make(chan error, 1)
-	guest.onBar = func(event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+	guest.onBar = func(event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 		_, _, err := view.HistoryBars(inst, iv, 5)
 		errCh <- err
 		return nil, nil, nil
 	}
 
 	go func() {
-		_ = strategysdk.ServeConn(context.Background(), conn, guest, strategysdk.WithHistoryBarsTimeout(200*time.Millisecond))
+		_ = sdk.ServeConn(context.Background(), conn, guest, sdk.WithHistoryBarsTimeout(200*time.Millisecond))
 	}()
 
 	select {
@@ -387,7 +387,7 @@ func TestServeConn_EOFWithoutSessionEndIsAbnormal(t *testing.T) {
 	conn := dialFakeServer(t, endlessRunHost{})
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
 
-	err := strategysdk.ServeConn(context.Background(), conn, guest)
+	err := sdk.ServeConn(context.Background(), conn, guest)
 	require.Error(t, err, "a stream that ends without session_end must not look like a successful run")
 }
 
@@ -403,7 +403,7 @@ func TestServeConn_WithLoggerIsUsedForEnvironment(t *testing.T) {
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
 
 	conn := h.dial()
-	go func() { _ = strategysdk.ServeConn(ctx, conn, guest, strategysdk.WithLogger(logger)) }()
+	go func() { _ = sdk.ServeConn(ctx, conn, guest, sdk.WithLogger(logger)) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -435,10 +435,10 @@ func TestServeConn_WithLoggerIsUsedForEnvironment(t *testing.T) {
 type describeOnceStrategy struct {
 	*testGuestStrategy
 	callCount int
-	second    strategysdk.Descriptor
+	second    sdk.Descriptor
 }
 
-func (s *describeOnceStrategy) Describe() strategysdk.Descriptor {
+func (s *describeOnceStrategy) Describe() sdk.Descriptor {
 	s.callCount++
 	if s.callCount == 1 {
 		return s.descriptor
@@ -457,10 +457,10 @@ func TestServeConn_DescribeCalledOnceAndReused(t *testing.T) {
 	first := simpleSDKDescriptor(t, "sdk_guest") // requires EUR/USD H1
 	otherInst := instrument.CurrencyPairID(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
 	iv := mustInterval(t)
-	second := strategysdk.Descriptor{
+	second := sdk.Descriptor{
 		Name:    "sdk_guest",
 		Version: "1.0",
-		Requirements: []strategysdk.DataRequirement{
+		Requirements: []sdk.DataRequirement{
 			{Instrument: otherInst, Interval: iv}, // a requirement never sent at Handshake
 		},
 	}
@@ -472,7 +472,7 @@ func TestServeConn_DescribeCalledOnceAndReused(t *testing.T) {
 		ok  bool
 		err error
 	}, 1)
-	guest.onBar = func(_ strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+	guest.onBar = func(_ sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 		_, ok, err := view.HistoryBars(otherInst, iv, 1)
 		historyCh <- struct {
 			ok  bool
@@ -482,7 +482,7 @@ func TestServeConn_DescribeCalledOnceAndReused(t *testing.T) {
 	}
 
 	conn := h.dial()
-	go func() { _ = strategysdk.ServeConn(ctx, conn, guest) }()
+	go func() { _ = sdk.ServeConn(ctx, conn, guest) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -519,7 +519,7 @@ func TestWithLogger_NilDoesNotOverrideDefault(t *testing.T) {
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
 
 	conn := h.dial()
-	go func() { _ = strategysdk.ServeConn(ctx, conn, guest, strategysdk.WithLogger(nil)) }()
+	go func() { _ = sdk.ServeConn(ctx, conn, guest, sdk.WithLogger(nil)) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)

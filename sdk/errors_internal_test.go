@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"errors"
@@ -23,13 +23,13 @@ func TestFromWireError_StructuredFailure(t *testing.T) {
 	var wireErr *WireError
 	require.ErrorAs(t, err, &wireErr)
 	require.Equal(t, v1.ErrorCode_ERROR_CODE_CAPABILITY_MISMATCH, wireErr.Code)
-	require.Contains(t, err.Error(), "nope")
+	require.EqualError(t, err, "sdk: ERROR_CODE_CAPABILITY_MISMATCH: nope")
 }
 
 func TestWireError_Error_EmptyMessage(t *testing.T) {
 	err := fromWireError(&v1.Error{Code: v1.ErrorCode_ERROR_CODE_DEADLINE_EXCEEDED})
 	require.Error(t, err)
-	require.NotContains(t, err.Error(), ": : ")
+	require.EqualError(t, err, "sdk: ERROR_CODE_DEADLINE_EXCEEDED")
 }
 
 func TestToWireError_RoundTrips(t *testing.T) {

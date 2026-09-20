@@ -1,6 +1,6 @@
-# strategysdk
+# sdk
 
-`strategysdk` is the guest-side Go SDK for writing an out-of-tree
+`sdk` is the guest-side Go SDK for writing an out-of-tree
 Trader strategy that speaks [Strategy Protocol
 v1](../protocol/strategy/v1) (issue #377, ADR-062) — the counterpart
 to `adapters/strategy/external.Host`, the host-side gRPC server
@@ -23,11 +23,11 @@ package main
 import (
     "log"
 
-    "github.com/rustyeddy/trader/strategysdk"
+    "github.com/rustyeddy/trader/sdk"
 )
 
 func main() {
-    if err := strategysdk.Serve(NewMyStrategy(cfg)); err != nil {
+    if err := sdk.Serve(NewMyStrategy(cfg)); err != nil {
         log.Fatal(err)
     }
 }
@@ -38,7 +38,7 @@ func main() {
 launches your binary), dials it, and drives your strategy until the
 host ends the session or your process receives SIGINT/SIGTERM.
 
-See [`examples/strategysdk-minimal`](../examples/strategysdk-minimal)
+See [`examples/sdk-minimal`](../examples/sdk-minimal)
 for a complete, minimal, compiling example.
 
 ## Implementing a strategy
@@ -75,11 +75,11 @@ this bar" response.
 ### Describing an intent
 
 ```go
-strategysdk.Enter(inst, order.Buy)
-strategysdk.Exit(inst)
-strategysdk.AdjustStop(inst, stopPrice)
-strategysdk.EnterWithStop(inst, order.Buy, stopPrice)
-strategysdk.TargetExposure(inst, order.Sell, quantity)
+sdk.Enter(inst, order.Buy)
+sdk.Exit(inst)
+sdk.AdjustStop(inst, stopPrice)
+sdk.EnterWithStop(inst, order.Buy, stopPrice)
+sdk.TargetExposure(inst, order.Sell, quantity)
 ```
 
 Each returns a `DescribedIntent`. To group several intents from one
@@ -88,16 +88,16 @@ with a re-entry), chain `.WithCorrelation(token)` with the same
 arbitrary string on each:
 
 ```go
-[]strategysdk.DescribedIntent{
-    strategysdk.Exit(inst).WithCorrelation("reversal"),
-    strategysdk.Enter(inst, order.Sell).WithCorrelation("reversal"),
+[]sdk.DescribedIntent{
+    sdk.Exit(inst).WithCorrelation("reversal"),
+    sdk.Enter(inst, order.Sell).WithCorrelation("reversal"),
 }
 ```
 
 ### Recording decision evidence
 
 ```go
-strategysdk.Signal("mystrategy", map[string]string{
+sdk.Signal("mystrategy", map[string]string{
     "fast_sma": fastSMA.String(),
     "slow_sma": slowSMA.String(),
 }).WithCorrelation(token)
@@ -130,7 +130,7 @@ separate fill-time history view.
 
 ### Handling fills (optional)
 
-Implement `FillHandler` to receive fill notifications — `strategysdk`
+Implement `FillHandler` to receive fill notifications — `sdk`
 detects this automatically and advertises the capability at Handshake:
 
 ```go
@@ -141,18 +141,18 @@ type FillHandler interface {
 
 ## What this SDK will never give you
 
-By design, `strategysdk` never exposes a broker handle, a risk engine,
+By design, `sdk` never exposes a broker handle, a risk engine,
 an execution pipeline, or Trader's own `strategy` package — the same
 restrictions an in-process `strategy.Strategy` already has
-(mechanically enforced by `strategysdk/boundary_test.go`). You
+(mechanically enforced by `sdk/boundary_test.go`). You
 describe what you want; the host process decides whether, and how, it
 actually happens.
 
 ## Testing your strategy
 
-`strategysdk.ServeConn` is the lower-level entry point `Serve` itself
+`sdk.ServeConn` is the lower-level entry point `Serve` itself
 uses after dialing — it accepts any `grpc.ClientConnInterface`, so you
 can drive your strategy against an in-process fake host (or the real
 `adapters/strategy/external.Host`, over a `bufconn` listener) in your
-own tests without a real socket. See `strategysdk`'s own
+own tests without a real socket. See `sdk`'s own
 `serve_test.go` for the pattern.

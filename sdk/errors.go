@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"fmt"
@@ -18,9 +18,9 @@ type WireError struct {
 // Error implements the error interface.
 func (e *WireError) Error() string {
 	if e.Message == "" {
-		return fmt.Sprintf("strategysdk: %s", e.Code)
+		return fmt.Sprintf("sdk: %s", e.Code)
 	}
-	return fmt.Sprintf("strategysdk: %s: %s", e.Code, e.Message)
+	return fmt.Sprintf("sdk: %s: %s", e.Code, e.Message)
 }
 
 // fromWireError converts a received *v1.Error into a Go error. A nil

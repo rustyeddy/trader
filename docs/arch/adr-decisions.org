@@ -678,7 +678,7 @@ same "settle one concrete piece without promoting the broader ADR's
 status" pattern ADR-046 already established for ADR-011, which is why
 ADR-010 keeps its own =Proposed= status, unchanged by this ADR. No
 code is introduced by this ADR: =protocol/strategy/v1=,
-=adapters/strategy/external=, and =strategysdk= remain documented
+=adapters/strategy/external=, and =sdk= remain documented
 proposals for a follow-on implementation issue.
 
 Note: ADR-063 is likewise maintained in its own file,

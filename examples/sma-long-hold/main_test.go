@@ -16,7 +16,7 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/strategysdk"
+	"github.com/rustyeddy/trader/sdk"
 )
 
 // These are the same in-process-level tests strategy/smatrend's own
@@ -104,7 +104,7 @@ func TestCrossState_OnlyReportsGenuineCrossAbove(t *testing.T) {
 	assert.False(t, s.update(true))
 }
 
-// fakeView is a minimal strategysdk.View for driving OnBar directly,
+// fakeView is a minimal sdk.View for driving OnBar directly,
 // without a real host process.
 type fakeView struct {
 	inst     instrument.ID
@@ -112,12 +112,12 @@ type fakeView struct {
 	avgPrice *num.Price
 }
 
-func (v fakeView) Account() strategysdk.AccountSnapshot {
+func (v fakeView) Account() sdk.AccountSnapshot {
 	if v.side == order.Flat {
-		return strategysdk.AccountSnapshot{}
+		return sdk.AccountSnapshot{}
 	}
-	return strategysdk.AccountSnapshot{
-		Positions: []strategysdk.PositionSnapshot{{Instrument: v.inst, Side: v.side, AvgPrice: v.avgPrice}},
+	return sdk.AccountSnapshot{
+		Positions: []sdk.PositionSnapshot{{Instrument: v.inst, Side: v.side, AvgPrice: v.avgPrice}},
 	}
 }
 
@@ -164,7 +164,7 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 		testBar(t, 2, "1.10400", "1.10450", "1.10250", "1.10300"),
 	}
 	for _, bar := range bars {
-		intents, signals, err := strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: bar}, fakeView{inst: strat.inst, side: order.Flat})
+		intents, signals, err := strat.OnBar(ctx, sdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: bar}, fakeView{inst: strat.inst, side: order.Flat})
 		require.NoError(t, err)
 		assert.Empty(t, signals)
 		assert.Empty(t, intents, "no entry expected during warm-up/below-SMA bars")
@@ -173,13 +173,13 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 	// A bar for a different instrument must be ignored outright, even
 	// though it would otherwise look like a fresh cross.
 	other := instrument.CurrencyPairID(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
-	intents, _, err := strat.OnBar(ctx, strategysdk.BarEvent{Instrument: other, Interval: strat.interval, Bar: testBar(t, 3, "1.20000", "1.30000", "1.19000", "1.29000")}, fakeView{inst: strat.inst, side: order.Flat})
+	intents, _, err := strat.OnBar(ctx, sdk.BarEvent{Instrument: other, Interval: strat.interval, Bar: testBar(t, 3, "1.20000", "1.30000", "1.19000", "1.29000")}, fakeView{inst: strat.inst, side: order.Flat})
 	require.NoError(t, err)
 	assert.Empty(t, intents, "a bar for a different instrument must never be acted on")
 
 	// A sharp rise crosses above the SMA: Enter, while still Flat.
 	crossBar := testBar(t, 3, "1.10300", "1.11050", "1.10250", "1.11000")
-	intents, signals, err := strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: crossBar}, fakeView{inst: strat.inst, side: order.Flat})
+	intents, signals, err := strat.OnBar(ctx, sdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: crossBar}, fakeView{inst: strat.inst, side: order.Flat})
 	require.NoError(t, err)
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.IntentEnter, intents[0].Kind)
@@ -196,7 +196,7 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 	// bar the position is first observed Long.
 	entryFillBar := testBar(t, 4, "1.11000", "1.11200", "1.10900", "1.11100")
 	entryPrice := num.MustParsePrice("1.11000")
-	intents, signals, err = strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: entryFillBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
+	intents, signals, err = strat.OnBar(ctx, sdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: entryFillBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
 	require.NoError(t, err)
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.IntentAdjustStop, intents[0].Kind)
@@ -210,7 +210,7 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 
 	// A higher High ratchets the stop upward.
 	higherBar := testBar(t, 5, "1.11100", "1.11500", "1.11000", "1.11400")
-	intents, _, err = strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: higherBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
+	intents, _, err = strat.OnBar(ctx, sdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: higherBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
 	require.NoError(t, err)
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.IntentAdjustStop, intents[0].Kind)
@@ -220,7 +220,7 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 	// A High no greater than the existing high-water mark emits
 	// nothing — the stop never moves down.
 	flatBar := testBar(t, 6, "1.11400", "1.11450", "1.11200", "1.11300")
-	intents, _, err = strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: flatBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
+	intents, _, err = strat.OnBar(ctx, sdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: flatBar}, fakeView{inst: strat.inst, side: order.Long, avgPrice: &entryPrice})
 	require.NoError(t, err)
 	assert.Empty(t, intents)
 
@@ -229,7 +229,7 @@ func TestOnBar_EntersOnCrossThenRatchetsThenIgnoresOtherInstrument(t *testing.T)
 	// observes it — see OnBar's own doc comment): back to Flat, no new
 	// entry on this same bar since there was no fresh cross.
 	afterStopBar := testBar(t, 7, "1.11300", "1.11350", "1.09000", "1.09500")
-	intents, _, err = strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: afterStopBar}, fakeView{inst: strat.inst, side: order.Flat})
+	intents, _, err = strat.OnBar(ctx, sdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: afterStopBar}, fakeView{inst: strat.inst, side: order.Flat})
 	require.NoError(t, err)
 	assert.Empty(t, intents)
 }
@@ -277,7 +277,7 @@ func TestStart_LogsWithoutError(t *testing.T) {
 	strat, err := newLongHold(defaultConfig())
 	require.NoError(t, err)
 
-	err = strat.Start(context.Background(), strategysdk.Environment{
+	err = strat.Start(context.Background(), sdk.Environment{
 		Clock:  clock.NewSimulated(time.Date(2024, time.June, 3, 0, 0, 0, 0, time.UTC)),
 		RunID:  "run_test",
 		Logger: slog.New(slog.DiscardHandler),
@@ -298,11 +298,11 @@ func TestOnBar_UnexpectedShortPositionIsAnError(t *testing.T) {
 		testBar(t, 1, "1.10500", "1.10550", "1.10350", "1.10400"),
 		testBar(t, 2, "1.10400", "1.10450", "1.10250", "1.10300"),
 	} {
-		_, _, err := strat.OnBar(ctx, strategysdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: bar}, fakeView{inst: strat.inst, side: order.Flat})
+		_, _, err := strat.OnBar(ctx, sdk.BarEvent{Instrument: strat.inst, Interval: strat.interval, Bar: bar}, fakeView{inst: strat.inst, side: order.Flat})
 		require.NoError(t, err)
 	}
 
-	_, _, err = strat.OnBar(ctx, strategysdk.BarEvent{
+	_, _, err = strat.OnBar(ctx, sdk.BarEvent{
 		Instrument: strat.inst, Interval: strat.interval,
 		Bar: testBar(t, 3, "1.10300", "1.10350", "1.10250", "1.10300"),
 	}, fakeView{inst: strat.inst, side: order.Short})

@@ -1405,6 +1405,10 @@ trader-protocol/        Protobuf schemas and generated clients
 trader-strategy-sdk/    Optional language-specific helper SDKs
 #+END_EXAMPLE
 
+The implemented Go guest SDK lives at =sdk/= in this repository, imported as
+=github.com/rustyeddy/trader/sdk= (ADR-062, issue #398). Its minimal example
+lives at =examples/sdk-minimal/=.
+
 Do not expose internal Go structs directly as the long-term wire format.
 
 ** Strategy Process Contract
