@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	svcexecution "github.com/rustyeddy/trader/service/execution"
+	svcexecution "github.com/rustyeddy/trader/internal/service/execution"
 )
 
 // tableFormatter is the default, human-readable Formatter: a plain

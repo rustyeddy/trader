@@ -14,14 +14,14 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/rustyeddy/trader/adapters/strategy/external"
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/logging"
+	"github.com/rustyeddy/trader/internal/adapters/strategy/external"
+	"github.com/rustyeddy/trader/internal/logging"
+	"github.com/rustyeddy/trader/internal/strategy"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/sdk"
-	"github.com/rustyeddy/trader/strategy"
 )
 
 // TestServe_MissingSocketPathEnvProducesClearError exercises Serve

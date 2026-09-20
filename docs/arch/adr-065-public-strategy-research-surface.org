@@ -1,0 +1,97 @@
+#+TITLE: ADR-065: Supported strategy/research API and private runtime
+#+DATE: [2026-09-20 Sun]
+
+* Status
+
+Accepted. Issue #400, owner decisions in
+https://github.com/rustyeddy/trader/issues/400#issuecomment-5750680548.
+
+* Context
+
+The initial architecture offered broad public Go library composition,
+including marketdata.Manager, runtime adapters, in-process strategies, and
+tradertest. Independent strategy repositories now need a deliberate,
+smaller compatibility contract before v0.1.0.
+
+This partially amends ADR-002's public extension-port posture, ADR-017's
+public runtime order vocabulary, ADR-020's public Manager entry point,
+ADR-043's external Go in-process strategy composition, and ADR-062's shared
+clock.Clock guest signature. Their domain and protocol semantics otherwise
+remain in force. The same public-visibility amendment applies to ADR-007/008
+(broker ports/adapters), ADR-015 (runtime clocks), ADR-019 (account/portfolio),
+ADR-022/023 (service/logging), ADR-031/035/036/038/039 (pipeline, backtest,
+journal, report, and service composition), and ADR-058 (chart rendering).
+Their Status sections point here; their original decision bodies are preserved.
+It also replaces the architecture/package-boundaries
+promise of public runtime test builders.
+
+The existing SDK clock provided host time through Now but real wall-clock
+timers through NewTimer. Protocol v1 cannot drive guest timers using the
+host's simulated clock, so that signature promised too much.
+
+* Decision
+
+The supported external Go API is the strategy/research/value surface:
+
+| Public package | Supported responsibility |
+|----------------+--------------------------|
+| sdk | Guest strategy lifecycle, snapshots, described intents/signals, transport |
+| indicator | Pure reusable indicator computation |
+| analysis | Deterministic research computation over public values |
+| marketdata | Bars, intervals, calendars, time ranges, dataset metadata and semantics |
+| instrument | Instrument identity and listing values |
+| num | Exact numeric values and analytical conversions |
+| order | Side, PositionSide, IntentKind and their vocabulary/validation |
+| version | Trader build/version identity |
+| protocol/strategy/v1 | Versioned wire contract |
+
+Runtime packages move under internal/: account, portfolio, backtest,
+broker, execution, risk, pipeline, strategy, service, adapters, journal,
+report, chart, config, logging, clock, id, and the current tradertest.
+marketdata manager/acquisition/provider/storage/normalization implementation
+moves together to internal/marketdata. Runtime order objects move to
+internal/order. Neither public package exports runtime constructors,
+aliases, handles, or types that expose internal objects.
+
+sdk.Clock is a guest-owned interface with only Now() time.Time. The SDK
+implements it using host-supplied timestamps; it exposes no timer capability.
+Host-driven timers, if needed later, require a protocol design. Runtime
+clocks and canonical ID generation remain internal. Guest IDs remain opaque
+strings. The protocol messages and runtime trading behavior do not change.
+
+Runtime packages depend on public values, never the reverse. Public SDK,
+indicator, and analysis code cannot import runtime packages. Package-private
+numeric implementation under num/internal remains allowed; it is not runtime
+machinery and does not appear in public signatures.
+
+There is no pkg/ directory, compatibility package, or public runtime alias.
+Any future public SDK test helpers must depend only on the supported public
+contracts; the existing runtime builders move to internal/tradertest.
+
+* Verification
+
+A separate module with an unrelated module path builds a real guest using
+the supported packages. Negative builds must fail specifically because of
+Go internal visibility when importing runtime packages. Architecture tests
+check the public package inventory, dependency direction, and exported type
+graphs for leaked internal types. Existing behavior, strategy equivalence,
+formatting, vet, lint, unit and race tests continue to apply.
+
+* Consequences
+
+This deliberately breaks accidental pre-release Go import paths. Runtime
+composition is private; consumers operate Trader through its application
+interfaces and strategies through Protocol v1/sdk. Pure research libraries
+remain reusable directly. Local ignored research scripts inside the module
+may use runtime packages, but are not a compatibility commitment.
+
+v0.1.0 is a subsequent release action after review, merge, and verification;
+this decision does not authorize tagging or change ADR-064's release process.
+
+* Alternatives
+
+Keeping public forwarding aliases would preserve accidental runtime APIs.
+Moving directories without auditing exports would leave manager access
+available through public constructors. Keeping the full public clock would
+continue to expose timers with different simulation semantics. All three
+are rejected.

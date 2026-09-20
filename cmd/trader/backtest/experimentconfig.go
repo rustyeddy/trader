@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/internal/config"
+	"github.com/rustyeddy/trader/internal/strategy/emacross"
 	"github.com/rustyeddy/trader/num"
-	"github.com/rustyeddy/trader/strategy/emacross"
 )
 
 // runConfig is the typed configuration "trader backtest run" resolves

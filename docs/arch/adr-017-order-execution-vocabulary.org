@@ -20,6 +20,8 @@ change — the substance of what those two sentences describe (a
 =TradeID= remains additive future work, deferred to whichever
 milestone actually does journal/report work) is unchanged.
 
+Amended by ADR-065: runtime order objects are internal; only shared Side/PositionSide/IntentKind vocabulary remains public.
+
 * Context
 
 Trader needs broker-neutral value models for the stages of trading

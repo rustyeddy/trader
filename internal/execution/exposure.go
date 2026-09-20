@@ -1,0 +1,194 @@
+package execution
+
+import (
+	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/order"
+)
+
+// findPosition returns acc's open position in listing's instrument, if
+// any. Position matching is by instrument identity, not exact Listing
+// equality: Intent (and therefore the position it may already own)
+// identifies an instrument, never a venue-specific Listing (#177).
+func findPosition(acc account.Snapshot, listing instrument.Listing) (runtimeorder.Position, bool) {
+	for _, p := range acc.Positions() {
+		if p.Listing.InstrumentID().Equal(listing.InstrumentID()) {
+			return p, true
+		}
+	}
+	return runtimeorder.Position{}, false
+}
+
+// planExit determines the Side and Quantity that would close acc's
+// entire current position in listing, or ErrNoPositionToExit if there
+// is nothing to close.
+func planExit(acc account.Snapshot, listing instrument.Listing) (order.Side, num.Quantity, error) {
+	pos, ok := findPosition(acc, listing)
+	if !ok {
+		return 0, num.Quantity{}, ErrNoPositionToExit
+	}
+	switch pos.Side {
+	case order.Long:
+		return order.Sell, pos.Quantity, nil
+	case order.Short:
+		return order.Buy, pos.Quantity, nil
+	default: // order.Flat: a stored Position is never Flat (see account.Snapshot's own invariant), but handled explicitly rather than falling through silently.
+		return 0, num.Quantity{}, ErrNoPositionToExit
+	}
+}
+
+// planTargetExposure determines the Side, Quantity, and ReduceOnly
+// value execution needs to move acc's current position in listing to
+// exactly targetSide/targetQty, the absolute desired exposure
+// (#177: IntentTargetExposure carries a target, not a delta).
+//
+//   - No current position: propose targetSide/targetQty outright.
+//   - Same direction, growing (target > current): propose the
+//     additional targetSide/delta needed.
+//   - Same direction, shrinking (target < current): propose a
+//     ReduceOnly opposite-side/delta order — a partial exit, not a
+//     reversal.
+//   - Same direction, unchanged: ErrAlreadyAtTarget.
+//   - Opposite direction: propose targetSide sized at current+target,
+//     crossing through flat to reach the new target in one order.
+func planTargetExposure(acc account.Snapshot, listing instrument.Listing, targetSide order.Side, targetQty num.Quantity) (order.Side, num.Quantity, bool, error) {
+	pos, ok := findPosition(acc, listing)
+	if !ok || pos.Side == order.Flat {
+		return targetSide, targetQty, false, nil
+	}
+
+	sameDirection := (pos.Side == order.Long && targetSide == order.Buy) ||
+		(pos.Side == order.Short && targetSide == order.Sell)
+
+	if !sameDirection {
+		total, err := pos.Quantity.Add(targetQty)
+		if err != nil {
+			return 0, num.Quantity{}, false, err
+		}
+		return targetSide, total, false, nil
+	}
+
+	switch pos.Quantity.Cmp(targetQty) {
+	case 0:
+		return 0, num.Quantity{}, false, ErrAlreadyAtTarget
+	case -1: // current < target: grow in the same direction
+		delta, err := targetQty.Sub(pos.Quantity)
+		if err != nil {
+			return 0, num.Quantity{}, false, err
+		}
+		return targetSide, delta, false, nil
+	default: // current > target: partial reduce, opposite side, reduce-only
+		delta, err := pos.Quantity.Sub(targetQty)
+		if err != nil {
+			return 0, num.Quantity{}, false, err
+		}
+		return opposite(targetSide), delta, true, nil
+	}
+}
+
+func opposite(s order.Side) order.Side {
+	if s == order.Buy {
+		return order.Sell
+	}
+	return order.Buy
+}
+
+// planAdjustStop determines the Side and Quantity a protective stop
+// order for acc's entire current position in listing needs — the same
+// closing side/quantity planExit computes (a protective stop is, in
+// the end, a conditional exit), but reported as ErrNoPositionToProtect
+// rather than ErrNoPositionToExit when there is nothing to protect, so
+// a caller debugging an IntentAdjustStop failure sees an error that
+// actually names what it was trying to do.
+func planAdjustStop(acc account.Snapshot, listing instrument.Listing) (order.Side, num.Quantity, error) {
+	side, qty, err := planExit(acc, listing)
+	if err != nil {
+		return 0, num.Quantity{}, ErrNoPositionToProtect
+	}
+	return side, qty, nil
+}
+
+// roundStopPriceToTick rounds price to listing's own tick size, in the
+// direction that never makes the protective stop it places more
+// aggressive/tighter than what the caller (a strategy computing a
+// derived price — a fraction of a high-water mark, an ATR multiple,
+// and so on) actually asked for (issue #340): a Sell stop protects a
+// long from below, so rounding it further down gives the position
+// more room, never less, than requested; a Buy stop protects a short
+// from above, so rounding it further up does the same. This is the one
+// place execution rounds a caller-supplied price at all — every other
+// price (Enter/Exit/TargetExposure never carry one; a strategy that
+// already supplies an exact, tick-aligned StopPrice sees this round to
+// itself, a no-op) — matching num's own "nothing silently rounded"
+// convention: the direction and the fact that rounding happens at all
+// are both explicit and documented here, not folded invisibly into
+// order.NewProposal/order.NewReplaceRequest's own strict validation.
+func roundStopPriceToTick(price num.Price, side order.Side, listing instrument.Listing) (num.Price, error) {
+	tick := listing.Spec().TickSize()
+	if side == order.Buy {
+		return price.RoundUp(tick)
+	}
+	return price.RoundDown(tick)
+}
+
+// findRestingStopOrder returns acc's own resting (non-terminal),
+// ReduceOnly Stop order for listing's instrument, if any — the signal
+// execution.Plan/PlanReplace and pipeline.Pipeline use to decide
+// between "place the initial protective stop" (Plan) and "ratchet the
+// existing one" (PlanReplace).
+//
+// This means "protective stop," not merely "some Stop order that
+// happens to exist" (PR #337 review): ReduceOnly is required (matching
+// exactly what Plan itself always sets when it places one — see its
+// own IntentAdjustStop case), and, when acc currently holds a position
+// in listing's instrument, the order's Side must be the side that
+// actually protects it (opposite the position's own side — the same
+// side planAdjustStop itself would compute). An order.Order whose Side
+// no longer matches — for example a stale Sell stop left over from a
+// long position that has since reversed to short — is not treated as
+// this instrument's protective stop; Plan will plan a fresh one for
+// the new position instead. Reconciling or canceling that orphaned
+// order is not attempted here: #335's own strategy design never
+// reverses a position without a full exit first, so this is a known,
+// documented limitation for a case the current consumer cannot
+// actually produce, not a silently accepted general bug.
+//
+// With no open position at all, Side is not constrained — there is no
+// protective side to check against, and planAdjustStop itself already
+// rejects an IntentAdjustStop with no position via
+// ErrNoPositionToProtect before either Plan or PlanReplace would ever
+// depend on what this function returns in that case.
+func findRestingStopOrder(acc account.Snapshot, listing instrument.Listing) (runtimeorder.Order, bool) {
+	var wantSide order.Side
+	haveWantSide := false
+	if pos, ok := findPosition(acc, listing); ok {
+		switch pos.Side {
+		case order.Long:
+			wantSide, haveWantSide = order.Sell, true
+		case order.Short:
+			wantSide, haveWantSide = order.Buy, true
+		}
+	}
+
+	for _, o := range acc.OpenOrders() {
+		if o.Status.Terminal() {
+			continue
+		}
+		if o.Request.Type != runtimeorder.Stop {
+			continue
+		}
+		if !o.Request.ReduceOnly {
+			continue
+		}
+		if !o.Request.Listing.InstrumentID().Equal(listing.InstrumentID()) {
+			continue
+		}
+		if haveWantSide && o.Request.Side != wantSide {
+			continue
+		}
+		return o, true
+	}
+	return runtimeorder.Order{}, false
+}

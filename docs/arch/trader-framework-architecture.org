@@ -7,6 +7,28 @@
 #+STARTUP: overview indent
 #+PROPERTY: header-args:go :results none :exports code
 
+* Current Public Boundary (ADR-065)
+
+Issue #400 narrows the supported Go API to external strategies, research, and
+shared values. The supported packages are =sdk=, =indicator=, =analysis=,
+=marketdata=, =instrument=, =num=, =order=, =version=, and
+=protocol/strategy/v1=. Runtime composition is private under =internal/=.
+The exact matrix and dependency diagram are in =package-boundaries.org=.
+
+This decision replaces this proposal's earlier broad public library-composition
+posture. Runtime responsibilities and trading invariants below remain valid;
+references to strategy, broker, execution, risk, backtest, journal, report,
+account, portfolio, service, adapters, clock, id, and tradertest describe
+internal packages, not supported external import paths. Unimplemented package
+sketches below do not establish additional public API commitments.
+
+Public =marketdata= contains values and deterministic dataset/calendar semantics.
+Manager, acquisition, storage, normalization, and providers live together under
+=internal/marketdata=. Public =order= contains only Side, PositionSide, and
+IntentKind vocabulary; canonical runtime order objects live in =internal/order=.
+=sdk.Clock= exposes only =Now()= using host time. Protocol v1 does not offer
+guest timers. Runtime typed IDs and test builders are internal.
+
 * Revision Notes
 
 This revision incorporates the strongest supporting ideas from the independent
@@ -15,7 +37,7 @@ source of truth.  The principal additions are:
 
 - Explicit architectural invariants.
 - A controlled greenfield repository strategy.
-- A closed market-data subsystem behind =marketdata.Manager=, with historical
+- A closed market-data subsystem behind =internal/marketdata.Manager=, with historical
   acquisition, live feeds, persistence, coverage, adjustment, and fetch policy
   kept as distinct internal concerns.
 - Strategy descriptors and optional capability interfaces.
@@ -23,7 +45,7 @@ source of truth.  The principal additions are:
 - Live operational guards separated from trade-risk rules.
 - Selectable handling of ambiguous bar-based fills.
 - Paper trading as the safe default.
-- A public =tradertest= package and mechanically enforced architecture rules.
+- Mechanically enforced architecture rules and a private runtime test kit.
 - A concrete milestone and GitHub issue plan.
 - Synthetic and multi-leg instruments documented as a deferred extension.
 
@@ -42,10 +64,10 @@ important boundaries explicit enough that selected modules can later run in
 separate processes without redesigning the trading model.
 #+END_QUOTE
 
-Trader should support three equally important uses:
+Trader supports these uses under ADR-065:
 
-1. A user imports Trader packages and builds a custom Go application.
-2. Trader's own applications compose those same public packages into complete
+1. A user imports the supported value/research packages or builds an SDK guest.
+2. Trader's own applications compose internal runtime and public values into complete
    backtesting, scanning, data, and live-trading programs.
 3. A strategy or adapter can run outside the Trader process through a versioned
    protocol without being compiled into the Trader binary.
@@ -106,7 +128,7 @@ problems:
 - Support historical research, scanning, backtesting, paper trading, and live
   trading.
 - Support multiple data vendors, brokers, storage engines, and transports.
-- Permit both in-process and out-of-process strategies.
+- Permit internal in-process strategies and supported external SDK strategies.
 - Preserve deterministic behavior in simulations and backtests.
 - Make live trading recoverable, reconcilable, observable, and safe.
 - Avoid coupling domain objects to a particular CLI, database, message broker,
@@ -199,9 +221,9 @@ that violates one requires an explicit architecture decision record.
 
 ** API First, Implementation Second
 
-Public packages define domain concepts, application services, extension points,
-and stable results.  Implementation packages may change more quickly and
-should normally live under =internal/=.
+Public packages define the supported strategy/research/value contracts listed
+in ADR-065. Runtime domain, application-service, adapter, and orchestration
+packages live under =internal/= and may evolve without public API promises.
 
 A public interface should exist only when at least one of the following is true:
 
@@ -235,7 +257,7 @@ Trader's public extension interfaces are ports.  Brokers, journals, message
 buses, and network protocols are adapters.  Market-data vendors and storage
 engines are a deliberate exception: they are internal adapters owned by the
 closed =marketdata= subsystem and are accessible only through
-=marketdata.Manager=.
+=internal/marketdata.Manager=.
 
 #+BEGIN_EXAMPLE
                 +-----------------------------+
@@ -248,7 +270,7 @@ closed =marketdata= subsystem and are accessible only through
                 +--------------+--------------+
                                |
                 +--------------v--------------+
-                | Public domain/API packages  |
+                | Internal runtime contracts  |
                 | strategy, risk, execution   |
                 +--------------+--------------+
                                |
@@ -502,7 +524,7 @@ Deposits and withdrawals should be modeled as cash ledger activity.  Not every
 broker API allows Trader to initiate them.  The public API should therefore
 separate observing cash movements from requesting transfers.
 
-* Major Public Packages
+* Package Responsibilities (public status governed by ADR-065)
 
 The exact names can evolve, but the responsibilities should remain stable.
 
@@ -525,7 +547,7 @@ It should not fetch prices or place orders.
 ** =marketdata=
 
 Owns canonical market observations and the complete acquisition, normalization,
-storage, caching, and retrieval subsystem.  =marketdata.Manager= is the sole
+storage, caching, and retrieval subsystem.  =internal/marketdata.Manager= is the sole
 exported access point for data operations.  All consumers use the manager; no
 other package or user code directly acquires, builds, retrieves, or persists
 market data.
@@ -542,7 +564,7 @@ The implementation should still distinguish these internal roles:
 
 Provider and storage interfaces may be used behind an =internal/= boundary when
 they improve implementation or testing, but they are not public extension
-points.  Only =marketdata.Manager= may invoke them or initiate acquisition and
+points.  Only =internal/marketdata.Manager= may invoke them or initiate acquisition and
 canonical builds.
 
 A request describes the data product the consumer needs, not how to acquire or
@@ -664,7 +686,7 @@ Use one canonical resampler for interval derivation.  Validate it by comparing a
 derived interval against a provider's native bars for the same session calendar.
 Disagreement usually exposes a boundary, holiday, or daylight-saving error.
 
-=marketdata.Manager= composes acquisition, feeds, stores, cache, normalization,
+=internal/marketdata.Manager= composes acquisition, feeds, stores, cache, normalization,
 and resampling.  These implementation contracts should remain narrow and
 internal.
 
@@ -1316,7 +1338,7 @@ Possible public service packages:
 - =backtest.Runner=
 - =scanner.Service=
 - =live.Manager=
-- =marketdata.Manager=
+- =internal/marketdata.Manager=
 - =report.Service=
 
 An application service:
@@ -1356,19 +1378,11 @@ belongs in dependencies.
 
 ** In-Process Go Strategies
 
-Users should be able to import Trader and implement =strategy.Strategy= in
-their own private repository.
-
-Their application can compose:
-
-- Trader public packages
-- Their private strategy package
-- Trader or custom adapters
-
-No Go plugin is required.  The private strategy is compiled into the user's own
-binary, not committed to Trader.
-
-This is the simplest and most type-safe extension path.
+In-process strategies are Trader runtime implementation details under
+=internal/strategy=. External strategy repositories implement =sdk.Strategy=
+and run as separate guest processes through Strategy Protocol v1. They may use
+the supported public research/value packages, but do not compose Trader's
+runtime adapters or services directly.
 
 ** Out-of-Process Strategies
 
@@ -1452,132 +1466,45 @@ trading workflows.
 MCP is an application-facing integration and should expose safe tools over
 existing application services.  It should never become the domain API.
 
-* Proposed Repository Layout
-
-One possible layout follows.  Package names are illustrative; the dependency
-rules matter more than the exact directory names.
+* Repository Layout (ADR-065)
 
 #+BEGIN_EXAMPLE
 trader/
-  go.mod
-  README.md
-  LICENSE
-
-  instrument/             public instrument/listing model
-  marketdata/             public canonical data types and Manager facade
-    internal/             marketdata-only implementation; Go restricts these
-                          imports to the marketdata/ subtree, so no other
-                          package can reach a provider, store, or builder
-      provider/           provider acquisition adapters
-        oanda/            OANDA raw archive reader and acquisition
-      storage/            CSV/Parquet/in-memory persistence
-      normalize/          canonical conversion and validation
-      cache/              Manager-owned memory cache
-  indicator/              public indicator APIs and common indicators
-  analysis/               public analysis observations
-  strategy/               public strategy and intent contracts
-  order/                  public order/fill model
-  account/                public account state model
-  portfolio/              public multi-account view
-  risk/                   public risk policies and engine contracts
-  broker/                 public broker adapter contracts
-  execution/              public execution planning/management contracts
-  scanner/                public scanner APIs
-  backtest/               public backtest service and result model
-  live/                   public live-session service and state model
-  journal/                public journal contracts
-  report/                 public report models and renderers
-  event/                  small shared event envelope
-  clock/                  deterministic time abstraction
-
-  protocol/
-    strategy/v1/          wire-facing adapters or generated protocol facade
-
-  adapters/
-    broker/
-      oanda/              public optional adapter package if supported API
-      alpaca/
-      ibkr/
-      sim/
-    journal/
-      sqlite/
-      jsonl/
-    transport/
-      grpc/
-      http/
-      mqtt/
-
-  internal/               module-wide non-public implementation (the
-                          marketdata subsystem keeps its own internals under
-                          marketdata/internal/ instead, see above)
-    engine/               orchestration details not promised as public API
-    reconcile/            shared recovery/reconciliation implementation
-    runtime/              process lifecycle helpers
-    testkit/              non-public test infrastructure
-    ...
-
-  cmd/
-    trader/               all-in-one operator CLI
-    trader-data/          data acquisition/normalization service
-    trader-backtest/      batch backtest runner
-    trader-live/          live bot manager
-    trader-api/           HTTP/gRPC/MCP gateway
-    trader-strategy-host/ out-of-process strategy host/client
-
-  examples/
-    minimal-backtest/
-    private-strategy-app/
-    scanner/
-    paper-trading/
-
-  tradertest/              public fakes, builders, clocks, and assertions
-
-  contracttest/
-    broker/
-    strategy/
-
-  docs/
-    architecture/
-    api/
-    protocols/
+  sdk/                    external strategy API; Now-only guest Clock
+  indicator/              pure calculations
+  analysis/               deterministic research
+  marketdata/             canonical values, calendars, dataset semantics
+  instrument/             instrument/listing values
+  num/                    exact numeric values
+    internal/fixed/       private arithmetic, no exposed internal types
+  order/                  Side, PositionSide, IntentKind vocabulary
+  version/                build identity
+  protocol/strategy/v1/   versioned wire contract
+  internal/
+    marketdata/           manager, queries, acquisition, normalization, storage
+      internal/provider/  OANDA, Stooq, Alpaca provider implementations
+    order/                canonical runtime order objects and lifecycle
+    account/ portfolio/   accounting projections
+    strategy/             in-process strategy contract and implementations
+    execution/ risk/      planning and risk evaluation
+    pipeline/ broker/     submission orchestration and broker ports
+    backtest/             runner and scheduler
+    journal/ report/      recording and result rendering
+    chart/                visualization
+    service/ adapters/    application services and implementations
+    clock/ id/            runtime time and canonical identity
+    config/ logging/      composition plumbing
+    tradertest/           private runtime builders/assertions
+  cmd/trader/             operator composition root
+  examples/               guest examples and internal composition examples
+  test/architecture/      public API and external-module acceptance tests
+  docs/                   architecture, guides, research
 #+END_EXAMPLE
 
-** Public Testing Support
-
-A public =tradertest= package should make strategies and adapters easy to test
-without requiring users to reinvent framework scaffolding.  It may include:
-
-- Deterministic clocks and ID generators.
-- Candle, quote, order, fill, account, and portfolio builders.
-- Canonical market-data readers and Manager-backed fixtures.
-- Simulated broker presets.
-- Strategy harnesses.
-- No-lookahead assertions.
-- Golden journal and report helpers.
-- Contract-test entry points for supported public adapters.
-
-Testing utilities are part of framework usability.  Runnable examples should use
-them and execute in CI so public documentation cannot silently rot.
-
-** Public Adapter Packages Versus =internal/=
-
-An adapter intended for direct user import may be public, for example:
-
-#+BEGIN_SRC go
-import "github.com/rustyeddy/trader/adapters/broker/oanda"
-#+END_SRC
-
-An adapter used only by Trader's applications can remain under =internal/=.
-
-Do not put all adapters under =internal/= if external users are expected to
-construct them.  Conversely, do not promise every experimental adapter as a
-stable public API.
-
-Keep one repository and begin with one Go module.  Adapter dependencies should be
-kept at the edge and imported only by applications that use them.  If a broker
-SDK eventually creates unacceptable dependency weight, a nested module inside
-the same repository is the first escalation.  Separate repositories are not
-planned.
+The current =tradertest= is private. Future SDK test support must be built from
+supported public contracts. No =pkg/= directory or old-path shim is retained.
+External module acceptance tests enforce the import boundary in addition to
+review; examples built inside this module alone cannot prove that restriction.
 
 * Dependency Direction
 
@@ -1978,11 +1905,11 @@ areas should be added before public APIs are considered mature.
 
 | Requirement                         | Proposed owner                                      |
 |-------------------------------------+-----------------------------------------------------|
-| Acquire OHLCV/tick data             | =marketdata.Manager= + internal provider adapter     |
-| Normalize canonical data            | =marketdata.Manager= + internal normalizer           |
-| Hide CSV/Parquet storage            | =marketdata.Manager= + internal storage              |
-| Historical retrieval                | =marketdata.Manager=                                 |
-| Real-time data                       | =marketdata.Manager= typed readers                   |
+| Acquire OHLCV/tick data             | =internal/marketdata.Manager= + internal provider adapter     |
+| Normalize canonical data            | =internal/marketdata.Manager= + internal normalizer           |
+| Hide CSV/Parquet storage            | =internal/marketdata.Manager= + internal storage              |
+| Historical retrieval                | =internal/marketdata.Manager=                                 |
+| Real-time data                       | =internal/marketdata.Manager= typed readers                   |
 | Multiple brokers                    | =broker= ports + adapter packages                    |
 | Place/manage orders                 | =execution= + =broker.Account=                       |
 | Broker asynchronous events          | =broker.EventReader=                                 |
@@ -2054,7 +1981,7 @@ Build one complete flow:
 Provider native data -> normalization -> canonical store -> historical query
 #+END_EXAMPLE
 
-Use CSV initially if useful, but test the public =marketdata.Manager= API with
+Use CSV initially if useful, but test the public =internal/marketdata.Manager= API with
 an internal in-memory store and one internal provider adapter.  Applications
 cannot access or replace either implementation.
 
@@ -2279,7 +2206,7 @@ forced into the broker account abstraction.
 
 Yes.  Bounded historical queries, unbounded subscriptions, and storage have
 different lifecycle and failure semantics.  They remain distinct internal
-responsibilities composed exclusively by =marketdata.Manager=; they are not
+responsibilities composed exclusively by =internal/marketdata.Manager=; they are not
 public extension contracts.
 
 ** Make Paper Trading the Default
@@ -2419,8 +2346,8 @@ report
 Minimal end-to-end capabilities:
 
 - One canonical bar type and one quote type
-- One internal historical provider adapter behind =marketdata.Manager=
-- One internal real-time provider adapter behind =marketdata.Manager=
+- One internal historical provider adapter behind =internal/marketdata.Manager=
+- One internal real-time provider adapter behind =internal/marketdata.Manager=
 - One simulated broker
 - One real broker adapter
 - Market, limit, and stop orders

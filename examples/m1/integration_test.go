@@ -24,16 +24,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/clock"
-	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/logging"
+	"github.com/rustyeddy/trader/internal/account"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/config"
+	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/logging"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/internal/portfolio"
+	"github.com/rustyeddy/trader/internal/tradertest"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/portfolio"
-	"github.com/rustyeddy/trader/tradertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,8 +46,8 @@ import (
 // them.
 type m1Scenario struct {
 	listing     instrument.Listing
-	filledOrder order.Order
-	position    order.Position
+	filledOrder runtimeorder.Order
+	position    runtimeorder.Position
 	usdSnapshot account.Snapshot
 	gbpSnapshot account.Snapshot
 	portfolio   portfolio.Portfolio
@@ -88,12 +89,12 @@ func buildM1Scenario(g *id.Generator) (m1Scenario, error) {
 	if err != nil {
 		return m1Scenario{}, err
 	}
-	proposal, err := order.NewProposal(order.Proposal{
+	proposal, err := runtimeorder.NewProposal(runtimeorder.Proposal{
 		Listing:     listing,
 		AccountID:   accountID,
 		Side:        order.Buy,
-		Type:        order.Market,
-		TimeInForce: order.GTC,
+		Type:        runtimeorder.Market,
+		TimeInForce: runtimeorder.GTC,
 		Quantity:    num.MustParseQuantity("1000"),
 	})
 	if err != nil {
@@ -103,18 +104,18 @@ func buildM1Scenario(g *id.Generator) (m1Scenario, error) {
 	if err != nil {
 		return m1Scenario{}, err
 	}
-	request, err := order.NewRequest(proposal, orderID)
+	request, err := runtimeorder.NewRequest(proposal, orderID)
 	if err != nil {
 		return m1Scenario{}, err
 	}
-	pendingOrder, err := order.NewOrder(order.Order{
+	pendingOrder, err := runtimeorder.NewOrder(runtimeorder.Order{
 		Request: request,
-		Status:  order.StatusPendingSubmit,
+		Status:  runtimeorder.StatusPendingSubmit,
 	})
 	if err != nil {
 		return m1Scenario{}, err
 	}
-	workingOrder, err := order.ApplyAcceptance(pendingOrder, "broker-order-1", request.Quantity, nil, nil)
+	workingOrder, err := runtimeorder.ApplyAcceptance(pendingOrder, "broker-order-1", request.Quantity, nil, nil)
 	if err != nil {
 		return m1Scenario{}, err
 	}
@@ -124,7 +125,7 @@ func buildM1Scenario(g *id.Generator) (m1Scenario, error) {
 		return m1Scenario{}, err
 	}
 	fillPrice := num.MustParsePrice("1.10000")
-	fill, err := order.NewFill(order.Fill{
+	fill, err := runtimeorder.NewFill(runtimeorder.Fill{
 		FillID:        fillID,
 		OrderID:       workingOrder.Request.OrderID,
 		BrokerOrderID: workingOrder.BrokerOrderID,
@@ -137,13 +138,13 @@ func buildM1Scenario(g *id.Generator) (m1Scenario, error) {
 	if err != nil {
 		return m1Scenario{}, err
 	}
-	filledOrder, err := order.ApplyFill(workingOrder, fill)
+	filledOrder, err := runtimeorder.ApplyFill(workingOrder, fill)
 	if err != nil {
 		return m1Scenario{}, err
 	}
 
 	// position resulting from the fill.
-	position, err := order.NewPosition(order.Position{
+	position, err := runtimeorder.NewPosition(runtimeorder.Position{
 		AccountID: accountID,
 		Listing:   listing,
 		Side:      order.Long,
@@ -171,7 +172,7 @@ func buildM1Scenario(g *id.Generator) (m1Scenario, error) {
 		UnrealizedPnL:   num.MustParseMoney("0", usd),
 		Fees:            num.MustParseMoney("0", usd),
 		Financing:       num.MustParseMoney("0", usd),
-		Positions:       []order.Position{position},
+		Positions:       []runtimeorder.Position{position},
 	})
 	if err != nil {
 		return m1Scenario{}, err
@@ -266,7 +267,7 @@ func TestM1VocabularyReachesExpectedState(t *testing.T) {
 	require.NoError(t, err)
 
 	tradertest.AssertTerminal(t, scenario.filledOrder)
-	tradertest.AssertStatus(t, order.StatusFilled, scenario.filledOrder)
+	tradertest.AssertStatus(t, runtimeorder.StatusFilled, scenario.filledOrder)
 
 	require.NotNil(t, scenario.filledOrder.AcceptedQuantity)
 	assert.True(t, scenario.filledOrder.FilledQuantity.Equal(*scenario.filledOrder.AcceptedQuantity))

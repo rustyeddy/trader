@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	svc "github.com/rustyeddy/trader/service/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // newSyncCmd implements "trader data sync INSTRUMENT INTERVAL --from

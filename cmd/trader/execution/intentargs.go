@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/id"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 )
@@ -49,20 +50,20 @@ func parseIntentSide(s string) (order.Side, error) {
 // generator distinct from buildSimBroker's own internal one, the same
 // separation cmd/trader/broker's own submit command establishes
 // between the two identifier domains.
-func buildEnterIntent(gen *id.Generator, instID instrument.ID, side order.Side) (order.Intent, error) {
+func buildEnterIntent(gen *id.Generator, instID instrument.ID, side order.Side) (runtimeorder.Intent, error) {
 	intentID, err := id.GenerateIntentID(gen)
 	if err != nil {
-		return order.Intent{}, err
+		return runtimeorder.Intent{}, err
 	}
 	eventID, err := id.GenerateEventID(gen)
 	if err != nil {
-		return order.Intent{}, err
+		return runtimeorder.Intent{}, err
 	}
 	corrID, err := id.GenerateCorrelationID(gen)
 	if err != nil {
-		return order.Intent{}, err
+		return runtimeorder.Intent{}, err
 	}
-	return order.NewIntent(order.Intent{
+	return runtimeorder.NewIntent(runtimeorder.Intent{
 		IntentID:   intentID,
 		Kind:       order.IntentEnter,
 		Instrument: instID,

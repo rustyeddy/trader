@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/rustyeddy/trader/account"
-	svcbroker "github.com/rustyeddy/trader/service/broker"
+	"github.com/rustyeddy/trader/internal/account"
+	svcbroker "github.com/rustyeddy/trader/internal/service/broker"
 )
 
 // tableFormatter is the default, human-readable Formatter: a plain

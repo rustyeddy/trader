@@ -1,0 +1,888 @@
+package sim
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account"
+	brokerpkg "github.com/rustyeddy/trader/internal/broker"
+	"github.com/rustyeddy/trader/internal/id"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/order"
+)
+
+// positionKey identifies one (instrument, provider, venue) listing for
+// accountState.positions, matching the uniqueness rule
+// account.NewSnapshot itself enforces on Snapshot.Positions.
+type positionKey struct {
+	instrumentID instrument.ID
+	provider     string
+	venue        string
+}
+
+func keyForListing(l instrument.Listing) positionKey {
+	return positionKey{instrumentID: l.InstrumentID(), provider: l.Provider(), venue: l.Venue()}
+}
+
+// reducibleQuantity reports how much of position a ReduceOnly order
+// for side may legally reduce (issue #352): zero when there is no
+// position at all, or when the position's Side does not oppose side —
+// a Sell can only reduce a Long position, a Buy can only reduce a
+// Short one. The zero value (num.Quantity{}, IsZero() true) is a safe,
+// valid "nothing" for every caller of this function to check, matching
+// num.Quantity's own zero-value convention.
+func reducibleQuantity(position runtimeorder.Position, hasPosition bool, side order.Side) num.Quantity {
+	if !hasPosition {
+		return num.Quantity{}
+	}
+	switch side {
+	case order.Sell:
+		if position.Side == order.Long {
+			return position.Quantity
+		}
+	case order.Buy:
+		if position.Side == order.Short {
+			return position.Quantity
+		}
+	}
+	return num.Quantity{}
+}
+
+// accountState is one simulated account's mutable state, independently
+// guarded by its own mutex so operations against different accounts
+// never contend. asOf tracks the last time this state actually changed
+// (construction, or a Submit); Snapshot reports it directly rather than
+// re-reading the clock on every query, so two Snapshot calls with no
+// intervening state change report identical AsOf values.
+//
+// closed and changed together let eventReader.Next block for a future
+// event instead of returning io.EOF merely because it has caught up
+// (ADR-024: io.EOF from a live-style stream must mean the producer
+// itself has ended, not "nothing new yet"). changed is closed and
+// replaced with a fresh channel every time events grows; a blocked
+// reader observes the close, wakes, and rechecks. closed is set true
+// exactly once, by Broker.Close, at which point changed is closed one
+// final time (and never replaced) to wake every blocked reader for
+// good. Both fields are read and written only while holding mu, which
+// is what lets Submit and Broker.Close safely race against each other
+// without ever double-closing changed — see commitOrderEvent and
+// Broker.Close.
+type accountState struct {
+	mu sync.Mutex
+
+	ref      account.Reference
+	currency num.Currency
+	cash     num.Money
+	zero     num.Money
+	asOf     time.Time
+
+	// orders holds every order ever accepted by Submit, in every
+	// status including terminal ones — this is what Submit's OrderID
+	// idempotency check consults (see Submit), distinct from which of
+	// them are still "open" (see snapshotLocked). A market order that
+	// fills immediately (issue #149) is stored here as StatusFilled
+	// from the moment it commits; it never passes through this map as
+	// StatusWorking.
+	orders map[id.OrderID]runtimeorder.Order
+	// positions holds this account's current position per listing.
+	// Only Position values with a non-Flat Side are ever stored — a
+	// position that returns to flat is deleted rather than kept as a
+	// zero-quantity entry, matching account.Snapshot's own "Positions
+	// is simply empty" convention for a flat account. Use
+	// commitPosition, never a direct map write, so this invariant
+	// cannot be violated by accident.
+	positions map[positionKey]runtimeorder.Position
+	// marks holds the last known price per listing (issue #152,
+	// M3-09): set from a market order's fill price (Submit), a
+	// triggered limit/stop fill's price, or — even when no order
+	// triggers — a bar Observation's Close (Broker.Advance). Snapshot
+	// computes UnrealizedPnL from these marks against each open
+	// Position's AvgPrice; it is explicitly "as of the simulator's last
+	// known market observation," not live/real-time mark-to-market —
+	// see snapshotLocked's doc comment. Entries are never deleted, even
+	// after a position closes, so the last traded price remains
+	// available for history/display.
+	marks map[positionKey]num.Price
+	// realizedPnL is this account's cumulative realized profit and
+	// loss, denominated in currency. It moves only when a fill reduces,
+	// closes, or reverses a position (see position.go); opening or
+	// increasing a position never changes it. Reported directly as
+	// account.Snapshot.RealizedPnL.
+	realizedPnL num.Money
+	// fees is this account's cumulative commission paid, denominated in
+	// currency. It moves only when a fill reports a non-nil
+	// order.Fill.Commission (issue #152, M3-09) — this package builds
+	// no commission model of its own, so it is zero unless a caller's
+	// injected dependencies eventually produce one. Reported directly
+	// as account.Snapshot.Fees.
+	fees num.Money
+
+	events       []brokerpkg.Event
+	nextSequence uint64
+
+	closed  bool
+	changed chan struct{}
+}
+
+// zeroMoney returns zero money denominated in currency.
+func zeroMoney(currency num.Currency) (num.Money, error) {
+	return num.ParseMoney("0", currency)
+}
+
+// snapshotLocked builds this account's current account.Snapshot. The
+// caller must already hold s.mu; this performs no I/O and consults no
+// injected dependency — every value comes from s's own already-stored
+// fields, so Snapshot remains a pure, synchronous read (issue #152,
+// M3-09, design discussion on that issue).
+//
+// OpenOrders and Positions are each sorted deterministically before
+// account.NewSnapshot sees them: both are backed by maps, so ranging
+// either directly would expose Go's randomized map iteration order
+// through the resulting Snapshot, breaking the reproducibility this
+// package otherwise guarantees — two calls against identical state
+// must return both in the same order, not just the same set.
+//
+// UnrealizedPnL is computed from s.marks against each open Position's
+// AvgPrice (see unrealizedPnLForPosition) — explicitly "as of the
+// simulator's last known market observation" (whatever last touched
+// s.marks for that listing: a fill, or a Broker.Advance revaluation),
+// not live/real-time mark-to-market; this package has no ongoing price
+// feed to mark against between those events. Equity is s.cash plus
+// that UnrealizedPnL. BuyingPower and MarginAvailable mirror s.cash
+// directly and MarginUsed is always zero: this package still models an
+// unleveraged, fully funded account with no margin policy of its own
+// (that is M4's job) — these fields are a deliberate M3 placeholder,
+// not a claim of real margin/leverage semantics.
+func (s *accountState) snapshotLocked() (account.Snapshot, error) {
+	openOrders := make([]runtimeorder.Order, 0, len(s.orders))
+	for _, o := range s.orders {
+		if !o.Status.Terminal() {
+			openOrders = append(openOrders, o)
+		}
+	}
+	sort.Slice(openOrders, func(i, j int) bool {
+		return openOrders[i].Request.OrderID.String() < openOrders[j].Request.OrderID.String()
+	})
+
+	positions := make([]runtimeorder.Position, 0, len(s.positions))
+	for _, p := range s.positions {
+		positions = append(positions, p)
+	}
+	sort.Slice(positions, func(i, j int) bool {
+		a, b := positions[i].Listing, positions[j].Listing
+		if a.InstrumentID() != b.InstrumentID() {
+			return a.InstrumentID().String() < b.InstrumentID().String()
+		}
+		if a.Provider() != b.Provider() {
+			return a.Provider() < b.Provider()
+		}
+		return a.Venue() < b.Venue()
+	})
+
+	unrealizedPnL := s.zero
+	for key, p := range s.positions {
+		mark, ok := s.marks[key]
+		if !ok {
+			continue // a position always has a mark from its opening fill
+		}
+		delta, err := unrealizedPnLForPosition(p, mark, p.Listing.Spec().SettlementCurrency())
+		if err != nil {
+			return account.Snapshot{}, err
+		}
+		unrealizedPnL, err = unrealizedPnL.Add(delta)
+		if err != nil {
+			return account.Snapshot{}, err
+		}
+	}
+
+	equity, err := s.cash.Add(unrealizedPnL)
+	if err != nil {
+		return account.Snapshot{}, err
+	}
+
+	return account.NewSnapshot(account.SnapshotParams{
+		AccountID:       s.ref.AccountID,
+		Broker:          s.ref.Broker,
+		Currency:        s.currency,
+		AsOf:            s.asOf,
+		CashBalances:    []num.Money{s.cash},
+		Equity:          equity,
+		BuyingPower:     s.cash,
+		MarginUsed:      s.zero,
+		MarginAvailable: s.cash,
+		RealizedPnL:     s.realizedPnL,
+		UnrealizedPnL:   unrealizedPnL,
+		Fees:            s.fees,
+		Financing:       s.zero,
+		Positions:       positions,
+		OpenOrders:      openOrders,
+	})
+}
+
+// commitPosition stores pos as the account's current position for
+// key, or removes any stored entry when pos is Flat — the only way
+// s.positions is ever written, so its "only non-Flat entries" invariant
+// (see accountState's doc comment) cannot be violated by a direct map
+// write at a call site. The caller must already hold s.mu.
+func (s *accountState) commitPosition(key positionKey, pos runtimeorder.Position) {
+	if pos.Side == order.Flat {
+		delete(s.positions, key)
+		return
+	}
+	s.positions[key] = pos
+}
+
+// buildOrderEvent constructs the deterministic EventKindOrder Event
+// recording o, at the given sequence. It performs no mutation of s and
+// returns an error, with s left completely untouched, if event ID
+// generation or validation fails — the caller commits the returned
+// Event (via commitEvents) only once every other part of the state
+// transition it belongs to has also succeeded, so a failure here can
+// never leave an order accepted with no matching event. sequence must
+// be the exact value this event will occupy once committed — see
+// Submit, the only intended caller, for how a multi-event commit
+// assigns increasing sequences to each event before building any of
+// them. The caller must already hold s.mu.
+func (s *accountState) buildOrderEvent(deps Deps, o runtimeorder.Order, causationID id.EventID, sequence uint64) (brokerpkg.Event, error) {
+	orderForEvent := cloneOrder(o)
+	return s.buildEvent(deps, brokerpkg.EventKindOrder, causationID, sequence, &orderForEvent, nil)
+}
+
+// buildFillEvent constructs the deterministic EventKindFill Event
+// recording f, at the given sequence. See buildOrderEvent for the
+// atomicity and sequencing contract this shares. Unlike buildOrderEvent,
+// this also sets f.Metadata to the same EventID/CausationID/Timestamp
+// as the wrapping Event itself: a Fill has no independent identity
+// apart from the event that reports it, so the two stay in sync by
+// construction rather than by convention.
+func (s *accountState) buildFillEvent(deps Deps, f runtimeorder.Fill, causationID id.EventID, sequence uint64) (brokerpkg.Event, error) {
+	eventID, err := id.GenerateEventID(deps.IDs)
+	if err != nil {
+		return brokerpkg.Event{}, err
+	}
+	now := deps.Clock.Now()
+	f.Metadata = id.Metadata{EventID: eventID, CausationID: causationID, Timestamp: now}
+	fillForEvent := cloneFill(f)
+	return brokerpkg.NewEvent(brokerpkg.Event{
+		Metadata: id.Metadata{
+			EventID:     eventID,
+			CausationID: causationID,
+			Timestamp:   now,
+		},
+		ObservedAt: now,
+		Sequence:   sequence,
+		Kind:       brokerpkg.EventKindFill,
+		Fill:       &fillForEvent,
+	})
+}
+
+// buildEvent is buildOrderEvent/buildFillEvent's shared construction
+// path. Exactly one of orderPayload/fillPayload must be non-nil,
+// matching kind; the caller already owns a private clone safe to hand
+// to brokerpkg.NewEvent directly.
+func (s *accountState) buildEvent(deps Deps, kind brokerpkg.EventKind, causationID id.EventID, sequence uint64, orderPayload *runtimeorder.Order, fillPayload *runtimeorder.Fill) (brokerpkg.Event, error) {
+	eventID, err := id.GenerateEventID(deps.IDs)
+	if err != nil {
+		return brokerpkg.Event{}, err
+	}
+	now := deps.Clock.Now()
+	return brokerpkg.NewEvent(brokerpkg.Event{
+		Metadata: id.Metadata{
+			EventID:     eventID,
+			CausationID: causationID,
+			Timestamp:   now,
+		},
+		ObservedAt: now,
+		Sequence:   sequence,
+		Kind:       kind,
+		Order:      orderPayload,
+		Fill:       fillPayload,
+	})
+}
+
+// commitEvents appends every Event in evs, in order, and advances
+// s.nextSequence to the last one's Sequence. The caller must already
+// hold s.mu and must supply events built by buildOrderEvent/
+// buildFillEvent against s's current nextSequence, in strictly
+// increasing Sequence order with no gaps — see Submit, the only
+// intended caller.
+func (s *accountState) commitEvents(evs ...brokerpkg.Event) {
+	if len(evs) == 0 {
+		return
+	}
+	s.nextSequence = evs[len(evs)-1].Sequence
+	s.events = append(s.events, evs...)
+	close(s.changed)
+	s.changed = make(chan struct{})
+}
+
+// cloneOrder returns a copy of o that shares no pointer or slice state
+// with it, so storing or emitting the clone is safe from later mutation
+// through the original — the same discipline account.Snapshot's own
+// internal cloning applies, duplicated here because it is unexported
+// there.
+func cloneOrder(o runtimeorder.Order) runtimeorder.Order {
+	cloned := o
+	if o.Request.LimitPrice != nil {
+		v := *o.Request.LimitPrice
+		cloned.Request.LimitPrice = &v
+	}
+	if o.Request.StopPrice != nil {
+		v := *o.Request.StopPrice
+		cloned.Request.StopPrice = &v
+	}
+	if o.AcceptedQuantity != nil {
+		v := *o.AcceptedQuantity
+		cloned.AcceptedQuantity = &v
+	}
+	if o.AcceptedLimitPrice != nil {
+		v := *o.AcceptedLimitPrice
+		cloned.AcceptedLimitPrice = &v
+	}
+	if o.AcceptedStopPrice != nil {
+		v := *o.AcceptedStopPrice
+		cloned.AcceptedStopPrice = &v
+	}
+	if o.AvgFillPrice != nil {
+		v := *o.AvgFillPrice
+		cloned.AvgFillPrice = &v
+	}
+	if o.Rejection != nil {
+		v := *o.Rejection
+		cloned.Rejection = &v
+	}
+	if o.AppliedFillIDs != nil {
+		cloned.AppliedFillIDs = append([]id.FillID(nil), o.AppliedFillIDs...)
+	}
+	if o.AppliedBrokerFillIDs != nil {
+		cloned.AppliedBrokerFillIDs = append([]string(nil), o.AppliedBrokerFillIDs...)
+	}
+	return cloned
+}
+
+// accountHandle is broker.Account bound to one account of a Broker.
+// Obtain one from Broker.OpenAccount.
+type accountHandle struct {
+	broker *Broker
+	state  *accountState
+}
+
+var _ brokerpkg.Account = (*accountHandle)(nil)
+
+// Reference implements broker.Account.
+func (h *accountHandle) Reference() account.Reference {
+	return h.state.ref
+}
+
+// Snapshot implements broker.Account.
+func (h *accountHandle) Snapshot(ctx context.Context) (account.Snapshot, error) {
+	if h.broker.isClosed() {
+		return account.Snapshot{}, brokerpkg.ErrClosed
+	}
+
+	h.state.mu.Lock()
+	defer h.state.mu.Unlock()
+	return h.state.snapshotLocked()
+}
+
+// Submit implements broker.Account. It validates req and accepts it
+// into StatusWorking, emitting the resulting EventKindOrder event.
+// Resubmitting the same req.OrderID is idempotent: Submit returns the
+// already-stored Order unchanged and emits no additional event,
+// matching Request.OrderID's role as the initial-submission idempotency
+// key (ADR-017).
+//
+// A market order (req.Type == order.Market) additionally fills
+// immediately and completely at the price h.broker.deps.Prices reports,
+// transitioning the order to StatusFilled and, if the listing was flat,
+// opening a Position — see buildMarketFill and the package doc comment
+// for what this does and does not yet cover. It deliberately does not
+// touch cash/balance state; that is issue #152's (M3-09) scope. Limit
+// and stop orders remain StatusWorking with no fill matching until
+// issue #150 (M3-07).
+func (h *accountHandle) Submit(ctx context.Context, req runtimeorder.Request) (runtimeorder.Order, error) {
+	if h.broker.isClosed() {
+		return runtimeorder.Order{}, brokerpkg.ErrClosed
+	}
+
+	h.state.mu.Lock()
+	defer h.state.mu.Unlock()
+
+	// Re-check under state.mu: h.broker.isClosed() above is only a fast
+	// pre-check under a different mutex (Broker.mu), so Close could run
+	// between it and this point. h.state.closed is set only while
+	// holding state.mu (see Broker.Close), so this check is the
+	// authoritative one — without it, a Submit racing a concurrent
+	// Close could call commitEvents after Close already closed
+	// h.state.changed, double-closing it and panicking.
+	if h.state.closed {
+		return runtimeorder.Order{}, brokerpkg.ErrClosed
+	}
+
+	if existing, ok := h.state.orders[req.OrderID]; ok {
+		return cloneOrder(existing), nil
+	}
+
+	accepted := req.Quantity
+	now := h.broker.deps.Clock.Now()
+
+	// AcceptedLimitPrice/AcceptedStopPrice mirror the requested values
+	// exactly: this package performs no price improvement or matching
+	// (see the package doc comment), so whatever the request asked for
+	// is what gets accepted.
+	var acceptedLimit, acceptedStop *num.Price
+	if req.LimitPrice != nil {
+		v := *req.LimitPrice
+		acceptedLimit = &v
+	}
+	if req.StopPrice != nil {
+		v := *req.StopPrice
+		acceptedStop = &v
+	}
+
+	o, err := runtimeorder.NewOrder(runtimeorder.Order{
+		Request:            req,
+		BrokerOrderID:      "sim-" + req.OrderID.String(),
+		AcceptedQuantity:   &accepted,
+		AcceptedLimitPrice: acceptedLimit,
+		AcceptedStopPrice:  acceptedStop,
+		Status:             runtimeorder.StatusWorking,
+		UpdatedAt:          now,
+	})
+	if err != nil {
+		return runtimeorder.Order{}, err
+	}
+
+	// Build every event before mutating any state: if event ID
+	// generation or validation fails at any step below, Submit must
+	// return an error with h.state left exactly as it was — never an
+	// order accepted with no matching event, which would also break
+	// idempotency (a retry would see the OrderID already present and
+	// report success without ever emitting the event). This is the same
+	// build-then-commit discipline for a single event extended to a
+	// market order's three (accept, fill, filled).
+	acceptEvent, err := h.state.buildOrderEvent(h.broker.deps, o, req.Metadata.EventID, h.state.nextSequence+1)
+	if err != nil {
+		return runtimeorder.Order{}, err
+	}
+
+	if req.Type != runtimeorder.Market {
+		h.state.orders[req.OrderID] = cloneOrder(o)
+		h.state.asOf = now
+		h.state.commitEvents(acceptEvent)
+		return o, nil
+	}
+
+	price, err := h.broker.deps.Prices.Price(req.Listing, req.Side)
+	if err != nil {
+		return runtimeorder.Order{}, err
+	}
+
+	outcome, err := h.state.buildFill(h.broker.deps, o, price, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+	if errors.Is(err, ErrReduceOnlyNothingToReduce) {
+		// Issue #352: a ReduceOnly market order (o was just accepted
+		// above, not yet stored) with nothing left to reduce is
+		// canceled instead of filled — never silently dropped, and
+		// never allowed to open/increase/reverse a position.
+		pendingEvent, canceledEvent, canceled, cancelErr := h.state.buildInternalCancellation(h.broker.deps, o, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+		if cancelErr != nil {
+			return runtimeorder.Order{}, cancelErr
+		}
+		h.state.orders[req.OrderID] = cloneOrder(canceled)
+		h.state.asOf = now
+		h.state.commitEvents(acceptEvent, pendingEvent, canceledEvent)
+		return canceled, nil
+	}
+	if err != nil {
+		return runtimeorder.Order{}, err
+	}
+
+	h.state.commitFill(req.Listing, outcome)
+	h.state.asOf = now
+	h.state.commitEvents(append([]brokerpkg.Event{acceptEvent, outcome.fillEvent, outcome.filledEvent}, outcome.extraEvents...)...)
+	return outcome.order, nil
+}
+
+// fillOutcome bundles everything one complete fill produces — built by
+// buildFill without mutating accountState, committed by the caller
+// (Submit or accountState.advance) only once every part of it has
+// succeeded, matching the atomicity discipline established in #149.
+type fillOutcome struct {
+	order       runtimeorder.Order
+	fillEvent   brokerpkg.Event
+	filledEvent brokerpkg.Event
+	// extraEvents holds any additional events that must be committed
+	// as part of this exact same atomic transaction, beyond fillEvent/
+	// filledEvent — today only ever the two-event StatusPendingCancel
+	// -> StatusCanceled sequence built for an oversized ReduceOnly
+	// fill's unfillable remainder (issue #352 review). Empty (nil) in
+	// the ordinary case; order already reflects whatever these events
+	// (if any) transitioned it to, so a caller never needs to inspect
+	// extraEvents to know order's final status — only to commit them.
+	extraEvents []brokerpkg.Event
+	position    runtimeorder.Position
+	mark        num.Price
+	cash        num.Money
+	realizedPnL num.Money
+	fees        num.Money
+}
+
+// commitFill applies outcome to s: stores the filled order, commits
+// the resulting Position (opening/adjusting/closing it — see
+// commitPosition), records the new mark, and updates cash/realizedPnL/
+// fees. The caller must already hold s.mu and must call commitEvents
+// separately (see Submit and accountState.advance).
+func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcome) {
+	s.orders[outcome.order.Request.OrderID] = cloneOrder(outcome.order)
+	key := keyForListing(listing)
+	s.commitPosition(key, outcome.position)
+	s.marks[key] = outcome.mark
+	s.cash = outcome.cash
+	s.realizedPnL = outcome.realizedPnL
+	s.fees = outcome.fees
+}
+
+// buildFill constructs everything one complete fill of o needs — the
+// resulting filled Order, the EventKindFill and second EventKindOrder
+// (status-change) events, this account's post-fill Position, its new
+// mark for o.Request.Listing, and its post-fill cash/realizedPnL/fees
+// — without mutating s (see fillOutcome and commitFill). causationID
+// and sequence are the EventID and Sequence the fill event is
+// assigned; the filled-status order event is assigned sequence+1,
+// caused by the fill event's own EventID. Two callers build price and
+// causationID differently: Submit (issue #149/M3-06) uses Deps.Prices
+// and the just-built order-accepted event's EventID;
+// accountState.advance (issue #150/M3-07, ADR-026) uses a
+// trigger/gap-derived price and a zero causationID, since a
+// market-observation-triggered fill is not caused by any preceding
+// Trader-internal event.
+//
+// price is only the base price on entry (issue #153, M3-10): if
+// Deps.Slippage is configured and o.Request.Type is Market or Stop,
+// buildFill immediately adjusts it to the model's returned final
+// execution price before anything else — the Fill itself, position/PnL
+// accounting, and the new mark all use that adjusted price, never the
+// pre-slippage base. Deps.Commission, if configured, is then consulted
+// from that same final price, matching a percentage/notional fee
+// model's expectation of seeing what was actually paid.
+//
+// The fill is always for o's complete AcceptedQuantity — this package
+// has no partial-fill/volume model. Position accounting (issue #152,
+// M3-09) covers all five transitions — open, increase, reduce, close,
+// reverse — via order.ApplyFillToPosition (issue #217, M5-09, extracted
+// from this package's own former private helper into broker-neutral
+// position accounting shared with backtest trade derivation). Cash
+// moves only
+// by realized PnL and, when a fill's Commission is set, by that
+// commission (applyCommission) — never by a universal full-notional
+// debit/credit, which is not broker-neutral accounting (a cash
+// purchase should leave equity roughly unchanged, not book the full
+// notional as an immediate loss; see the design discussion on issue
+// #152).
+// roundFillPriceToTick rounds price to listing's own tick size, in
+// the conservative direction for side: Buy rounds up (the simulated
+// account pays more), Sell rounds down (the account receives less) —
+// so rounding a real, off-tick historical observation to a
+// representable price never advantages the backtest (issue #343).
+// See buildFill's own call site for why this is unconditional, not
+// limited to a specific order type or triggering path.
+func roundFillPriceToTick(price num.Price, side order.Side, tick num.Price) (num.Price, error) {
+	if side == order.Buy {
+		return price.RoundUp(tick)
+	}
+	return price.RoundDown(tick)
+}
+
+func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Price, causationID id.EventID, sequence uint64) (fillOutcome, error) {
+	req := o.Request
+	key := keyForListing(req.Listing)
+	currency := req.Listing.Spec().SettlementCurrency()
+
+	// Checked first, before any other part of the fill is built:
+	// realized/unrealized PnL, cash, and fees are all computed and
+	// accumulated in currency, and this package has no FX conversion-
+	// rate source to reconcile it with a different account currency
+	// (see ErrUnsupportedSettlementCurrency's doc comment). Every
+	// transition below — open, increase, reduce, close, reverse —
+	// needs this to hold, not only the ones that realize PnL, so it is
+	// enforced uniformly up front rather than left to surface only
+	// when arithmetic happens to combine mismatched currencies.
+	if !currency.Equal(s.currency) {
+		return fillOutcome{}, fmt.Errorf("%w: listing %s settles in %s, account is %s", ErrUnsupportedSettlementCurrency, req.Listing.Symbol(), currency, s.currency)
+	}
+
+	fillQty := *o.AcceptedQuantity
+
+	// ReduceOnly enforcement (issue #352): checked here, in buildFill
+	// itself, because this is the one path both Submit's market-order
+	// fill and accountState.advance's resting Limit/Stop trigger
+	// share — the two places two independent ReduceOnly orders against
+	// the same position (a resting protective stop, and a later direct
+	// exit) can each reach a fill. Two live ReduceOnly orders against
+	// one position is never prevented upstream (see #352's own
+	// discussion of a possible future OCO/order-group concept), so
+	// this is the backstop that makes reversing a position from a
+	// ReduceOnly fill structurally impossible regardless of how many
+	// such orders exist or what order they trigger in.
+	if req.ReduceOnly {
+		existing, hasExisting := s.positions[key]
+		reducible := reducibleQuantity(existing, hasExisting, req.Side)
+		if reducible.IsZero() {
+			return fillOutcome{}, ErrReduceOnlyNothingToReduce
+		}
+		// Clamped, never rejected outright, when the position is
+		// smaller than what this order was sized for: this keeps the
+		// core invariant (a ReduceOnly fill never reverses or exceeds
+		// the standing position) unconditionally true. The unfillable
+		// remainder is canceled atomically, as part of this exact same
+		// fill transaction — see the ReduceOnly clamp handling below,
+		// right after order.ApplyFill — rather than left resting: an
+		// oversized ReduceOnly order that clamps here leaves
+		// order.ApplyFill's own result at StatusPartiallyFilled, and
+		// accountState.advance only ever reconsiders StatusWorking
+		// orders, so a live PartiallyFilled remainder would never be
+		// evaluated again (PR #353 review).
+		if fillQty.Cmp(reducible) > 0 {
+			fillQty = reducible
+		}
+	}
+
+	// Round the base price to the listing's own tick size before
+	// anything else touches it (issue #343): price may be a raw
+	// Observation.Open (a triggered Stop/Limit order's own gap-fill
+	// price, ADR-026's stopTriggerPrice/limitTriggerPrice) or a
+	// Deps.Prices-supplied market-order price, and either source can
+	// legitimately carry sub-cent precision against real split-
+	// adjusted historical data (ADR-052) with no tick-size guarantee
+	// at all — unlike a strategy-requested stop price, which
+	// execution's own roundStopPriceToTick already rounds before it
+	// ever reaches here (ADR-056). Without this step, order.NewFill's
+	// own strict tick-size validation below would simply reject the
+	// fill outright the moment real data landed off-tick, which for a
+	// multi-decade daily-bar run is the common case, not an edge one.
+	//
+	// The rounding direction is conservative and side-dependent, not
+	// "nearest": a Buy fill rounds up (costs the simulated account
+	// more), a Sell fill rounds down (the account receives less) — so
+	// rounding a real, off-tick historical price to a representable
+	// one never advantages the backtest. This is a different direction
+	// rule from roundStopPriceToTick's own "never tighter than
+	// requested," which optimizes for a different question (has the
+	// strategy's own request been honored, not "is this fill
+	// generous").
+	rounded, err := roundFillPriceToTick(price, req.Side, req.Listing.Spec().TickSize())
+	if err != nil {
+		return fillOutcome{}, fmt.Errorf("%w: rounding fill price to tick size: %w", runtimeorder.ErrInvalidFill, err)
+	}
+	price = rounded
+
+	// Slippage (issue #153, M3-10) only ever adjusts a market-type
+	// execution's price: a plain Market order, or a Stop that has
+	// already resolved its own trigger/gap price (ADR-026) and become
+	// one. A Limit fill is a price guarantee by definition and must
+	// never be adjusted, so it is never offered to deps.Slippage at
+	// all. The pipeline is: base price (Deps.Prices, or the
+	// observation trigger/gap rules) -> tick rounding (above) ->
+	// slippage -> final execution price, used for everything from here
+	// on — the Fill itself, position/PnL accounting, the new mark, and
+	// (below) commission.
+	if deps.Slippage != nil && (req.Type == runtimeorder.Market || req.Type == runtimeorder.Stop) {
+		adjusted, err := deps.Slippage.Slippage(req.Listing, req.Side, fillQty, price)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+		// Validated immediately, before anything downstream (most
+		// notably Commission) ever sees it: SlippageModel's own
+		// contract says the returned price is validated like any
+		// other fill price, and order.NewFill's own tick-size check
+		// happens too late in this pipeline to prevent an invalid
+		// price from reaching Commission first.
+		if err := req.Listing.Spec().ValidatePrice(adjusted); err != nil {
+			return fillOutcome{}, fmt.Errorf("%w: slippage-adjusted price: %v", runtimeorder.ErrInvalidFill, err)
+		}
+		price = adjusted
+	}
+
+	var commission *num.Money
+	if deps.Commission != nil {
+		c, err := deps.Commission.Commission(req.Listing, req.Side, fillQty, price)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+		commission = c
+	}
+
+	fillID, err := id.GenerateFillID(deps.IDs)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+
+	fill, err := runtimeorder.NewFill(runtimeorder.Fill{
+		FillID:        fillID,
+		OrderID:       req.OrderID,
+		BrokerOrderID: o.BrokerOrderID,
+		AccountID:     req.AccountID,
+		Listing:       req.Listing,
+		Side:          req.Side,
+		Price:         price,
+		Quantity:      fillQty,
+		Commission:    commission,
+		Timestamp:     deps.Clock.Now(),
+	})
+	if err != nil {
+		return fillOutcome{}, err
+	}
+
+	fillEvent, err := s.buildFillEvent(deps, fill, causationID, sequence)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+
+	filled, err := runtimeorder.ApplyFill(o, fill)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+
+	filledEvent, err := s.buildOrderEvent(deps, filled, fillEvent.Metadata.EventID, sequence+1)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+
+	// An oversized ReduceOnly order's clamp above (fillQty < the
+	// originally requested quantity) leaves order.ApplyFill's own
+	// result at StatusPartiallyFilled. That remainder can never
+	// legally fill — the position it would reduce is already fully
+	// accounted for — so it is canceled atomically, right here, as
+	// part of this exact same fill transaction, rather than left as a
+	// live order accountState.advance would never reconsider (only
+	// StatusWorking orders are ever re-evaluated there) (PR #353
+	// review, following up on issue #352).
+	finalOrder := filled
+	var extraEvents []brokerpkg.Event
+	if req.ReduceOnly && filled.Status == runtimeorder.StatusPartiallyFilled {
+		pendingEvent, canceledEvent, canceled, err := s.buildInternalCancellation(deps, filled, filledEvent.Metadata.EventID, sequence+2)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+		finalOrder = canceled
+		extraEvents = []brokerpkg.Event{pendingEvent, canceledEvent}
+	}
+
+	existing, hasExisting := s.positions[key]
+	transition, err := runtimeorder.ApplyFillToPosition(existing, hasExisting, req.AccountID, req.Listing, currency, req.Side, price, fillQty)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+	positionAfter, realizedPnLDelta := transition.Position, transition.RealizedPnL
+
+	cashAfter, err := s.cash.Add(realizedPnLDelta)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+	realizedPnLAfter, err := s.realizedPnL.Add(realizedPnLDelta)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+	feesAfter := s.fees
+
+	if fill.Commission != nil {
+		cashAfter, feesAfter, err = applyCommission(cashAfter, feesAfter, *fill.Commission)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+	}
+
+	return fillOutcome{
+		order:       finalOrder,
+		fillEvent:   fillEvent,
+		filledEvent: filledEvent,
+		extraEvents: extraEvents,
+		position:    positionAfter,
+		mark:        price,
+		cash:        cashAfter,
+		realizedPnL: realizedPnLAfter,
+		fees:        feesAfter,
+	}, nil
+}
+
+// buildInternalCancellation transitions o (StatusWorking or
+// StatusPartiallyFilled) to StatusCanceled entirely on the broker's
+// own initiative — issue #352's own resolution for
+// ErrReduceOnlyNothingToReduce, where a stale ReduceOnly order (most
+// often a protective stop left resting after the position it
+// protected already closed some other way) triggers with nothing
+// left to legally reduce and must be retired rather than filled.
+//
+// Unlike Cancel (cancel_replace.go), there is no external
+// order.CancelRequest here — a fresh EventID generated from deps.IDs
+// stands in for one, so this reuses order.ApplyCancelRequest/
+// ApplyCancelResult, the exact same two-event StatusPendingCancel ->
+// StatusCanceled sequence Cancel itself produces, rather than
+// inventing a second cancellation code path. sequence/sequence+1 are
+// the two events' own Sequence values; the caller commits them (and
+// the resulting order) only once every other part of its own
+// transaction has also succeeded, matching every other builder in
+// this file.
+func (s *accountState) buildInternalCancellation(deps Deps, o runtimeorder.Order, causationID id.EventID, sequence uint64) (brokerpkg.Event, brokerpkg.Event, runtimeorder.Order, error) {
+	cancelEventID, err := id.GenerateEventID(deps.IDs)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
+	}
+	now := deps.Clock.Now()
+	cancelReq := runtimeorder.CancelRequest{OrderID: o.Request.OrderID, Metadata: id.Metadata{EventID: cancelEventID, CausationID: causationID, Timestamp: now}}
+
+	pending, err := runtimeorder.ApplyCancelRequest(o, cancelReq)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
+	}
+	// Caused by cancelEventID (the internal cancel request's own
+	// EventID), not the outer causationID — matching Cancel()'s own
+	// contract exactly (its pendingEvent is caused by req.Metadata
+	// .EventID, never by whatever caused the CancelRequest itself).
+	// causationID above only ever flows into cancelReq.Metadata
+	// .CausationID: what triggered the decision to cancel, not what
+	// caused this specific order-status transition (PR #353 review).
+	pendingEvent, err := s.buildOrderEvent(deps, pending, cancelEventID, sequence)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
+	}
+
+	result, err := runtimeorder.NewCancelResult(runtimeorder.CancelResult{
+		OrderID:  o.Request.OrderID,
+		Status:   runtimeorder.StatusCanceled,
+		Metadata: id.Metadata{CausationID: cancelEventID, Timestamp: now},
+	})
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
+	}
+	canceled, err := runtimeorder.ApplyCancelResult(pending, result)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
+	}
+	canceledEvent, err := s.buildOrderEvent(deps, canceled, pendingEvent.Metadata.EventID, sequence+1)
+	if err != nil {
+		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
+	}
+
+	return pendingEvent, canceledEvent, canceled, nil
+}
+
+// Cancel and Replace implement broker.Account; see cancel_replace.go
+// (issue #151, M3-08).
+
+// Events implements broker.Account.
+func (h *accountHandle) Events(ctx context.Context, cursor brokerpkg.EventCursor) (brokerpkg.EventReader, error) {
+	if h.broker.isClosed() {
+		return nil, brokerpkg.ErrClosed
+	}
+	h.state.mu.Lock()
+	endSequence := h.state.nextSequence
+	h.state.mu.Unlock()
+	return &eventReader{state: h.state, after: decodeCursor(cursor), endSequence: endSequence}, nil
+}

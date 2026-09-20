@@ -1,275 +1,115 @@
 #+TITLE: Trader Package Boundaries
-#+SUBTITLE: Dependency direction, placement rules, and public API guidance
+#+SUBTITLE: Supported external API and private runtime (ADR-065)
 #+STARTUP: overview indent
 
-* Purpose
+* Supported External Surface
 
-This document records the package boundary rules for Trader.  It
-states which packages may depend on which, what belongs in a public
-package versus =internal/=, and which behaviors are prohibited inside
-domain code.
+Top-level library packages are deliberate compatibility commitments. Trader's
+runtime is under =internal/=; external strategies interact with it through
+Strategy Protocol v1 and =sdk=. This replaces the earlier broad public
+composition model (ADR-065, issue #400). There is no =pkg/= directory or
+compatibility facade for removed import paths.
 
-It is a companion to, not a replacement for, the canonical
-architecture document =docs/arch/trader-framework-architecture.org=
-and the decision registry =docs/arch/adr-decisions.org=.  Where this
-document and the canonical architecture appear to disagree, the
-canonical architecture governs and the disagreement is a defect in
-this document.
+| Current package | Previous location | External? | Responsibility and dependency constraints |
+|-----------------+-------------------+-----------+--------------------------------------------|
+| sdk | sdk | Yes | Guest lifecycle and transport; depends on public values and protocol v1 |
+| indicator | indicator | Yes | Pure calculations; no runtime, I/O, or account access |
+| analysis | analysis | Yes | Deterministic research over indicator, marketdata, instrument, num |
+| instrument | instrument | Yes | Instrument identity, listing and resolution values |
+| num | num | Yes | Exact numeric values; package-private fixed-point implementation |
+| marketdata | marketdata (split) | Yes | Bars, calendars, intervals, ranges, dataset metadata/validation |
+| order | order (split) | Yes | Side, PositionSide, IntentKind and constants/validation/display |
+| version | version | Yes | Build identity |
+| protocol/strategy/v1 | protocol/strategy/v1 | Yes | Versioned wire contract |
+| internal/marketdata | marketdata (split) | No | Manager, queries/readers, coverage/plans, acquisition, storage, normalization; depends on public marketdata values |
+| internal/marketdata/internal/provider/* | marketdata/internal/provider/* | No | Provider adapters owned only by the internal data subsystem |
+| internal/order | order (split) | No | Canonical intents/proposals/requests/orders/fills/positions, lifecycle; depends on public order vocabulary and internal IDs |
+| internal/account | account | No | Runtime accounting snapshots |
+| internal/portfolio | portfolio | No | Cross-account projections |
+| internal/backtest | backtest | No | Deterministic runner and scheduler |
+| internal/broker | broker | No | Broker ports |
+| internal/execution | execution | No | Execution planning, no broker calls |
+| internal/risk | risk | No | Pure risk evaluation, no broker calls |
+| internal/pipeline | pipeline | No | Execution/risk/broker orchestration |
+| internal/strategy/* | strategy/* | No | In-process strategies and their runtime contract |
+| internal/service/* | service/* | No | Transport-neutral application services |
+| internal/adapters/* | adapters/* | No | Broker/journal/protocol implementations |
+| internal/journal | journal | No | Runtime records and recording contracts |
+| internal/report | report | No | Runtime result rendering |
+| internal/chart | chart | No | Research/result visualization |
+| internal/config | config | No | Composition-root configuration plumbing |
+| internal/logging | logging | No | Logging configuration; SDK uses slog directly |
+| internal/clock | clock | No | Runtime clock/timer implementations |
+| internal/id | id | No | Canonical typed IDs and generation |
+| internal/tradertest | tradertest | No | Runtime test fixtures/builders |
 
-This document deliberately does *not* create package directories.  Rules
-are recorded before code exists so that the first implementation lands
-inside a boundary rather than defining one by accident.
+Known external-contract consumers in this repository are =examples/sdk-minimal=
+and =examples/sma-long-hold=, plus the separate-module acceptance fixture in
+=test/architecture=. Other examples compose private runtime packages inside
+Trader's module and are contributor examples, not supported external APIs.
+Independent external repositories were not inventoried by this change.
 
-* Preliminary Package Map (Non-Final)
-
-The map below is *directional, not mandatory*.  It shows the intended
-direction of dependency, not a required set of packages.  Package names,
-counts, and groupings will change as real consumers appear.  Nothing in
-this map authorizes creating a directory before a package has working
-code.
+* Dependency Direction
 
 #+BEGIN_EXAMPLE
-                        instrument
-                            ^
-                            |
-        +-------------------+-------------------+
-        |                   |                   |
-    marketdata            order              account
-        ^  ^               ^ ^ ^                 ^
-         \  \             /  | \                 |
-          \  +-----------+   |  \                |
-           \                 |   \               |
-        strategy         execution risk       broker   portfolio
-             \                \     |             |        /
-              +--------+-------+----+-------------+-------+
-                                |
-                            pipeline
-                                ^
-                    +-----------+-----------+
-                    |                       |
-                backtest                journal, report
-         (application orchestration,   (reusable by backtest
-          also depends on strategy,     and a future live
-          the broker port, and          session, not
-          marketdata directly)          backtest-specific)
-                    ^
-                    |
-              service/backtest
-         (ADR-022 wrapper; siblings
-          service/broker, service/execution
-          each wrap one domain package the
-          same way — service/* depends
-          "downward" on the domain package
-          it wraps, never the reverse)
-                    ^
-                    |
-              adapters and commands
-         (cmd/trader/backtest: the outer
-          composition root that constructs
-          adapters/broker/sim.Broker,
-          pipeline.Pipeline, and an
-          instrument.Resolver, then injects
-          the broker.Broker *port* — never
-          the concrete adapter — into
-          service/backtest)
+external guest executable
+    -> sdk -> protocol/strategy/v1
+           -> public order, marketdata, instrument, num
+    -> indicator
+    -> analysis -> indicator, public marketdata/instrument
+
+cmd/trader -> internal/service -> internal/backtest / internal/pipeline
+internal/backtest -> internal/strategy, broker, journal, public values
+internal/pipeline -> internal/execution, risk, broker
+internal/marketdata -> public marketdata, instrument, num
+                    -> internal/marketdata/internal/provider/*
+internal/order -> public order, instrument, num, internal/id
 #+END_EXAMPLE
 
-=execution= and =risk= (M4, ADR-005/ADR-006) sit alongside =strategy=,
-=broker=, and =portfolio= at this tier: both depend on =order= (the
-=order.Proposal=/=order.Request= vocabulary ADR-017 already
-established), and =risk= additionally depends on =account=/=portfolio=
-to evaluate a proposal against current exposure.  Neither depends on
-=strategy= or =broker= — =strategy= never imports either (ADR-005), and
-the chain from a strategy's own intent through =execution= and =risk=
-to an approved =order.Request= reaching =broker.Account.Submit= is
-wired by application services, not by a direct import between any of
-these sibling packages.
+Arrows mean imports. Public packages never depend on =internal/= runtime
+packages. The package-private =num/internal/fixed= arithmetic implementation
+is allowed, but its types must not appear in public signatures. No public
+alias, constructor, method, field, or interface exposes runtime objects.
 
-The canonical intent value itself is =order.Intent= (issue #177,
-M4-02), not a =strategy.Intent= type — a correction to an earlier
-version of this diagram, made during #177's own review. Putting the
-type =execution= consumes in a not-yet-existing =strategy= package
-would have forced =execution= to import =strategy= to use it, directly
-reversing the "neither depends on strategy" rule stated above.
-=order= already owns the neighboring =Proposal -> Request -> Order ->
-Fill= vocabulary (ADR-017), so =order.Intent= keeps the whole
-=Intent -> Proposal -> RiskDecision -> Request= chain in one
-dependency-direction-consistent package. =strategy= itself was not
-created by #177; it is built in M5 (#210), when a real =Strategy=
-interface, lifecycle, and =View=/=BarEvent= types have an actual
-consumer (=backtest=) to justify them — #177 only added the value type
-=strategy= produces and =execution= consumes, both depending on
-=order=, per the diagram above, not on each other.
+=sdk.Clock= contains only =Now() time.Time=. Protocol v1 carries host time,
+not host-driven guest timers. SDK run/order/correlation IDs are opaque strings;
+guest code does not generate canonical runtime IDs. Any future public SDK
+fixture package must depend only on public contracts.
 
-=pipeline= (M4, ADR-031) is the orchestration seam sitting one tier
-above =execution=/=risk=/=broker=: it composes =risk.Sizer=,
-=execution.Planner=, =risk.Engine=, and =broker.Account.Submit= into
-one callable path (=Evaluate=/=Submit=, ADR-032), because that
-composition cannot live inside =execution= or =risk= without reversing
-the "neither depends on broker" rule those packages already enforce.
-Neither =execution= nor =risk= imports =pipeline= back — enforced by
-construction, since either would be a compile-time import cycle.
+* Runtime Rules
 
-The =service/*= tier (=service/broker=, =service/execution=,
-=service/backtest=, and their own siblings) is the ADR-022
-application/service layer: each subpackage wraps *one* domain package
-as a transport-neutral use case for an external caller (the CLI today,
-a future REST/WebSocket/SSE adapter) — =service/broker= wraps
-=broker.Broker=, =service/execution= wraps =pipeline.Pipeline=
-directly, and =service/backtest= wraps =backtest.Runner=. A =service/*=
-subpackage depends "downward" on the domain package it wraps; the
-domain package never depends back on its own =service/*= wrapper — the
-same rule =service/doc.go= already states for every =service/*=
-subpackage, unchanged by M5 adding a new one. =journal= and =report=
-(M5) sit alongside =pipeline=/=backtest= at the domain tier rather than
-under =service/*= — both are reusable by a future =live= session, not
-backtest-specific, so neither lives under =backtest/= despite
-=backtest= being their first concrete consumer.
-
-Application orchestration packages (=backtest=, and eventually
-=live=/=scanner=) depend on =pipeline= directly for their own
-in-process execution/risk needs — never on =service/execution=, which
-exists to serve an external caller's transport-neutral request/
-response shape, not another orchestration package's own synchronous
-call (ADR-035). Concrete adapter construction (=adapters/broker/sim=
-today, a real broker adapter later) belongs only to the outermost
-composition root — =cmd/trader/backtest=, mirroring
-=cmd/trader/execution/service.go='s own existing role — which injects
-the =broker.Broker= *port* into =service/backtest= and, through it,
-=backtest.Runner=. =service/backtest= itself never imports a concrete
-adapter package, exactly like =service/execution= today.
-
-Arrows point from a dependent package toward the package it depends on.
-Read upward: =strategy= may depend on =marketdata=; =marketdata= may
-depend on =instrument=; nothing in the upper rows may depend on
-application services, adapters, or commands.
-
-* Dependency Rules
-
-These rules apply to every package in the module.  A change that
-violates one requires an architecture decision record, not a code
-comment.
-
-1. Domain packages must not import adapters.  Vendor SDK types, database
-   drivers, and wire protocols never appear in a domain signature.
-2. Strategies must not import broker implementations.  A strategy that
-   can name a broker package can be coupled to one.
-3. Strategies emit intents and cannot submit orders.  There is no path
-   from strategy code to an order submission call.  See ADR-005.
-4. Risk evaluates proposed exposure and cannot call brokers.  Risk rules
-   are pure functions over a proposal and a snapshot, so they remain
-   deterministic and auditable.
-5. Execution coordinates approved actions.  It owns order mechanics:
-   tick and quantity rounding, order-type selection, working-order
-   tracking, replacement, and cancellation.  It does not decide whether
-   the exposure is acceptable.  See ADR-006.
-6. Broker adapters translate external APIs and do not contain trading
-   policy.  An adapter that decides *whether* to trade has absorbed a
-   responsibility belonging to risk or to the live session.
-7. Transport DTOs must not become public domain types.  A type shaped by
-   JSON, Protobuf, or a database schema is an encoding concern; the
-   domain owns its own vocabulary.
-8. Domain behavior must not call =time.Now()= directly.  Time arrives
-   through an injected clock so backtests are reproducible.
-9. Packages must not launch hidden goroutines from =init()=.  Background
-   work is owned by an explicit context and returns a closer, a reader,
-   or a =Run(ctx)= lifecycle.
-10. Live trading requires deliberate configuration and cannot be the
-    default.  A zero-value or minimally configured runtime operates in
-    paper mode.  See ADR-014.
-11. New public packages require a real consumer, a documented
-    responsibility, and a stable reason to be public.
-12. Implementation details should prefer =internal/=.  Promotion from
-    =internal/= to public is cheap; demotion is a breaking change.
-13. Public interfaces should exist at seams where implementations
-    genuinely vary.  An interface with exactly one implementation and no
-    external implementers is a concrete type wearing a costume.
-14. Concrete structs are preferred for domain values.  Value types are
-    data, not behavior contracts.
-15. No empty placeholder directories.  A package directory exists only
-    when it holds working code and its tests.
-16. Package dependencies must remain acyclic.  Resolve a cycle by moving
-    the shared value type into the package that owns its meaning, not by
-    adding an interface to break the compile error.
-
-* Public Versus =internal/=
-
-Apply this test before placing a type or behavior in a public package.
-
-1. Is this type or behavior intended for external framework consumers?
-2. Does it have a stable contract?
-3. Are multiple implementations expected?
-4. Would exposing it constrain internal evolution?
-
-If the answers do not support a public API, prefer =internal/=.
-
-Guidance for the common cases:
-
-- *Domain value types* (prices, bars, orders, snapshots) are public.
-  They are the vocabulary users write code against.
-- *Extension points* users are expected to implement (broker adapters and
-  journals) are public interfaces, kept small.  Market-data providers and
-  storage are deliberately not extension points; they live under
-  =marketdata/internal/= (for example =marketdata/internal/provider/oanda=).
-  Go's =internal/= rule enforces the boundary that matters: nothing outside
-  the =marketdata/= subtree can import them, so no external package can reach
-  a provider or store except through the =marketdata= package's own API.  No
-  hand-written architecture test is needed for that — the compiler is the
-  enforcement.  A finer rule — that /within/ =marketdata=, only
-  =marketdata.Manager= drives providers and stores, not other functions in
-  the package — is intra-package and cannot be compiler-enforced; it is
-  policy, upheld in review, not by a test.
-- *Orchestration internals* (engine loops, reconciliation mechanics,
-  runtime plumbing) belong in =internal/= until a user needs to replace
-  them.
-- *Adapters* are public when users construct them directly, and
-  =internal/= when only Trader's own commands use them.
-- *Test infrastructure* intended for users belongs in a public
-  =tradertest= package; everything else belongs in =internal/=.
-
-* Prohibited in Domain Code
-
-These are restatements of rules 8, 9, and 10, collected because they are
-the ones most easily violated by otherwise reasonable code.
-
-- *Direct =time.Now()= calls.*  Domain behavior receives time from an
-  injected clock.  A backtest that cannot control the clock cannot be
-  reproduced.
-- *Hidden goroutines from =init()=.*  Package initialization must not
-  start background work.  A caller cannot cancel what it did not start.
-- *Real-money trading by default.*  No default configuration, example,
-  or zero value may submit a real-money order.  Enabling real-money
-  trading is an explicit, account-scoped, operator-visible decision.
-
-Also avoid, for the same reasons: global mutable state, package-level
-loggers, environment-variable reads inside domain code, and global
-random sources.
+1. Strategies emit intents and never submit broker orders.
+2. Risk evaluates snapshots without calling brokers.
+3. Execution and risk remain separate; pipeline owns their composition with broker submission.
+4. Broker adapters translate external APIs without trading policy.
+5. Service wrappers depend on their domain packages, never the reverse.
+6. Concrete adapters are constructed at composition roots, not in services.
+7. Reports consume results; trading behavior never depends on rendering.
+8. Exact prices, quantities, money, and accounting values use =num=.
+9. Time and identity are injected; no hidden global configuration or unmanaged goroutines.
+10. Live-money operation requires explicit enablement and is never the default.
+11. Dependencies remain acyclic. Move shared values to their semantic owner rather than adding interfaces to hide a cycle.
+12. New public packages require a concrete consumer and an explicit compatibility decision.
 
 * Enforcement
 
-These rules are currently enforced by review, not by tooling.  That is a
-known gap.
+Go enforces external runtime import restrictions. =test/architecture=
+builds a real guest in a temporary module with an unrelated import path, and
+checks that direct imports of runtime packages fail specifically with Go's
+internal visibility error. It checks the supported package inventory, each
+public package's transitive dependencies, and exported type graphs for
+internal types, including methods and aliases.
 
-Mechanical enforcement is expected to arrive as the package tree grows
-and will likely combine:
+Existing package-level dependency checks continue to constrain runtime
+layering. Configuration/logging/time checks retain their narrow composition
+exemptions at the new paths. Normal verification is =make check= and
+=make build=; optional data-dependent test suites are also compiled with their
+build tags when moving their packages.
 
-- an import-direction check built on =go list=, or =depguard= rules for
-  forbidden imports;
-- =go vet= analyzers for the =time.Now()= and =init()= goroutine
-  prohibitions;
-- =apidiff= against a committed public API baseline;
-- compiled and executed examples in CI.
+* Architectural References
 
-Selecting and landing the enforcement mechanism is tracked separately.
-Until then, the pull-request template's "Architectural impact" section
-is the review checkpoint for these rules.
-
-* Relationship to Other Documents
-
-- =docs/arch/trader-framework-architecture.org= is canonical.  It owns
-  the architectural invariants, the package responsibilities, and the
-  reasoning behind them.
-- =docs/arch/adr-decisions.org= owns durable decisions.  A boundary rule
-  that becomes contested is resolved by an ADR, and this document is
-  then updated to match.
-- =CONTRIBUTING.org= owns the workflow and the Definition of Done.
+ADR-065 owns this public boundary and its amendments to earlier public
+composition promises. ADR-062/063 own protocol/process behavior; ADR-064 owns
+the later Git-tag release process. The canonical architecture retains the
+runtime responsibilities and invariants; CONTRIBUTING.org owns workflow and
+review requirements.

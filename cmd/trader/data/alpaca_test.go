@@ -17,7 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/marketdata"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 )
 
 // alpacaBarsJSONForCLITest builds a bars response in the shape the
@@ -103,7 +103,7 @@ func TestDataSync_Alpaca_MissingCredentialsProducesClearError(t *testing.T) {
 		"--from", "2024-01-08", "--to", "2024-01-10")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Alpaca credential/base URL is not configured")
-	require.True(t, errors.Is(err, marketdata.ErrInvalidConfig),
+	require.True(t, errors.Is(err, marketruntime.ErrInvalidConfig),
 		"error must be classifiable via errors.Is(err, marketdata.ErrInvalidConfig), matching OANDA's own missing-credential behavior")
 }
 
@@ -127,7 +127,7 @@ func TestDataSync_Alpaca_OneSidedCredentialProducesClearError(t *testing.T) {
 		"--from", "2024-01-08", "--to", "2024-01-10")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must both be supplied together")
-	require.True(t, errors.Is(err, marketdata.ErrInvalidConfig),
+	require.True(t, errors.Is(err, marketruntime.ErrInvalidConfig),
 		"error must be classifiable via errors.Is(err, marketdata.ErrInvalidConfig)")
 }
 

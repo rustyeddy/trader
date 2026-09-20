@@ -57,4 +57,7 @@
 // num.Price close into the float64 domain RunEventStudy needs happens
 // through Price's own sanctioned Float64 method (ADR-045), never a
 // String()/ParseFloat() round-trip.
+//
+// This package is part of Trader's supported external strategy/research/value
+// API (ADR-065); it does not expose runtime composition or internal types.
 package analysis

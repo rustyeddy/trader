@@ -8,11 +8,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/account"
-	brokerpkg "github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/clock"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account"
+	brokerpkg "github.com/rustyeddy/trader/internal/broker"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/id"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 )
@@ -64,7 +65,7 @@ func TestIsFlatSPY_OpenPosition(t *testing.T) {
 	listing := testSPYListing(t)
 	accID := testAccountID(t)
 	avgPrice := num.MustParsePrice("450.00")
-	pos, err := order.NewPosition(order.Position{
+	pos, err := runtimeorder.NewPosition(runtimeorder.Position{
 		AccountID: accID, Listing: listing, Side: order.Long, Quantity: num.MustParseQuantity("1"), AvgPrice: &avgPrice,
 	})
 	require.NoError(t, err)
@@ -73,7 +74,7 @@ func TestIsFlatSPY_OpenPosition(t *testing.T) {
 		AccountID: accID, Broker: "alpaca", Currency: num.MustParseCurrency("USD"), AsOf: time.Now(),
 		Equity: zero, BuyingPower: zero, MarginUsed: zero, MarginAvailable: zero,
 		RealizedPnL: zero, UnrealizedPnL: zero, Fees: zero, Financing: zero,
-		Positions: []order.Position{pos},
+		Positions: []runtimeorder.Position{pos},
 	})
 	require.NoError(t, err)
 	assert.False(t, isFlatSPY(snap, listing))
@@ -103,21 +104,21 @@ func (f *fakeEventReader) Close() error { return nil }
 
 var _ brokerpkg.EventReader = (*fakeEventReader)(nil)
 
-func testOrderEvent(t *testing.T, orderID id.OrderID, status order.Status) brokerpkg.Event {
+func testOrderEvent(t *testing.T, orderID id.OrderID, status runtimeorder.Status) brokerpkg.Event {
 	t.Helper()
 	listing := testSPYListing(t)
 	accID := testAccountID(t)
-	req, err := order.NewRequest(order.Proposal{
-		Listing: listing, AccountID: accID, Side: order.Buy, Type: order.Market,
-		TimeInForce: order.DAY, Quantity: num.MustParseQuantity("1"),
+	req, err := runtimeorder.NewRequest(runtimeorder.Proposal{
+		Listing: listing, AccountID: accID, Side: order.Buy, Type: runtimeorder.Market,
+		TimeInForce: runtimeorder.DAY, Quantity: num.MustParseQuantity("1"),
 	}, orderID)
 	require.NoError(t, err)
 	qty := num.MustParseQuantity("1")
-	o := order.Order{Request: req, Status: status}
-	if status.Terminal() || status == order.StatusWorking {
+	o := runtimeorder.Order{Request: req, Status: status}
+	if status.Terminal() || status == runtimeorder.StatusWorking {
 		o.AcceptedQuantity = &qty
 	}
-	built, err := order.NewOrder(o)
+	built, err := runtimeorder.NewOrder(o)
 	require.NoError(t, err)
 
 	eventID, err := id.GenerateEventID(id.NewGenerator(clock.Real{}, id.Random{}))
@@ -140,7 +141,7 @@ func testFillEvent(t *testing.T, orderID id.OrderID) brokerpkg.Event {
 	gen := id.NewGenerator(clock.Real{}, id.Random{})
 	fillID, err := id.GenerateFillID(gen)
 	require.NoError(t, err)
-	fill, err := order.NewFill(order.Fill{
+	fill, err := runtimeorder.NewFill(runtimeorder.Fill{
 		FillID: fillID, OrderID: orderID, AccountID: accID, Listing: listing,
 		Side: order.Buy, Price: num.MustParsePrice("450.00"), Quantity: num.MustParseQuantity("1"),
 		Timestamp: time.Now(),
@@ -162,9 +163,9 @@ func testFillEvent(t *testing.T, orderID id.OrderID) brokerpkg.Event {
 func TestWaitForFill_ReturnsTrueOnFilledWithFillEvent(t *testing.T) {
 	realOrderID := mustOrderID(t)
 	reader := &fakeEventReader{events: []brokerpkg.Event{
-		testOrderEvent(t, realOrderID, order.StatusWorking),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusWorking),
 		testFillEvent(t, realOrderID),
-		testOrderEvent(t, realOrderID, order.StatusFilled),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusFilled),
 	}}
 	got := waitForFill(t, context.Background(), reader, realOrderID, time.Second)
 	assert.True(t, got)
@@ -177,8 +178,8 @@ func TestWaitForFill_ReturnsTrueOnFilledWithFillEvent(t *testing.T) {
 func TestWaitForFill_FalseWhenStatusFilledWithoutFillEvent(t *testing.T) {
 	realOrderID := mustOrderID(t)
 	reader := &fakeEventReader{events: []brokerpkg.Event{
-		testOrderEvent(t, realOrderID, order.StatusWorking),
-		testOrderEvent(t, realOrderID, order.StatusFilled),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusWorking),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusFilled),
 	}}
 	got := waitForFill(t, context.Background(), reader, realOrderID, 20*time.Millisecond)
 	assert.False(t, got)
@@ -187,8 +188,8 @@ func TestWaitForFill_FalseWhenStatusFilledWithoutFillEvent(t *testing.T) {
 func TestWaitForFill_ReturnsFalseOnCanceled(t *testing.T) {
 	realOrderID := mustOrderID(t)
 	reader := &fakeEventReader{events: []brokerpkg.Event{
-		testOrderEvent(t, realOrderID, order.StatusWorking),
-		testOrderEvent(t, realOrderID, order.StatusCanceled),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusWorking),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusCanceled),
 	}}
 	got := waitForFill(t, context.Background(), reader, realOrderID, time.Second)
 	assert.False(t, got)
@@ -198,9 +199,9 @@ func TestWaitForFill_IgnoresOtherOrders(t *testing.T) {
 	realOrderID := mustOrderID(t)
 	otherOrderID := mustOrderID(t)
 	reader := &fakeEventReader{events: []brokerpkg.Event{
-		testOrderEvent(t, otherOrderID, order.StatusFilled),
+		testOrderEvent(t, otherOrderID, runtimeorder.StatusFilled),
 		testFillEvent(t, otherOrderID),
-		testOrderEvent(t, realOrderID, order.StatusFilled),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusFilled),
 		testFillEvent(t, realOrderID),
 	}}
 	got := waitForFill(t, context.Background(), reader, realOrderID, time.Second)
@@ -210,7 +211,7 @@ func TestWaitForFill_IgnoresOtherOrders(t *testing.T) {
 func TestWaitForFill_TimesOut(t *testing.T) {
 	realOrderID := mustOrderID(t)
 	reader := &fakeEventReader{events: []brokerpkg.Event{
-		testOrderEvent(t, realOrderID, order.StatusWorking),
+		testOrderEvent(t, realOrderID, runtimeorder.StatusWorking),
 	}}
 	got := waitForFill(t, context.Background(), reader, realOrderID, 20*time.Millisecond)
 	assert.False(t, got)
@@ -235,7 +236,7 @@ func TestMustFreshEventID(t *testing.T) {
 // Cancel is ever called by that function, so every other method
 // panics if reached, catching an accidental dependency on it.
 type fakeAccount struct {
-	cancelResult order.CancelResult
+	cancelResult runtimeorder.CancelResult
 	cancelErr    error
 }
 
@@ -243,13 +244,13 @@ func (f *fakeAccount) Reference() account.Reference { panic("not used by cancelA
 func (f *fakeAccount) Snapshot(context.Context) (account.Snapshot, error) {
 	panic("not used by cancelAndAwaitTerminal")
 }
-func (f *fakeAccount) Submit(context.Context, order.Request) (order.Order, error) {
+func (f *fakeAccount) Submit(context.Context, runtimeorder.Request) (runtimeorder.Order, error) {
 	panic("not used by cancelAndAwaitTerminal")
 }
-func (f *fakeAccount) Cancel(context.Context, order.CancelRequest) (order.CancelResult, error) {
+func (f *fakeAccount) Cancel(context.Context, runtimeorder.CancelRequest) (runtimeorder.CancelResult, error) {
 	return f.cancelResult, f.cancelErr
 }
-func (f *fakeAccount) Replace(context.Context, order.ReplaceRequest) (order.ReplaceResult, error) {
+func (f *fakeAccount) Replace(context.Context, runtimeorder.ReplaceRequest) (runtimeorder.ReplaceResult, error) {
 	panic("not used by cancelAndAwaitTerminal")
 }
 func (f *fakeAccount) Events(context.Context, brokerpkg.EventCursor) (brokerpkg.EventReader, error) {
@@ -260,13 +261,13 @@ var _ brokerpkg.Account = (*fakeAccount)(nil)
 
 func TestCancelAndAwaitTerminal_ReturnsCanceled(t *testing.T) {
 	orderID := mustOrderID(t)
-	acc := &fakeAccount{cancelResult: order.CancelResult{OrderID: orderID, Status: order.StatusPendingCancel}}
+	acc := &fakeAccount{cancelResult: runtimeorder.CancelResult{OrderID: orderID, Status: runtimeorder.StatusPendingCancel}}
 	reader := &fakeEventReader{events: []brokerpkg.Event{
-		testOrderEvent(t, orderID, order.StatusWorking),
-		testOrderEvent(t, orderID, order.StatusCanceled),
+		testOrderEvent(t, orderID, runtimeorder.StatusWorking),
+		testOrderEvent(t, orderID, runtimeorder.StatusCanceled),
 	}}
 	got := cancelAndAwaitTerminal(t, context.Background(), acc, reader, testGenerator(), orderID, time.Second)
-	assert.Equal(t, order.StatusCanceled, got)
+	assert.Equal(t, runtimeorder.StatusCanceled, got)
 }
 
 // TestCancelAndAwaitTerminal_DetectsRaceFill is the exact scenario PR
@@ -277,12 +278,12 @@ func TestCancelAndAwaitTerminal_ReturnsCanceled(t *testing.T) {
 // resulting position instead of assuming the cancel succeeded.
 func TestCancelAndAwaitTerminal_DetectsRaceFill(t *testing.T) {
 	orderID := mustOrderID(t)
-	acc := &fakeAccount{cancelResult: order.CancelResult{OrderID: orderID, Status: order.StatusPendingCancel}}
+	acc := &fakeAccount{cancelResult: runtimeorder.CancelResult{OrderID: orderID, Status: runtimeorder.StatusPendingCancel}}
 	reader := &fakeEventReader{events: []brokerpkg.Event{
-		testOrderEvent(t, orderID, order.StatusFilled),
+		testOrderEvent(t, orderID, runtimeorder.StatusFilled),
 	}}
 	got := cancelAndAwaitTerminal(t, context.Background(), acc, reader, testGenerator(), orderID, time.Second)
-	assert.Equal(t, order.StatusFilled, got)
+	assert.Equal(t, runtimeorder.StatusFilled, got)
 }
 
 // TestCancelAndAwaitTerminal_TrustsAlreadyTerminalCancelResult is the
@@ -298,10 +299,10 @@ func TestCancelAndAwaitTerminal_DetectsRaceFill(t *testing.T) {
 // to prove no further Next call is needed.
 func TestCancelAndAwaitTerminal_TrustsAlreadyTerminalCancelResult(t *testing.T) {
 	orderID := mustOrderID(t)
-	acc := &fakeAccount{cancelResult: order.CancelResult{OrderID: orderID, Status: order.StatusFilled}}
+	acc := &fakeAccount{cancelResult: runtimeorder.CancelResult{OrderID: orderID, Status: runtimeorder.StatusFilled}}
 	reader := &fakeEventReader{} // deliberately empty: must not be consulted
 	got := cancelAndAwaitTerminal(t, context.Background(), acc, reader, testGenerator(), orderID, 50*time.Millisecond)
-	assert.Equal(t, order.StatusFilled, got)
+	assert.Equal(t, runtimeorder.StatusFilled, got)
 }
 
 func testGenerator() *id.Generator {

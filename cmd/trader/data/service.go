@@ -7,12 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/config"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
-	svc "github.com/rustyeddy/trader/service/marketdata"
 )
 
 // datasetFlags holds the "data" command group's persistent flag
@@ -237,7 +238,7 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 	}
 
 	resolver := instrument.NewMemoryResolver()
-	managerCfg := marketdata.Config{
+	managerCfg := marketruntime.Config{
 		Clock:        clock.Real{},
 		StoreRoot:    cfg.StoreRoot,
 		RawRoot:      cfg.RawRoot,
@@ -285,11 +286,11 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 		managerCfg.AlpacaBaseURL = cfg.AlpacaBaseURL
 	case cfg.AlpacaKeyID != "" || cfg.AlpacaSecretKey != "":
 		return dataContext{}, fmt.Errorf(
-			"%w: Alpaca key ID and secret key must both be supplied together (set both TRADER_ALPACA_KEY_ID and TRADER_ALPACA_SECRET_KEY)",
-			marketdata.ErrInvalidConfig)
+			"%w: Alpaca key ID and secret key must both be supplied together (set both TRADER_ALPACA_KEY_ID and TRADER_ALPACA_SECRET_KEY)", marketruntime.
+				ErrInvalidConfig)
 	}
 
-	manager, err := marketdata.New(managerCfg)
+	manager, err := marketruntime.New(managerCfg)
 	if err != nil {
 		return dataContext{}, err
 	}

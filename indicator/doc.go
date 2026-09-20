@@ -67,4 +67,7 @@
 // identical), per docs/research/mr-01-experiment-definition.org's
 // explicit requirement that such an observation be excluded rather than
 // treated as a real (if extreme) value.
+//
+// This package is part of Trader's supported external strategy/research/value
+// API (ADR-065); it does not expose runtime composition or internal types.
 package indicator

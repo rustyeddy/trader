@@ -93,4 +93,7 @@
 // persistence adapter that needs exact scaled BIGINT reconstruction should
 // introduce its own narrowly scoped boundary for that purpose rather than
 // reuse a general-purpose escape hatch here.
+//
+// This package is part of Trader's supported external strategy/research/value
+// API (ADR-065); it does not expose runtime composition or internal types.
 package num

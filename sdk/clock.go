@@ -3,9 +3,13 @@ package sdk
 import (
 	"sync"
 	"time"
-
-	"github.com/rustyeddy/trader/clock"
 )
+
+// Clock exposes the host time observed by a guest strategy. Protocol v1 does
+// not provide host-driven timers; timer capabilities require a future protocol.
+type Clock interface {
+	Now() time.Time
+}
 
 // hostClock is Environment.Clock's own concrete implementation: Now
 // always returns whatever timestamp the host most recently supplied
@@ -15,25 +19,12 @@ import (
 // gives a guest the identical clock-observation semantics an
 // in-process strategy already has under both a real and a simulated
 // host clock, without the guest ever owning a time source of its own.
-//
-// NewTimer is the one exception: it delegates to clock.Real, real
-// wall-clock timers, via embedding. v1 has no wire mechanism for the
-// host to drive a guest-local timer's own firing, and a guest process
-// is, regardless of the host's own simulated-or-real clock, always a
-// genuine external process running in real wall-clock time — any
-// component that needs to actually wait must eventually rely on a
-// real OS timer somewhere. This is a deliberate, narrow limitation
-// documented here, not an oversight: a strategy that never calls
-// env.Clock.NewTimer (as neither strategy/smatrend nor
-// strategy/emacross does today) never observes it.
 type hostClock struct {
-	clock.Real
-
 	mu  sync.Mutex
 	now time.Time
 }
 
-var _ clock.Clock = (*hostClock)(nil)
+var _ Clock = (*hostClock)(nil)
 
 func newHostClock(start time.Time) *hostClock {
 	return &hostClock{now: start}

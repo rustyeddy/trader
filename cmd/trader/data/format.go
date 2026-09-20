@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	svc "github.com/rustyeddy/trader/service/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // Supported --format values (issue #111). "table" is every command's

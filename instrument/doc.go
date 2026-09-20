@@ -123,4 +123,7 @@
 // "Deferred: Synthetic and Multi-Leg Instruments" section. Nothing in this
 // package names a leg, a synthetic composition, or a multi-leg execution
 // concept; see arch_test.go, which enforces that mechanically.
+//
+// This package is part of Trader's supported external strategy/research/value
+// API (ADR-065); it does not expose runtime composition or internal types.
 package instrument

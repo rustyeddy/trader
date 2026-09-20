@@ -35,6 +35,8 @@ across the full archive before that tree is deleted, and the general
 Rate/string-parsing cache idea in issue #85 (deliberately deferred
 pending actual performance evidence).
 
+Amended by ADR-065: Manager and provider/store implementation move to internal/marketdata; public marketdata is values only.
+
 ** DONE Persisted interval policy
 Canonical M1, H1, H4, D1, and W1 Bars are persisted (see "All derived
 data will be persisted" below for the no-recompute-on-every-query

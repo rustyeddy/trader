@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -128,7 +127,7 @@ type Environment struct {
 	// own timestamp as it arrives — never this process's local wall
 	// clock (see the package doc comment's own "clock ownership"
 	// section).
-	Clock clock.Clock
+	Clock Clock
 
 	// RunID is the host's own run identifier, in its canonical text
 	// form — carried as a plain string since a guest never parses or

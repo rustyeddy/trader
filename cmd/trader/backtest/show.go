@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/id"
+	"github.com/rustyeddy/trader/internal/id"
 )
 
 // showFlags holds "trader backtest show"'s own flag values.

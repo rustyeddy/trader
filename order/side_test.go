@@ -13,13 +13,13 @@ func TestSideString(t *testing.T) {
 }
 
 func TestSideValid(t *testing.T) {
-	assert.True(t, Buy.valid())
-	assert.True(t, Sell.valid())
-	assert.False(t, sideUnset.valid())
-	assert.False(t, Side(200).valid())
+	assert.True(t, Buy.Valid())
+	assert.True(t, Sell.Valid())
+	assert.False(t, sideUnset.Valid())
+	assert.False(t, Side(200).Valid())
 }
 
 func TestSideZeroValueIsInvalid(t *testing.T) {
 	var s Side
-	assert.False(t, s.valid())
+	assert.False(t, s.Valid())
 }

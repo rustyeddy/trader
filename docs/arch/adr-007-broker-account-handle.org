@@ -11,6 +11,8 @@ originally accepted inline in that document. The registry
 file is authoritative for ADR-007's Status, Context, Decision,
 Consequences, and Alternatives Considered.
 
+Amended by ADR-065: broker/account ports are private runtime contracts under internal/broker.
+
 * Context
 
 A mutable account object whose methods hide network calls conflates local

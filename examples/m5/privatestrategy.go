@@ -1,20 +1,9 @@
-// Package m5 contains a representative "private strategy" — a
-// strategy.Strategy implementation written the way real code living
-// outside this module would write one (issue #225, M5-17). It is not
-// itself a separate Go module (a genuinely external repository is not
-// meaningfully different from this file for the purpose of this
-// proof, and keeping it in-tree lets boundary_test.go and
-// privatestrategy_test.go mechanically verify the property rather than
-// merely assert it), but its own imports are deliberately restricted
-// to exactly the public contract strategy/doc.go documents, plus the
-// standard library's context: context, order, marketdata, instrument,
-// and strategy itself. It never
-// imports backtest, service, cmd, or adapters — see boundary_test.go
-// for the mechanical guard, and privatestrategy_test.go for the
-// composition-root glue (which legitimately does import those
-// packages, the same way a real application built on top of a private
-// strategy would) that actually runs it through backtest.Runner via
-// service/backtest.Service.
+// Package m5 contains a representative in-tree private/runtime strategy
+// (issue #225, M5-17). It demonstrates how Trader's own composition root can
+// wire an internal strategy into the backtest runtime. Its imports deliberately
+// use internal/strategy and internal/order, so this example is not an external
+// consumer boundary test. External strategy authors should use sdk and the
+// separate-module checks in test/architecture instead.
 //
 // privateStrategy itself does nothing sophisticated: it enters long
 // once on its one required instrument's own first bar and never
@@ -27,17 +16,16 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/instrument"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/internal/strategy"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/strategy"
 )
 
-// PrivateStrategy is the representative external strategy
-// implementation. It is exported (unlike cmd/trader/backtest's own
-// unexported demoStrategy) specifically so privatestrategy_test.go —
-// standing in for a separate application built on top of a private
-// strategy — can construct it using nothing but this package's own
-// public API, the way a real external consumer would.
+// PrivateStrategy is the representative in-tree private/runtime strategy
+// used by the M5 example and its composition test. It is exported so that
+// privatestrategy_test.go can construct it while exercising the internal
+// runtime contract; it is not an external-consumer API.
 type PrivateStrategy struct {
 	instrumentID instrument.ID
 	interval     marketdata.Interval
@@ -70,7 +58,7 @@ func (s *PrivateStrategy) Start(ctx context.Context, env strategy.Environment) e
 }
 
 // OnBar implements strategy.Strategy.
-func (s *PrivateStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+func (s *PrivateStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]runtimeorder.Intent, error) {
 	if s.entered {
 		return nil, nil
 	}
@@ -80,5 +68,5 @@ func (s *PrivateStrategy) OnBar(ctx context.Context, event strategy.BarEvent, vi
 	if err != nil {
 		return nil, err
 	}
-	return []order.Intent{in}, nil
+	return []runtimeorder.Intent{in}, nil
 }

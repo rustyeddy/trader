@@ -99,7 +99,7 @@ boilerplate) and isn't covered further here.
 
 ## `trader data` — Historical Market Data
 
-`marketdata.Manager`'s CLI surface: query canonical bars, inspect coverage,
+`internal/marketdata.Manager`'s CLI surface: query canonical bars, inspect coverage,
 and plan/sync/build/update a dataset. Every `data` subcommand takes the same
 two positional arguments and shares the same flag set.
 
@@ -513,7 +513,7 @@ no config-file or environment-variable backing at all, no matter how
 important it looks. Where a field *is* config-backed, the variable name
 follows `config`'s naming convention: prefix `TRADER_`, then the dotted
 config path, uppercased with `.` replaced by `_` — see the
-[`config` package doc comment](../config/doc.go) for the full rule.
+[`config` package doc comment](../internal/config/doc.go) for the full rule.
 
 Concretely, per command:
 

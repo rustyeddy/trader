@@ -59,19 +59,21 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/rustyeddy/trader/adapters/broker/alpaca"
-	brokerpkg "github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/clock"
-	execpkg "github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/adapters/broker/alpaca"
+	brokerpkg "github.com/rustyeddy/trader/internal/broker"
+	"github.com/rustyeddy/trader/internal/clock"
+	execpkg "github.com/rustyeddy/trader/internal/execution"
+	"github.com/rustyeddy/trader/internal/id"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/internal/pipeline"
+	"github.com/rustyeddy/trader/internal/risk"
+	svcexecution "github.com/rustyeddy/trader/internal/service/execution"
+	mdsvc "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/pipeline"
-	"github.com/rustyeddy/trader/risk"
-	svcexecution "github.com/rustyeddy/trader/service/execution"
-	mdsvc "github.com/rustyeddy/trader/service/marketdata"
 )
 
 // alpacaEQ09CredentialFile names a local YAML file this test reads its
@@ -208,7 +210,7 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	}
 
 	// --- Step 2: canonical equity market data through marketdata.Manager ---
-	mgr, err := marketdata.New(marketdata.Config{
+	mgr, err := marketruntime.New(marketruntime.Config{
 		Clock:            c,
 		StoreRoot:        t.TempDir(),
 		RawRoot:          t.TempDir(),
@@ -285,14 +287,14 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
 
-	buildIntent := func(kind order.IntentKind, side order.Side) order.Intent {
+	buildIntent := func(kind order.IntentKind, side order.Side) runtimeorder.Intent {
 		intentID, err := id.GenerateIntentID(ids)
 		require.NoError(t, err)
 		eventID, err := id.GenerateEventID(ids)
 		require.NoError(t, err)
 		corrID, err := id.GenerateCorrelationID(ids)
 		require.NoError(t, err)
-		in, err := order.NewIntent(order.Intent{
+		in, err := runtimeorder.NewIntent(runtimeorder.Intent{
 			IntentID:   intentID,
 			Kind:       kind,
 			Instrument: spyID,
@@ -366,7 +368,7 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	// race to a fill after cancellation is requested. ---
 	if !waitForFill(t, ctx, reader, enterOrderID, 30*time.Second) {
 		finalStatus := cancelAndAwaitTerminal(t, ctx, acc, reader, ids, enterOrderID, 30*time.Second)
-		if finalStatus == order.StatusFilled {
+		if finalStatus == runtimeorder.StatusFilled {
 			// The cancel raced with a real fill: a position now exists.
 			// Flatten it through the same normal pipeline before this
 			// run ends, so the paper account is never left with
@@ -399,7 +401,7 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 
 	if !waitForFill(t, ctx, reader, exitOrderID, 30*time.Second) {
 		finalStatus := cancelAndAwaitTerminal(t, ctx, acc, reader, ids, exitOrderID, 30*time.Second)
-		if finalStatus != order.StatusFilled {
+		if finalStatus != runtimeorder.StatusFilled {
 			t.Fatalf("exit order did not fill within the smoke test's timeout (final status %s after cancel); a real SPY position may remain open on the paper account and needs manual review", finalStatus)
 		}
 		// The cancel raced with a real fill: the flatten still
@@ -436,7 +438,7 @@ func flattenSPYIfOpen(t *testing.T, ctx context.Context, svc *svcexecution.Servi
 	require.NoError(t, err)
 	corrID, err := id.GenerateCorrelationID(ids)
 	require.NoError(t, err)
-	exitIntent, err := order.NewIntent(order.Intent{
+	exitIntent, err := runtimeorder.NewIntent(runtimeorder.Intent{
 		IntentID: intentID, Kind: order.IntentExit, Instrument: spyID,
 		Metadata: id.Metadata{EventID: eventID, CorrelationID: corrID},
 	})
@@ -460,7 +462,7 @@ func flattenSPYIfOpen(t *testing.T, ctx context.Context, svc *svcexecution.Servi
 	// without checking that first would misreport a successful flatten
 	// as a failure.
 	finalStatus := cancelAndAwaitTerminal(t, ctx, acc, reader, ids, resp.Order.Request.OrderID, 30*time.Second)
-	if finalStatus != order.StatusFilled {
+	if finalStatus != runtimeorder.StatusFilled {
 		t.Fatalf("failed to flatten a pre-existing SPY position before starting the smoke test (final status %s after cancel); the paper account needs manual review", finalStatus)
 	}
 	t.Log("flatten order filled despite the cancel race; the pre-existing position was still successfully closed")

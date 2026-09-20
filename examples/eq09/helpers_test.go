@@ -17,10 +17,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/account"
-	brokerpkg "github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account"
+	brokerpkg "github.com/rustyeddy/trader/internal/broker"
+	"github.com/rustyeddy/trader/internal/id"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/order"
 )
 
@@ -86,9 +87,9 @@ func awaitFillEvidence(t *testing.T, ctx context.Context, reader brokerpkg.Event
 			}
 			t.Logf("observed order %s transition to status %s", orderID, ev.Order.Status)
 			switch ev.Order.Status {
-			case order.StatusFilled:
+			case runtimeorder.StatusFilled:
 				statusFilled = true
-			case order.StatusRejected, order.StatusCanceled, order.StatusExpired:
+			case runtimeorder.StatusRejected, runtimeorder.StatusCanceled, runtimeorder.StatusExpired:
 				return false, fillObserved
 			}
 		case brokerpkg.EventKindFill:
@@ -138,9 +139,9 @@ func mustFreshEventID(t *testing.T, ids *id.Generator) id.EventID {
 // for a "new" terminal event would hang until this function's own
 // timeout for an event that will never be redelivered (PR #314
 // review, second finding).
-func cancelAndAwaitTerminal(t *testing.T, ctx context.Context, acc brokerpkg.Account, reader brokerpkg.EventReader, ids *id.Generator, orderID id.OrderID, timeout time.Duration) order.Status {
+func cancelAndAwaitTerminal(t *testing.T, ctx context.Context, acc brokerpkg.Account, reader brokerpkg.EventReader, ids *id.Generator, orderID id.OrderID, timeout time.Duration) runtimeorder.Status {
 	t.Helper()
-	result, err := acc.Cancel(ctx, order.CancelRequest{
+	result, err := acc.Cancel(ctx, runtimeorder.CancelRequest{
 		OrderID:  orderID,
 		Metadata: id.Metadata{EventID: mustFreshEventID(t, ids)},
 	})

@@ -5,9 +5,10 @@ import (
 	"io"
 	"time"
 
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
-	svc "github.com/rustyeddy/trader/service/marketdata"
 )
 
 // jsonFormatter renders a stable, structured JSON document per
@@ -86,7 +87,7 @@ type jsonAction struct {
 	Reason   string `json:"reason"`
 }
 
-func toJSONActions(actions []marketdata.Action) []jsonAction {
+func toJSONActions(actions []marketruntime.Action) []jsonAction {
 	out := make([]jsonAction, len(actions))
 	for i, a := range actions {
 		out[i] = jsonAction{
@@ -119,7 +120,7 @@ type jsonSkipped struct {
 	Reason   string `json:"reason"`
 }
 
-func toJSONSkipped(skipped []marketdata.SkippedAction) []jsonSkipped {
+func toJSONSkipped(skipped []marketruntime.SkippedAction) []jsonSkipped {
 	out := make([]jsonSkipped, len(skipped))
 	for i, s := range skipped {
 		out[i] = jsonSkipped{
@@ -135,7 +136,7 @@ type jsonSyncResult struct {
 	Skipped    []jsonSkipped  `json:"skipped"`
 }
 
-func toJSONSyncResult(result marketdata.SyncResult) jsonSyncResult {
+func toJSONSyncResult(result marketruntime.SyncResult) jsonSyncResult {
 	downloaded := make([]jsonDownload, len(result.Downloaded))
 	for i, d := range result.Downloaded {
 		downloaded[i] = jsonDownload{
@@ -163,7 +164,7 @@ type jsonBuildResult struct {
 	Skipped   []jsonSkipped   `json:"skipped"`
 }
 
-func toJSONBuildResult(result marketdata.BuildResult) jsonBuildResult {
+func toJSONBuildResult(result marketruntime.BuildResult) jsonBuildResult {
 	published := make([]jsonPublished, len(result.Published))
 	for i, p := range result.Published {
 		published[i] = jsonPublished{

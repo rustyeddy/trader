@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	svcbroker "github.com/rustyeddy/trader/service/broker"
+	svcbroker "github.com/rustyeddy/trader/internal/service/broker"
 )
 
 // Supported --format values, duplicated from cmd/trader/data's own

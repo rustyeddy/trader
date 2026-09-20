@@ -4,9 +4,10 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/instrument"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/internal/strategy"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/strategy"
 )
 
 // demoStrategy is a provisional, composition-side reference strategy
@@ -77,7 +78,7 @@ func (s *demoStrategy) Start(ctx context.Context, env strategy.Environment) erro
 // with this same rule, per instrument. Each instrument's own
 // seen/entered state is independent — one instrument reaching its
 // entry bar never affects another's.
-func (s *demoStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+func (s *demoStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]runtimeorder.Intent, error) {
 	key := event.Instrument.String()
 	if s.entered[key] {
 		return nil, nil
@@ -92,5 +93,5 @@ func (s *demoStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view 
 	if err != nil {
 		return nil, err
 	}
-	return []order.Intent{in}, nil
+	return []runtimeorder.Intent{in}, nil
 }

@@ -10,6 +10,8 @@ computes a metric") but did not itself design. This ADR records the
 concrete package, model, and renderer decisions #220's design review
 settled.
 
+Amended by ADR-065: report rendering is internal runtime implementation.
+
 * Context
 
 #219/ADR-037 produced a transport-neutral `backtest.Result`/

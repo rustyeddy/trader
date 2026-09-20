@@ -9,6 +9,8 @@ package and #186-#188 depend on its existence, but no ADR records the
 decision that this composition had to live in a new top-level package
 rather than inside =execution=, =risk=, or =broker=.
 
+Amended by ADR-065: pipeline orchestration is internal runtime implementation.
+
 * Context
 
 By the time issue #185 needed to compose sizing, execution planning,

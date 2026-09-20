@@ -16,15 +16,3 @@ func TestHostClock_NowReflectsMostRecentSet(t *testing.T) {
 	c.set(next)
 	require.True(t, c.Now().Equal(next))
 }
-
-func TestHostClock_NewTimerDelegatesToRealTimer(t *testing.T) {
-	c := newHostClock(time.Now())
-	timer := c.NewTimer(10 * time.Millisecond)
-	defer timer.Stop()
-
-	select {
-	case <-timer.C():
-	case <-time.After(2 * time.Second):
-		t.Fatal("timer never fired")
-	}
-}

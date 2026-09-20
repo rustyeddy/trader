@@ -11,6 +11,8 @@ service that must construct a *fresh* stateful dependency bundle on
 every call stay consistent with every other =service/*= package's
 "never import a concrete adapter" rule.
 
+Amended by ADR-065: backtest service composition is private to Trader.
+
 * Context
 
 =backtest.Runner= is single-use: =RunnerParams= bundles a freshly

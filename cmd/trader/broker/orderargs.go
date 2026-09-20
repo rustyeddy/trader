@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/order"
 )
 
@@ -20,32 +21,32 @@ func parseOrderSide(s string) (order.Side, error) {
 }
 
 // parseOrderType parses --type into order.Type, case-insensitively.
-func parseOrderType(s string) (order.Type, error) {
+func parseOrderType(s string) (runtimeorder.Type, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "market":
-		return order.Market, nil
+		return runtimeorder.Market, nil
 	case "limit":
-		return order.Limit, nil
+		return runtimeorder.Limit, nil
 	case "stop":
-		return order.Stop, nil
+		return runtimeorder.Stop, nil
 	case "stop_limit", "stop-limit", "stoplimit":
-		return order.StopLimit, nil
+		return runtimeorder.StopLimit, nil
 	default:
 		return 0, fmt.Errorf("invalid --type %q: expected market, limit, stop, or stop-limit", s)
 	}
 }
 
 // parseTimeInForce parses --tif into order.TimeInForce, case-insensitively.
-func parseTimeInForce(s string) (order.TimeInForce, error) {
+func parseTimeInForce(s string) (runtimeorder.TimeInForce, error) {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "GTC":
-		return order.GTC, nil
+		return runtimeorder.GTC, nil
 	case "DAY":
-		return order.DAY, nil
+		return runtimeorder.DAY, nil
 	case "IOC":
-		return order.IOC, nil
+		return runtimeorder.IOC, nil
 	case "FOK":
-		return order.FOK, nil
+		return runtimeorder.FOK, nil
 	default:
 		return 0, fmt.Errorf("invalid --tif %q: expected GTC, DAY, IOC, or FOK", s)
 	}

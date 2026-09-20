@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/instrument"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	"github.com/stretchr/testify/assert"
@@ -45,23 +46,23 @@ func TestCliPriceSource(t *testing.T) {
 
 func TestResolveSubmitPriceSource(t *testing.T) {
 	t.Run("market order requires a price", func(t *testing.T) {
-		_, err := resolveSubmitPriceSource(order.Market, "EURUSD", "")
+		_, err := resolveSubmitPriceSource(runtimeorder.Market, "EURUSD", "")
 		require.ErrorContains(t, err, "--price is required")
 	})
 
 	t.Run("market order with a price builds a cliPriceSource", func(t *testing.T) {
-		src, err := resolveSubmitPriceSource(order.Market, "EURUSD", "1.10000")
+		src, err := resolveSubmitPriceSource(runtimeorder.Market, "EURUSD", "1.10000")
 		require.NoError(t, err)
 		require.IsType(t, cliPriceSource{}, src)
 	})
 
 	t.Run("market order with an invalid price is rejected", func(t *testing.T) {
-		_, err := resolveSubmitPriceSource(order.Market, "EURUSD", "not-a-number")
+		_, err := resolveSubmitPriceSource(runtimeorder.Market, "EURUSD", "not-a-number")
 		require.ErrorContains(t, err, "--price")
 	})
 
 	t.Run("non-market order needs no price and uses noPriceSource", func(t *testing.T) {
-		src, err := resolveSubmitPriceSource(order.Limit, "EURUSD", "")
+		src, err := resolveSubmitPriceSource(runtimeorder.Limit, "EURUSD", "")
 		require.NoError(t, err)
 		require.IsType(t, noPriceSource{}, src)
 	})

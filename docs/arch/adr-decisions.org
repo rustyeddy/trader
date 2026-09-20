@@ -172,6 +172,11 @@ the original decided, use full supersession instead.
 | 062 | External Strategy Protocol v1 and out-of-process architecture (in adr-062-external-strategy-protocol-v1.org) | Accepted |
 | 063 | External strategy process manager and Unix-domain socket transport (in adr-063-external-strategy-process-manager.org) | Accepted |
 | 064 | Git-describe-derived version and build metadata (in adr-064-git-describe-version-metadata.org) | Accepted |
+| 065 | Supported strategy/research API and private runtime (in adr-065-public-strategy-research-surface.org) | Accepted |
+
+ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
+015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
+Their remaining behavior contracts are unchanged; see their Status notes.
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -752,6 +757,9 @@ consumers.
 ** Status
 
 Accepted
+
+Amended by ADR-065: runtime extension ports are private; the supported external
+Go API is the strategy/research/value surface.
 
 ** Context
 

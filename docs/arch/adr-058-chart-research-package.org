@@ -5,6 +5,8 @@
 
 Accepted.
 
+Amended by ADR-065: chart rendering moves to internal/chart and is not a supported external research API.
+
 * Context
 
 Issue #355 asks for deterministic static chart generation so

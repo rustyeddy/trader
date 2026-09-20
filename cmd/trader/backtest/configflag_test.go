@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/adapters/journal/jsonl"
 	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
-	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/internal/adapters/journal/jsonl"
+	"github.com/rustyeddy/trader/internal/journal"
 )
 
 // writeConfigFile writes contents to a fresh temp file and returns its

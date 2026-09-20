@@ -13,11 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/clock"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
-	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 )
 
 // TestNextBarOpenAfterEntry_UsesFollowingBarOpenNotEntryBarClose is the
@@ -41,7 +42,7 @@ func TestNextBarOpenAfterEntry_UsesFollowingBarOpenNotEntryBarClose(t *testing.T
 	ctx := context.Background()
 
 	// Ground truth, read independently of the function under test.
-	reader, err := manager.Bars(ctx, marketdata.BarQuery{Instrument: instrumentID, Interval: marketdata.H1, Range: span})
+	reader, err := manager.Bars(ctx, marketruntime.BarQuery{Instrument: instrumentID, Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	entryBar, err := reader.Next(ctx)
 	require.NoError(t, err)
@@ -71,7 +72,7 @@ func TestNextBarOpenAfterEntry_AccountsForWarmupBars(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	reader, err := manager.Bars(ctx, marketdata.BarQuery{Instrument: instrumentID, Interval: marketdata.H1, Range: span})
+	reader, err := manager.Bars(ctx, marketruntime.BarQuery{Instrument: instrumentID, Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	_, err = reader.Next(ctx) // index 0, consumed as warm-up
 	require.NoError(t, err)
@@ -88,7 +89,7 @@ func TestNextBarOpenAfterEntry_AccountsForWarmupBars(t *testing.T) {
 
 // newGappedFixtureManager returns a *marketdata.Manager over
 // testdata/raw/oanda's deliberately gapped February fixture.
-func newGappedFixtureManager(t *testing.T) (*marketdata.Manager, instrument.ID) {
+func newGappedFixtureManager(t *testing.T) (*marketruntime.Manager, instrument.ID) {
 	t.Helper()
 
 	eurusd, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
@@ -112,7 +113,7 @@ func newGappedFixtureManager(t *testing.T) (*marketdata.Manager, instrument.ID) 
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(listing))
 
-	manager, err := marketdata.New(marketdata.Config{
+	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.NewSimulated(time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC)),
 		StoreRoot:    t.TempDir(),
 		RawRoot:      "testdata/raw/oanda",
@@ -128,7 +129,7 @@ func newGappedFixtureManager(t *testing.T) (*marketdata.Manager, instrument.ID) 
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	plan, err := manager.Plan(ctx, marketdata.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
+	plan, err := manager.Plan(ctx, marketruntime.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	if len(plan.Actions) > 0 {
 		_, err = manager.Build(ctx, plan)

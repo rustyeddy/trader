@@ -11,18 +11,19 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/adapters/strategy/external"
-	"github.com/rustyeddy/trader/clock"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/logging"
+	"github.com/rustyeddy/trader/internal/account"
+	"github.com/rustyeddy/trader/internal/adapters/strategy/external"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/logging"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/internal/strategy"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
 	"github.com/rustyeddy/trader/sdk"
-	"github.com/rustyeddy/trader/strategy"
 )
 
 // This file proves sdk against the real, production
@@ -328,7 +329,7 @@ func TestServeConn_FillHandlerRoundTrip(t *testing.T) {
 	require.NoError(t, strat.Start(context.Background(), testEnvironment(t)))
 	<-guest.startedCh
 
-	fill, err := order.NewFill(order.Fill{
+	fill, err := runtimeorder.NewFill(runtimeorder.Fill{
 		FillID:    mustFillID(t),
 		OrderID:   mustOrderID(t),
 		AccountID: mustAccountID(t),

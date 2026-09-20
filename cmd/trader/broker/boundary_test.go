@@ -27,11 +27,11 @@ var commandFiles = []string{
 // by issue #201's command-family package split), mirroring
 // cmd/trader/data's own TestCommandHandlers_NeverImportMarketdataDirectly:
 // nothing prevents a broker leaf command from importing
-// github.com/rustyeddy/trader/adapters/broker/sim directly and
+// github.com/rustyeddy/trader/internal/adapters/broker/sim directly and
 // bypassing service/broker, so it is worth a real regression test
 // rather than relying on convention alone.
 func TestCommandHandlers_NeverImportSimBrokerDirectly(t *testing.T) {
-	const forbidden = `"github.com/rustyeddy/trader/adapters/broker/sim"`
+	const forbidden = `"github.com/rustyeddy/trader/internal/adapters/broker/sim"`
 
 	fset := token.NewFileSet()
 	for _, name := range commandFiles {

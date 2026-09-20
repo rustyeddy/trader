@@ -5,8 +5,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
-	svcbroker "github.com/rustyeddy/trader/service/broker"
+	"github.com/rustyeddy/trader/internal/account"
+	svcbroker "github.com/rustyeddy/trader/internal/service/broker"
 )
 
 // jsonFormatter renders a stable, structured JSON document per

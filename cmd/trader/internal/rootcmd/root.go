@@ -35,8 +35,8 @@ import (
 	"github.com/rustyeddy/trader/cmd/trader/data"
 	"github.com/rustyeddy/trader/cmd/trader/execution"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/logging"
+	"github.com/rustyeddy/trader/internal/config"
+	"github.com/rustyeddy/trader/internal/logging"
 	"github.com/rustyeddy/trader/version"
 )
 
