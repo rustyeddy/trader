@@ -3,7 +3,7 @@ package broker
 import (
 	"github.com/spf13/cobra"
 
-	svcbroker "github.com/rustyeddy/trader/service/broker"
+	svcbroker "github.com/rustyeddy/trader/internal/service/broker"
 )
 
 // newAccountsCmd implements "trader broker accounts [--format]"

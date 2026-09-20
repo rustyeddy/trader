@@ -15,21 +15,22 @@ import (
 
 	"github.com/spf13/cobra"
 
-	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
-	"github.com/rustyeddy/trader/adapters/journal/jsonl"
-	"github.com/rustyeddy/trader/adapters/strategy/external"
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/journal"
+	simbroker "github.com/rustyeddy/trader/internal/adapters/broker/sim"
+	"github.com/rustyeddy/trader/internal/adapters/journal/jsonl"
+	"github.com/rustyeddy/trader/internal/adapters/strategy/external"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/journal"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	"github.com/rustyeddy/trader/internal/report"
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
+	svcmarketdata "github.com/rustyeddy/trader/internal/service/marketdata"
+	"github.com/rustyeddy/trader/internal/strategy"
+	"github.com/rustyeddy/trader/internal/strategy/emacross"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	strategyv1 "github.com/rustyeddy/trader/protocol/strategy/v1"
-	"github.com/rustyeddy/trader/report"
-	svcbacktest "github.com/rustyeddy/trader/service/backtest"
-	svcmarketdata "github.com/rustyeddy/trader/service/marketdata"
-	"github.com/rustyeddy/trader/strategy"
-	"github.com/rustyeddy/trader/strategy/emacross"
 )
 
 // strategyConfigPathEnv names the environment variable "trader
@@ -631,7 +632,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		return err
 	}
 
-	manager, err := marketdata.New(marketdata.Config{
+	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.Real{},
 		StoreRoot:    storeRoot,
 		RawRoot:      flags.dataRawRoot,
@@ -645,7 +646,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	// Ensure canonical data is published for every requested instrument
 	// before either strategy path below reads it.
 	for _, instrumentID := range instruments.ids {
-		plan, err := manager.Plan(ctx, marketdata.BarQuery{Instrument: instrumentID, Interval: interval, Range: span})
+		plan, err := manager.Plan(ctx, marketruntime.BarQuery{Instrument: instrumentID, Interval: interval, Range: span})
 		if err != nil {
 			return err
 		}
@@ -697,7 +698,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		}
 
 		src := newNextBarOpenPriceSource()
-		if err := src.load(ctx, manager, listing.Symbol(), marketdata.BarQuery{Instrument: instID, Interval: interval, Range: span}); err != nil {
+		if err := src.load(ctx, manager, listing.Symbol(), marketruntime.BarQuery{Instrument: instID, Interval: interval, Range: span}); err != nil {
 			return fmt.Errorf("loading canonical prices for %s: %w", instID, err)
 		}
 
@@ -761,7 +762,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		src := newNextBarOpenPriceSource()
 		for _, instrumentID := range instruments.ids {
 			listing := instruments.simListing[instrumentID.String()]
-			if err := src.load(ctx, manager, listing.Symbol(), marketdata.BarQuery{Instrument: instrumentID, Interval: interval, Range: span}); err != nil {
+			if err := src.load(ctx, manager, listing.Symbol(), marketruntime.BarQuery{Instrument: instrumentID, Interval: interval, Range: span}); err != nil {
 				return fmt.Errorf("loading canonical prices for %s: %w", instrumentID, err)
 			}
 		}
@@ -921,8 +922,8 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 // bar's Open. Each instrument's own entry/fill bar is computed
 // independently, since demoStrategy enters each instrument on that
 // instrument's own first bar, not a shared portfolio-wide bar index.
-func nextBarOpenAfterEntry(ctx context.Context, manager *marketdata.Manager, instrumentID instrument.ID, interval marketdata.Interval, span marketdata.TimeRange, warmupBars int) (num.Price, error) {
-	reader, err := manager.Bars(ctx, marketdata.BarQuery{Instrument: instrumentID, Interval: interval, Range: span})
+func nextBarOpenAfterEntry(ctx context.Context, manager *marketruntime.Manager, instrumentID instrument.ID, interval marketdata.Interval, span marketdata.TimeRange, warmupBars int) (num.Price, error) {
+	reader, err := manager.Bars(ctx, marketruntime.BarQuery{Instrument: instrumentID, Interval: interval, Range: span})
 	if err != nil {
 		return num.Price{}, err
 	}

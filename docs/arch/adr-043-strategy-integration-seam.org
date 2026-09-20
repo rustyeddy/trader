@@ -11,6 +11,8 @@ records the verification performed, the new evidence added, and the
 documented future-boundary analysis, per the issue's plan/review
 thread.
 
+Amended by ADR-065: in-process strategy composition is private; external strategies use sdk and Protocol v1.
+
 * Context
 
 Before implementation, I confirmed most of #225's acceptance criteria

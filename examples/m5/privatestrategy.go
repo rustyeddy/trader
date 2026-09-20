@@ -27,9 +27,10 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/instrument"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/internal/strategy"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/strategy"
 )
 
 // PrivateStrategy is the representative external strategy
@@ -70,7 +71,7 @@ func (s *PrivateStrategy) Start(ctx context.Context, env strategy.Environment) e
 }
 
 // OnBar implements strategy.Strategy.
-func (s *PrivateStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+func (s *PrivateStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]runtimeorder.Intent, error) {
 	if s.entered {
 		return nil, nil
 	}
@@ -80,5 +81,5 @@ func (s *PrivateStrategy) OnBar(ctx context.Context, event strategy.BarEvent, vi
 	if err != nil {
 		return nil, err
 	}
-	return []order.Intent{in}, nil
+	return []runtimeorder.Intent{in}, nil
 }

@@ -30,7 +30,7 @@ var forbiddenOrchestrationCalls = map[string]bool{
 // .go file in this package and fails if it finds a call expression of
 // the shape <alias>.NewRunner(...)/<alias>.NewScheduler(...)/
 // <alias>.NewReplay(...) where <alias> is bound to
-// "github.com/rustyeddy/trader/backtest" in that file's own imports.
+// "github.com/rustyeddy/trader/internal/backtest" in that file's own imports.
 func TestCmdBacktestNeverCallsOrchestrationDirectly(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestCmdBacktestNeverCallsOrchestrationDirectly(t *testing.T) {
 		backtestAlias := ""
 		for _, imp := range f.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)
-			if path != "github.com/rustyeddy/trader/backtest" {
+			if path != "github.com/rustyeddy/trader/internal/backtest" {
 				continue
 			}
 			if imp.Name != nil {

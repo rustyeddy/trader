@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/pipeline"
+	"github.com/rustyeddy/trader/internal/pipeline"
 )
 
 func TestResolveFormatter(t *testing.T) {

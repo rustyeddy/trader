@@ -1,0 +1,130 @@
+package logging_test
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/rustyeddy/trader/internal/logging"
+)
+
+// ExampleNew shows typical composition-root wiring: build a Config
+// (normally via config.Load[logging.Config]), build a logger from it, and
+// defer closing whatever it opened.
+//
+// This example is not output-verified: TextHandler's default output
+// includes a wall-clock timestamp, which would make the expected output
+// different on every run. See ExampleCapture for a fully verified example.
+func ExampleNew() {
+	cfg := logging.Config{
+		Level:  0, // slog.LevelInfo
+		Format: "text",
+		Output: "stdout",
+	}
+
+	logger, closer, err := logging.New(cfg)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	defer func() { _ = closer.Close() }()
+
+	logger.Info("server started", "port", 8080)
+}
+
+// ExampleCapture shows the test-kit pattern for asserting on structured log
+// output without parsing formatted console text.
+func ExampleCapture() {
+	logger, rec := logging.Capture()
+
+	logger.Info("order placed", logging.OrderID, "abc123")
+
+	for _, r := range rec.Records() {
+		fmt.Println(r.Message, r.Attrs[logging.OrderID])
+	}
+	// Output:
+	// order placed abc123
+}
+
+// ExampleSecret shows redacting a sensitive value at the call site, the
+// package's primary redaction mechanism.
+func ExampleSecret() {
+	logger, rec := logging.Capture()
+
+	logger.Info("authenticated", "password", logging.Secret("hunter2"))
+
+	fmt.Println(rec.Records()[0].Attrs["password"])
+	// Output:
+	// REDACTED
+}
+
+// ExampleWithCorrelationID shows propagating a correlation ID through
+// context.Context so every record logged while handling one logical
+// operation can be grouped together, without passing the attribute
+// explicitly at every call site.
+func ExampleWithCorrelationID() {
+	logger, rec := logging.Capture()
+
+	ctx := logging.WithCorrelationID(context.Background(), "corr-123")
+	logger.InfoContext(ctx, "processing order")
+
+	fmt.Println(rec.Records()[0].Attrs[logging.CorrelationID])
+	// Output:
+	// corr-123
+}
+
+// ExampleWithComponent shows scoping a logger to one subsystem, so its
+// records stay distinguishable from other subsystems after aggregation.
+// ComponentBroker is one of the small, canonical vocabulary of component
+// names attrs.go defines (issue #126) — call sites use these names rather
+// than inventing their own spelling for the same subsystem.
+func ExampleWithComponent() {
+	logger, rec := logging.Capture()
+
+	broker := logging.WithComponent(logger, logging.ComponentBroker)
+	broker.Info("connected")
+
+	fmt.Println(rec.Records()[0].Attrs[logging.Component])
+	// Output:
+	// broker
+}
+
+// ExampleNewMulti shows the primary multi-output use case (issue #127):
+// simultaneous operator console output and a persistent log file. This
+// example is not output-verified for the same reason ExampleNew isn't: a
+// wall-clock timestamp in the text output would differ on every run.
+func ExampleNewMulti() {
+	// A unique, self-cleaning temp file, not a fixed path: this example
+	// runs under `go test`, and a fixed path would leave a real file
+	// behind (or collide with a concurrent/repeated run).
+	f, err := os.CreateTemp("", "trader-example-*.log")
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	logger, closer, err := logging.NewMulti([]logging.Config{
+		{Format: "text", Output: "stdout"},
+		{Format: "json", Output: path},
+	})
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	defer func() { _ = closer.Close() }()
+
+	logger.Info("dataset published", "instrument", "EURUSD")
+}
+
+// ExampleDiscard shows building a valid logger for a component test that
+// doesn't care about log output.
+func ExampleDiscard() {
+	logger := logging.Discard()
+	logger.Info("this goes nowhere")
+	_, _ = fmt.Fprintln(os.Stdout, "component ran without a real logger")
+	// Output:
+	// component ran without a real logger
+}

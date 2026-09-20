@@ -1,0 +1,225 @@
+package order_test
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/id"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/order"
+)
+
+func exampleListing() instrument.Listing {
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	if err != nil {
+		panic(err)
+	}
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   "OANDA",
+		Symbol:     "EUR_USD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return listing
+}
+
+// Example_proposalToRequest shows the proposal-to-request stage: a
+// Proposal is validated on its own, then assigned a Trader OrderID to
+// become a Request ready for submission.
+func Example_proposalToRequest() {
+	g := id.NewGenerator(clock.NewSimulated(time.Now()), id.NewDeterministic(1, 2))
+	accountID, err := id.GenerateAccountID(g)
+	if err != nil {
+		panic(err)
+	}
+
+	proposal, err := runtimeorder.NewProposal(runtimeorder.Proposal{
+		Listing:     exampleListing(),
+		AccountID:   accountID,
+		Side:        order.Buy,
+		Type:        runtimeorder.Market,
+		TimeInForce: runtimeorder.GTC,
+		Quantity:    num.MustParseQuantity("1000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	orderID, err := id.GenerateOrderID(g)
+	if err != nil {
+		panic(err)
+	}
+	request, err := runtimeorder.NewRequest(proposal, orderID)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(request.Side, request.Type, request.Quantity)
+	// Output:
+	// buy market 1000
+}
+
+// ExampleOrder_RemainingQuantity shows that remaining quantity derives
+// from the broker-accepted quantity, not the originally requested one —
+// a broker may accept a normalized quantity that differs from what was
+// requested.
+func ExampleOrder_RemainingQuantity() {
+	g := id.NewGenerator(clock.NewSimulated(time.Now()), id.NewDeterministic(1, 2))
+	accountID, err := id.GenerateAccountID(g)
+	if err != nil {
+		panic(err)
+	}
+	proposal, err := runtimeorder.NewProposal(runtimeorder.Proposal{
+		Listing:     exampleListing(),
+		AccountID:   accountID,
+		Side:        order.Buy,
+		Type:        runtimeorder.Market,
+		TimeInForce: runtimeorder.GTC,
+		Quantity:    num.MustParseQuantity("1000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	orderID, err := id.GenerateOrderID(g)
+	if err != nil {
+		panic(err)
+	}
+	request, err := runtimeorder.NewRequest(proposal, orderID)
+	if err != nil {
+		panic(err)
+	}
+
+	accepted := num.MustParseQuantity("1000")
+	o, err := runtimeorder.NewOrder(runtimeorder.Order{
+		Request:          request,
+		AcceptedQuantity: &accepted,
+		FilledQuantity:   num.MustParseQuantity("400"),
+		Status:           runtimeorder.StatusPartiallyFilled,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	remaining, err := o.RemainingQuantity()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(remaining)
+	// Output:
+	// 600
+}
+
+// Example_unknownBrokerStatus shows that an unrecognized broker status
+// or rejection code becomes the safe Unknown value rather than a crash
+// or a guess, while the broker's own text is preserved.
+func Example_unknownBrokerStatus() {
+	// parseBrokerStatus stands in for an adapter's own mapping from a
+	// broker's status vocabulary to order.Status.
+	parseBrokerStatus := func(brokerText string) runtimeorder.Status {
+		switch brokerText {
+		case "OPEN":
+			return runtimeorder.StatusWorking
+		default:
+			return runtimeorder.StatusUnknown
+		}
+	}
+
+	fmt.Println(parseBrokerStatus("OPEN"))
+	fmt.Println(parseBrokerStatus("SOME_NEW_BROKER_STATE"))
+	// Output:
+	// working
+	// unknown
+}
+
+// Example_lifecycle walks an order from submission through acceptance
+// and two partial fills to StatusFilled, using the named Apply*
+// functions rather than setting Status directly.
+func Example_lifecycle() {
+	g := id.NewGenerator(clock.NewSimulated(time.Now()), id.NewDeterministic(3, 4))
+	accountID, err := id.GenerateAccountID(g)
+	if err != nil {
+		panic(err)
+	}
+	listing := exampleListing()
+
+	proposal, err := runtimeorder.NewProposal(runtimeorder.Proposal{
+		Listing:     listing,
+		AccountID:   accountID,
+		Side:        order.Buy,
+		Type:        runtimeorder.Market,
+		TimeInForce: runtimeorder.GTC,
+		Quantity:    num.MustParseQuantity("1000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	orderID, err := id.GenerateOrderID(g)
+	if err != nil {
+		panic(err)
+	}
+	request, err := runtimeorder.NewRequest(proposal, orderID)
+	if err != nil {
+		panic(err)
+	}
+	o, err := runtimeorder.NewOrder(runtimeorder.Order{Request: request, Status: runtimeorder.StatusPendingSubmit})
+	if err != nil {
+		panic(err)
+	}
+
+	o, err = runtimeorder.ApplyAcceptance(o, "broker-order-1", num.MustParseQuantity("1000"), nil, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	fill := func(quantity string) runtimeorder.Fill {
+		fillID, ferr := id.GenerateFillID(g)
+		if ferr != nil {
+			panic(ferr)
+		}
+		f, ferr := runtimeorder.NewFill(runtimeorder.Fill{
+			FillID:        fillID,
+			OrderID:       o.Request.OrderID,
+			BrokerOrderID: o.BrokerOrderID,
+			AccountID:     o.Request.AccountID,
+			Listing:       listing,
+			Side:          o.Request.Side,
+			Price:         num.MustParsePrice("1.10000"),
+			Quantity:      num.MustParseQuantity(quantity),
+		})
+		if ferr != nil {
+			panic(ferr)
+		}
+		return f
+	}
+
+	o, err = runtimeorder.ApplyFill(o, fill("400"))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(o.Status, o.FilledQuantity)
+
+	o, err = runtimeorder.ApplyFill(o, fill("600"))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(o.Status, o.FilledQuantity)
+	// Output:
+	// partially_filled 400
+	// filled 1000
+}

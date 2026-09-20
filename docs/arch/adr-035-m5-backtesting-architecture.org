@@ -9,6 +9,8 @@ accidental boundaries, following the same design-notes-then-review
 pattern issue #176 (M4-01) used to extract ADR-005/ADR-006 ahead of
 M4.
 
+Amended by ADR-065: backtest, strategy, and supporting runtime packages are internal; the supported external surface is SDK/research/values.
+
 * Context
 
 By the start of M5, the following was already =Accepted= and directly

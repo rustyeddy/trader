@@ -24,19 +24,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
-	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/examples/m5"
-	"github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	simbroker "github.com/rustyeddy/trader/internal/adapters/broker/sim"
+	"github.com/rustyeddy/trader/internal/backtest"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/execution"
+	"github.com/rustyeddy/trader/internal/id"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	"github.com/rustyeddy/trader/internal/pipeline"
+	"github.com/rustyeddy/trader/internal/risk"
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/pipeline"
-	"github.com/rustyeddy/trader/risk"
-	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 )
 
 func eurusdListing(t *testing.T, provider string) instrument.Listing {
@@ -165,7 +166,7 @@ func TestPrivateStrategy_RunsThroughPublicBacktestService(t *testing.T) {
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t, "oanda")))
 
-	manager, err := marketdata.New(marketdata.Config{
+	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.NewSimulated(time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)),
 		StoreRoot:    t.TempDir(),
 		RawRoot:      "testdata/raw/oanda",
@@ -185,7 +186,7 @@ func TestPrivateStrategy_RunsThroughPublicBacktestService(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	plan, err := manager.Plan(ctx, marketdata.BarQuery{Instrument: simListing.InstrumentID(), Interval: marketdata.H1, Range: span})
+	plan, err := manager.Plan(ctx, marketruntime.BarQuery{Instrument: simListing.InstrumentID(), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	if len(plan.Actions) > 0 {
 		_, err = manager.Build(ctx, plan)

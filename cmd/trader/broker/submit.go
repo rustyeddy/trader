@@ -5,11 +5,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/clock"
-	"github.com/rustyeddy/trader/id"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/id"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	svcbroker "github.com/rustyeddy/trader/internal/service/broker"
 	"github.com/rustyeddy/trader/num"
-	"github.com/rustyeddy/trader/order"
-	svcbroker "github.com/rustyeddy/trader/service/broker"
 )
 
 // submitFlags holds "trader broker submit"'s own local flags,
@@ -136,7 +136,7 @@ func runSubmit(cmd *cobra.Command, flags submitFlags) error {
 	if err != nil {
 		return err
 	}
-	proposal, err := order.NewProposal(order.Proposal{
+	proposal, err := runtimeorder.NewProposal(runtimeorder.Proposal{
 		Listing:     listing,
 		AccountID:   accountID,
 		Side:        sideVal,
@@ -154,7 +154,7 @@ func runSubmit(cmd *cobra.Command, flags submitFlags) error {
 	if err != nil {
 		return err
 	}
-	req, err := order.NewRequest(proposal, orderID)
+	req, err := runtimeorder.NewRequest(proposal, orderID)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/rustyeddy/trader/report"
+	"github.com/rustyeddy/trader/internal/report"
 )
 
 // Format names accepted by --format on both "run" and "show". Unlike

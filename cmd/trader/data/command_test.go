@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/cmd/trader/internal/rootcmd"
-	"github.com/rustyeddy/trader/marketdata"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 )
 
 // discard is a minimal io.Writer that keeps test output out of `go
@@ -196,8 +196,7 @@ func TestDataBars_DefaultsStoreRootWhenOmitted(t *testing.T) {
 	root.SetErr(new(discard))
 
 	err := root.ExecuteContext(context.Background())
-	require.ErrorIs(t, err, marketdata.ErrDataUnavailable,
-		"a default store root must be computed and used, reaching Manager rather than failing at config load")
+	require.ErrorIs(t, err, marketruntime.ErrDataUnavailable, "a default store root must be computed and used, reaching Manager rather than failing at config load")
 }
 
 func TestDataPlan_PropagatesCancelledContext(t *testing.T) {

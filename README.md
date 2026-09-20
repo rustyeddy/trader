@@ -39,17 +39,19 @@ Trader's architecture is guided by a small set of principles:
 
 ## Packages
 
-Trader is organized as a set of small, single-responsibility packages —
-exact numeric types, deterministic time, canonical market data, broker-neutral
-order/strategy vocabulary, execution/risk/pipeline orchestration, and
-backtesting — layered per the architecture document's dependency direction.
-
-See the [Developer's Guide](docs/DevelopersGuide.md) for a tour of every
-public package, with short usage examples and links to the full package doc
-comments and ADRs behind each boundary.
+Trader's supported Go API is the external strategy/research/value surface:
+`sdk`, `indicator`, `analysis`, `marketdata`, `instrument`, `num`, `order`,
+`version`, and `protocol/strategy/v1`. Runtime composition, data acquisition,
+brokers, orders, backtesting, and reporting live under `internal/` (ADR-065).
 
 Guest strategies use [`sdk`](sdk) (`github.com/rustyeddy/trader/sdk`).
 See [`examples/sdk-minimal`](examples/sdk-minimal) for a complete example.
+`sdk.Clock` exposes host time through `Now()`; Protocol v1 has no guest timer
+capability. Runtime packages are not supported external imports.
+
+See the [package boundary matrix](docs/arch/package-boundaries.org) and
+[Developer's Guide](docs/DevelopersGuide.md) for public contracts and private
+implementation details. This pre-release change has no compatibility shims.
 
 ## Documentation
 

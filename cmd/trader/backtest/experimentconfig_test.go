@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/strategy/emacross"
+	"github.com/rustyeddy/trader/internal/config"
+	"github.com/rustyeddy/trader/internal/strategy/emacross"
 )
 
 // issue247CandidateYAML is #247's own candidate YAML, verbatim.

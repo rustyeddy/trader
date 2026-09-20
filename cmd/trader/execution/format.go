@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	svcexecution "github.com/rustyeddy/trader/service/execution"
+	svcexecution "github.com/rustyeddy/trader/internal/service/execution"
 )
 
 // Supported --format values, duplicated from cmd/trader/data's and

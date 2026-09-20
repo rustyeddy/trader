@@ -14,6 +14,8 @@ domain area as its own subpackage (=service/marketdata= is the
 first). See the Open Questions section for the retired question's
 resolution.
 
+Amended by ADR-065: service and runtime composition packages are internal; marketdata.Manager is no longer an external API.
+
 * Context
 
 Trader now has a completed Milestone 2 historical market-data

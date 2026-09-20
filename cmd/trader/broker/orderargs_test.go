@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/order"
 )
 
@@ -30,14 +31,14 @@ func TestParseOrderSide(t *testing.T) {
 func TestParseOrderType(t *testing.T) {
 	cases := []struct {
 		in   string
-		want order.Type
+		want runtimeorder.Type
 	}{
-		{"market", order.Market},
-		{"limit", order.Limit},
-		{"stop", order.Stop},
-		{"stop-limit", order.StopLimit},
-		{"stop_limit", order.StopLimit},
-		{"STOPLIMIT", order.StopLimit},
+		{"market", runtimeorder.Market},
+		{"limit", runtimeorder.Limit},
+		{"stop", runtimeorder.Stop},
+		{"stop-limit", runtimeorder.StopLimit},
+		{"stop_limit", runtimeorder.StopLimit},
+		{"STOPLIMIT", runtimeorder.StopLimit},
 	}
 	for _, c := range cases {
 		got, err := parseOrderType(c.in)
@@ -52,12 +53,12 @@ func TestParseOrderType(t *testing.T) {
 func TestParseTimeInForce(t *testing.T) {
 	cases := []struct {
 		in   string
-		want order.TimeInForce
+		want runtimeorder.TimeInForce
 	}{
-		{"gtc", order.GTC},
-		{"DAY", order.DAY},
-		{"ioc", order.IOC},
-		{"FOK", order.FOK},
+		{"gtc", runtimeorder.GTC},
+		{"DAY", runtimeorder.DAY},
+		{"ioc", runtimeorder.IOC},
+		{"FOK", runtimeorder.FOK},
 	}
 	for _, c := range cases {
 		got, err := parseTimeInForce(c.in)

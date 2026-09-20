@@ -7,6 +7,8 @@
 
 Proposed
 
+Amended by ADR-065: runtime clock/timer implementations are internal; sdk.Clock exposes only host Now.
+
 ** Context
 
 Trader must run the same application and domain behavior in live, paper,

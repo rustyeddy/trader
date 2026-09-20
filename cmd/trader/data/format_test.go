@@ -9,9 +9,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
-	svc "github.com/rustyeddy/trader/service/marketdata"
 )
 
 func TestResolveFormatter_Table(t *testing.T) {
@@ -53,20 +54,20 @@ func TestTableFormatter_PropagatesWriteErrors(t *testing.T) {
 	w := failingWriter{}
 
 	require.ErrorIs(t, f.FormatBars(w, svc.BarsResponse{Bars: []marketdata.Bar{sampleBar(t)}}), errAlwaysFails)
-	require.ErrorIs(t, f.FormatCoverage(w, svc.CoverageResponse{Coverage: marketdata.Coverage{
-		Partitions: []marketdata.PartitionCoverage{{Year: 2024, Month: time.January}},
+	require.ErrorIs(t, f.FormatCoverage(w, svc.CoverageResponse{Coverage: marketruntime.Coverage{
+		Partitions: []marketruntime.PartitionCoverage{{Year: 2024, Month: time.January}},
 	}}), errAlwaysFails)
 	require.ErrorIs(t, f.FormatPlan(w, svc.PlanResponse{}), errAlwaysFails,
 		"FormatPlan's zero-Actions \"nothing required\" line must also report a write failure")
-	require.ErrorIs(t, f.FormatSync(w, svc.SyncResponse{Result: marketdata.SyncResult{
-		Downloaded: []marketdata.DownloadResult{{}},
+	require.ErrorIs(t, f.FormatSync(w, svc.SyncResponse{Result: marketruntime.SyncResult{
+		Downloaded: []marketruntime.DownloadResult{{}},
 	}}), errAlwaysFails)
-	require.ErrorIs(t, f.FormatBuild(w, svc.BuildResponse{Result: marketdata.BuildResult{
-		Published: []marketdata.PublishResult{{}},
+	require.ErrorIs(t, f.FormatBuild(w, svc.BuildResponse{Result: marketruntime.BuildResult{
+		Published: []marketruntime.PublishResult{{}},
 	}}), errAlwaysFails)
 	require.ErrorIs(t, f.FormatUpdateProgress(w, svc.UpdateResponse{
 		SyncPerformed: true,
-		Sync:          svc.SyncResponse{Result: marketdata.SyncResult{Downloaded: []marketdata.DownloadResult{{}}}},
+		Sync:          svc.SyncResponse{Result: marketruntime.SyncResult{Downloaded: []marketruntime.DownloadResult{{}}}},
 	}), errAlwaysFails)
 	require.ErrorIs(t, f.FormatUpdate(w, svc.UpdateResponse{}), errAlwaysFails,
 		"FormatUpdate's \"already current\" line must also report a write failure")
@@ -125,8 +126,8 @@ func TestJSONFormatter_FormatPlan_EmptyActionsIsEmptyArray(t *testing.T) {
 }
 
 func TestJSONFormatter_FormatPlan_ActionFields(t *testing.T) {
-	plan := marketdata.Plan{Actions: []marketdata.Action{
-		{Kind: marketdata.ActionNormalizeCanonical, Interval: marketdata.H1, Year: 2024, Month: time.January, Reason: "missing"},
+	plan := marketruntime.Plan{Actions: []marketruntime.Action{
+		{Kind: marketruntime.ActionNormalizeCanonical, Interval: marketdata.H1, Year: 2024, Month: time.January, Reason: "missing"},
 	}}
 	var buf bytes.Buffer
 	err := jsonFormatter{}.FormatPlan(&buf, svc.PlanResponse{Plan: plan})
@@ -191,14 +192,14 @@ func TestJSONFormatter_FormatUpdateProgress_NeverClaimsAlreadyCurrent(t *testing
 }
 
 func TestJSONFormatter_FormatSync(t *testing.T) {
-	result := marketdata.SyncResult{
-		Downloaded: []marketdata.DownloadResult{{
-			Action:         marketdata.Action{Interval: marketdata.H1, Year: 2024, Month: time.January},
+	result := marketruntime.SyncResult{
+		Downloaded: []marketruntime.DownloadResult{{
+			Action:         marketruntime.Action{Interval: marketdata.H1, Year: 2024, Month: time.January},
 			RecordsWritten: 3,
 			RecordsRevised: 2,
 		}},
-		Skipped: []marketdata.SkippedAction{{
-			Action: marketdata.Action{Kind: marketdata.ActionRepairRaw, Interval: marketdata.H1, Year: 2024, Month: time.January},
+		Skipped: []marketruntime.SkippedAction{{
+			Action: marketruntime.Action{Kind: marketruntime.ActionRepairRaw, Interval: marketdata.H1, Year: 2024, Month: time.January},
 			Reason: "raw partition invalid",
 		}},
 	}
@@ -233,9 +234,9 @@ func TestJSONFormatter_FormatSync(t *testing.T) {
 // should never need to distinguish "zero" from "the field doesn't
 // exist here."
 func TestJSONFormatter_FormatSync_ZeroRecordsRevisedIsNotOmitted(t *testing.T) {
-	result := marketdata.SyncResult{
-		Downloaded: []marketdata.DownloadResult{{
-			Action:         marketdata.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
+	result := marketruntime.SyncResult{
+		Downloaded: []marketruntime.DownloadResult{{
+			Action:         marketruntime.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
 			RecordsWritten: 21,
 			RecordsRevised: 0,
 		}},
@@ -247,9 +248,9 @@ func TestJSONFormatter_FormatSync_ZeroRecordsRevisedIsNotOmitted(t *testing.T) {
 }
 
 func TestTableFormatter_FormatSync(t *testing.T) {
-	result := marketdata.SyncResult{
-		Downloaded: []marketdata.DownloadResult{{
-			Action:         marketdata.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
+	result := marketruntime.SyncResult{
+		Downloaded: []marketruntime.DownloadResult{{
+			Action:         marketruntime.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
 			RecordsWritten: 21,
 			RecordsRevised: 2,
 		}},
@@ -265,9 +266,9 @@ func TestTableFormatter_FormatSync(t *testing.T) {
 // table format: a zero revised count is printed as "0 revised", not
 // silently dropped from the line.
 func TestTableFormatter_FormatSync_ZeroRevisedIsShown(t *testing.T) {
-	result := marketdata.SyncResult{
-		Downloaded: []marketdata.DownloadResult{{
-			Action:         marketdata.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
+	result := marketruntime.SyncResult{
+		Downloaded: []marketruntime.DownloadResult{{
+			Action:         marketruntime.Action{Interval: marketdata.D1, Year: 2024, Month: time.January},
 			RecordsWritten: 21,
 		}},
 	}
@@ -278,9 +279,9 @@ func TestTableFormatter_FormatSync_ZeroRevisedIsShown(t *testing.T) {
 }
 
 func TestJSONFormatter_FormatBuild(t *testing.T) {
-	result := marketdata.BuildResult{
-		Published: []marketdata.PublishResult{{
-			Action:   marketdata.Action{Interval: marketdata.H1, Year: 2024, Month: time.January},
+	result := marketruntime.BuildResult{
+		Published: []marketruntime.PublishResult{{
+			Action:   marketruntime.Action{Interval: marketdata.H1, Year: 2024, Month: time.January},
 			BarCount: 216,
 		}},
 	}
@@ -304,9 +305,9 @@ func TestJSONFormatter_FormatCoverage(t *testing.T) {
 		time.Date(2024, time.January, 2, 0, 0, 0, 0, time.UTC),
 	)
 	require.NoError(t, err)
-	cov := marketdata.Coverage{
-		Partitions: []marketdata.PartitionCoverage{{Year: 2024, Month: time.January, Status: marketdata.PartitionCoverageMissing}},
-		Gaps:       []marketdata.Gap{{State: marketdata.IntervalStateMissing, Span: span}},
+	cov := marketruntime.Coverage{
+		Partitions: []marketruntime.PartitionCoverage{{Year: 2024, Month: time.January, Status: marketruntime.PartitionCoverageMissing}},
+		Gaps:       []marketruntime.Gap{{State: marketdata.IntervalStateMissing, Span: span}},
 	}
 
 	var buf bytes.Buffer

@@ -11,6 +11,8 @@ originally accepted inline in that document. The registry
 file is authoritative for ADR-008's Status, Context, Decision,
 Consequences, and Alternatives Considered.
 
+Amended by ADR-065: the broker port and simulator adapter are private runtime packages.
+
 * Context
 
 If backtests and paper simulations use a bespoke path inside the strategy

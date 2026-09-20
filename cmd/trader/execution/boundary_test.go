@@ -38,10 +38,10 @@ var compositionRootFiles = map[string]bool{
 // itself, so it is worth a real regression test rather than relying on
 // convention alone.
 var forbiddenImports = []string{
-	`"github.com/rustyeddy/trader/adapters/broker/sim"`,
-	`"github.com/rustyeddy/trader/pipeline"`,
-	`"github.com/rustyeddy/trader/execution"`,
-	`"github.com/rustyeddy/trader/risk"`,
+	`"github.com/rustyeddy/trader/internal/adapters/broker/sim"`,
+	`"github.com/rustyeddy/trader/internal/pipeline"`,
+	`"github.com/rustyeddy/trader/internal/execution"`,
+	`"github.com/rustyeddy/trader/internal/risk"`,
 }
 
 // TestCommandHandlers_NeverImportDomainOrSimulatorDirectly scans every

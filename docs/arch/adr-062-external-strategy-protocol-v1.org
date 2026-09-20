@@ -12,6 +12,8 @@ package placement, versioning, and ownership decisions the issue's own
 out-of-process analysis into an actual design rather than building
 against undocumented assumptions.
 
+Amended by ADR-065: SDK Clock exposes only host Now; runtime clocks, IDs, and tradertest are internal.
+
 * Context
 
 ADR-005 already establishes that a strategy emits =order.Intent=

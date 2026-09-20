@@ -1,6 +1,6 @@
 # Trader Developer's Guide
 
-This guide tours Trader's public packages, organized by architectural layer
+This guide tours Trader's supported public API and private runtime packages, organized by architectural layer
 (foundation → domain → orchestration → adapters → applications), matching the
 dependency direction described in
 [the framework architecture document](arch/trader-framework-architecture.org).
@@ -12,6 +12,21 @@ See the [README](../README.md) for project status, design principles, and
 getting-started instructions. See
 [Architecture Decision Records](arch/adr-decisions.org) for the durable
 decisions behind each boundary mentioned here.
+
+## Supported external API
+
+Only `sdk`, `indicator`, `analysis`, `marketdata`, `instrument`, `num`, `order`,
+`version`, and `protocol/strategy/v1` are supported external library packages.
+All runtime composition examples below are for contributors working inside
+Trader's module; they cannot be imported from an external strategy repository.
+See [ADR-065](arch/adr-065-public-strategy-research-surface.org) for the
+pre-release compatibility decision and [the matrix](arch/package-boundaries.org).
+
+Guest authors implement `sdk.Strategy`; `sdk.Environment.Clock` is a
+`sdk.Clock` exposing only `Now() time.Time`, supplied by the host. Runtime
+clocks, IDs, and test builders are internal. The separate-module tests in
+`test/architecture` verify both usable public contracts and forbidden
+runtime imports.
 
 ## Foundation Packages
 
@@ -41,7 +56,7 @@ serialize/reparse round-trip through decimal text; see
 [ADR-004](arch/adr-004-exact-numeric-representation.org) for the full exact
 numeric design rationale.
 
-### id
+### internal/id
 
 `id` provides Trader-owned identifiers — `RunID`, `OrderID`, `FillID`,
 `EventID`, `CorrelationID`, `IntentID`, and `AccountID` — each a distinct Go
@@ -58,10 +73,10 @@ order, err := id.GenerateOrderID(g)
 `id.Metadata` traces a value through a multi-stage workflow — one
 `CorrelationID` shared throughout, each stage's `CausationID` pointing at
 the `EventID` immediately before it. See the
-[package doc comment](../id/doc.go) for the full identifier list and the
+[package doc comment](../internal/id/doc.go) for the full identifier list and the
 worked intent → proposal → order → fill example.
 
-### clock
+### internal/clock
 
 `clock` is Trader's deterministic time seam: domain and application code
 receives a `clock.Clock` instead of calling `time.Now`/`time.NewTimer`
@@ -77,12 +92,12 @@ c.Advance(10 * time.Second)
 deadline := <-timer.C() // ready immediately, no sleep
 ```
 
-See the [package doc comment](../clock/doc.go) and
+See the [package doc comment](../internal/clock/doc.go) and
 [ADR-015](arch/adr-015-deterministic-time-and-clock-abstraction.org)
 for the full design rationale, including the precise equal-deadline
 ordering and UTC/monotonic-metadata guarantees.
 
-### config
+### internal/config
 
 `config` assembles typed application configuration for Trader's executable
 composition roots, resolving each field from defaults, a YAML file, the
@@ -99,10 +114,10 @@ type Settings struct {
 cfg, err := config.Load[Settings](config.Options{EnvPrefix: "TRADER"})
 ```
 
-See the [package doc comment](../config/doc.go) for the tag reference and
+See the [package doc comment](../internal/config/doc.go) for the tag reference and
 environment-variable naming convention.
 
-### logging
+### internal/logging
 
 `logging` builds Trader's structured loggers on top of `log/slog` — text or
 JSON output, a configurable level, and canonical attribute names
@@ -119,7 +134,7 @@ logger.Info("order placed", logging.OrderID, "abc123", "password", logging.Secre
 
 `logging.Config` works directly with `config.Load` — `slog.Level` already
 implements the same text encoding `config` expects. See the
-[package doc comment](../logging/doc.go) for context propagation, redaction,
+[package doc comment](../internal/logging/doc.go) for context propagation, redaction,
 and the `Discard`/`Capture` test helpers.
 
 ## Domain Packages
@@ -179,35 +194,22 @@ semantics.
 
 ### marketdata
 
-`marketdata` is the closed market-data subsystem (ADR-020): the sole
-access point for canonical bars/quotes/trades, acquisition from provider
-raw archives, canonical storage, and coverage tracking. `Manager` is the
-only exported entry point — providers, storage, and normalization live
-under `marketdata/internal/` and are unreachable from outside the package.
-Three internal providers exist today: `oanda` (FX, bid/ask, a live sync
-client), `stooq` (equities, single-price OHLCV, an offline CSV
-importer — issue #303, ADR-047), and `alpaca` (equities, single-price
-OHLCV, a live sync client — issue #297, ADR-050), dispatched internally
-by `Config.ProviderName`; `Manager`'s own public surface never differs
-between them. Alpaca's request contract (endpoint, parameters,
-`adjustment=split`, `feed=iex`) was confirmed against Alpaca's own
-official docs on review; its exact response *body* shape remains a
-partially-verified design assumption (isolated to one file,
-`marketdata/internal/provider/alpaca/wireshape.go`) since no real
-request has been issued against the live API from this environment —
-see ADR-050.
+`marketdata` provides public bars, intervals, time ranges, calendars, bar sets,
+and canonical dataset metadata. It exports no manager or acquisition/storage
+entry point. The closed data subsystem lives in `internal/marketdata`, including
+its OANDA, Stooq, and Alpaca provider implementations.
+
+Inside Trader, import that runtime package as `marketruntime` alongside the
+public `marketdata` values:
 
 ```go
-mgr, err := marketdata.New(marketdata.Config{
+mgr, err := marketruntime.New(marketruntime.Config{
     Clock: clock.Real{}, StoreRoot: "./canonical",
     RawRoot: "/data/raw/oanda", Resolver: resolver, ProviderName: "oanda",
 })
-
-plan, err := mgr.Plan(ctx, marketdata.BarQuery{Instrument: eurUsd, Interval: marketdata.H1, Range: span})
-if len(plan.Actions) > 0 {
-    _, err = mgr.Build(ctx, plan) // acquire/normalize missing canonical data
-}
-reader, err := mgr.Bars(ctx, query) // Reader[Bar]: Next(ctx)/Close()
+plan, err := mgr.Plan(ctx, marketruntime.BarQuery{
+    Instrument: eurUsd, Interval: marketdata.H1, Range: span,
+})
 ```
 
 `Interval` is built from a typed unit and count, never parsed from a
@@ -316,6 +318,13 @@ guarantee and its regression test.
 
 ### order
 
+The supported `order` package contains only `Side`, `PositionSide`, and
+`IntentKind`, their constants, and validation/display methods. Guest strategies
+use these values with `sdk` constructors. Runtime objects described next are
+private.
+
+### internal/order
+
 `order` defines Trader's broker-neutral order and execution vocabulary —
 what a proposal, request, accepted order, and fill are, not order-state
 transition rules or broker I/O. The stages are distinct types, not
@@ -350,7 +359,7 @@ derived entry/exit grouping backtest and report consume. See
 [ADR-018](arch/adr-018-order-lifecycle-transitions.org), and the
 [package doc comment](../order/doc.go) for the full model.
 
-### account
+### internal/account
 
 `account` models one broker account's authoritative observed snapshot
 (ADR-019): an immutable value describing what a broker reported at one
@@ -360,9 +369,9 @@ broker-scoped action handle (`broker.Account`, see below). Positions,
 open orders, and cash balances are deep-copied and revalidated through
 `order`'s own constructors on the way in, so a caller cannot hand
 `NewSnapshot` an already-invalid nested value. See the
-[package doc comment](../account/doc.go).
+[package doc comment](../internal/account/doc.go).
 
-### portfolio
+### internal/portfolio
 
 `portfolio` models a Trader-level view spanning one or more
 `account.Snapshot` values (ADR-019), preserving each contributing
@@ -371,10 +380,10 @@ total. Currency conversion is explicit and caller-supplied — `portfolio`
 never fetches rates itself — and an account whose currency has no
 matching `ConversionRate` makes the whole portfolio's `Equity` report
 `ConversionIncomplete` rather than a silently partial sum. See the
-[package doc comment](../portfolio/doc.go) for the full aggregation and
+[package doc comment](../internal/portfolio/doc.go) for the full aggregation and
 exposure-grouping rules.
 
-### strategy
+### internal/strategy
 
 `strategy` defines Trader's broker-neutral strategy runtime contract
 (ADR-005): how a strategy receives market observations and emits
@@ -386,7 +395,7 @@ consumer needs them. A strategy never imports `broker`, `execution`,
 `risk`, or `pipeline`; `Environment.Intents` is the only way it
 constructs a canonical `Intent`, guaranteeing deterministic
 IDs/correlation without the strategy touching ID-generation machinery
-directly. See the [package doc comment](../strategy/doc.go).
+directly. See the [package doc comment](../internal/strategy/doc.go).
 
 `strategy/emacross` is Trader's first real strategy: a fast/slow EMA
 crossover against this contract, with a documented crossover/warm-up
@@ -400,7 +409,7 @@ issue #273) for isolating one direction's own performance.
 These packages turn a strategy's intent into a broker submission, in three
 independent stages composed by one orchestration seam.
 
-### execution
+### internal/execution
 
 `execution` defines Trader's execution-planning contract (ADR-006): the
 seam that translates one `order.Intent` into a broker-neutral
@@ -409,9 +418,9 @@ broker. `Planner.Plan` is narrow by design — it never fetches its own
 account state, market data, or listing resolution, and it does not size
 an `IntentEnter` itself (sizing is risk's job). `execution` depends only
 on `order`, `account`, `instrument`, `num`, `id`, and `clock` — never on
-`broker` or `risk`. See the [package doc comment](../execution/doc.go).
+`broker` or `risk`. See the [package doc comment](../internal/execution/doc.go).
 
-### risk
+### internal/risk
 
 `risk` defines Trader's risk-admission contract (ADR-006, ADR-029): the
 seam that admits or rejects one `order.Proposal` before it becomes an
@@ -422,11 +431,11 @@ stopping at the first one. This package defines no concrete `Rule`
 itself; per-trade loss, exposure/position limits, and leverage/margin
 are each their own rule implementation. `risk` depends only on `order`,
 `account`, and `context` — never on `broker` or `execution`. See the
-[package doc comment](../risk/doc.go).
+[package doc comment](../internal/risk/doc.go).
 
-### broker
+### internal/broker
 
-`broker` defines Trader's public broker/account contracts (ADR-007,
+`internal/broker` defines Trader's private broker/account contracts (ADR-007,
 ADR-008) — the smallest stable ports needed by both the deterministic
 simulated broker and future real broker adapters. `Broker` is a
 session-level port (identity, account discovery, session lifecycle);
@@ -434,9 +443,9 @@ session-level port (identity, account discovery, session lifecycle);
 one account. Every method takes and returns canonical `order`/`account`
 values, never a provider-native type; `Account.Events` (ADR-024) streams
 order/fill/account/status changes in deterministic, gap-free order. See
-the [package doc comment](../broker/doc.go).
+the [package doc comment](../internal/broker/doc.go).
 
-### pipeline
+### internal/pipeline
 
 `pipeline` composes execution, risk, and broker submission into
 Trader's one canonical M4 orchestration path (issue #185):
@@ -452,9 +461,9 @@ building the approved `Request`, never calls the broker); `Submit` is
 its thin mutating continuation, so there is exactly one implementation
 of the sizing → planning → risk → request-construction sequence, used
 identically by backtest and any future live runtime. See the
-[package doc comment](../pipeline/doc.go).
+[package doc comment](../internal/pipeline/doc.go).
 
-### journal
+### internal/journal
 
 `journal` defines the storage-neutral contract for a durable, replayable
 record of what happened during a run (ADR-036): the `Recorder` interface
@@ -466,15 +475,15 @@ future SQLite/Postgres adapter never widens `journal`'s own surface.
 `journal` depends only on `id`, `num`, `instrument`, `order`, `risk`,
 `broker`, and `account` — never on `pipeline` or `backtest` — so it
 remains reusable by a future live session. See the
-[package doc comment](../journal/journal.go).
+[package doc comment](../internal/journal/journal.go).
 
 ## Backtesting and Reporting
 
-### backtest
+### internal/backtest
 
 `backtest` owns deterministic historical simulation orchestration
 (ADR-035): it reads already-published canonical market data through
-`marketdata.Manager`, merges it into one chronologically ordered replay
+`internal/marketdata.Manager`, merges it into one chronologically ordered replay
 stream per strategy, and drives that stream through a simulation clock,
 the strategy, and the same `pipeline.Pipeline` used by live trading,
 recording results through `journal` and computing `Metrics` (return,
@@ -484,9 +493,9 @@ adapter — only the composition root (`cmd/trader/backtest`) constructs
 adapters and injects ports. See
 [ADR-035](arch/adr-035-m5-backtesting-architecture.org),
 [ADR-041](arch/adr-041-backtest-determinism-suite.org) (the determinism
-regression suite), and the [package doc comment](../backtest/doc.go).
+regression suite), and the [package doc comment](../internal/backtest/doc.go).
 
-### report
+### internal/report
 
 `report` renders backtest results without computing them (ADR-038): it
 projects `backtest.Result` into a report-owned view model,
@@ -494,11 +503,11 @@ projects `backtest.Result` into a report-owned view model,
 that same model. No renderer touches `backtest.Result`/`backtest.Metrics`
 directly or performs arithmetic; the dependency runs one way only —
 `backtest` never imports `report`. See the
-[package doc comment](../report/doc.go).
+[package doc comment](../internal/report/doc.go).
 
 ## Application and Composition
 
-### service
+### internal/service
 
 `service` is the root of Trader's application/service layer (ADR-022):
 transport adapters (the CLI today, REST/WebSocket/SSE later) stay thin
@@ -506,8 +515,8 @@ by parsing input, building a request type from a `service` subpackage,
 calling one service operation, and formatting the response. Each
 subpackage — `service/marketdata`, `service/broker`, `service/execution`,
 `service/backtest` — orchestrates one domain area and depends only on
-public domain packages, never on another package's `internal/` tree.
-See the [package doc comment](../service/doc.go).
+the runtime domain packages it wraps and supported public values; domain packages never import service wrappers back.
+See the [package doc comment](../internal/service/doc.go).
 
 ## Adapters
 
@@ -544,16 +553,16 @@ its own — mechanically enforced by each group's own `boundary_test.go`.
 
 ## Test Support
 
-### tradertest
+### internal/tradertest
 
-`tradertest` provides deterministic public builders and assertions for
+`internal/tradertest` provides deterministic private builders and assertions for
 code that consumes Trader's domain packages — `instrument`, `order`,
-`account`, `portfolio` — so an external consumer's tests don't have to
+`account`, `portfolio` — so Trader's runtime tests don't have to
 reinvent "build me a valid EUR/USD listing" boilerplate. Every builder
 takes a small params struct with defaults and returns the real domain
 type via the real constructor (`order.NewProposal`, `account.NewSnapshot`,
 ...), never a parallel object model; a `Must`-prefixed variant panics on
-error for terse setup. See the [package doc comment](../tradertest/doc.go).
+error for terse setup. See the [package doc comment](../internal/tradertest/doc.go).
 
 ### test/internal
 

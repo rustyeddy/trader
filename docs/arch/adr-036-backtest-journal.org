@@ -16,6 +16,8 @@ reconciliation, which this issue does not address. This ADR narrows
 and concretizes only the journal half of ADR-009's scope for backtest
 runs.
 
+Amended by ADR-065: journal recording contracts are internal runtime implementation.
+
 * Context
 
 #218's acceptance criteria required: a completed run auditable from

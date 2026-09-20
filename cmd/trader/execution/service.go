@@ -6,18 +6,18 @@ import (
 
 	"github.com/spf13/cobra"
 
-	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/config"
-	executionpkg "github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	simbroker "github.com/rustyeddy/trader/internal/adapters/broker/sim"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/config"
+	executionpkg "github.com/rustyeddy/trader/internal/execution"
+	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/pipeline"
+	"github.com/rustyeddy/trader/internal/risk"
+	svcexecution "github.com/rustyeddy/trader/internal/service/execution"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/pipeline"
-	"github.com/rustyeddy/trader/risk"
-	svcexecution "github.com/rustyeddy/trader/service/execution"
 )
 
 // accountConfig is the typed configuration a fresh simulated

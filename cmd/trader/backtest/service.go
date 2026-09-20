@@ -7,19 +7,20 @@ import (
 	"io"
 	"time"
 
-	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
-	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/clock"
-	"github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/journal"
+	simbroker "github.com/rustyeddy/trader/internal/adapters/broker/sim"
+	"github.com/rustyeddy/trader/internal/backtest"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/execution"
+	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/journal"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	"github.com/rustyeddy/trader/internal/pipeline"
+	"github.com/rustyeddy/trader/internal/risk"
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/pipeline"
-	"github.com/rustyeddy/trader/risk"
-	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 )
 
 // simPriceSource is the simbroker.FillPriceSource "trader backtest
@@ -119,7 +120,7 @@ func (s *nextBarOpenPriceSource) setClock(c *clock.Simulated) {
 // before the run starts, exactly the same "load the whole series up
 // front" approach strategy/emacross's own EMA-05/EMA-06 tests already
 // established for the identical problem.
-func (s *nextBarOpenPriceSource) load(ctx context.Context, manager *marketdata.Manager, symbol string, query marketdata.BarQuery) error {
+func (s *nextBarOpenPriceSource) load(ctx context.Context, manager *marketruntime.Manager, symbol string, query marketruntime.BarQuery) error {
 	reader, err := manager.Bars(ctx, query)
 	if err != nil {
 		return err

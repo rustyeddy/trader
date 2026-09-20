@@ -11,6 +11,8 @@ originally accepted inline in that document. The registry
 file is authoritative for ADR-019's Status, Context, Decision,
 Consequences, and Alternatives Considered.
 
+Amended by ADR-065: account/portfolio snapshots are private; external strategies use SDK snapshots.
+
 * Context
 
 Issue #30 (M1-12) required broker-neutral, currency-safe value models

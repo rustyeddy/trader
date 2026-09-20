@@ -27,6 +27,7 @@ func (s Side) String() string {
 	}
 }
 
-func (s Side) valid() bool {
+// Valid reports whether the value belongs to the defined vocabulary.
+func (s Side) Valid() bool {
 	return s == Buy || s == Sell
 }

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rustyeddy/trader/id"
-	"github.com/rustyeddy/trader/report"
+	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/report"
 )
 
 // snapshotSchemaVersion identifies runSnapshot's own on-disk shape

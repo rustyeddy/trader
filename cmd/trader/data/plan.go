@@ -3,7 +3,7 @@ package data
 import (
 	"github.com/spf13/cobra"
 
-	svc "github.com/rustyeddy/trader/service/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // newPlanCmd implements "trader data plan INSTRUMENT INTERVAL --from

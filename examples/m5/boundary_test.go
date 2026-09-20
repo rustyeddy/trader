@@ -17,14 +17,14 @@ import (
 // public strategy.Strategy contract, the same way a real private
 // strategy repository would.
 var forbiddenRoots = []string{
-	"github.com/rustyeddy/trader/backtest",
-	"github.com/rustyeddy/trader/service",
+	"github.com/rustyeddy/trader/internal/backtest",
+	"github.com/rustyeddy/trader/internal/service",
 	"github.com/rustyeddy/trader/cmd",
-	"github.com/rustyeddy/trader/adapters",
-	"github.com/rustyeddy/trader/broker",
-	"github.com/rustyeddy/trader/execution",
-	"github.com/rustyeddy/trader/risk",
-	"github.com/rustyeddy/trader/pipeline",
+	"github.com/rustyeddy/trader/internal/adapters",
+	"github.com/rustyeddy/trader/internal/broker",
+	"github.com/rustyeddy/trader/internal/execution",
+	"github.com/rustyeddy/trader/internal/risk",
+	"github.com/rustyeddy/trader/internal/pipeline",
 }
 
 // TestPrivateStrategyNeverImportsRuntimeOrTransportPackages parses

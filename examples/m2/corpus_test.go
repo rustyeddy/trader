@@ -22,8 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/clock"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +51,7 @@ func TestM2VerticalSlice_Corpus(t *testing.T) {
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t)))
 
-	mgr, err := marketdata.New(marketdata.Config{
+	mgr, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.NewSimulated(time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)),
 		StoreRoot:    t.TempDir(),
 		RawRoot:      corpusRawRoot,
@@ -68,24 +69,24 @@ func TestM2VerticalSlice_Corpus(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, interval := range []marketdata.Interval{marketdata.H1, marketdata.D1} {
-		plan, err := mgr.Plan(ctx, marketdata.BarQuery{Instrument: eurusd, Interval: interval, Range: span})
+		plan, err := mgr.Plan(ctx, marketruntime.BarQuery{Instrument: eurusd, Interval: interval, Range: span})
 		require.NoError(t, err, "Plan(%s)", interval)
 		result, err := mgr.Build(ctx, plan)
 		require.NoError(t, err, "Build(%s)", interval)
 		t.Logf("%s: published %d partition(s), skipped %d action(s)", interval, len(result.Published), len(result.Skipped))
 	}
 
-	plan, err := mgr.Plan(ctx, marketdata.BarQuery{Instrument: eurusd, Interval: marketdata.W1, Range: span})
+	plan, err := mgr.Plan(ctx, marketruntime.BarQuery{Instrument: eurusd, Interval: marketdata.W1, Range: span})
 	require.NoError(t, err, "Plan(W1)")
 	result, err := mgr.Build(ctx, plan)
 	require.NoError(t, err, "Build(W1)")
 	t.Logf("W1: published %d partition(s)", len(result.Published))
 
-	cov, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusd, Interval: marketdata.D1, Range: span})
+	cov, err := mgr.Coverage(ctx, marketruntime.BarQuery{Instrument: eurusd, Interval: marketdata.D1, Range: span})
 	require.NoError(t, err, "Coverage(D1)")
 	t.Logf("D1 coverage: %d partition(s), %d gap(s)", len(cov.Partitions), len(cov.Gaps))
 
-	reader, err := mgr.Bars(ctx, marketdata.BarQuery{Instrument: eurusd, Interval: marketdata.D1, Range: span})
+	reader, err := mgr.Bars(ctx, marketruntime.BarQuery{Instrument: eurusd, Interval: marketdata.D1, Range: span})
 	require.NoError(t, err, "Bars(D1)")
 	defer reader.Close()
 	var n int

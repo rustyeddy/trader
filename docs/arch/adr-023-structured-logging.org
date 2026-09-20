@@ -13,6 +13,8 @@ named deferrals rather than open questions blocking acceptance — see
 Milestone 2.6 Scope and Consequences below for what remains future
 work under later M2.6 issues.
 
+Amended by ADR-065: logging configuration is internal; SDK contracts use standard slog directly.
+
 * Context
 
 Trader has established a logging package and CLI composition-root wiring during

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/rustyeddy/trader/marketdata"
-	svc "github.com/rustyeddy/trader/service/marketdata"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // tableFormatter is the default, human-readable Formatter: a plain
@@ -66,7 +66,7 @@ func (t tableFormatter) FormatPlan(w io.Writer, resp svc.PlanResponse) error {
 	return ew.err
 }
 
-func formatTablePlan(w io.Writer, plan marketdata.Plan) {
+func formatTablePlan(w io.Writer, plan marketruntime.Plan) {
 	if len(plan.Actions) == 0 {
 		_, _ = fmt.Fprintln(w, "nothing required")
 		return
@@ -76,14 +76,14 @@ func formatTablePlan(w io.Writer, plan marketdata.Plan) {
 	}
 }
 
-func formatTableSkipped(w io.Writer, skipped []marketdata.SkippedAction) {
+func formatTableSkipped(w io.Writer, skipped []marketruntime.SkippedAction) {
 	for _, s := range skipped {
 		_, _ = fmt.Fprintf(w, "skipped  %s  %s %04d-%02d  %s\n",
 			s.Action.Kind, s.Action.Interval, s.Action.Year, int(s.Action.Month), s.Reason)
 	}
 }
 
-func formatTableSyncResult(w io.Writer, result marketdata.SyncResult) {
+func formatTableSyncResult(w io.Writer, result marketruntime.SyncResult) {
 	for _, d := range result.Downloaded {
 		_, _ = fmt.Fprintf(w, "downloaded  %s %04d-%02d  %d record(s), %d revised\n",
 			d.Action.Interval, d.Action.Year, int(d.Action.Month), d.RecordsWritten, d.RecordsRevised)
@@ -91,7 +91,7 @@ func formatTableSyncResult(w io.Writer, result marketdata.SyncResult) {
 	formatTableSkipped(w, result.Skipped)
 }
 
-func formatTableBuildResult(w io.Writer, result marketdata.BuildResult) {
+func formatTableBuildResult(w io.Writer, result marketruntime.BuildResult) {
 	for _, p := range result.Published {
 		_, _ = fmt.Fprintf(w, "published  %s %04d-%02d  %d bar(s)\n",
 			p.Action.Interval, p.Action.Year, int(p.Action.Month), p.BarCount)

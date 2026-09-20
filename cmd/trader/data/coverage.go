@@ -3,7 +3,7 @@ package data
 import (
 	"github.com/spf13/cobra"
 
-	svc "github.com/rustyeddy/trader/service/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // newCoverageCmd implements "trader data coverage INSTRUMENT INTERVAL

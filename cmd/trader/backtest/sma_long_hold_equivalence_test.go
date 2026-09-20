@@ -50,18 +50,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/adapters/strategy/external"
-	"github.com/rustyeddy/trader/clock"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/internal/adapters/strategy/external"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/journal"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	"github.com/rustyeddy/trader/internal/risk"
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
+	"github.com/rustyeddy/trader/internal/strategy"
+	"github.com/rustyeddy/trader/internal/strategy/smatrend"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/risk"
-	svcbacktest "github.com/rustyeddy/trader/service/backtest"
-	"github.com/rustyeddy/trader/strategy"
-	"github.com/rustyeddy/trader/strategy/smatrend"
 )
 
 // buildSMALongHoldBinary builds examples/sma-long-hold into t's own
@@ -302,7 +304,7 @@ type smaLongHoldRun struct {
 // exactly like run.go's own --config path does, configured to
 // smatrend's own EQS-01 defaults (trailing-stop/fresh-cross/
 // fresh-cross) — the same defaults examples/sma-long-hold reproduces.
-func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) smaLongHoldRun {
+func runInTreeSMATrend(t *testing.T, manager *marketruntime.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) smaLongHoldRun {
 	t.Helper()
 	ctx := t.Context()
 
@@ -332,7 +334,7 @@ func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver in
 	descriptor := strat.Describe()
 
 	src := newNextBarOpenPriceSource()
-	require.NoError(t, src.load(ctx, manager, simListing.Symbol(), marketdata.BarQuery{
+	require.NoError(t, src.load(ctx, manager, simListing.Symbol(), marketruntime.BarQuery{
 		Instrument: simListing.InstrumentID(), Interval: interval, Range: p.span,
 	}))
 
@@ -361,7 +363,7 @@ func runInTreeSMATrend(t *testing.T, manager *marketdata.Manager, simResolver in
 // rendering) so its RunResponse can be compared field-for-field
 // against runInTreeSMATrend's, with no serialization round trip in
 // between.
-func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) smaLongHoldRun {
+func runExternalSMALongHold(t *testing.T, manager *marketruntime.Manager, simResolver instrument.Resolver, simListing instrument.Listing, p smaLongHoldEquivalenceParams) smaLongHoldRun {
 	t.Helper()
 	ctx := t.Context()
 
@@ -392,7 +394,7 @@ func runExternalSMALongHold(t *testing.T, manager *marketdata.Manager, simResolv
 	descriptor := process.Strategy().Describe()
 
 	src := newNextBarOpenPriceSource()
-	require.NoError(t, src.load(ctx, manager, simListing.Symbol(), marketdata.BarQuery{
+	require.NoError(t, src.load(ctx, manager, simListing.Symbol(), marketruntime.BarQuery{
 		Instrument: simListing.InstrumentID(), Interval: interval, Range: p.span,
 	}))
 
@@ -445,7 +447,7 @@ type tradeKey struct {
 	Costs       string
 }
 
-func tradeKeys(trades []order.Trade) []tradeKey {
+func tradeKeys(trades []runtimeorder.Trade) []tradeKey {
 	keys := make([]tradeKey, len(trades))
 	for i, tr := range trades {
 		keys[i] = tradeKey{
@@ -469,7 +471,7 @@ type positionKey struct {
 	AvgPrice   string
 }
 
-func positionKeys(positions []order.Position) []positionKey {
+func positionKeys(positions []runtimeorder.Position) []positionKey {
 	keys := make([]positionKey, len(positions))
 	for i, p := range positions {
 		var avgPrice string
@@ -689,7 +691,7 @@ func compareMetadata(t *testing.T, i int, label string, m1, m2 id.Metadata, n1, 
 // intent carries a non-nil StopPrice, so omitting it let two
 // implementations choose different stop prices at the intent stage
 // and still pass).
-func compareIntent(t *testing.T, i int, label string, in1, in2 order.Intent, n1, n2 *idNormalizer) {
+func compareIntent(t *testing.T, i int, label string, in1, in2 runtimeorder.Intent, n1, n2 *idNormalizer) {
 	t.Helper()
 	assert.Equalf(t, in1.Kind, in2.Kind, "record[%d]/%s: kind mismatch", i, label)
 	assert.Truef(t, in1.Instrument.Equal(in2.Instrument), "record[%d]/%s: instrument mismatch", i, label)
@@ -709,7 +711,7 @@ func compareIntent(t *testing.T, i int, label string, in1, in2 order.Intent, n1,
 // ReduceOnly, and Metadata — execution-planning semantics a diverging
 // proposal should fail on immediately, at the record where the
 // divergence actually occurred).
-func compareProposal(t *testing.T, i int, label string, p1, p2 order.Proposal, n1, n2 *idNormalizer) {
+func compareProposal(t *testing.T, i int, label string, p1, p2 runtimeorder.Proposal, n1, n2 *idNormalizer) {
 	t.Helper()
 	assert.Truef(t, p1.Listing.InstrumentID().Equal(p2.Listing.InstrumentID()), "record[%d]/%s: instrument mismatch", i, label)
 	assert.Equalf(t, p1.Side, p2.Side, "record[%d]/%s: side mismatch", i, label)
@@ -731,7 +733,7 @@ func compareProposal(t *testing.T, i int, label string, p1, p2 order.Proposal, n
 // separately-passing KindProposal record for the same decision).
 // KindOrder's own case reuses this identical helper for its embedded
 // Request, rather than a fourth independent hand-copy.
-func compareRequest(t *testing.T, i int, label string, req1, req2 order.Request, n1, n2 *idNormalizer) {
+func compareRequest(t *testing.T, i int, label string, req1, req2 runtimeorder.Request, n1, n2 *idNormalizer) {
 	t.Helper()
 	compareProposal(t, i, label, req1.Proposal, req2.Proposal, n1, n2)
 	assert.Equalf(t, n1.order(req1.OrderID), n2.order(req2.OrderID), "record[%d]/%s: order id shape mismatch", i, label)
@@ -759,7 +761,7 @@ func compareMoney(t *testing.T, i int, label string, m1, m2 *num.Money) {
 // trades at the same index, or the payload of two KindTrade journal
 // records), normalizing AccountID/fill IDs and comparing every
 // economically meaningful field directly.
-func compareTrades(t *testing.T, i int, tr1, tr2 order.Trade, n1, n2 *idNormalizer) {
+func compareTrades(t *testing.T, i int, tr1, tr2 runtimeorder.Trade, n1, n2 *idNormalizer) {
 	t.Helper()
 	assert.Truef(t, tr1.Listing.InstrumentID().Equal(tr2.Listing.InstrumentID()), "trade[%d]: instrument mismatch", i)
 	assert.Equalf(t, tr1.Side, tr2.Side, "trade[%d]: side mismatch", i)
@@ -811,7 +813,7 @@ func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 	simListing := smaLongHoldEquivalenceListing(t, "sim")
 	require.NoError(t, simResolver.Register(simListing))
 
-	manager, err := marketdata.New(marketdata.Config{
+	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.Real{},
 		StoreRoot:    t.TempDir(),
 		RawRoot:      "testdata/raw/oanda",
@@ -821,7 +823,7 @@ func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := t.Context()
-	plan, err := manager.Plan(ctx, marketdata.BarQuery{Instrument: simListing.InstrumentID(), Interval: marketdata.H1, Range: params.span})
+	plan, err := manager.Plan(ctx, marketruntime.BarQuery{Instrument: simListing.InstrumentID(), Interval: marketdata.H1, Range: params.span})
 	require.NoError(t, err)
 	if len(plan.Actions) > 0 {
 		_, err = manager.Build(ctx, plan)

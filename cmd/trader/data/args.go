@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/instrument"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
-	svc "github.com/rustyeddy/trader/service/marketdata"
 )
 
 // intervalsByName is the CLI's own string vocabulary for

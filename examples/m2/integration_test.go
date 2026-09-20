@@ -28,8 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/clock"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
@@ -107,14 +108,14 @@ func copyFixtureRaw(t *testing.T) string {
 // operation, by design (see Config's own RawRoot/StoreRoot doc
 // comments), so a test that needs them must keep its own copy from
 // construction time rather than ask Manager for them back.
-func newTestManager(t *testing.T) (mgr *marketdata.Manager, rawRoot, storeRoot string) {
+func newTestManager(t *testing.T) (mgr *marketruntime.Manager, rawRoot, storeRoot string) {
 	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t)))
 
 	rawRoot = copyFixtureRaw(t)
 	storeRoot = t.TempDir()
-	mgr, err := marketdata.New(marketdata.Config{
+	mgr, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.NewSimulated(time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)),
 		StoreRoot:    storeRoot,
 		RawRoot:      rawRoot,
@@ -134,10 +135,10 @@ func eurusdID(t *testing.T) instrument.ID {
 // Build's result. It is the vertical slice's own repeated step: every
 // canonical dataset in this package is produced this way, never by
 // calling an internal builder directly.
-func planAndBuild(t *testing.T, mgr *marketdata.Manager, interval marketdata.Interval, span marketdata.TimeRange) marketdata.BuildResult {
+func planAndBuild(t *testing.T, mgr *marketruntime.Manager, interval marketdata.Interval, span marketdata.TimeRange) marketruntime.BuildResult {
 	t.Helper()
 	ctx := context.Background()
-	plan, err := mgr.Plan(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: interval, Range: span})
+	plan, err := mgr.Plan(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: interval, Range: span})
 	require.NoError(t, err)
 	result, err := mgr.Build(ctx, plan)
 	require.NoError(t, err)
@@ -212,10 +213,10 @@ func TestM2VerticalSlice(t *testing.T) {
 		// the fixture's full span has a gap (the deliberate missing
 		// 2024-01-16) that would otherwise block scheduling a derive at
 		// all — see week1Span's own doc comment.
-		plan, err := mgr.Plan(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.W1, Range: week1Span(t)})
+		plan, err := mgr.Plan(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.W1, Range: week1Span(t)})
 		require.NoError(t, err)
 		require.Len(t, plan.Actions, 1)
-		assert.Equal(t, marketdata.ActionDeriveCanonical, plan.Actions[0].Kind)
+		assert.Equal(t, marketruntime.ActionDeriveCanonical, plan.Actions[0].Kind)
 
 		result, err := mgr.Build(ctx, plan)
 		require.NoError(t, err)
@@ -236,7 +237,7 @@ func TestM2VerticalSlice(t *testing.T) {
 			time.Date(2024, time.January, 7, 23, 0, 0, 0, time.UTC),
 		)
 		require.NoError(t, err)
-		reader, err := mgr.Bars(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.W1, Range: weekSpan})
+		reader, err := mgr.Bars(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.W1, Range: weekSpan})
 		require.NoError(t, err)
 		defer func() { _ = reader.Close() }()
 
@@ -273,7 +274,7 @@ func TestM2VerticalSlice(t *testing.T) {
 		// only the deliberately omitted 2024-01-16 session was reported,
 		// and every routine closure (two full weekends inside this
 		// fixture's own span) produced no Gap at all.
-		cov, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.D1, Range: span})
+		cov, err := mgr.Coverage(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.D1, Range: span})
 		require.NoError(t, err)
 
 		wantSpan, err := marketdata.NewTimeRange(
@@ -303,7 +304,7 @@ func TestM2VerticalSlice(t *testing.T) {
 		mutated := []byte(strings.Replace(string(original), oldRow, newRow, 1))
 		require.NoError(t, os.WriteFile(h1Path, mutated, 0o644))
 
-		plan, err := mgr.Plan(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+		plan, err := mgr.Plan(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 		require.NoError(t, err)
 		require.Len(t, plan.Actions, 1)
 		assert.Contains(t, plan.Actions[0].Reason, "stale")
@@ -332,17 +333,17 @@ func TestM2Build_AlreadyCancelledContextPublishesNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	plan, err := mgr.Plan(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	plan, err := mgr.Plan(context.Background(), marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	require.NotEmpty(t, plan.Actions)
 
 	_, err = mgr.Build(ctx, plan)
 	assert.ErrorIs(t, err, context.Canceled)
 
-	cov, err := mgr.Coverage(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	cov, err := mgr.Coverage(context.Background(), marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	for _, pc := range cov.Partitions {
-		assert.Equal(t, marketdata.PartitionCoverageMissing, pc.Status,
+		assert.Equal(t, marketruntime.PartitionCoverageMissing, pc.Status,
 			"a Build given an already-cancelled context must leave every partition exactly as unbuilt as before it was called")
 	}
 }
@@ -418,12 +419,12 @@ func (c *countingContext) Err() error {
 // this Build call, not a guessed magic number that would silently rot
 // if an unrelated internal loop changed shape.
 func TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished(t *testing.T) {
-	action0 := marketdata.Action{Kind: marketdata.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.H1, Year: 2024, Month: time.January}
-	action1 := marketdata.Action{Kind: marketdata.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.D1, Year: 2024, Month: time.January}
+	action0 := marketruntime.Action{Kind: marketruntime.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.H1, Year: 2024, Month: time.January}
+	action1 := marketruntime.Action{Kind: marketruntime.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.D1, Year: 2024, Month: time.January}
 
 	calibration, _, _ := newTestManager(t)
 	counter := &countingContext{Context: context.Background()}
-	calibrationResult, err := calibration.Build(counter, marketdata.Plan{Actions: []marketdata.Action{action0}})
+	calibrationResult, err := calibration.Build(counter, marketruntime.Plan{Actions: []marketruntime.Action{action0}})
 	require.NoError(t, err)
 	require.Len(t, calibrationResult.Published, 1)
 	wantBarCount := calibrationResult.Published[0].BarCount
@@ -432,7 +433,7 @@ func TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished(t *testing.
 
 	mgr, _, _ := newTestManager(t)
 	ctx := &cancelAfterN{Context: context.Background(), remaining: cutoff}
-	result, err := mgr.Build(ctx, marketdata.Plan{Actions: []marketdata.Action{action0, action1}})
+	result, err := mgr.Build(ctx, marketruntime.Plan{Actions: []marketruntime.Action{action0, action1}})
 	assert.ErrorIs(t, err, context.Canceled)
 	require.Len(t, result.Published, 1, "the first action must have completed and published before cancellation was observed")
 	assert.Equal(t, marketdata.H1, result.Published[0].Action.Interval)
@@ -440,22 +441,22 @@ func TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished(t *testing.
 		"completion evidence: the published action is the full dataset, not a partial one truncated by the cancellation")
 
 	span := fixtureSpan(t)
-	cov, err := mgr.Coverage(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.D1, Range: span})
+	cov, err := mgr.Coverage(context.Background(), marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.D1, Range: span})
 	require.NoError(t, err)
 	for _, pc := range cov.Partitions {
-		assert.Equal(t, marketdata.PartitionCoverageMissing, pc.Status,
+		assert.Equal(t, marketruntime.PartitionCoverageMissing, pc.Status,
 			"the second action (D1) was never reached, so nothing must be published for it")
 	}
 
-	h1Cov, err := mgr.Coverage(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	h1Cov, err := mgr.Coverage(context.Background(), marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	require.Len(t, h1Cov.Partitions, 1)
-	assert.Equal(t, marketdata.PartitionCoverageCurrent, h1Cov.Partitions[0].Status,
+	assert.Equal(t, marketruntime.PartitionCoverageCurrent, h1Cov.Partitions[0].Status,
 		"the first action's own publish must remain intact, not retroactively undone by the later cancellation")
 
 	// Completion evidence, not just a status flag: the full H1 dataset
 	// is actually readable back through Bars, end to end.
-	reader, err := mgr.Bars(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	reader, err := mgr.Bars(context.Background(), marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
 	var n int
@@ -479,9 +480,9 @@ func TestM2Queries_NeverWriteToStore(t *testing.T) {
 	span := fixtureSpan(t)
 	ctx := context.Background()
 
-	_, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	_, err := mgr.Coverage(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
-	_, err = mgr.Bars(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	_, err = mgr.Bars(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	assert.Error(t, err, "nothing has been built yet, so Bars must report unavailable data rather than build it on the fly")
 
 	entries, err := os.ReadDir(storeRoot)
@@ -522,7 +523,7 @@ func TestM2VerticalSlice_IncompleteRecordExcludedNotAborted(t *testing.T) {
 	assert.Equal(t, 2, result.Published[0].BarCount,
 		"3 raw records, but the third is provider-incomplete and must be excluded, not published")
 
-	reader, err := mgr.Bars(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	reader, err := mgr.Bars(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
 	var times []time.Time
@@ -546,10 +547,10 @@ func TestM2VerticalSlice_IncompleteRecordExcludedNotAborted(t *testing.T) {
 	// archive fact directly (one record OANDA itself marked
 	// provisional), independent of how the canonical build chose to
 	// handle it.
-	cov, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	cov, err := mgr.Coverage(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	require.Len(t, cov.Partitions, 1)
-	assert.Equal(t, marketdata.PartitionCoverageCurrent, cov.Partitions[0].Status,
+	assert.Equal(t, marketruntime.PartitionCoverageCurrent, cov.Partitions[0].Status,
 		"an incomplete record does not itself make the partition Stale or Invalid")
 	assert.Equal(t, 1, cov.Partitions[0].RawIncompleteCount,
 		"Coverage must match the raw archive fact: exactly one record is provider-incomplete")
@@ -585,8 +586,8 @@ func TestM2Coverage_InvalidCanonicalPartition(t *testing.T) {
 	path := canonicalPartitionPath(storeRoot, 2024, time.January, "h1")
 	require.NoError(t, os.WriteFile(path, []byte("not a canonical partition\n"), 0o644))
 
-	cov, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	cov, err := mgr.Coverage(ctx, marketruntime.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	require.Len(t, cov.Partitions, 1)
-	assert.Equal(t, marketdata.PartitionCoverageInvalid, cov.Partitions[0].Status)
+	assert.Equal(t, marketruntime.PartitionCoverageInvalid, cov.Partitions[0].Status)
 }

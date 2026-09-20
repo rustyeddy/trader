@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	svcexecution "github.com/rustyeddy/trader/service/execution"
+	svcexecution "github.com/rustyeddy/trader/internal/service/execution"
 )
 
 // jsonFormatter renders a stable, structured JSON document per

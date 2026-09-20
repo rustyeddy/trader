@@ -58,7 +58,7 @@ trip.
 
 `Start` is called once, with an `Environment` carrying:
 
-- `Clock` — reflects the *host's* own clock (real or, in a backtest,
+- `Clock` (`sdk.Clock`, `Now()` only; no guest timer capability) — reflects the *host's* own clock (real or, in a backtest,
   simulated), never your process's local wall clock. Always use
   `env.Clock.Now()`, never `time.Now()`, for anything that needs to
   agree with the host's own notion of "now."

@@ -10,9 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/clock"
 	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/clock"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
@@ -189,7 +190,7 @@ func fillBarFor(t *testing.T, rawRoot, barTime string) marketdata.Bar {
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(listing))
 
-	manager, err := marketdata.New(marketdata.Config{
+	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.NewSimulated(time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC)),
 		StoreRoot:    t.TempDir(),
 		RawRoot:      rawRoot,
@@ -204,14 +205,14 @@ func fillBarFor(t *testing.T, rawRoot, barTime string) marketdata.Bar {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	plan, err := manager.Plan(ctx, marketdata.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
+	plan, err := manager.Plan(ctx, marketruntime.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	if len(plan.Actions) > 0 {
 		_, err = manager.Build(ctx, plan)
 		require.NoError(t, err)
 	}
 
-	reader, err := manager.Bars(ctx, marketdata.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
+	reader, err := manager.Bars(ctx, marketruntime.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
 

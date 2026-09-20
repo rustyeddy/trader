@@ -1,5 +1,5 @@
 // Package sdk is the guest-side counterpart to
-// adapters/strategy/external's host-side ExternalStrategyAdapter
+// internal/adapters/strategy/external's host-side ExternalStrategyAdapter
 // (issue #379, ADR-062): a small Go helper/runtime so an out-of-tree
 // Go strategy process can speak Strategy Protocol v1
 // (protocol/strategy/v1, issue #377) without hand-writing gRPC
@@ -14,14 +14,9 @@
 //	    }
 //	}
 //
-// sdk is a top-level, public, non-domain framework package —
-// the same role tradertest plays for in-process testing
-// (package-boundaries.org's own "Test infrastructure intended for
-// users belongs in a public tradertest package" precedent, applied
-// here to a public package that exists to serve external strategy
-// authors rather than Trader's own runtime). It is never imported by
-// any other package in this module; only an external strategy
-// author's own process/binary imports it.
+// sdk is the supported external strategy API (ADR-065). Strategies use it
+// alongside public values and pure indicator/analysis packages. Trader's
+// orchestration, broker, storage, identity, and test infrastructure are internal.
 //
 // # sdk.Strategy is its own interface, not strategy.Strategy
 //
@@ -30,7 +25,7 @@
 // strategy.FillHandler) closely enough that porting an in-process
 // strategy's decision logic to a v1 guest is mostly mechanical, but
 // OnBar returns ([]DescribedIntent, []DescribedSignal, error), not
-// ([]order.Intent, error): a guest never mints a real order.IntentID,
+// ([]internal/order.Intent, error): a guest never mints a real internal/id.IntentID,
 // id.EventID, or id.CorrelationID (ADR-005/ADR-062's own intent-
 // construction-ownership section) — it only describes what it wants
 // built, exactly the shape the Run stream's own wire messages already
@@ -48,7 +43,8 @@
 // arrives — never this process's local wall clock, so a guest
 // observes the identical clock semantics an in-process strategy
 // already has under both a real and a simulated host clock (ADR-062's
-// own corrected "clock ownership" section).
+// own corrected "clock ownership" section). Clock exposes only Now; host-driven
+// guest timers are not a Protocol v1 capability (ADR-065).
 //
 // # Dependency direction
 //
@@ -56,14 +52,14 @@
 // marketdata, instrument, and num for the shared value types
 // DescribedIntent and the wire conversions are built from (order.Side,
 // num.Price, num.Quantity, instrument.ID, marketdata.Bar/Interval) —
-// never on order.Intent or order.NewIntent themselves, which
+// never on internal/order.Intent or internal/order.NewIntent themselves, which
 // sdk never calls. It never imports strategy, and never
 // imports backtest, service, cmd, adapters, broker, execution, risk,
 // pipeline, or chart — the identical forbidden set
-// strategy/boundary_test.go already enforces for in-process
+// internal/strategy/boundary_test.go already enforces for in-process
 // strategies (see boundary_test.go in this package), since a guest
 // process has exactly the same restrictions an in-process strategy
-// does. sdk and adapters/strategy/external both depend on
+// does. sdk and internal/adapters/strategy/external both depend on
 // protocol/strategy/v1 and do the field-by-field wire translation
 // independently in both directions — that translation logic is not
 // shared code between host and guest, since each side owns a
@@ -73,11 +69,11 @@
 //
 // Serve reads the Unix-domain socket path from the
 // TRADER_STRATEGY_SOCKET environment variable — the exact contract
-// adapters/strategy/external.Process sets on the child process it
+// internal/adapters/strategy/external.Process sets on the child process it
 // launches (ADR-063) — rather than importing that host-side package's
 // own SocketPathEnv constant, for the same "neither package imports
 // the other" reason above. This is the one place sdk reads
-// the process environment directly; see config/arch_test.go's own
+// the process environment directly; see internal/config/arch_test.go's own
 // exemption list, which names this package for exactly this reason —
 // Serve is this process's own composition root, structurally the
 // guest-side equivalent of a cmd/ binary's main(), just packaged as

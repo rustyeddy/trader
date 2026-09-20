@@ -3,7 +3,7 @@ package data
 import (
 	"github.com/spf13/cobra"
 
-	svc "github.com/rustyeddy/trader/service/marketdata"
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // newBarsCmd implements "trader data bars INSTRUMENT INTERVAL --from

@@ -2,6 +2,17 @@
 #+AUTHOR: Rusty Eddy
 #+DATE: [2026-07-30 Thu]
 
+* Current API Scope (ADR-065)
+
+The original requirements below describe the framework's capabilities. Issue
+#400 narrows their external Go API interpretation: supported external code uses
+sdk, indicator, analysis, marketdata values, instrument, num, order vocabulary,
+version, and protocol/strategy/v1. Runtime services, brokers, acquisition,
+canonical orders, identities, clocks, and test builders are private under
+internal/. Trader's own applications compose that private runtime. External
+strategies operate through Strategy Protocol v1/sdk, with a Now-only host clock.
+See package-boundaries.org for the accepted matrix.
+
 * Overview
 
 The objective for this excersive is to make a =fresh= pass at

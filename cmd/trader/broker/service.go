@@ -6,15 +6,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
-	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	simbroker "github.com/rustyeddy/trader/internal/adapters/broker/sim"
+	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/config"
+	"github.com/rustyeddy/trader/internal/id"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
+	svcbroker "github.com/rustyeddy/trader/internal/service/broker"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	svcbroker "github.com/rustyeddy/trader/service/broker"
 )
 
 // accountConfig is the typed configuration a fresh simulated
@@ -116,8 +117,8 @@ func (c cliPriceSource) Price(listing instrument.Listing, side order.Side) (num.
 // file never needs to import adapters/broker/sim itself just to name
 // the FillPriceSource interface type (see boundary_test.go's own
 // "command handlers never import simulator internals" guard).
-func resolveSubmitPriceSource(orderType order.Type, symbol, priceFlag string) (simbroker.FillPriceSource, error) {
-	if orderType != order.Market {
+func resolveSubmitPriceSource(orderType runtimeorder.Type, symbol, priceFlag string) (simbroker.FillPriceSource, error) {
+	if orderType != runtimeorder.Market {
 		return noPriceSource{}, nil
 	}
 	if priceFlag == "" {
