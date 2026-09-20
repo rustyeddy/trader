@@ -58,7 +58,7 @@ numeric design rationale.
 
 ### internal/id
 
-`id` provides Trader-owned identifiers — `RunID`, `OrderID`, `FillID`,
+`internal/id` provides Trader-owned identifiers — `RunID`, `OrderID`, `FillID`,
 `EventID`, `CorrelationID`, `IntentID`, and `AccountID` — each a distinct Go
 type at compile time, backed internally by a monotonic ULID (time-sortable,
 generated from an injected `clock.Clock`) but never exposing that as a
@@ -70,7 +70,7 @@ order, err := id.GenerateOrderID(g)
 // order.String() == "ord_01J8Z3K5H7T1MDCE9WNRP2VXY0"
 ```
 
-`id.Metadata` traces a value through a multi-stage workflow — one
+`internal/id.Metadata` traces a value through a multi-stage workflow — one
 `CorrelationID` shared throughout, each stage's `CausationID` pointing at
 the `EventID` immediately before it. See the
 [package doc comment](../internal/id/doc.go) for the full identifier list and the
@@ -78,8 +78,8 @@ worked intent → proposal → order → fill example.
 
 ### internal/clock
 
-`clock` is Trader's deterministic time seam: domain and application code
-receives a `clock.Clock` instead of calling `time.Now`/`time.NewTimer`
+`internal/clock` is Trader's deterministic time seam: runtime code receives a
+`clock.Clock` instead of calling `time.Now`/`time.NewTimer`
 directly, so backtests and simulations can advance time manually with no
 wall-clock waiting. `Real` wraps the standard library for production;
 `Simulated` advances only when told to:

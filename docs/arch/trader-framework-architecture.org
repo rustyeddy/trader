@@ -45,7 +45,7 @@ source of truth.  The principal additions are:
 - Live operational guards separated from trade-risk rules.
 - Selectable handling of ambiguous bar-based fills.
 - Paper trading as the safe default.
-- A public =tradertest= package and mechanically enforced architecture rules.
+- Mechanically enforced architecture rules and a private runtime test kit.
 - A concrete milestone and GitHub issue plan.
 - Synthetic and multi-leg instruments documented as a deferred extension.
 
@@ -1378,19 +1378,11 @@ belongs in dependencies.
 
 ** In-Process Go Strategies
 
-Users should be able to import Trader and implement =strategy.Strategy= in
-their own private repository.
-
-Their application can compose:
-
-- Trader public packages
-- Their private strategy package
-- Trader or custom adapters
-
-No Go plugin is required.  The private strategy is compiled into the user's own
-binary, not committed to Trader.
-
-This is the simplest and most type-safe extension path.
+In-process strategies are Trader runtime implementation details under
+=internal/strategy=. External strategy repositories implement =sdk.Strategy=
+and run as separate guest processes through Strategy Protocol v1. They may use
+the supported public research/value packages, but do not compose Trader's
+runtime adapters or services directly.
 
 ** Out-of-Process Strategies
 
