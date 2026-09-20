@@ -2,6 +2,7 @@ package stooq
 
 import (
 	"context"
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,6 +38,40 @@ func TestImport_SmallFixtureSplitsIntoMonthlyPartitions(t *testing.T) {
 	snapJune, err := ReadPartitionSnapshot(ctx, rawRoot, "SPY", 2020, time.June)
 	require.NoError(t, err)
 	require.Len(t, snapJune.Records, 1)
+}
+
+func TestImportArchive_SPYD1PreservesSourceAndPartitionsMonthly(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "deep path", "daily", "us", "nyse etfs", "2", "spy.us.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	content := archiveHeader + "\r\n" +
+		"SPY.US,D,20200131,000000,100.00,101.00,99.00,100.50,1000,0\r\n" +
+		"SPY.US,D,20200203,000000,100.50,102.00,100.00,101.50,2000,0\r\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	before := sha256.Sum256([]byte(content))
+
+	r, err := ImportArchive(ctx, path, filepath.Join(root, "raw"), "SPY")
+	require.NoError(t, err)
+	require.Equal(t, 2, r.RowsImported)
+	require.Equal(t, 2, r.MonthsWritten)
+	require.Equal(t, time.Date(2020, time.January, 31, 0, 0, 0, 0, time.UTC), r.FirstDate)
+	require.Equal(t, time.Date(2020, time.February, 3, 0, 0, 0, 0, time.UTC), r.LastDate)
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, before, sha256.Sum256(after), "native archive must remain byte-for-byte unchanged")
+	snap, err := ReadPartitionSnapshot(ctx, filepath.Join(root, "raw"), "SPY", 2020, time.February)
+	require.NoError(t, err)
+	require.Len(t, snap.Records, 1)
+	require.Equal(t, "101.5", snap.Records[0].Close.String())
+}
+
+func TestImportArchive_RejectsNonDailyRows(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempCSV(t, dir, "spy.us.txt", archiveHeader+"\nSPY.US,H1,20200131,000000,100,101,99,100.5,1000,0\n")
+	_, err := ImportArchive(context.Background(), path, t.TempDir(), "SPY")
+	require.ErrorIs(t, err, ErrMalformedData)
 }
 
 // TestImport_FirstLastDateAreMinMaxNotScanOrder confirms

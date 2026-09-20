@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -42,6 +43,48 @@ func spyListing(t *testing.T) instrument.Listing {
 	})
 	require.NoError(t, err)
 	return listing
+}
+
+// TestStooqArchiveShape_SPYD1 feeds one archive-style .txt file with a deep
+// path and spaces through the existing Import -> Plan -> Build -> Bars path.
+// The test proves the new source shape is only an adapter at the ingestion
+// edge; canonical storage and reads remain unchanged.
+func TestStooqArchiveShape_SPYD1(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	source := filepath.Join(root, "download archive", "daily", "us", "nyse etfs", "2", "spy.us.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	content := stooqArchiveHeaderForTest() + "\n" +
+		"SPY.US,D,20200501,000000,282.80,283.19,278.85,282.79,74424000,0\n" +
+		"SPY.US,D,20200601,000000,301.02,303.44,300.15,303.10,52134500,0\n"
+	require.NoError(t, os.WriteFile(source, []byte(content), 0o644))
+	rawRoot := filepath.Join(root, "raw")
+	_, err := stooq.ImportArchive(ctx, source, rawRoot, "SPY")
+	require.NoError(t, err)
+
+	mgr := newStooqTestManager(t, rawRoot)
+	span, err := marketdata.NewTimeRange(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2020, 7, 1, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	plan, err := mgr.Plan(ctx, BarQuery{Instrument: spyID(t), Interval: marketdata.D1, Range: span})
+	require.NoError(t, err)
+	result, err := mgr.Build(ctx, plan)
+	require.NoError(t, err)
+	require.Len(t, result.Published, 2)
+	for _, partition := range result.Published {
+		require.Equal(t, "stooq", partition.Manifest.Provider)
+		require.Equal(t, marketdata.AdjustmentSplitAdjusted, partition.Manifest.AdjustmentPolicy)
+	}
+	reader, err := mgr.Bars(ctx, BarQuery{Instrument: spyID(t), Interval: marketdata.D1, Range: span})
+	require.NoError(t, err)
+	defer reader.Close()
+	bar, err := reader.Next(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "282.79", bar.Close.String())
+	require.True(t, bar.Time.Equal(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC)))
+}
+
+func stooqArchiveHeaderForTest() string {
+	return "<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>"
 }
 
 func spyID(t *testing.T) instrument.ID {

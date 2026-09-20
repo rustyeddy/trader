@@ -5,8 +5,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rustyeddy/trader/num"
 )
 
 // nativeHeader is the exact column header Stooq's own daily-history CSV
@@ -14,6 +17,11 @@ import (
 // raw-archive partition format. Import's job is converting one into the
 // other.
 const nativeHeader = "Date,Open,High,Low,Close,Volume"
+
+// archiveHeader is the header used by Stooq's downloaded archive files.
+// Those files are CSV despite their .txt suffix and include provider
+// identity, period, and time columns around the OHLCV fields.
+const archiveHeader = "<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>"
 
 // ImportResult summarizes one Import call.
 type ImportResult struct {
@@ -139,6 +147,130 @@ func Import(ctx context.Context, csvPath, rawRoot, symbol string) (ImportResult,
 		result.MonthsWritten++
 	}
 
+	return result, nil
+}
+
+// ImportArchive reads one native Stooq archive file and writes its daily
+// records into Trader's existing monthly raw-partition pipeline. It accepts
+// the deep, provider-native archive layout without modifying the source path.
+// Only daily rows (period D) are supported in this first slice.
+func ImportArchive(ctx context.Context, csvPath, rawRoot, symbol string) (ImportResult, error) {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" {
+		return ImportResult{}, fmt.Errorf("%w: symbol is required", ErrMalformedData)
+	}
+	f, err := os.Open(csvPath)
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("stooq: archive import: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return ImportResult{}, fmt.Errorf("stooq: archive import: %w", err)
+		}
+		return ImportResult{}, fmt.Errorf("%w: %s: empty file", ErrMalformedData, csvPath)
+	}
+	if strings.TrimSpace(scanner.Text()) != archiveHeader {
+		return ImportResult{}, fmt.Errorf("%w: %s: unexpected header %q, want %q", ErrMalformedData, csvPath, scanner.Text(), archiveHeader)
+	}
+	var records []Record
+	line := 1
+	for scanner.Scan() {
+		line++
+		if err := ctx.Err(); err != nil {
+			return ImportResult{}, err
+		}
+		row := strings.TrimSpace(scanner.Text())
+		if row == "" {
+			continue
+		}
+		rec, err := parseArchiveRow(csvPath, line, row, symbol)
+		if err != nil {
+			return ImportResult{}, err
+		}
+		records = append(records, rec)
+	}
+	if err := scanner.Err(); err != nil {
+		return ImportResult{}, fmt.Errorf("stooq: archive import: %w", err)
+	}
+	return writeImportedRecords(ctx, rawRoot, symbol, records)
+}
+
+func parseArchiveRow(path string, line int, row, symbol string) (Record, error) {
+	fields := strings.Split(row, ",")
+	if len(fields) != 10 {
+		return Record{}, fmt.Errorf("%w: %s:%d: expected 10 fields, got %d", ErrMalformedData, path, line, len(fields))
+	}
+	ticker := strings.TrimSuffix(strings.ToUpper(strings.TrimSpace(fields[0])), ".US")
+	if ticker != symbol {
+		return Record{}, fmt.Errorf("%w: %s:%d: ticker %q does not match %q", ErrMalformedData, path, line, fields[0], symbol)
+	}
+	if strings.TrimSpace(fields[1]) != "D" {
+		return Record{}, fmt.Errorf("%w: %s:%d: unsupported period %q, only D is supported", ErrMalformedData, path, line, fields[1])
+	}
+	if strings.TrimSpace(fields[3]) != "000000" {
+		return Record{}, fmt.Errorf("%w: %s:%d: daily row has non-midnight time %q", ErrMalformedData, path, line, fields[3])
+	}
+	date, err := time.Parse("20060102", strings.TrimSpace(fields[2]))
+	if err != nil {
+		return Record{}, fmt.Errorf("%w: %s:%d: invalid date %q: %v", ErrMalformedData, path, line, fields[2], err)
+	}
+	parsePrice := func(name, value string) (num.Price, error) {
+		p, err := num.ParsePrice(strings.TrimSpace(value))
+		if err != nil {
+			return num.Price{}, fmt.Errorf("%w: %s:%d: invalid %s %q: %v", ErrMalformedData, path, line, name, value, err)
+		}
+		return p, nil
+	}
+	open, err := parsePrice("open", fields[4])
+	if err != nil {
+		return Record{}, err
+	}
+	high, err := parsePrice("high", fields[5])
+	if err != nil {
+		return Record{}, err
+	}
+	low, err := parsePrice("low", fields[6])
+	if err != nil {
+		return Record{}, err
+	}
+	closePrice, err := parsePrice("close", fields[7])
+	if err != nil {
+		return Record{}, err
+	}
+	volume, err := strconv.ParseInt(strings.TrimSpace(fields[8]), 10, 64)
+	if err != nil || volume < 0 {
+		return Record{}, fmt.Errorf("%w: %s:%d: invalid volume %q", ErrMalformedData, path, line, fields[8])
+	}
+	return Record{Time: date.UTC(), Open: open, High: high, Low: low, Close: closePrice, Volume: volume}, nil
+}
+
+func writeImportedRecords(ctx context.Context, rawRoot, symbol string, records []Record) (ImportResult, error) {
+	result := ImportResult{}
+	byMonth := make(map[monthKey][]Record)
+	var order []monthKey
+	for _, rec := range records {
+		key := monthKey{year: rec.Time.Year(), month: rec.Time.Month()}
+		if _, seen := byMonth[key]; !seen {
+			order = append(order, key)
+		}
+		byMonth[key] = append(byMonth[key], rec)
+		result.RowsImported++
+		if result.FirstDate.IsZero() || rec.Time.Before(result.FirstDate) {
+			result.FirstDate = rec.Time
+		}
+		if result.LastDate.IsZero() || rec.Time.After(result.LastDate) {
+			result.LastDate = rec.Time
+		}
+	}
+	for _, key := range order {
+		if err := WritePartition(ctx, rawRoot, symbol, key.year, key.month, byMonth[key], false); err != nil {
+			return ImportResult{}, fmt.Errorf("stooq: import: write %04d-%02d: %w", key.year, int(key.month), err)
+		}
+		result.MonthsWritten++
+	}
 	return result, nil
 }
 

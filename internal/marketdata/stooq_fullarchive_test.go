@@ -21,7 +21,7 @@ import (
 	marketdata "github.com/rustyeddy/trader/marketdata"
 )
 
-// fullArchiveStooqCSVPath names the real Stooq CSV export
+// fullArchiveStooqArchivePath names the real Stooq native archive export
 // TestStooqFullArchiveEndToEnd imports and reads back through the full
 // Manager path. Empty by default for the identical reason every other
 // fullarchive constant in this codebase is: an operator edits it
@@ -30,27 +30,27 @@ import (
 //
 //	go test -tags fullarchive ./marketdata/... \
 //	    -run TestStooqFullArchiveEndToEnd -v
-const fullArchiveStooqCSVPath = ""
+const fullArchiveStooqArchivePath = ""
 
-// TestStooqFullArchiveEndToEnd imports fullArchiveStooqCSVPath, runs it
+// TestStooqFullArchiveEndToEnd imports fullArchiveStooqArchivePath, runs it
 // through Plan -> Build -> Bars against a real marketdata.Manager, and
-// spot-checks a few known dates/prices against the raw CSV — issue
+// spot-checks a few known dates/prices against the raw archive — issue
 // #303 (EQ-03A)'s own acceptance criterion that the full local SPY D1
 // dataset can be imported and read through the normal Trader
 // marketdata path, exercised against real data rather than only a
 // fixture.
 func TestStooqFullArchiveEndToEnd(t *testing.T) {
-	if fullArchiveStooqCSVPath == "" {
-		t.Skip("fullArchiveStooqCSVPath is empty; edit the constant in this file to point at a real Stooq CSV export to run this test")
+	if fullArchiveStooqArchivePath == "" {
+		t.Skip("fullArchiveStooqArchivePath is empty; edit the constant in this file to point at a native Stooq .txt export to run this test")
 	}
-	if info, err := os.Stat(fullArchiveStooqCSVPath); err != nil || info.IsDir() {
-		t.Skipf("fullArchiveStooqCSVPath %q is not a readable file: %v", fullArchiveStooqCSVPath, err)
+	if info, err := os.Stat(fullArchiveStooqArchivePath); err != nil || info.IsDir() {
+		t.Skipf("fullArchiveStooqArchivePath %q is not a readable file: %v", fullArchiveStooqArchivePath, err)
 	}
 
 	ctx := context.Background()
 	rawRoot := t.TempDir()
 
-	result, err := stooq.Import(ctx, fullArchiveStooqCSVPath, rawRoot, "SPY")
+	result, err := stooq.ImportArchive(ctx, fullArchiveStooqArchivePath, rawRoot, "SPY")
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
