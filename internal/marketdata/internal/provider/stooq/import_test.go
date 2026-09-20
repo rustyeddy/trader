@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +73,51 @@ func TestImportArchive_RejectsNonDailyRows(t *testing.T) {
 	path := writeTempCSV(t, dir, "spy.us.txt", archiveHeader+"\nSPY.US,H1,20200131,000000,100,101,99,100.5,1000,0\n")
 	_, err := ImportArchive(context.Background(), path, t.TempDir(), "SPY")
 	require.ErrorIs(t, err, ErrMalformedData)
+}
+
+func TestImportArchive_RejectsMalformedRowsWithContext(t *testing.T) {
+	valid := []string{"SPY.US", "D", "20200131", "000000", "100", "101", "99", "100.5", "1000", "0"}
+	cases := []struct {
+		name   string
+		modify func([]string) []string
+	}{
+		{name: "field count", modify: func(fields []string) []string { return fields[:9] }},
+		{name: "ticker mismatch", modify: func(fields []string) []string { fields[0] = "QQQ.US"; return fields }},
+		{name: "period", modify: func(fields []string) []string { fields[1] = "H1"; return fields }},
+		{name: "time", modify: func(fields []string) []string { fields[3] = "093000"; return fields }},
+		{name: "date", modify: func(fields []string) []string { fields[2] = "2020-01-31"; return fields }},
+		{name: "open", modify: func(fields []string) []string { fields[4] = "bad"; return fields }},
+		{name: "high", modify: func(fields []string) []string { fields[5] = "bad"; return fields }},
+		{name: "low", modify: func(fields []string) []string { fields[6] = "bad"; return fields }},
+		{name: "close", modify: func(fields []string) []string { fields[7] = "bad"; return fields }},
+		{name: "volume", modify: func(fields []string) []string { fields[8] = "bad"; return fields }},
+		{name: "negative volume", modify: func(fields []string) []string { fields[8] = "-1"; return fields }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := tc.modify(append([]string(nil), valid...))
+			dir := t.TempDir()
+			path := filepath.Join(dir, "nested path", "spy.us.txt")
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			content := archiveHeader + "\n" + strings.Join(fields, ",") + "\n"
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+			_, err := ImportArchive(context.Background(), path, filepath.Join(dir, "raw"), "SPY")
+			require.ErrorIs(t, err, ErrMalformedData)
+			require.ErrorContains(t, err, path)
+			require.ErrorContains(t, err, ":2:")
+		})
+	}
+}
+
+func TestImportArchive_RejectsWrongHeaderWithPathContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested path", "spy.us.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("wrong,header\n"), 0o644))
+	_, err := ImportArchive(context.Background(), path, t.TempDir(), "SPY")
+	require.ErrorIs(t, err, ErrMalformedData)
+	require.ErrorContains(t, err, path)
 }
 
 // TestImport_FirstLastDateAreMinMaxNotScanOrder confirms

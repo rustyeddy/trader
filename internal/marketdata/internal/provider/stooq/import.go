@@ -244,6 +244,8 @@ func parseArchiveRow(path string, line int, row, symbol string) (Record, error) 
 	if err != nil || volume < 0 {
 		return Record{}, fmt.Errorf("%w: %s:%d: invalid volume %q", ErrMalformedData, path, line, fields[8])
 	}
+	// OPENINT is provider metadata outside Trader's OHLCV model; validate
+	// the field count but deliberately do not persist it.
 	return Record{Time: date.UTC(), Open: open, High: high, Low: low, Close: closePrice, Volume: volume}, nil
 }
 
