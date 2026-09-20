@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"go/parser"
@@ -11,17 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStrategySDKNeverImportsForbiddenPackages mirrors
+// TestSDKNeverImportsForbiddenPackages mirrors
 // strategy/boundary_test.go's own per-file import-parsing approach
 // and its exact forbidden set (ADR-062's own "Dependency direction"
-// section: "strategysdk depends on order, marketdata, instrument, and
+// section: "sdk depends on order, marketdata, instrument, and
 // num ... never on strategy itself, and never on backtest, service,
 // cmd, adapters, broker, execution, risk, pipeline, or chart ... since
 // a guest process has exactly the same restrictions an in-process
 // strategy does"). It parses every non-test .go file's own import
 // block directly, per-file, rather than a package-level `go list`
 // that would merge every file's imports together.
-func TestStrategySDKNeverImportsForbiddenPackages(t *testing.T) {
+func TestSDKNeverImportsForbiddenPackages(t *testing.T) {
 	forbiddenRoots := []string{
 		"github.com/rustyeddy/trader/strategy",
 		"github.com/rustyeddy/trader/broker",

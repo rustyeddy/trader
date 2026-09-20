@@ -1,9 +1,9 @@
-package strategysdk
+package sdk
 
 import "context"
 
 // Strategy is the contract an out-of-tree Go strategy implements to
-// speak Strategy Protocol v1 through Serve — strategysdk's own
+// speak Strategy Protocol v1 through Serve — sdk's own
 // counterpart to strategy.Strategy, deliberately not that interface
 // itself (see the package doc comment). OnBar returns described
 // intents and described signals rather than real, canonical ones: a
@@ -26,7 +26,7 @@ type Strategy interface {
 	OnBar(ctx context.Context, event BarEvent, view View) ([]DescribedIntent, []DescribedSignal, error)
 }
 
-// FillHandler is an optional Strategy capability — strategysdk's own
+// FillHandler is an optional Strategy capability — sdk's own
 // counterpart to strategy.FillHandler (ADR-060). Implementing it
 // advertises CAPABILITY_FILL_HANDLER at Handshake; Serve negotiates it
 // automatically based on whether the Strategy value passed to it

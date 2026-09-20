@@ -1,7 +1,7 @@
-package strategysdk
+package sdk
 
 // DescribedSignal is a guest's own research-side trace of the
-// evidence behind one bar's decision — strategysdk's own counterpart
+// evidence behind one bar's decision — sdk's own counterpart
 // to journal.Signal, whose shape it mirrors verbatim (Strategy,
 // Values), since that type is already a plain, string-keyed evidence
 // bag with no Go-interface or identity content to translate

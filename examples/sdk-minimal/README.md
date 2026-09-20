@@ -1,21 +1,21 @@
-# strategysdk-minimal
+# sdk-minimal
 
-The smallest useful out-of-tree Go strategy, built on `strategysdk`
+The smallest useful out-of-tree Go strategy, built on `sdk`
 (issue #381, ADR-062) — the guest-side counterpart to
 `adapters/strategy/external.Host` (issue #379/#380).
 
 It never imports Trader's `strategy`, `backtest`, `adapters`, or any
-runtime/application package — only `strategysdk` itself, plus the
+runtime/application package — only `sdk` itself, plus the
 small shared value-type packages (`instrument`, `marketdata`, `num`,
-`order`) `strategysdk.DescribedIntent` and friends are built from. See
-`strategysdk/boundary_test.go` for the mechanically enforced version
+`order`) `sdk.DescribedIntent` and friends are built from. See
+`sdk/boundary_test.go` for the mechanically enforced version
 of that same rule.
 
 ## What it does
 
 `flipFlop` is a deliberately trivial strategy: flat on its first bar,
 it enters long; once long, the next bar exits. It exists to show the
-complete shape of a `strategysdk.Strategy` — `Describe`, `Start`,
+complete shape of a `sdk.Strategy` — `Describe`, `Start`,
 `OnBar` — and the one-line `Serve()` call a real strategy author's own
 `main()` needs. It is not a trading strategy anyone should run for
 real.
@@ -24,7 +24,7 @@ real.
 
 ```go
 func main() {
-    if err := strategysdk.Serve(newFlipFlop()); err != nil {
+    if err := sdk.Serve(newFlipFlop()); err != nil {
         log.Fatal(err)
     }
 }
@@ -45,7 +45,7 @@ automatically. To drive it manually against any `StrategyHostService`
 implementation instead:
 
 ```sh
-go build -o /tmp/flipflop ./examples/strategysdk-minimal
+go build -o /tmp/flipflop ./examples/sdk-minimal
 
 # with some process listening on /tmp/trader-strategy.sock and
 # implementing trader.strategy.v1.StrategyHostService:
@@ -54,7 +54,7 @@ TRADER_STRATEGY_SOCKET=/tmp/trader-strategy.sock /tmp/flipflop
 
 Without `TRADER_STRATEGY_SOCKET` set, or with nothing listening at
 that path, it exits immediately with a clear error rather than
-hanging — see `strategysdk.SocketPathEnv`'s own doc comment.
+hanging — see `sdk.SocketPathEnv`'s own doc comment.
 
 ## Running it through "trader backtest run" (issue #382)
 
@@ -65,7 +65,7 @@ launches it, completes the Handshake, and drives it exactly like
 run:
 
 ```sh
-go build -o /tmp/flipflop ./examples/strategysdk-minimal
+go build -o /tmp/flipflop ./examples/sdk-minimal
 
 trader backtest run \
   --strategy-exec /tmp/flipflop \

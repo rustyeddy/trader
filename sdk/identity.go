@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ import (
 // ErrInvalidWireValue reports a wire message field that is malformed,
 // missing, or outside what this v1 surface defines. Conversion never
 // guesses or repairs an invalid value; it fails explicitly.
-var ErrInvalidWireValue = errors.New("strategysdk: invalid wire value")
+var ErrInvalidWireValue = errors.New("sdk: invalid wire value")
 
 // parseInstrumentID reconstructs an instrument.ID from its own
 // canonical text form (for example "fx:EUR/USD"), the same text every

@@ -1,4 +1,4 @@
-package strategysdk_test
+package sdk_test
 
 import (
 	"context"
@@ -21,14 +21,14 @@ import (
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
+	"github.com/rustyeddy/trader/sdk"
 	"github.com/rustyeddy/trader/strategy"
-	"github.com/rustyeddy/trader/strategysdk"
 )
 
-// This file proves strategysdk against the real, production
+// This file proves sdk against the real, production
 // adapters/strategy/external.Host implementation (issue #379/#380),
 // not a hand-rolled fake protocol server: a bufconn listener connects
-// a real Host on one side to strategysdk.ServeConn on the other,
+// a real Host on one side to sdk.ServeConn on the other,
 // exercising both halves of the v1 boundary together end to end —
 // exactly the guarantee a unit test against either side alone cannot
 // give.
@@ -126,28 +126,28 @@ type fakeView struct {
 
 func (v fakeView) Account() account.Snapshot { return v.acct }
 
-// testGuestStrategy is a minimal strategysdk.Strategy whose behavior
+// testGuestStrategy is a minimal sdk.Strategy whose behavior
 // each test configures via its own fields/callbacks.
 type testGuestStrategy struct {
-	descriptor strategysdk.Descriptor
+	descriptor sdk.Descriptor
 
-	startedCh chan strategysdk.Environment // Start sends its env here; buffered 1
+	startedCh chan sdk.Environment // Start sends its env here; buffered 1
 
-	onBar func(event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error)
+	onBar func(event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error)
 }
 
-func newTestGuestStrategy(descriptor strategysdk.Descriptor) *testGuestStrategy {
-	return &testGuestStrategy{descriptor: descriptor, startedCh: make(chan strategysdk.Environment, 1)}
+func newTestGuestStrategy(descriptor sdk.Descriptor) *testGuestStrategy {
+	return &testGuestStrategy{descriptor: descriptor, startedCh: make(chan sdk.Environment, 1)}
 }
 
-func (s *testGuestStrategy) Describe() strategysdk.Descriptor { return s.descriptor }
+func (s *testGuestStrategy) Describe() sdk.Descriptor { return s.descriptor }
 
-func (s *testGuestStrategy) Start(_ context.Context, env strategysdk.Environment) error {
+func (s *testGuestStrategy) Start(_ context.Context, env sdk.Environment) error {
 	s.startedCh <- env
 	return nil
 }
 
-func (s *testGuestStrategy) OnBar(_ context.Context, event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+func (s *testGuestStrategy) OnBar(_ context.Context, event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 	if s.onBar == nil {
 		return nil, nil, nil
 	}
@@ -155,27 +155,27 @@ func (s *testGuestStrategy) OnBar(_ context.Context, event strategysdk.BarEvent,
 }
 
 // testGuestStrategyWithFill additionally implements
-// strategysdk.FillHandler.
+// sdk.FillHandler.
 type testGuestStrategyWithFill struct {
 	*testGuestStrategy
-	onFill func(event strategysdk.FillEvent, view strategysdk.View) error
+	onFill func(event sdk.FillEvent, view sdk.View) error
 }
 
-func (s *testGuestStrategyWithFill) OnFill(_ context.Context, event strategysdk.FillEvent, view strategysdk.View) error {
+func (s *testGuestStrategyWithFill) OnFill(_ context.Context, event sdk.FillEvent, view sdk.View) error {
 	if s.onFill == nil {
 		return nil
 	}
 	return s.onFill(event, view)
 }
 
-func simpleSDKDescriptor(t *testing.T, name string) strategysdk.Descriptor {
+func simpleSDKDescriptor(t *testing.T, name string) sdk.Descriptor {
 	t.Helper()
 	iv, err := marketdata.NewInterval(marketdata.UnitHour, 1)
 	require.NoError(t, err)
-	return strategysdk.Descriptor{
+	return sdk.Descriptor{
 		Name:    name,
 		Version: "1.0",
-		Requirements: []strategysdk.DataRequirement{
+		Requirements: []sdk.DataRequirement{
 			{Instrument: eurUSD(t), Interval: iv, WarmupBars: 0},
 		},
 	}
@@ -183,7 +183,7 @@ func simpleSDKDescriptor(t *testing.T, name string) strategysdk.Descriptor {
 
 // testHarness starts a real external.Host over a bufconn listener and
 // connects a *grpc.ClientConn to it, giving a test both a bufconn
-// listener (for a strategysdk.ServeConn caller to dial the SAME
+// listener (for a sdk.ServeConn caller to dial the SAME
 // in-memory network) and a ready client connection.
 type testHarness struct {
 	t      *testing.T
@@ -213,7 +213,7 @@ func (h *testHarness) stop() {
 }
 
 // dial returns a fresh *grpc.ClientConn to this harness's own bufconn
-// listener — the same connection a real strategysdk guest would dial
+// listener — the same connection a real sdk guest would dial
 // over the Unix-domain socket in production.
 func (h *testHarness) dial() *grpc.ClientConn {
 	h.t.Helper()
@@ -239,7 +239,7 @@ func testEnvironment(t *testing.T) strategy.Environment {
 }
 
 // TestServeConn_DescribeStartOnBarRoundTrip is the core acceptance
-// path: strategysdk.ServeConn, driving a real testGuestStrategy,
+// path: sdk.ServeConn, driving a real testGuestStrategy,
 // completes Handshake against a real external.Host and a described
 // intent becomes a real canonical order.Intent host-side.
 func TestServeConn_DescribeStartOnBarRoundTrip(t *testing.T) {
@@ -249,15 +249,15 @@ func TestServeConn_DescribeStartOnBarRoundTrip(t *testing.T) {
 
 	inst := eurUSD(t)
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
-	guest.onBar = func(event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+	guest.onBar = func(event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 		require.True(t, event.Instrument.Equal(inst))
 		require.Equal(t, "USD", view.Account().Currency)
-		return []strategysdk.DescribedIntent{strategysdk.Enter(inst, order.Buy)}, nil, nil
+		return []sdk.DescribedIntent{sdk.Enter(inst, order.Buy)}, nil, nil
 	}
 
 	conn := h.dial()
 	serveErrCh := make(chan error, 1)
-	go func() { serveErrCh <- strategysdk.ServeConn(ctx, conn, guest) }()
+	go func() { serveErrCh <- sdk.ServeConn(ctx, conn, guest) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -299,7 +299,7 @@ func mustInterval(t *testing.T) marketdata.Interval {
 }
 
 // TestServeConn_FillHandlerRoundTrip proves a guest implementing
-// strategysdk.FillHandler negotiates CAPABILITY_FILL_HANDLER and
+// sdk.FillHandler negotiates CAPABILITY_FILL_HANDLER and
 // receives a real FillEvent.
 func TestServeConn_FillHandlerRoundTrip(t *testing.T) {
 	h := newTestHarness(t)
@@ -307,17 +307,17 @@ func TestServeConn_FillHandlerRoundTrip(t *testing.T) {
 	defer cancelGuest()
 
 	inst := eurUSD(t)
-	onFillCalled := make(chan strategysdk.FillEvent, 1)
+	onFillCalled := make(chan sdk.FillEvent, 1)
 	guest := &testGuestStrategyWithFill{
 		testGuestStrategy: newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest")),
-		onFill: func(event strategysdk.FillEvent, view strategysdk.View) error {
+		onFill: func(event sdk.FillEvent, view sdk.View) error {
 			onFillCalled <- event
 			return nil
 		},
 	}
 
 	conn := h.dial()
-	go func() { _ = strategysdk.ServeConn(ctx, conn, guest) }()
+	go func() { _ = sdk.ServeConn(ctx, conn, guest) }()
 
 	strat, err := h.host.Strategy(context.Background())
 	require.NoError(t, err)
@@ -407,10 +407,10 @@ func TestServeConn_ProtocolVersionMismatchProducesClearError(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	guest := newTestGuestStrategy(simpleSDKDescriptor(t, "sdk_guest"))
-	err = strategysdk.ServeConn(context.Background(), conn, guest)
+	err = sdk.ServeConn(context.Background(), conn, guest)
 	require.Error(t, err)
 
-	var wireErr *strategysdk.WireError
+	var wireErr *sdk.WireError
 	require.ErrorAs(t, err, &wireErr)
 	require.Equal(t, v1.ErrorCode_ERROR_CODE_PROTOCOL_VERSION_MISMATCH, wireErr.Code)
 }

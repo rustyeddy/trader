@@ -1,7 +1,7 @@
 // Command fakeguest is a minimal Strategy Protocol v1 guest, used only
 // as a real out-of-process test fixture for
 // adapters/strategy/external's own process_test.go (issue #380). It
-// is not part of any published SDK — a real guest is strategysdk,
+// is not part of any published SDK — a real guest is sdk,
 // issue #381 — and exists solely to exercise Process/Launch against
 // an actual child process and Unix-domain socket rather than an
 // in-process fake, which is exactly what issue #380's own acceptance

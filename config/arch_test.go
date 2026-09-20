@@ -20,8 +20,8 @@ import (
 // belongs — and so is config itself, which necessarily calls os.Getenv and
 // friends to implement the environment source.
 //
-// strategysdk is exempt for the same reason as cmd/, not a relaxation
-// of it: strategysdk.Serve reads TRADER_STRATEGY_SOCKET
+// sdk is exempt for the same reason as cmd/, not a relaxation
+// of it: sdk.Serve reads TRADER_STRATEGY_SOCKET
 // (adapters/strategy/external's own ADR-063 launch contract) to find
 // the Unix-domain socket it must dial, and is itself this process's
 // own composition root — the guest-side equivalent of a cmd/ binary's
@@ -37,11 +37,11 @@ import (
 // exemptPrefixes are repository-relative path prefixes allowed to touch the
 // process environment or command-line flags directly.
 //
-// examples/sma-long-hold is exempt for the same reason strategysdk and
+// examples/sma-long-hold is exempt for the same reason sdk and
 // cmd already are: its main() is an out-of-tree guest binary's own
 // composition root (issue #383), reading TRADER_STRATEGY_CONFIG the
-// same way strategysdk's own Serve reads TRADER_STRATEGY_SOCKET.
-var exemptPrefixes = []string{"config", "cmd", "test", "strategysdk", "examples/sma-long-hold", ".git"}
+// same way sdk's own Serve reads TRADER_STRATEGY_SOCKET.
+var exemptPrefixes = []string{"config", "cmd", "test", "sdk", "examples/sma-long-hold", ".git"}
 
 func TestDomainPackagesDoNotReadEnvOrFlags(t *testing.T) {
 	root := repoRoot(t)

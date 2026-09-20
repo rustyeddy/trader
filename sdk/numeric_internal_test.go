@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"testing"

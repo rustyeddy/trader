@@ -61,7 +61,7 @@ variable, =TRADER_STRATEGY_SOCKET= (exported as
 =external.SocketPathEnv=), set on the child's process environment
 before it is started. No command-line flag convention is defined: an
 environment variable requires no assumption about the guest's own
-argument parsing (=strategysdk=, issue #381, or a hand-rolled guest in
+argument parsing (=sdk=, issue #381, or a hand-rolled guest in
 any language), matches how the equivalent =GRPC_*=/=NO_PROXY=-style
 conventions are conventionally passed to child processes, and needs no
 escaping rules for a path that might itself contain spaces.
@@ -150,7 +150,7 @@ the same way, not assume inheritance was ever the default.
   =strategy.Strategy= value (ADR-062's own architectural requirement,
   reaffirmed).
 - The environment-variable convention is a real, load-bearing
-  contract now: any future guest SDK (=strategysdk=, issue #381) must
+  contract now: any future guest SDK (=sdk=, issue #381) must
   read =external.SocketPathEnv= (or the literal
   =TRADER_STRATEGY_SOCKET= string) to find its socket.
 - Process supervision is deliberately shallow (detect and expose, not

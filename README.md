@@ -48,6 +48,9 @@ See the [Developer's Guide](docs/DevelopersGuide.md) for a tour of every
 public package, with short usage examples and links to the full package doc
 comments and ADRs behind each boundary.
 
+Guest strategies use [`sdk`](sdk) (`github.com/rustyeddy/trader/sdk`).
+See [`examples/sdk-minimal`](examples/sdk-minimal) for a complete example.
+
 ## Documentation
 
 - [User's Guide](docs/UsersGuide.md)

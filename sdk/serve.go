@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"context"
@@ -98,7 +98,7 @@ func WithHistoryBarsTimeout(d time.Duration) Option {
 // own main():
 //
 //	func main() {
-//	    if err := strategysdk.Serve(mystrategy.New(cfg)); err != nil {
+//	    if err := sdk.Serve(mystrategy.New(cfg)); err != nil {
 //	        log.Fatal(err)
 //	    }
 //	}
@@ -120,12 +120,12 @@ func Serve(strat Strategy, opts ...Option) error {
 func ServeContext(ctx context.Context, strat Strategy, opts ...Option) error {
 	sockPath := os.Getenv(SocketPathEnv)
 	if sockPath == "" {
-		return fmt.Errorf("strategysdk: %s is not set — this process must be launched by a Trader host (ADR-063)", SocketPathEnv)
+		return fmt.Errorf("sdk: %s is not set — this process must be launched by a Trader host (ADR-063)", SocketPathEnv)
 	}
 
 	conn, err := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("strategysdk: dialing %s: %w", sockPath, err)
+		return fmt.Errorf("sdk: dialing %s: %w", sockPath, err)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -160,7 +160,7 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 	descriptor := strat.Describe()
 	wireDescriptor, err := toWireDescriptor(descriptor)
 	if err != nil {
-		return fmt.Errorf("strategysdk: describe: %w", err)
+		return fmt.Errorf("sdk: describe: %w", err)
 	}
 
 	handshakeCtx, cancelHandshake := context.WithTimeout(ctx, cfg.handshakeTimeout)
@@ -171,27 +171,27 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 	})
 	cancelHandshake()
 	if err != nil {
-		return fmt.Errorf("strategysdk: handshake: %w", err)
+		return fmt.Errorf("sdk: handshake: %w", err)
 	}
 	if !hsResp.GetAccepted() {
 		if rejectErr := fromWireError(hsResp.GetRejectReason()); rejectErr != nil {
-			return fmt.Errorf("strategysdk: handshake rejected: %w", rejectErr)
+			return fmt.Errorf("sdk: handshake rejected: %w", rejectErr)
 		}
-		return fmt.Errorf("strategysdk: handshake rejected: host protocol version %q, this SDK is %q",
+		return fmt.Errorf("sdk: handshake rejected: host protocol version %q, this SDK is %q",
 			hsResp.GetProtocolVersion(), v1.ProtocolVersion)
 	}
 	if err := verifyNegotiatedCapabilities(capabilities, hsResp.GetCapabilities()); err != nil {
-		return fmt.Errorf("strategysdk: handshake: %w", err)
+		return fmt.Errorf("sdk: handshake: %w", err)
 	}
 
 	stream, err := client.Run(ctx)
 	if err != nil {
-		return fmt.Errorf("strategysdk: opening run stream: %w", err)
+		return fmt.Errorf("sdk: opening run stream: %w", err)
 	}
 	if err := stream.Send(&v1.RunClientMessage{Payload: &v1.RunClientMessage_RunOpen{
 		RunOpen: &v1.RunOpen{SessionId: hsResp.GetSessionId()},
 	}}); err != nil {
-		return fmt.Errorf("strategysdk: sending run_open: %w", err)
+		return fmt.Errorf("sdk: sending run_open: %w", err)
 	}
 
 	g := &guestRun{
@@ -218,7 +218,7 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 
 // negotiatedCapabilities returns the v1.Capability set strat itself
 // advertises at Handshake, determined entirely by which optional
-// strategysdk interfaces it implements — mirroring how
+// sdk interfaces it implements — mirroring how
 // ExternalStrategyAdapter's own capability wrapper family is selected
 // host-side (ADR-062).
 func negotiatedCapabilities(strat Strategy) []v1.Capability {
@@ -294,12 +294,12 @@ func (g *guestRun) loop() error {
 				if g.sawSessionEnd {
 					return nil
 				}
-				return fmt.Errorf("strategysdk: run stream: ended without a session_end message (host or transport failure)")
+				return fmt.Errorf("sdk: run stream: ended without a session_end message (host or transport failure)")
 			}
 			if g.ctx.Err() != nil {
 				return g.ctx.Err()
 			}
-			return fmt.Errorf("strategysdk: run stream: %w", err)
+			return fmt.Errorf("sdk: run stream: %w", err)
 		}
 
 		switch payload := msg.GetPayload().(type) {
@@ -319,7 +319,7 @@ func (g *guestRun) loop() error {
 			g.sawSessionEnd = true
 			return sessionEndErr(payload.SessionEnd)
 		default:
-			return fmt.Errorf("strategysdk: run stream: received message with no recognized payload")
+			return fmt.Errorf("sdk: run stream: received message with no recognized payload")
 		}
 	}
 }
@@ -337,7 +337,7 @@ func (g *guestRun) handleSessionStart(w *v1.SessionStart) error {
 		Logger: g.logger,
 	}
 	if err := g.strat.Start(g.ctx, env); err != nil {
-		return fmt.Errorf("strategysdk: start: %w", err)
+		return fmt.Errorf("sdk: start: %w", err)
 	}
 	return nil
 }
@@ -348,14 +348,14 @@ func (g *guestRun) handleBarEvent(w *v1.BarEvent) error {
 	}
 	event, err := fromWireBarEvent(w)
 	if err != nil {
-		return fmt.Errorf("strategysdk: bar event: %w", err)
+		return fmt.Errorf("sdk: bar event: %w", err)
 	}
 	if g.clock != nil {
 		g.clock.set(event.Bar.Time)
 	}
 	account, err := fromWireAccountSnapshot(w.GetAccount())
 	if err != nil {
-		return fmt.Errorf("strategysdk: bar event: %w", err)
+		return fmt.Errorf("sdk: bar event: %w", err)
 	}
 
 	view := &guestView{
@@ -405,11 +405,11 @@ func (g *guestRun) handleFillEvent(w *v1.FillEvent) error {
 	}
 	event, err := fromWireFillEvent(w)
 	if err != nil {
-		return fmt.Errorf("strategysdk: fill event: %w", err)
+		return fmt.Errorf("sdk: fill event: %w", err)
 	}
 	account, err := fromWireAccountSnapshot(w.GetAccount())
 	if err != nil {
-		return fmt.Errorf("strategysdk: fill event: %w", err)
+		return fmt.Errorf("sdk: fill event: %w", err)
 	}
 
 	// GetHistoryBars is scoped to an in-flight BarEvent callback only
@@ -428,7 +428,7 @@ func (g *guestRun) handleFillEvent(w *v1.FillEvent) error {
 		}
 	} else {
 		wireErr = toWireError(v1.ErrorCode_ERROR_CODE_CAPABILITY_MISMATCH,
-			fmt.Errorf("strategysdk: received fill_event but this strategy does not implement FillHandler"))
+			fmt.Errorf("sdk: received fill_event but this strategy does not implement FillHandler"))
 	}
 
 	return g.stream.Send(&v1.RunClientMessage{Payload: &v1.RunClientMessage_OnFillResponse{OnFillResponse: &v1.OnFillResponse{
@@ -507,7 +507,7 @@ func (v *guestView) HistoryBars(instID instrument.ID, interval marketdata.Interv
 
 	wireIv, err := toWireInterval(interval)
 	if err != nil {
-		return nil, false, fmt.Errorf("strategysdk: history bars: %w", err)
+		return nil, false, fmt.Errorf("sdk: history bars: %w", err)
 	}
 
 	rpcCtx, cancel := context.WithTimeout(v.ctx, v.historyBarsTimeout)
@@ -521,12 +521,12 @@ func (v *guestView) HistoryBars(instID instrument.ID, interval marketdata.Interv
 		Count:            int32(n),
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("strategysdk: history bars: %w", err)
+		return nil, false, fmt.Errorf("sdk: history bars: %w", err)
 	}
 
 	bars, err = fromWireBars(resp.GetBars())
 	if err != nil {
-		return nil, false, fmt.Errorf("strategysdk: history bars: %w", err)
+		return nil, false, fmt.Errorf("sdk: history bars: %w", err)
 	}
 	return bars, true, nil
 }

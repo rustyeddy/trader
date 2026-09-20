@@ -1,15 +1,15 @@
-// Command strategysdk-minimal is the minimal out-of-tree strategy
+// Command sdk-minimal is the minimal out-of-tree strategy
 // binary issue #381's own acceptance criteria ask for: it compiles
 // and serves Strategy Protocol v1 over a Unix-domain socket using
-// only strategysdk — never importing Trader's own strategy, backtest,
-// or adapters packages (strategysdk/boundary_test.go enforces the
-// identical rule for strategysdk itself; this example demonstrates
+// only sdk — never importing Trader's own strategy, backtest,
+// or adapters packages (sdk/boundary_test.go enforces the
+// identical rule for sdk itself; this example demonstrates
 // the same discipline from an author's own, separate perspective).
 //
 // It implements a deliberately trivial "flip-flop" strategy: flat on
 // its first bar, it enters long; once long, the next bar exits. This
 // is not a trading strategy anyone should run for real — it exists to
-// show the complete shape of a strategysdk.Strategy (Describe/Start/
+// show the complete shape of a sdk.Strategy (Describe/Start/
 // OnBar) and the one-line Serve() a real author's own main() needs,
 // nothing more.
 //
@@ -25,19 +25,19 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/strategysdk"
+	"github.com/rustyeddy/trader/sdk"
 )
 
 func main() {
-	if err := strategysdk.Serve(newFlipFlop()); err != nil {
+	if err := sdk.Serve(newFlipFlop()); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// flipFlop is the smallest useful strategysdk.Strategy: it never
+// flipFlop is the smallest useful sdk.Strategy: it never
 // consults history or the account snapshot in any real way, and it
 // implements no optional capability (no FillHandler) — see
-// strategysdk's own doc comment for what each of Describe/Start/OnBar
+// sdk's own doc comment for what each of Describe/Start/OnBar
 // is for.
 type flipFlop struct {
 	instrument instrument.ID
@@ -60,31 +60,31 @@ func newFlipFlop() *flipFlop {
 	return &flipFlop{instrument: inst, interval: interval}
 }
 
-func (f *flipFlop) Describe() strategysdk.Descriptor {
-	return strategysdk.Descriptor{
+func (f *flipFlop) Describe() sdk.Descriptor {
+	return sdk.Descriptor{
 		Name:    "flipflop",
 		Version: "0.1.0",
-		Requirements: []strategysdk.DataRequirement{
+		Requirements: []sdk.DataRequirement{
 			{Instrument: f.instrument, Interval: f.interval, WarmupBars: 0},
 		},
 	}
 }
 
-func (f *flipFlop) Start(_ context.Context, env strategysdk.Environment) error {
+func (f *flipFlop) Start(_ context.Context, env sdk.Environment) error {
 	env.Logger.Info("flipflop starting", "run_id", env.RunID, "start", env.Clock.Now())
 	return nil
 }
 
-func (f *flipFlop) OnBar(_ context.Context, event strategysdk.BarEvent, _ strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+func (f *flipFlop) OnBar(_ context.Context, event sdk.BarEvent, _ sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 	if !event.Instrument.Equal(f.instrument) {
 		return nil, nil, nil
 	}
 
 	if !f.long {
 		f.long = true
-		return []strategysdk.DescribedIntent{strategysdk.Enter(f.instrument, order.Buy)}, nil, nil
+		return []sdk.DescribedIntent{sdk.Enter(f.instrument, order.Buy)}, nil, nil
 	}
 
 	f.long = false
-	return []strategysdk.DescribedIntent{strategysdk.Exit(f.instrument)}, nil, nil
+	return []sdk.DescribedIntent{sdk.Exit(f.instrument)}, nil, nil
 }

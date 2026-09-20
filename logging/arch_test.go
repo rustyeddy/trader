@@ -28,13 +28,13 @@ import (
 // slog.SetDefault-equivalent choice (if any) belongs, not scattered through
 // domain code.
 //
-// strategysdk is exempt for the same reason cmd/ is: strategysdk.Serve is
+// sdk is exempt for the same reason cmd/ is: sdk.Serve is
 // the composition root of an out-of-process guest strategy binary (ADR-062),
 // not domain code invoked from within a larger, already-composed process.
 // Its own WithLogger option lets a guest author inject a real logger; the
 // slog.Default() fallback only supplies a reasonable value when the guest's
 // own main() never bothered to configure one.
-var globalLoggerExemptPrefixes = []string{"logging", "cmd", "test", "strategysdk", ".git"}
+var globalLoggerExemptPrefixes = []string{"logging", "cmd", "test", "sdk", ".git"}
 
 // slog identifiers that read or mutate the mutable package-level default
 // logger. slog.New, slog.NewTextHandler, slog.NewJSONHandler,

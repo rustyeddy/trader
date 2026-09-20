@@ -18,8 +18,8 @@ import (
 	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
 )
 
-// flipFlopPath is the path to the examples/strategysdk-minimal
-// fixture binary — the same real, out-of-tree strategysdk-based
+// flipFlopPath is the path to the examples/sdk-minimal
+// fixture binary — the same real, out-of-tree sdk-based
 // strategy issue #381 shipped as its own "one minimal example binary
 // compiles and runs" acceptance criterion — built once in TestMain and
 // reused by every test in this file. Using this real example, rather
@@ -55,8 +55,8 @@ func runTestMain(m *testing.M) int {
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	flipFlopPath = filepath.Join(dir, "flipflop")
-	if err := goBuild(flipFlopPath, "github.com/rustyeddy/trader/examples/strategysdk-minimal"); err != nil {
-		fmt.Fprintln(os.Stderr, "backtest: building strategysdk-minimal test fixture:", err)
+	if err := goBuild(flipFlopPath, "github.com/rustyeddy/trader/examples/sdk-minimal"); err != nil {
+		fmt.Fprintln(os.Stderr, "backtest: building sdk-minimal test fixture:", err)
 		return 1
 	}
 
@@ -78,7 +78,7 @@ func goBuild(out, pkg string) error {
 
 // TestVerticalSlice_RunWithStrategyExec is issue #382's own core
 // acceptance path: "run" launches a real out-of-tree strategy
-// executable (examples/strategysdk-minimal's flip-flop strategy —
+// executable (examples/sdk-minimal's flip-flop strategy —
 // flat on its first EUR/USD H1 bar, long on the second, flat again on
 // the third, and so on) over a real Unix-domain socket and Strategy
 // Protocol v1 Handshake, drives it through the real M5
@@ -124,7 +124,7 @@ func TestVerticalSlice_RunWithStrategyExec(t *testing.T) {
 	require.NotEmpty(t, doc.Run.RunID)
 
 	// flipflop's own Describe() names it "flipflop" (examples/
-	// strategysdk-minimal/main.go) — a manifest reporting anything else
+	// sdk-minimal/main.go) — a manifest reporting anything else
 	// would mean the external adapter's Handshake-received Descriptor
 	// never actually reached backtest.Manifest.
 	assert.Equal(t, "flipflop", doc.Run.StrategyName)

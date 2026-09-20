@@ -1,9 +1,9 @@
 // Command sma-long-hold is the out-of-tree reference implementation
-// issue #383 asks for: a real, non-trivial strategysdk.Strategy
+// issue #383 asks for: a real, non-trivial sdk.Strategy
 // proving Strategy Protocol v1 (ADR-062) against a strategy that is
 // not a "hello world" — SMA/indicator state, a genuine bar-driven
 // entry/exit decision, and a ratcheting protective stop — built on
-// strategysdk exactly as examples/strategysdk-minimal is, and never
+// sdk exactly as examples/sdk-minimal is, and never
 // importing Trader's strategy, backtest, adapters, or any runtime/
 // application package.
 //
@@ -51,7 +51,7 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
-	"github.com/rustyeddy/trader/strategysdk"
+	"github.com/rustyeddy/trader/sdk"
 )
 
 func main() {
@@ -59,7 +59,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := strategysdk.Serve(strat); err != nil {
+	if err := sdk.Serve(strat); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -81,7 +81,7 @@ type fileConfig struct {
 	TrailingStopPercent string `json:"trailing_stop_percent"`
 }
 
-// defaultConfig matches examples/strategysdk-minimal's own EUR/USD H1
+// defaultConfig matches examples/sdk-minimal's own EUR/USD H1
 // convention, so this binary is runnable with no config file at all —
 // TRADER_STRATEGY_CONFIG, when set, overrides every field.
 func defaultConfig() fileConfig {
@@ -110,7 +110,7 @@ func newFromEnv() (*longHold, error) {
 	return newLongHold(cfg)
 }
 
-// longHold is the strategysdk.Strategy implementation: strategy/
+// longHold is the sdk.Strategy implementation: strategy/
 // smatrend's own default-configuration behavior (trailing-stop exit,
 // fresh-cross entry/re-entry), reduced to the state that behavior
 // actually needs. See the package doc comment for why no re-entry-
@@ -219,25 +219,25 @@ func parseIntervalUnit(s string) (marketdata.Unit, error) {
 	}
 }
 
-// Describe implements strategysdk.Strategy. WarmupBars equals the SMA
+// Describe implements sdk.Strategy. WarmupBars equals the SMA
 // period, mirroring strategy/smatrend.Strategy.Describe exactly.
-func (s *longHold) Describe() strategysdk.Descriptor {
-	return strategysdk.Descriptor{
+func (s *longHold) Describe() sdk.Descriptor {
+	return sdk.Descriptor{
 		Name:    "sma-long-hold",
 		Version: "v1",
-		Requirements: []strategysdk.DataRequirement{
+		Requirements: []sdk.DataRequirement{
 			{Instrument: s.inst, Interval: s.interval, WarmupBars: s.sma.Period()},
 		},
 	}
 }
 
-// Start implements strategysdk.Strategy.
-func (s *longHold) Start(_ context.Context, env strategysdk.Environment) error {
+// Start implements sdk.Strategy.
+func (s *longHold) Start(_ context.Context, env sdk.Environment) error {
 	env.Logger.Info("sma-long-hold starting", "run_id", env.RunID, "start", env.Clock.Now(), "instrument", s.inst, "sma_period", s.sma.Period())
 	return nil
 }
 
-// OnBar implements strategysdk.Strategy, mirroring strategy/smatrend.
+// OnBar implements sdk.Strategy, mirroring strategy/smatrend.
 // Strategy.OnBar/onFlat/onLong for exactly the default-rule scenario
 // this package's own doc comment describes. Like smatrend itself, it
 // never detects its own trailing-stop trigger: by the time OnBar
@@ -245,7 +245,7 @@ func (s *longHold) Start(_ context.Context, env strategysdk.Environment) error {
 // broker's resting-order machinery (ADR-026) against that exact bar,
 // so side == order.Flat with sideLastBar == order.Long means the stop
 // already triggered, not something this function decides itself.
-func (s *longHold) OnBar(_ context.Context, event strategysdk.BarEvent, view strategysdk.View) ([]strategysdk.DescribedIntent, []strategysdk.DescribedSignal, error) {
+func (s *longHold) OnBar(_ context.Context, event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 	if !event.Instrument.Equal(s.inst) {
 		return nil, nil, nil
 	}
@@ -276,9 +276,9 @@ func (s *longHold) OnBar(_ context.Context, event strategysdk.BarEvent, view str
 			return nil, nil, nil
 		}
 		const token = "action"
-		in := strategysdk.Enter(s.inst, order.Buy).WithCorrelation(token)
+		in := sdk.Enter(s.inst, order.Buy).WithCorrelation(token)
 		sig := s.signal(close, smaValue, "enter-long", nil).WithCorrelation(token)
-		return []strategysdk.DescribedIntent{in}, []strategysdk.DescribedSignal{sig}, nil
+		return []sdk.DescribedIntent{in}, []sdk.DescribedSignal{sig}, nil
 
 	case order.Long:
 		if s.sideLastBar != order.Long {
@@ -304,9 +304,9 @@ func (s *longHold) OnBar(_ context.Context, event strategysdk.BarEvent, view str
 		}
 		s.lastStop = &newStop
 		const token = "action"
-		in := strategysdk.AdjustStop(s.inst, newStop).WithCorrelation(token)
+		in := sdk.AdjustStop(s.inst, newStop).WithCorrelation(token)
 		sig := s.signal(close, smaValue, "adjust-stop", &newStop).WithCorrelation(token)
-		return []strategysdk.DescribedIntent{in}, []strategysdk.DescribedSignal{sig}, nil
+		return []sdk.DescribedIntent{in}, []sdk.DescribedSignal{sig}, nil
 
 	default:
 		return nil, nil, fmt.Errorf("sma-long-hold: unexpected position side %v (long-only strategy)", side)
@@ -327,7 +327,7 @@ func (s *longHold) OnBar(_ context.Context, event strategysdk.BarEvent, view str
 // ever reproduces smatrend's own default configuration (trailing-stop/
 // fresh-cross/fresh-cross, always PhaseFlat — see this package's own
 // doc comment).
-func (s *longHold) signal(close, smaValue float64, action string, stopPrice *num.Price) strategysdk.DescribedSignal {
+func (s *longHold) signal(close, smaValue float64, action string, stopPrice *num.Price) sdk.DescribedSignal {
 	values := map[string]string{
 		"close":        strconv.FormatFloat(close, 'f', -1, 64),
 		"sma":          strconv.FormatFloat(smaValue, 'f', -1, 64),
@@ -339,13 +339,13 @@ func (s *longHold) signal(close, smaValue float64, action string, stopPrice *num
 	if stopPrice != nil {
 		values["stop_price"] = stopPrice.String()
 	}
-	return strategysdk.Signal("sma-long-hold", values)
+	return sdk.Signal("sma-long-hold", values)
 }
 
 // currentPositionSide mirrors strategy/smatrend's own identical
 // helper: view's own current side for instID, or order.Flat if no
 // open position names it.
-func currentPositionSide(view strategysdk.View, instID instrument.ID) order.PositionSide {
+func currentPositionSide(view sdk.View, instID instrument.ID) order.PositionSide {
 	for _, p := range view.Account().Positions {
 		if p.Instrument.Equal(instID) {
 			return p.Side
@@ -361,7 +361,7 @@ func currentPositionSide(view strategysdk.View, instID instrument.ID) order.Posi
 // "currently above"). Not shared code with strategy/smatrend — this
 // is this binary's own independent half of the same well-known
 // algorithm, the same "no shared wire-conversion code" discipline
-// strategysdk's own doc comment establishes for the host/guest
+// sdk's own doc comment establishes for the host/guest
 // boundary, applied here to strategy logic instead.
 type crossState struct {
 	have     bool

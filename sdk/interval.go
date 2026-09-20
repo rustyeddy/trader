@@ -1,4 +1,4 @@
-package strategysdk
+package sdk
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 func toWireInterval(iv marketdata.Interval) (*v1.Interval, error) {
 	unit, err := toWireIntervalUnit(iv.Unit())
 	if err != nil {
-		return nil, fmt.Errorf("strategysdk: interval: %w", err)
+		return nil, fmt.Errorf("sdk: interval: %w", err)
 	}
 	if iv.Count() > math.MaxInt32 {
 		return nil, fmt.Errorf("%w: interval: count %d exceeds int32 range", ErrInvalidWireValue, iv.Count())
@@ -29,7 +29,7 @@ func fromWireInterval(w *v1.Interval) (marketdata.Interval, error) {
 	}
 	unit, err := fromWireIntervalUnit(w.GetUnit())
 	if err != nil {
-		return marketdata.Interval{}, fmt.Errorf("strategysdk: interval: %w", err)
+		return marketdata.Interval{}, fmt.Errorf("sdk: interval: %w", err)
 	}
 	iv, err := marketdata.NewInterval(unit, int(w.GetCount()))
 	if err != nil {
