@@ -76,7 +76,7 @@ func TestStooqArchiveShape_SPYD1(t *testing.T) {
 	}
 	reader, err := mgr.Bars(ctx, BarQuery{Instrument: spyID(t), Interval: marketdata.D1, Range: span})
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	bar, err := reader.Next(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "282.79", bar.Close.String())
