@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rustyeddy/trader/internal/mcpserver"
@@ -12,5 +13,6 @@ import (
 func main() {
 	if err := mcpserver.New().Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Printf("trader-mcp: %v", err)
+		os.Exit(1)
 	}
 }
