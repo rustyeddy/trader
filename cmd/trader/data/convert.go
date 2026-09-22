@@ -53,7 +53,7 @@ func newConvertCmd() *cobra.Command {
 				return err
 			}
 			resp, err := dc.Service.Convert(cmd.Context(), svc.ConvertRequest{
-				DatasetRequest: req, ArchivePath: extracted, Symbol: strings.ToUpper(args[0]),
+				DatasetRequest: req, ArchivePath: extracted,
 			})
 			if err != nil {
 				return err
@@ -66,7 +66,7 @@ func newConvertCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&archivePath, "archive", "", "native Stooq ZIP archive path")
-	addDatasetArgFlags(cmd, &flags)
+	addDatasetConversionFlags(cmd, &flags)
 	return cmd
 }
 

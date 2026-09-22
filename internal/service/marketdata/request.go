@@ -117,5 +117,4 @@ type UpdateRequest struct {
 type ConvertRequest struct {
 	DatasetRequest
 	ArchivePath string
-	Symbol      string
 }
