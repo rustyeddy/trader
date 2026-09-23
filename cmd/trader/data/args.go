@@ -65,15 +65,19 @@ type datasetArgFlags struct {
 // addDatasetArgFlags registers --from, --to (both required), --format
 // (issue #111; defaults to "table"), and --exchange/--kind (issue
 // #331; required only for a non-FX provider) on cmd.
-func addDatasetArgFlags(cmd *cobra.Command, flags *datasetArgFlags) {
+func addDatasetConversionFlags(cmd *cobra.Command, flags *datasetArgFlags) {
 	cmd.Flags().StringVar(&flags.from, "from", "", "range start (YYYY-MM-DD or RFC3339), required")
 	cmd.Flags().StringVar(&flags.to, "to", "", "range end (YYYY-MM-DD or RFC3339), required")
-	cmd.Flags().StringVar(&flags.format, "format", formatTable,
-		"output format: "+formatTable+" or "+formatJSON)
 	cmd.Flags().StringVar(&flags.exchange, "exchange", "",
 		"listing exchange (for example ARCA or NASDAQ); required for a non-FX provider such as alpaca")
 	cmd.Flags().StringVar(&flags.kind, "kind", "",
 		`instrument kind, "equity" or "etf"; required for a non-FX provider such as alpaca`)
+}
+
+func addDatasetArgFlags(cmd *cobra.Command, flags *datasetArgFlags) {
+	addDatasetConversionFlags(cmd, flags)
+	cmd.Flags().StringVar(&flags.format, "format", formatTable,
+		"output format: "+formatTable+" or "+formatJSON)
 }
 
 // fxProviders names the providers whose bare INSTRUMENT argument is a

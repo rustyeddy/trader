@@ -114,3 +114,9 @@ type UpdateResponse struct {
 	Build         BuildResponse
 	FinalPlan     marketruntime.Plan
 }
+
+// ConvertResponse reports the imported raw source and canonical build.
+type ConvertResponse struct {
+	Import marketruntime.StooqImportResult
+	Build  BuildResponse
+}

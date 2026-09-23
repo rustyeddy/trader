@@ -63,6 +63,7 @@ func New() *cobra.Command {
 	cmd.AddCommand(newSyncCmd())
 	cmd.AddCommand(newBuildCmd())
 	cmd.AddCommand(newUpdateCmd())
+	cmd.AddCommand(newConvertCmd())
 
 	return cmd
 }

@@ -111,3 +111,10 @@ type BuildRequest struct {
 type UpdateRequest struct {
 	DatasetRequest
 }
+
+// ConvertRequest imports one provider-native archive and builds the requested
+// canonical dataset from the resulting managed raw partitions.
+type ConvertRequest struct {
+	DatasetRequest
+	ArchivePath string
+}
