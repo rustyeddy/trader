@@ -52,7 +52,8 @@ func TestConvertRejectsNonDailyIntervalBeforeImport(t *testing.T) {
 	span, err := marketdata.NewTimeRange(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2020, 2, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	_, err = service.Convert(context.Background(), svc.ConvertRequest{
-		DatasetRequest: svc.DatasetRequest{Interval: marketdata.H1, Range: span}, ArchivePath: "unused",
+		DatasetRequest: svc.DatasetRequest{Instrument: instrument.ETFID("ARCA", "SPY"), Interval: marketdata.H1, Range: span}, ArchivePath: "unused",
 	})
 	require.ErrorIs(t, err, svc.ErrInvalidRequest)
+	require.ErrorContains(t, err, "supports only D1")
 }
