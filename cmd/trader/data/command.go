@@ -31,9 +31,6 @@ func New() *cobra.Command {
 			if err := cmd.Context().Err(); err != nil {
 				return err
 			}
-			if cmd.Name() == "stq2bars" && flags.provider == "" && !cmd.Flags().Changed("provider") {
-				flags.provider = "stooq"
-			}
 			dc, err := buildDataContext(cmd, flags)
 			if err != nil {
 				return err
