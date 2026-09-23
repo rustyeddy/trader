@@ -130,7 +130,7 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (resp UpdateRes
 		}
 	}
 
-	buildResp, err := s.Build(ctx, BuildRequest(req))
+	buildResp, err := s.Build(ctx, BuildRequest{DatasetRequest: req.DatasetRequest})
 	resp.Build = buildResp
 	if err != nil {
 		return resp, err

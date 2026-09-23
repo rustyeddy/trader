@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // stq2barsDefaults contains the small set of reference listings Trader can
@@ -59,24 +59,9 @@ func newStq2BarsCmd() *cobra.Command {
 			} else if exchange == "" || kind == "" {
 				return fmt.Errorf("--exchange and --kind must be provided together")
 			}
-			if from == "" {
-				from = "1900-01-01"
-			}
-			if to == "" {
-				to = "2100-01-01"
-			}
-			req, err := resolveDatasetRequest(cmd, []string{symbol, "D1"}, datasetArgFlags{
-				from: from, to: to, exchange: exchange, kind: kind,
-			})
+			req, err := resolveStq2BarsRequest(cmd, symbol, from, to, exchange, kind)
 			if err != nil {
 				return err
-			}
-			if !rebuild {
-				coverage, coverageErr := dc.Service.Coverage(cmd.Context(), svc.CoverageRequest{DatasetRequest: req})
-				if coverageErr == nil && coverageIsComplete(coverage.Coverage) {
-					_, err = fmt.Fprintf(cmd.OutOrStdout(), "skipped %s: canonical range is already current (use --rebuild to overwrite)\n", symbol)
-					return err
-				}
 			}
 			archivePath := archive
 			if archivePath == "" {
@@ -101,6 +86,7 @@ func newStq2BarsCmd() *cobra.Command {
 			resp, err := dc.Service.Convert(cmd.Context(), svc.ConvertRequest{
 				DatasetRequest: req,
 				ArchivePath:    extracted,
+				Force:          rebuild,
 			})
 			if err != nil {
 				return err
@@ -120,16 +106,35 @@ func newStq2BarsCmd() *cobra.Command {
 	return cmd
 }
 
-func coverageIsComplete(coverage marketruntime.Coverage) bool {
-	if len(coverage.Partitions) == 0 || len(coverage.Gaps) != 0 {
-		return false
+func resolveStq2BarsRequest(cmd *cobra.Command, symbol, from, to, exchange, kind string) (svc.DatasetRequest, error) {
+	dc, ok := dataContextFrom(cmd.Context())
+	if !ok {
+		return svc.DatasetRequest{}, fmt.Errorf("data service is not configured on this command's context")
 	}
-	for _, partition := range coverage.Partitions {
-		if partition.Status != marketruntime.PartitionCoverageCurrent {
-			return false
-		}
+	id, err := registerRequestedInstrument(dc, symbol, datasetArgFlags{exchange: exchange, kind: kind})
+	if err != nil {
+		return svc.DatasetRequest{}, err
 	}
-	return true
+	req := svc.DatasetRequest{Instrument: id, Interval: marketdata.D1}
+	if from == "" && to == "" {
+		return req, nil
+	}
+	if from == "" || to == "" {
+		return svc.DatasetRequest{}, fmt.Errorf("--from and --to must be provided together")
+	}
+	start, err := parseDate(from)
+	if err != nil {
+		return svc.DatasetRequest{}, err
+	}
+	end, err := parseDate(to)
+	if err != nil {
+		return svc.DatasetRequest{}, err
+	}
+	req.Range, err = marketdata.NewTimeRange(start, end)
+	if err != nil {
+		return svc.DatasetRequest{}, fmt.Errorf("invalid range: %w", err)
+	}
+	return req, nil
 }
 
 func findStooqArchive(root, symbol string) (string, error) {
@@ -146,7 +151,7 @@ func findStooqArchive(root, symbol string) (string, error) {
 			return nil
 		}
 		name := strings.ToLower(entry.Name())
-		if strings.HasSuffix(name, ".zip") && strings.Contains(name, symbol) {
+		if strings.HasSuffix(name, ".zip") && archiveNameHasSymbol(name, symbol) {
 			matches = append(matches, path)
 		}
 		return nil
@@ -162,4 +167,14 @@ func findStooqArchive(root, symbol string) (string, error) {
 		return "", fmt.Errorf("multiple Stooq archives for %s found under %q; provide --archive", strings.ToUpper(symbol), root)
 	}
 	return matches[0], nil
+}
+
+func archiveNameHasSymbol(name, symbol string) bool {
+	base := strings.TrimSuffix(strings.ToLower(filepath.Base(name)), ".zip")
+	for _, token := range strings.FieldsFunc(base, func(r rune) bool { return r == '_' || r == '.' || r == '-' }) {
+		if token == strings.ToLower(symbol) {
+			return true
+		}
+	}
+	return false
 }

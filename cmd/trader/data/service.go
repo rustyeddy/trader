@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -113,10 +114,10 @@ func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, 
 	if cmd.Flags().Changed("raw-root") {
 		overrides["raw-root"] = flags.rawRoot
 	}
-	if flags.archiveRoot != "" {
+	if cmd.Flags().Changed("archive-root") {
 		overrides["archive-root"] = flags.archiveRoot
 	}
-	if flags.provider != "" {
+	if cmd.Flags().Changed("provider") {
 		overrides["provider"] = flags.provider
 	}
 	if cmd.Flags().Changed("oanda-base-url") {
@@ -241,6 +242,16 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 	}
 	if err := applyDefaultDataRoots(&cfg); err != nil {
 		return dataContext{}, err
+	}
+	if cmd.Name() == "stq2bars" && cfg.Provider == "oanda" && os.Getenv("TRADER_PROVIDER") == "" && !cmd.Flags().Changed("provider") {
+		cfg.Provider = "stooq"
+	}
+	if cmd.Name() == "stq2bars" && cfg.ArchiveRoot == "" {
+		dataDir, err := defaultTraderDataDir()
+		if err != nil {
+			return dataContext{}, err
+		}
+		cfg.ArchiveRoot = filepath.Join(dataDir, "archive", cfg.Provider)
 	}
 
 	resolver := instrument.NewMemoryResolver()

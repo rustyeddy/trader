@@ -60,8 +60,19 @@ func TestStq2BarsUsesStooqDefaultsAndKnownInstrument(t *testing.T) {
 
 	out, err := runData(t, storeRoot, rawRoot, "stq2bars", "SPY", "--archive", archivePath)
 	require.NoError(t, err)
-	require.Contains(t, out, "converted SPY")
+	require.Contains(t, out, "converted SPY (updated)")
+	rebuilt, err := runData(t, storeRoot, rawRoot, "stq2bars", "SPY", "--archive", archivePath, "--from", "2020-01-01", "--to", "2020-02-01", "--rebuild")
+	require.NoError(t, err)
+	require.Contains(t, rebuilt, "converted SPY (rebuilt)")
+	require.Contains(t, rebuilt, "published 1 canonical partitions")
 	require.FileExists(t, filepath.Join(storeRoot, "stooq", "SPY", "2020", "01", "SPY-2020-01-d1.csv"))
+}
+
+func TestStq2BarsPreservesConfiguredProvider(t *testing.T) {
+	t.Setenv("TRADER_PROVIDER", "alpaca")
+	_, err := runData(t, t.TempDir(), t.TempDir(), "stq2bars", "SPY", "--archive", filepath.Join(t.TempDir(), "missing.zip"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires provider stooq")
 }
 
 func TestStq2BarsRejectsUnknownInstrumentWithoutIdentityOverride(t *testing.T) {

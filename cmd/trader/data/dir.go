@@ -50,7 +50,7 @@ func defaultTraderDataDir() (string, error) {
 // os.MkdirAll), exactly at the point they actually write, which is
 // where directory creation as a side effect belongs.
 func applyDefaultDataRoots(cfg *datasetConfig) error {
-	if cfg.StoreRoot != "" && cfg.RawRoot != "" && cfg.ArchiveRoot != "" {
+	if cfg.StoreRoot != "" && cfg.RawRoot != "" {
 		return nil
 	}
 
@@ -64,9 +64,6 @@ func applyDefaultDataRoots(cfg *datasetConfig) error {
 	}
 	if cfg.RawRoot == "" {
 		cfg.RawRoot = filepath.Join(dataDir, "raw", cfg.Provider)
-	}
-	if cfg.ArchiveRoot == "" {
-		cfg.ArchiveRoot = filepath.Join(dataDir, "archive", cfg.Provider)
 	}
 	return nil
 }

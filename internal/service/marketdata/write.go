@@ -3,6 +3,8 @@ package marketdata
 import (
 	"context"
 	"log/slog"
+
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 )
 
 // Sync implements the mutating Sync use case (issue #106): acquire the
@@ -59,7 +61,13 @@ func (s *Service) Build(ctx context.Context, req BuildRequest) (BuildResponse, e
 		return BuildResponse{}, err
 	}
 
-	plan, err := s.manager.Plan(ctx, req.query())
+	var plan marketruntime.Plan
+	var err error
+	if req.Force {
+		plan, err = s.manager.ForcePlan(ctx, req.query())
+	} else {
+		plan, err = s.manager.Plan(ctx, req.query())
+	}
 	if err != nil {
 		s.logOutcome(ctx, slog.LevelInfo, "build completed", "build failed", req.DatasetRequest, err)
 		return BuildResponse{}, err
