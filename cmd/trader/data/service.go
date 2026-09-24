@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -25,6 +26,7 @@ import (
 type datasetFlags struct {
 	storeRoot     string
 	rawRoot       string
+	archiveRoot   string
 	provider      string
 	oandaBaseURL  string
 	alpacaBaseURL string
@@ -83,6 +85,7 @@ type datasetFlags struct {
 type datasetConfig struct {
 	StoreRoot       string `config:"store_root" flag:"store-root"`
 	RawRoot         string `config:"raw_root" flag:"raw-root"`
+	ArchiveRoot     string `config:"archive_root" flag:"archive-root"`
 	Provider        string `config:"provider" flag:"provider" default:"oanda"`
 	OANDAToken      string `config:"oanda_token" secret:"true"`
 	OANDABaseURL    string `config:"oanda_base_url" flag:"oanda-base-url"`
@@ -111,6 +114,9 @@ func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, 
 	if cmd.Flags().Changed("raw-root") {
 		overrides["raw-root"] = flags.rawRoot
 	}
+	if cmd.Flags().Changed("archive-root") {
+		overrides["archive-root"] = flags.archiveRoot
+	}
 	if cmd.Flags().Changed("provider") {
 		overrides["provider"] = flags.provider
 	}
@@ -137,9 +143,10 @@ func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, 
 // every registered Listing must share with the Manager for
 // ResolveInstrument's lookup to ever match.
 type dataContext struct {
-	Service  *svc.Service
-	Resolver *instrument.MemoryResolver
-	Provider string
+	Service     *svc.Service
+	Resolver    *instrument.MemoryResolver
+	Provider    string
+	ArchiveRoot string
 }
 
 type dataContextKey struct{}
@@ -236,6 +243,16 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 	if err := applyDefaultDataRoots(&cfg); err != nil {
 		return dataContext{}, err
 	}
+	if cmd.Name() == "stq2bars" && cfg.Provider == "oanda" && os.Getenv("TRADER_PROVIDER") == "" && !cmd.Flags().Changed("provider") {
+		cfg.Provider = "stooq"
+	}
+	if cmd.Name() == "stq2bars" && cfg.ArchiveRoot == "" {
+		dataDir, err := defaultTraderDataDir()
+		if err != nil {
+			return dataContext{}, err
+		}
+		cfg.ArchiveRoot = filepath.Join(dataDir, "archive", cfg.Provider)
+	}
 
 	resolver := instrument.NewMemoryResolver()
 	managerCfg := marketruntime.Config{
@@ -300,5 +317,5 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 		return dataContext{}, err
 	}
 
-	return dataContext{Service: service, Resolver: resolver, Provider: cfg.Provider}, nil
+	return dataContext{Service: service, Resolver: resolver, Provider: cfg.Provider, ArchiveRoot: cfg.ArchiveRoot}, nil
 }

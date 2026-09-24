@@ -47,6 +47,8 @@ func New() *cobra.Command {
 		"canonical data store root path (default $XDG_DATA_HOME/trader/data, or ~/.local/share/trader/data)")
 	cmd.PersistentFlags().StringVar(&flags.rawRoot, "raw-root", "",
 		"raw provider archive root path (default $XDG_DATA_HOME/trader/raw/<provider>, or ~/.local/share/trader/raw/<provider>)")
+	cmd.PersistentFlags().StringVar(&flags.archiveRoot, "archive-root", "",
+		"native provider archive root path (default $XDG_DATA_HOME/trader/archive/<provider>, or ~/.local/share/trader/archive/<provider>)")
 	cmd.PersistentFlags().StringVar(&flags.provider, "provider", "",
 		"canonical dataset provider name (default oanda)")
 	cmd.PersistentFlags().StringVar(&flags.oandaBaseURL, "oanda-base-url", "",
@@ -64,6 +66,7 @@ func New() *cobra.Command {
 	cmd.AddCommand(newBuildCmd())
 	cmd.AddCommand(newUpdateCmd())
 	cmd.AddCommand(newConvertCmd())
+	cmd.AddCommand(newStq2BarsCmd())
 
 	return cmd
 }

@@ -527,7 +527,7 @@ Concretely, per command:
   env-backed — flag only.
 - **`trader data`** (all subcommands) — only the parent command's
   persistent flags are env-backed: `TRADER_STORE_ROOT`,
-  `TRADER_RAW_ROOT`, `TRADER_PROVIDER`, `TRADER_OANDA_BASE_URL`. Each
+  `TRADER_RAW_ROOT`, `TRADER_ARCHIVE_ROOT`, `TRADER_PROVIDER`, `TRADER_OANDA_BASE_URL`. Each
   leaf subcommand's own `--from`/`--to`/`--format` are flag only.
 - **`trader broker`** / **`trader execution`** — only the shared
   `--starting-cash`/`--currency`/`--account-id` flags are env-backed
@@ -543,3 +543,23 @@ These credentials are environment-only and have no flag at all:
 | `TRADER_OANDA_TOKEN`        | OANDA API token, required for `trader data sync`/`update`       |
 | `TRADER_ALPACA_KEY_ID`      | Alpaca API key ID, required (with the secret key below) for `trader data sync`/`update --provider alpaca` |
 | `TRADER_ALPACA_SECRET_KEY`  | Alpaca API secret key, required (with the key ID above) for `trader data sync`/`update --provider alpaca` |
+
+### `trader data stq2bars <symbol>`
+
+Converts one native Stooq daily ZIP into Trader managed raw partitions and
+canonical D1 bars. The command imports the source before checking/building, so
+refreshed ZIP contents participate in the normal raw fingerprint and stale-data
+semantics.
+
+```sh
+bin/stq2bars SPY
+bin/stq2bars SPY --from 2010-01-01 --to 2020-01-01
+bin/stq2bars SPY --rebuild
+```
+
+The provider defaults to `stooq` when no provider is configured, and the range
+defaults to the archive's actual first and last dates. Set `TRADER_ARCHIVE_ROOT`
+or pass `--archive-root` to locate native ZIPs; `--archive` selects one ZIP
+explicitly. SPY, QQQ, and AAPL have reference listing metadata. Other symbols
+must provide `--exchange` and `--kind`. Extraction is temporary and source ZIPs
+are never modified.

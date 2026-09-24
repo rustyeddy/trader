@@ -102,6 +102,8 @@ type SyncRequest struct {
 // marketdata.Plan.
 type BuildRequest struct {
 	DatasetRequest
+	// Force rebuilds canonical partitions that are already current.
+	Force bool
 }
 
 // UpdateRequest is the request for the higher-level Update use case
@@ -117,4 +119,6 @@ type UpdateRequest struct {
 type ConvertRequest struct {
 	DatasetRequest
 	ArchivePath string
+	// Force rebuilds canonical partitions even when their fingerprints are unchanged.
+	Force bool
 }

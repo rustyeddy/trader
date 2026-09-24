@@ -37,6 +37,23 @@ Trader's architecture is guided by a small set of principles:
   for orders, fills, positions, and balances; Trader maintains reconciled
   projections for speed, reporting, and recovery.
 
+## Stooq canonical bars
+
+The convenience command converts one downloaded Stooq daily archive through
+Trader's normal raw and canonical data services:
+
+```sh
+bin/stq2bars SPY
+bin/stq2bars SPY --from 2010-01-01 --to 2020-01-01
+```
+
+The command defaults to provider `stooq`, interval `D1`, and the configured
+Trader data roots. Set `TRADER_ARCHIVE_ROOT`, or pass `--archive-root`, for the
+native Stooq ZIP directory. Use `--archive` to name one ZIP directly. SPY, QQQ,
+and AAPL have reference listing metadata; other symbols require both
+`--exchange` and `--kind` (for example, `--exchange NASDAQ --kind equity`).
+The source ZIP is read-only and extraction is temporary.
+
 ## Packages
 
 Trader's supported Go API is the external strategy/research/value surface:

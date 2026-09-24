@@ -451,3 +451,40 @@ func d1Complete(cov Coverage) bool {
 	}
 	return true
 }
+
+// ForcePlan returns a normal plan plus canonical build actions for partitions
+// that are already current. It is used by explicit operator rebuild commands;
+// ordinary Plan remains idempotent and produces no work for unchanged data.
+func (m *Manager) ForcePlan(ctx context.Context, query BarQuery) (Plan, error) {
+	plan, err := m.Plan(ctx, query)
+	if err != nil {
+		return Plan{}, err
+	}
+	if query.Interval == marketdata.W1 {
+		return plan, nil
+	}
+	seen := make(map[[2]int]struct{}, len(plan.Actions))
+	for _, action := range plan.Actions {
+		if action.Kind == ActionNormalizeCanonical {
+			seen[[2]int{action.Year, int(action.Month)}] = struct{}{}
+		}
+	}
+	for _, partition := range plan.Coverage.Partitions {
+		if partition.Status != PartitionCoverageCurrent {
+			continue
+		}
+		key := [2]int{partition.Year, int(partition.Month)}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		plan.Actions = append(plan.Actions, Action{
+			Kind:       ActionNormalizeCanonical,
+			Instrument: query.Instrument,
+			Interval:   query.Interval,
+			Year:       partition.Year,
+			Month:      partition.Month,
+			Reason:     "explicit force rebuild",
+		})
+	}
+	return plan, nil
+}

@@ -50,3 +50,33 @@ func mustReadFile(t *testing.T, path string) []byte {
 	require.NoError(t, err)
 	return data
 }
+
+func TestStq2BarsUsesStooqDefaultsAndKnownInstrument(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "spy_us_d.zip")
+	content := []byte("<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>\n" +
+		"SPY.US,D,20200131,000000,100,101,99,100.5,1000,0\n")
+	writeZIPMember(t, archivePath, "data/daily/us/nyse etfs/spy.us.txt", content)
+	rawRoot, storeRoot := t.TempDir(), t.TempDir()
+
+	out, err := runData(t, storeRoot, rawRoot, "stq2bars", "SPY", "--archive", archivePath)
+	require.NoError(t, err)
+	require.Contains(t, out, "converted SPY (updated)")
+	rebuilt, err := runData(t, storeRoot, rawRoot, "stq2bars", "SPY", "--archive", archivePath, "--from", "2020-01-01", "--to", "2020-02-01", "--rebuild")
+	require.NoError(t, err)
+	require.Contains(t, rebuilt, "converted SPY (rebuilt)")
+	require.Contains(t, rebuilt, "published 1 canonical partitions")
+	require.FileExists(t, filepath.Join(storeRoot, "stooq", "SPY", "2020", "01", "SPY-2020-01-d1.csv"))
+}
+
+func TestStq2BarsPreservesConfiguredProvider(t *testing.T) {
+	t.Setenv("TRADER_PROVIDER", "alpaca")
+	_, err := runData(t, t.TempDir(), t.TempDir(), "stq2bars", "SPY", "--archive", filepath.Join(t.TempDir(), "missing.zip"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires provider stooq")
+}
+
+func TestStq2BarsRejectsUnknownInstrumentWithoutIdentityOverride(t *testing.T) {
+	_, err := runData(t, t.TempDir(), t.TempDir(), "stq2bars", "UNKNOWN", "--archive", filepath.Join(t.TempDir(), "missing.zip"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "provide --exchange and --kind")
+}

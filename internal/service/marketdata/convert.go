@@ -11,7 +11,7 @@ import (
 // Convert imports one already-downloaded provider archive and then builds
 // canonical data through the same Manager Plan/Build path used elsewhere.
 func (s *Service) Convert(ctx context.Context, req ConvertRequest) (resp ConvertResponse, err error) {
-	if err := req.Validate(); err != nil {
+	if err := validateConvertRequest(req); err != nil {
 		return ConvertResponse{}, err
 	}
 	if req.ArchivePath == "" {
@@ -28,7 +28,41 @@ func (s *Service) Convert(ctx context.Context, req ConvertRequest) (resp Convert
 	if err != nil {
 		return ConvertResponse{}, err
 	}
-	build, err := s.Build(ctx, BuildRequest{DatasetRequest: req.DatasetRequest})
+	if req.Range.Start().IsZero() && req.Range.End().IsZero() {
+		end := imported.LastDate.UTC().AddDate(0, 0, 1)
+		req.Range, err = marketdata.NewTimeRange(imported.FirstDate.UTC(), end)
+	} else {
+		start := req.Range.Start()
+		end := req.Range.End()
+		if start.Before(imported.FirstDate) {
+			start = imported.FirstDate
+		}
+		lastEnd := imported.LastDate.UTC().AddDate(0, 0, 1)
+		if end.After(lastEnd) {
+			end = lastEnd
+		}
+		req.Range, err = marketdata.NewTimeRange(start, end)
+	}
+	if err != nil {
+		return ConvertResponse{}, fmt.Errorf("%w: source range does not overlap requested range: %v", ErrInvalidRequest, err)
+	}
+	build, err := s.Build(ctx, BuildRequest{DatasetRequest: req.DatasetRequest, Force: req.Force})
 	resp = ConvertResponse{Import: imported, Build: build}
 	return resp, err
+}
+
+func validateConvertRequest(req ConvertRequest) error {
+	if req.Instrument.IsZero() {
+		return fmt.Errorf("%w: instrument is zero", ErrInvalidRequest)
+	}
+	if !req.Interval.Valid() {
+		return fmt.Errorf("%w: interval is invalid", ErrInvalidRequest)
+	}
+	if (req.Range.Start().IsZero()) != (req.Range.End().IsZero()) {
+		return fmt.Errorf("%w: range must be fully specified or omitted", ErrInvalidRequest)
+	}
+	if !req.Range.Start().IsZero() && !req.Range.End().After(req.Range.Start()) {
+		return fmt.Errorf("%w: range is invalid", ErrInvalidRequest)
+	}
+	return nil
 }
