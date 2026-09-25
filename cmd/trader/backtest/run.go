@@ -96,10 +96,9 @@ func newRunCmd() *cobra.Command {
 			"backtest (issue #224) with the demo strategy: one Scheduler and\n" +
 			"one shared account/pipeline still replay every requested\n" +
 			"instrument — this is not a per-symbol engine.\n\n" +
-			"--config supplies backtest/strategy parameters from a YAML file\n" +
-			"(issue #247) and runs the real EMA crossover strategy\n" +
-			"(issue #252) instead of the demo strategy, for a single\n" +
-			"instrument; any explicit flag above still overrides its value.\n\n" +
+			"--config supplies backtest and generic strategy parameters from a YAML file\n" +
+			"strategy.name selects a registered in-process strategy; any explicit\n" +
+			"flag above still overrides its corresponding config-file value.\n\n" +
 			"--strategy-exec runs an out-of-tree strategy executable instead\n" +
 			"(issue #382, ADR-062/ADR-063): trader launches it, completes\n" +
 			"Strategy Protocol v1's Handshake, and drives it exactly like an\n" +
@@ -110,8 +109,8 @@ func newRunCmd() *cobra.Command {
 			"passes extra arguments to the executable unmodified;\n" +
 			"--strategy-config forwards a config file path via the " + strategyConfigPathEnv + "\n" +
 			"environment variable, never parsed by trader itself. Mutually\n" +
-			"exclusive with --config: there is no strategy registry to\n" +
-			"select an in-tree strategy and an external one at once.\n\n" +
+			"exclusive with --config: choose either an in-process or external\n" +
+			"strategy for a run.\n\n" +
 			"--journal optionally writes a durable JSONL audit trail of\n" +
 			"the run (adapters/journal/jsonl); off by default, and never\n" +
 			"read back by 'show' (see the package doc comment).",
@@ -132,29 +131,28 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flags.warmupBars, "warmup-bars", 0, "warm-up bars required before the demo strategy may trade, per instrument")
 
 	cmd.Flags().StringVar(&flags.config, "config", "", "YAML config file supplying backtest/strategy parameters (issue #247); explicit flags above always override it")
-	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "must equal \"ema-cross\" when --config is used (there is no strategy registry to select from; any other value is rejected)")
-	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period; only used when --config is also given")
-	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; only used when --config is also given")
-	cmd.Flags().StringVar(&flags.allowedSide, "allowed-side", "", "restrict the EMA strategy to one position direction: both (default), long-only, or short-only; only used when --config is also given")
+	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "in-process strategy name selected by --config")
+	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period; used by the ema-cross strategy")
+	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; used by the ema-cross strategy")
+	cmd.Flags().StringVar(&flags.allowedSide, "allowed-side", "", "restrict ema-cross to one position direction: both, long-only, or short-only")
 
 	cmd.Flags().StringVar(&flags.strategyExec, "strategy-exec", "", "path to an out-of-tree strategy executable, launched and driven over Strategy Protocol v1 (ADR-062/ADR-063) instead of an in-tree strategy; mutually exclusive with --config")
 	cmd.Flags().StringArrayVar(&flags.strategyArgs, "strategy-args", nil, "extra argument passed to --strategy-exec's own executable, unmodified; repeatable, in order; requires --strategy-exec")
 	cmd.Flags().StringVar(&flags.strategyConfig, "strategy-config", "", "path to a config file for --strategy-exec's own executable; forwarded as the "+strategyConfigPathEnv+" environment variable, never parsed by trader itself; requires --strategy-exec")
 
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
-	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required)")
-	cmd.Flags().StringVar(&flags.provider, "provider", "oanda", "market data provider name")
+	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required, or supplied by --config)")
+	cmd.Flags().StringVar(&flags.provider, "provider", "", "market data provider name (default: oanda, or backtest.provider from --config)")
 
 	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "./backtest-runs", "directory run snapshots are written to and 'show' reads from")
 	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg)
 	cmd.Flags().StringVar(&flags.journal, "journal", "", "optional path to write a durable JSONL journal of this run (adapters/journal/jsonl); path must not already exist")
 
-	// --symbol/--from/--to/--adverse-distance are no longer cobra-required:
+	// --symbol/--from/--to/--adverse-distance/--data-raw-root are no longer cobra-required:
 	// each is also satisfiable from --config (issue #247), so their
 	// presence is instead enforced uniformly by buildRunConfig's
 	// config.Load call, which aggregates every missing/invalid field into
 	// one error rather than cobra stopping at the first missing flag.
-	_ = cmd.MarkFlagRequired("data-raw-root")
 
 	return cmd
 }
@@ -178,7 +176,7 @@ func validateStrategySelection(cmd *cobra.Command, flags runFlags) error {
 		return nil
 	}
 	if flags.config != "" {
-		return fmt.Errorf("--strategy-exec cannot be combined with --config: there is no strategy registry to select between an in-tree and an external strategy")
+		return fmt.Errorf("--strategy-exec cannot be combined with --config: choose either an in-process or external strategy")
 	}
 	return nil
 }
@@ -492,6 +490,38 @@ func effectiveSymbols(flagSymbols []string, configSymbol string) ([]string, erro
 	return nil, fmt.Errorf("at least one --symbol, or backtest.symbol in --config, is required")
 }
 
+var backtestEquityReferences = map[string]struct {
+	exchange string
+	kind     string
+}{
+	"SPY":  {exchange: "ARCA", kind: "etf"},
+	"QQQ":  {exchange: "NASDAQ", kind: "etf"},
+	"AAPL": {exchange: "NASDAQ", kind: "equity"},
+}
+
+func registerBacktestInstrument(resolver *instrument.MemoryResolver, provider, symbol string) (instrument.ID, error) {
+	if provider == "oanda" {
+		return svcmarketdata.RegisterFXInstrument(resolver, provider, symbol)
+	}
+
+	reference, ok := backtestEquityReferences[symbol]
+	if !ok {
+		return instrument.ID{}, fmt.Errorf("unsupported equity %q for provider %q: add reference metadata before backtesting it", symbol, provider)
+	}
+	providerSymbol := symbol
+	registration := svcmarketdata.EquityRegistration{
+		Provider:       provider,
+		Exchange:       reference.exchange,
+		Ticker:         symbol,
+		ProviderSymbol: providerSymbol,
+		Currency:       num.MustParseCurrency("USD"),
+	}
+	if reference.kind == "etf" {
+		return svcmarketdata.RegisterETFInstrument(resolver, registration)
+	}
+	return svcmarketdata.RegisterEquityInstrument(resolver, registration)
+}
+
 // resolveInstrumentSet parses flags.symbols into a canonical
 // instrumentSet: each symbol is registered under both the oanda-side
 // resolver (Manager's own bar-fetching resolver) and the sim-side
@@ -528,12 +558,18 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 		}
 		seen[symbol] = symbol
 
-		instrumentID, err := svcmarketdata.RegisterFXInstrument(oandaResolver, provider, symbol)
+		instrumentID, err := registerBacktestInstrument(oandaResolver, provider, symbol)
 		if err != nil {
 			return instrumentSet{}, err
 		}
-		if _, err := svcmarketdata.RegisterFXInstrument(simResolver, "sim", symbol); err != nil {
-			return instrumentSet{}, err
+		if provider == "oanda" {
+			if _, err := svcmarketdata.RegisterFXInstrument(simResolver, "sim", symbol); err != nil {
+				return instrumentSet{}, err
+			}
+		} else {
+			if _, err := registerBacktestInstrument(simResolver, "sim", symbol); err != nil {
+				return instrumentSet{}, err
+			}
 		}
 		simListing, err := simResolver.ResolveInstrument(instrumentID, "sim", "")
 		if err != nil {
@@ -581,6 +617,10 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	if err != nil {
 		return err
 	}
+	if cfg.Backtest.DataRawRoot == "" {
+		return fmt.Errorf("backtest.data_raw_root is required (set it in --config or pass --data-raw-root)")
+	}
+	provider := cfg.Backtest.Provider
 
 	symbols, err := effectiveSymbols(flags.symbols, cfg.Backtest.Symbol)
 	if err != nil {
@@ -627,7 +667,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 
 	oandaResolver := instrument.NewMemoryResolver()
 	simResolver := instrument.NewMemoryResolver()
-	instruments, err := resolveInstrumentSet(symbols, flags.provider, oandaResolver, simResolver)
+	instruments, err := resolveInstrumentSet(symbols, provider, oandaResolver, simResolver)
 	if err != nil {
 		return err
 	}
@@ -635,9 +675,9 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.Real{},
 		StoreRoot:    storeRoot,
-		RawRoot:      flags.dataRawRoot,
+		RawRoot:      cfg.Backtest.DataRawRoot,
 		Resolver:     oandaResolver,
-		ProviderName: flags.provider,
+		ProviderName: provider,
 	})
 	if err != nil {
 		return err
@@ -669,22 +709,8 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	// finish "successfully" without ever noticing).
 	var externalProcess *external.Process
 
-	if flags.config != "" {
-		// There is no strategy registry: strategy.name (--strategy-name)
-		// does not select anything, since this path only ever
-		// constructs strategy/emacross. Rejecting any other name here
-		// (rather than silently running EMA crossover under an
-		// unrelated label) keeps the manifest's StrategyName truthful
-		// against what the config actually claimed (PR #263 review).
-		if cfg.Strategy.Name != emacross.Name {
-			return fmt.Errorf("strategy.name %q is not supported: --config only runs %q (there is no strategy registry)",
-				cfg.Strategy.Name, emacross.Name)
-		}
-
-		// --config describes a single-instrument EMA crossover
-		// experiment (buildRunConfig already rejected combining it
-		// with more than one --symbol), so instruments.ids has exactly
-		// one entry here.
+	if flags.config != "" && cfg.Strategy.Name == emacross.Name {
+		// EMA crossover is a single-instrument strategy.
 		instID := instruments.ids[0]
 		listing := instruments.simListing[instID.String()]
 

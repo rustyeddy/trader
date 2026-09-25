@@ -123,6 +123,7 @@ backtest:
   adverse_distance: 0.01000
 
 strategy:
+  name: ema-cross
   fast_period: 50
   slow_period: 20
 `)
@@ -227,8 +228,8 @@ strategy:
 
 // TestRunCLI_UnsupportedStrategyNameRejected proves strategy.name is
 // a truthful, validated claim rather than an ignored label: there is
-// no strategy registry, so a name other than "ema-cross" must fail
-// loudly instead of silently running EMA crossover anyway (PR #263
+// no registered strategy may be silently accepted; an unknown name must
+// fail loudly instead of selecting a different implementation (PR #263
 // review).
 func TestRunCLI_UnsupportedStrategyNameRejected(t *testing.T) {
 	configPath := writeConfigFile(t, `

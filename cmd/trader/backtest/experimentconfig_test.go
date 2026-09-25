@@ -70,7 +70,7 @@ backtest:
 	assert.Equal(t, "USD", cfg.Backtest.Currency)
 	assert.Equal(t, "10000", cfg.Backtest.StartingCapital)
 	assert.Equal(t, "0.01", cfg.Backtest.RiskFraction.String())
-	assert.Equal(t, "ema-cross", cfg.Strategy.Name)
+	assert.Equal(t, "buy-and-hold", cfg.Strategy.Name)
 	assert.Equal(t, 20, cfg.Strategy.FastPeriod)
 	assert.Equal(t, 50, cfg.Strategy.SlowPeriod)
 	assert.Equal(t, "/srv/trading/data/canonical", cfg.Backtest.DataStoreRoot,
@@ -118,6 +118,7 @@ func TestRunConfig_ValidateRejectsInvalidRelationships(t *testing.T) {
 			"from":             "2015-01-01",
 			"to":               "2025-01-01",
 			"adverse-distance": "0.0050",
+			"strategy-name":    "ema-cross",
 		}
 		maps.Copy(m, overrides)
 		return m

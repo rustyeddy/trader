@@ -13,31 +13,20 @@ import (
 )
 
 // runConfig is the typed configuration "trader backtest run" resolves
-// via --config (issue #247, EMA-02): the backtest composition inputs
-// this command already accepts as individual flags, plus a strategy
-// section for the real EMA crossover strategy (strategy/emacross,
-// issues #248/#249) run.go constructs whenever --config is given
-// (issue #252, EMA-07). config.Load applies its own
-// defaults-then-file-then-environment-then-overrides precedence
-// (config/doc.go); buildRunConfig below only ever places an explicitly
-// Changed flag's value into Overrides, so an unset flag never masks a
-// config-file value, matching CONTRIBUTING.org's "explicit CLI
-// override > config file > documented defaults" precedence for this
-// experiment.
+// via --config: the backtest composition inputs this command already
+// accepts as individual flags, plus a generic strategy selector.
+// config.Load applies its own defaults-then-file-then-environment-then-overrides
+// precedence; buildRunConfig below only places explicitly changed flags
+// into Overrides, so config-file values remain effective by default.
 //
 // Interval is decoded as a plain string, not restricted by an enum
 // tag: parseInterval already normalizes case and reports a clear error
 // at the point of use, so duplicating a second, case-sensitive
 // validation here would only be able to disagree with it.
 //
-// Strategy is parsed and validated here; run.go additionally rejects
-// any Strategy.Name other than emacross.Name before constructing a
-// strategy at all (PR #263 review) — there is no strategy registry, so
-// an unsupported or misspelled name must fail loudly rather than
-// silently running EMA crossover under a different label. Strategy is
-// then passed to Manifest.StrategyParameters via the constructed
-// emacross.Strategy's own Config(), so the manifest only ever claims
-// parameters that actually governed the run that occurred.
+// Strategy is parsed and validated against the registered in-process
+// strategies. An unsupported or misspelled name fails loudly rather than
+// silently selecting a different implementation.
 type runConfig struct {
 	Backtest backtestSection
 	Strategy strategySection
@@ -77,24 +66,18 @@ type backtestSection struct {
 	// share state across runs relies on, so this default only ever
 	// takes effect when nothing more specific overrides it.
 	DataStoreRoot string `config:"data_store_root" flag:"data-store-root" default:"/srv/trading/data/canonical"`
+	DataRawRoot   string `config:"data_raw_root" flag:"data-raw-root"`
+	Provider      string `config:"provider" flag:"provider" default:"oanda"`
 }
 
 // strategySection is the EMA crossover strategy's own configuration —
-// see docs/research/ema-01-experiment-definition.org for the
-// crossover/warm-up semantics these periods feed once a real strategy
-// consumes them.
-// FastPeriod/SlowPeriod default to EMA-01's own reference values
-// (docs/research/ema-01-experiment-definition.org) rather than being
-// required: an invocation that never mentions the EMA strategy at all
-// (today's only real strategy is demoStrategy, which ignores this
-// section) must keep working unchanged.
-// JSON tags follow the snake_case convention backtest/manifest_test.go
-// already establishes for strategy parameters, so a future consumer
-// that does marshal this section into Manifest.StrategyParameters
-// (EMA-04/EMA-07) produces a manifest consistent with that convention
-// rather than Go's default "Name"/"FastPeriod"/"SlowPeriod" keys.
+// Strategy-specific fields live under this generic selector. EMA fields are
+// decoded here for the registered ema-cross strategy and ignored by the
+// buy-and-hold baseline; future registered strategies can add their own
+// construction and validation without changing the top-level config shape.
+// JSON tags keep strategy parameters stable in manifests and reports.
 type strategySection struct {
-	Name       string `config:"name" flag:"strategy-name" default:"ema-cross" json:"name"`
+	Name       string `config:"name" flag:"strategy-name" default:"buy-and-hold" json:"name"`
 	FastPeriod int    `config:"fast_period" flag:"fast-period" default:"20" json:"fast_period"`
 	SlowPeriod int    `config:"slow_period" flag:"slow-period" default:"50" json:"slow_period"`
 	// AllowedSide restricts which position direction the strategy may
@@ -110,12 +93,20 @@ type strategySection struct {
 // (config/load.go's validateDestination). It covers exactly what plain
 // field decoding cannot: relationships between fields.
 func (c runConfig) Validate() error {
-	if c.Strategy.FastPeriod <= 0 {
-		return fmt.Errorf("strategy.fast_period must be positive, got %d", c.Strategy.FastPeriod)
-	}
-	if c.Strategy.SlowPeriod <= c.Strategy.FastPeriod {
-		return fmt.Errorf("strategy.slow_period (%d) must be greater than strategy.fast_period (%d)",
-			c.Strategy.SlowPeriod, c.Strategy.FastPeriod)
+	switch c.Strategy.Name {
+	case demoStrategyName:
+		// The passive baseline has no strategy-specific parameters.
+	case emacross.Name:
+		if c.Strategy.FastPeriod <= 0 {
+			return fmt.Errorf("strategy.fast_period must be positive, got %d", c.Strategy.FastPeriod)
+		}
+		if c.Strategy.SlowPeriod <= c.Strategy.FastPeriod {
+			return fmt.Errorf("strategy.slow_period (%d) must be greater than strategy.fast_period (%d)",
+				c.Strategy.SlowPeriod, c.Strategy.FastPeriod)
+		}
+	default:
+		return fmt.Errorf("strategy.name %q is not registered; supported strategies are %q and %q",
+			c.Strategy.Name, demoStrategyName, emacross.Name)
 	}
 
 	from, err := parseDate(c.Backtest.From)
@@ -194,6 +185,12 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 	}
 	if cmd.Flags().Changed("data-store-root") {
 		overrides["data-store-root"] = flags.dataStoreRoot
+	}
+	if cmd.Flags().Changed("data-raw-root") {
+		overrides["data-raw-root"] = flags.dataRawRoot
+	}
+	if cmd.Flags().Changed("provider") {
+		overrides["provider"] = flags.provider
 	}
 
 	return config.Load[runConfig](config.Options{

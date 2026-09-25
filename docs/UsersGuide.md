@@ -278,9 +278,9 @@ There are three strategy paths:
   buy-and-hold entry per instrument's first bar. `--symbol` may be repeated
   for a multi-instrument run (one shared account/pipeline, not a per-symbol
   engine).
-- **With `--config`:** the real `strategy/emacross` EMA-crossover strategy,
-  for exactly one instrument, configured from a YAML file (see below). Any
-  explicit flag still overrides its corresponding config-file value.
+- **With `--config`:** an in-process strategy selected by `strategy.name` in
+  the YAML file (see below). Any explicit flag still overrides its
+  corresponding config-file value.
 - **With `--strategy-exec`:** an out-of-tree strategy executable, launched
   and driven over Strategy Protocol v1 — see
   [External strategies](#external-strategies) below. Mutually exclusive
@@ -297,14 +297,14 @@ There are three strategy paths:
 | `--risk-fraction`    | `0.01`                          | fraction of account equity to risk                                                     |
 | `--adverse-distance` | —                               | adverse price distance for sizing, **required** (or via `--config`)                    |
 | `--warmup-bars`      | `0`                             | warm-up bars before the **demo** strategy may trade (ignored with `--config`)          |
-| `--data-raw-root`    | —                               | raw archive root, **required**                                                         |
+| `--data-raw-root`    | —                               | raw archive root (required, or supplied by `backtest.data_raw_root`)                  |
 | `--data-store-root`  | `/srv/trading/data/canonical`\* | canonical data store root; an explicit empty value opts into a fresh temp dir per run  |
-| `--provider`         | `oanda`                         | market data provider name                                                              |
+| `--provider`         | `oanda`                         | market data provider name; `backtest.provider` in `--config` may supply it            |
 | `--config`           | —                               | YAML file supplying backtest/strategy parameters (see below)                           |
-| `--strategy-name`    | —                               | must equal `ema-cross` when `--config` is used                                         |
-| `--fast-period`      | —                               | EMA fast period (only with `--config`)                                                 |
-| `--slow-period`      | —                               | EMA slow period (only with `--config`)                                                 |
-| `--allowed-side`     | `both`                          | restrict the EMA strategy: `both`, `long-only`, or `short-only` (only with `--config`) |
+| `--strategy-name`    | —                               | in-process strategy name selected by `--config`                                      |
+| `--fast-period`      | —                               | EMA fast period for `ema-cross`                                                       |
+| `--slow-period`      | —                               | EMA slow period for `ema-cross`                                                       |
+| `--allowed-side`     | `both`                          | restrict `ema-cross`: `both`, `long-only`, or `short-only`                           |
 | `--strategy-exec`    | —                               | path to an out-of-tree strategy executable; mutually exclusive with `--config`         |
 | `--strategy-args`    | —                               | extra argument passed to `--strategy-exec`'s own executable, unmodified; repeatable    |
 | `--strategy-config`  | —                               | path to a config file for `--strategy-exec`'s own executable (see below)               |
@@ -336,20 +336,22 @@ backtest:
   starting_capital: 10000      # default 10000
   risk_fraction: 0.01          # default 0.01
   adverse_distance: 0.0050     # required
+  data_raw_root: /path/to/raw/oanda  # required
   data_store_root: /path/to/canonical  # default /srv/trading/data/canonical
+  provider: oanda                    # default oanda; e.g. stooq
 
 strategy:
-  name: ema-cross              # default ema-cross; no other value is supported
-  fast_period: 20              # default 20
-  slow_period: 50              # default 50
-  allowed_side: both           # default both; or long-only / short-only
+  name: buy-and-hold            # registered in-process strategy; also supports ema-cross
+  fast_period: 20              # used when name is ema-cross
+  slow_period: 50              # used when name is ema-cross
+  allowed_side: both           # used when name is ema-cross
 ```
 
 Precedence for each of the fields shown above (the ones with a `config:`
 tag backing them — see [Environment Variables](#environment-variables))
 is: explicit CLI flag > `--config` file value > `TRADER_BACKTEST_*`/
 `TRADER_STRATEGY_*` environment variable > the default shown above.
-`--data-raw-root`, `--provider`, `--journal`, `--output-dir`, `--format`,
+`--journal`, `--output-dir`, `--format`,
 and `--warmup-bars` are plain CLI flags with no `--config`/environment-
 variable backing at all — see the flag table above for which is which.
 
@@ -520,10 +522,9 @@ Concretely, per command:
 - **`trader backtest run`** — only the fields shown in the `--config`
   YAML reference above are env-backed: `TRADER_BACKTEST_SYMBOL`,
   `_INTERVAL`, `_FROM`, `_TO`, `_CURRENCY`, `_STARTING_CAPITAL`,
-  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_DATA_STORE_ROOT`, and
+  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_DATA_STORE_ROOT`, `_DATA_RAW_ROOT`, and
   `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
-  `_ALLOWED_SIDE`. `--data-raw-root`, `--provider`, `--journal`,
-  `--output-dir`, `--format`, and `--warmup-bars` are **not**
+  `_ALLOWED_SIDE`. `--provider`, `--journal`, `--output-dir`, `--format`, and `--warmup-bars` are **not**
   env-backed — flag only.
 - **`trader data`** (all subcommands) — only the parent command's
   persistent flags are env-backed: `TRADER_STORE_ROOT`,

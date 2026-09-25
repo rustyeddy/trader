@@ -9,13 +9,12 @@
 // logic of its own, and never calls backtest.NewRunner/NewScheduler/
 // NewReplay directly (boundary_test.go enforces this mechanically).
 //
-// # Three strategy paths, no registry
+// # Strategy selection paths
 //
 // "trader backtest run" selects between exactly three strategies by
 // which of --config/--strategy-exec is given (mutually exclusive with
-// each other) — there is no strategy registry or name-based lookup
-// (ADR-039's own note on deferring strategy discovery still applies
-// beyond these three):
+// each other). --config selects a registered in-process strategy by
+// the YAML file's strategy.name:
 //
 //   - Neither flag: an unexported demoStrategy (demo_strategy.go)
 //     that enters long once per requested instrument, on that
@@ -27,10 +26,10 @@
 //     solely so this command is genuinely executable end to end
 //     without any real strategy configured; it is not a real trading
 //     strategy.
-//   - With --config (issue #252, EMA-07): the real strategy/emacross
-//     EMA crossover strategy, configured from the YAML file's own
-//     strategy.fast_period/slow_period (issue #247), for exactly one
-//     instrument. Its FillPriceSource (nextBarOpenPriceSource,
+//   - With --config: an in-process strategy selected by strategy.name.
+//     The built-in buy-and-hold baseline and strategy/emacross are
+//     currently registered; strategy-specific fields are interpreted
+//     only by the selected strategy. Its FillPriceSource (nextBarOpenPriceSource,
 //     service.go) is a general per-bar-lookup implementation, unlike
 //     demoStrategy's precomputed single-fill price, because a
 //     crossover strategy enters, exits, and re-enters at run-dependent

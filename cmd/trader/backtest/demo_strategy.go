@@ -30,6 +30,10 @@ import (
 // warm-up/entry state independently by instrument.ID string, the same
 // per-instrument-keyed pattern backtest's own enterThenExitStrategy
 // test fixture (#223) already established as correct.
+// demoStrategyName is the stable config/manifest name for the built-in
+// passive baseline and the generic --config strategy selector.
+const demoStrategyName = "buy-and-hold"
+
 type demoStrategy struct {
 	instrumentIDs []instrument.ID
 	interval      marketdata.Interval
@@ -50,7 +54,7 @@ func (s *demoStrategy) Describe() strategy.Descriptor {
 		requirements[i] = strategy.DataRequirement{Instrument: instID, Interval: s.interval, WarmupBars: s.warmupBars}
 	}
 	return strategy.Descriptor{
-		Name:         "cli-demo",
+		Name:         demoStrategyName,
 		Version:      "v0",
 		Requirements: requirements,
 	}
