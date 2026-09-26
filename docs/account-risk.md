@@ -137,8 +137,17 @@ records which rule and why (`risk.Violation{Rule, Message, Measured, Limit}`).
 Quantity is decided only in the `Sizer`, which is an explicit, configured,
 manifest-recorded choice. A *capping* sizer — e.g. `min(risk-budget size,
 buying-power size)` that records which constraint bound — is legitimate sizing
-rather than silent resizing; whether to add one is an open question in #410 /
-#417.
+rather than silent resizing. No capping sizer is planned in this milestone
+[future].
+
+Strategies that choose their own quantity keep that contract. The Buy & Hold
+baseline takes an explicit `quantity` (with `instrument`, `buy_date`, and an
+optional `sell_date`); the strategy decides what to buy and when, margin/risk
+decides whether that quantity is admissible, the simulator decides the fill,
+and the report values the result — including a position still open at run
+end, valued at the final mark (the run end date is not an implicit sell). If the quantity can't be financed, it is
+rejected — never resized. Choosing a financeable baseline quantity, with fill
+headroom, is guidance in #417, not a sizer change.
 
 Every position/exposure-limit rule — the rules ADR-034 covers, and the
 planned account initial-margin rule, which follows the same principle — must
@@ -179,6 +188,8 @@ the results. The aggregate is defined per position (Σ notionalᵢ × rateᵢ) s
 later per-listing or per-instrument override — an OANDA `marginRate`, or a
 futures dollars-per-contract margin — changes only that per-position input,
 not the aggregate calculation or the meaning of the account setting (#411).
+This is designed for, not implemented: v1 is one account, one account
+currency, and one configured `initial_margin_ratio`.
 
 - **[#410]** ADR-066 settles terminology, valuation basis, fill-time
   semantics, and non-goals.
@@ -249,8 +260,8 @@ broker liquidates. Explicit v1 non-goals of #409; a later issue can add
 ## 4. Account models by market type
 
 Margin rules are properties of the venue and instrument, not of Trader.
-v1 uses a single account-level ratio; per-instrument rates are a planned
-extension (#410, #411).
+v1 uses a single account-level ratio. Per-instrument rates are future work;
+#410 and #411 only have to make sure the design doesn't rule them out.
 
 ### Cash equities (no margin)
 
@@ -324,10 +335,10 @@ config (config-driven composition arrives with #414).
 
 ### Planned  [#409 milestone]
 
-| Parameter                       | Default     | Notes                                   |
-|---------------------------------|-------------|-----------------------------------------|
-| `backtest.initial_margin_ratio` | 1.0         | Unlevered; 0.5 = 2×, 0.25 = 4× gross    |
-| full-notional sizer headroom    | TBD in #417 | Avoid fill-time rejection on small gaps |
+| Parameter                       | Default         | Notes                                                                                 |
+|---------------------------------|-----------------|---------------------------------------------------------------------------------------|
+| `backtest.initial_margin_ratio` | 1.0             | Unlevered; 0.5 = 2×, 0.25 = 4× gross                                                  |
+| Buy & Hold baseline quantity    | explicit config | Choose a quantity that fits available buying power with suitable fill headroom (#417) |
 
 ### Future candidates
 
@@ -420,15 +431,15 @@ Design constraints for any new account-risk code:
 
 ## 8. Tests that would have caught the bug
 
-| #   | Invariant                                                                                                                                                                                                                                                                                                      | Status                                                  |
-|-----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
-| 1   | At ratio 1.0, every fill that increases gross exposure leaves gross notional (valued at the fill price, other positions at their admission-time marks) × ratio ≤ the equity used to admit it. Later over-limit readings caused only by post-entry mark drift are not violations (no maintenance margin in v1). | [#414]                                                  |
-| 2   | Σ R ≤ maxPortfolioHeat × equity at every bar                                                                                                                                                                                                                                                                   | [future]                                                |
-| 3   | Multiple simultaneous signals never produce combined notional > buying power                                                                                                                                                                                                                                   | [#413] multi-instrument test; live concurrency [future] |
-| 4   | A tight-stop signal on a $10k account at ratio 1.0 is **rejected** with rule `account_initial_margin` and its measured/limit values journaled                                                                                                                                                                  | [#413, #414]                                            |
-| 5   | FX positions risk the configured amount in account currency                                                                                                                                                                                                                                                    | [future]; today cross-currency input is rejected        |
-| 6   | Drawdown ladder applies its multiplier, then halts; recovery doesn't rearm without explicit action                                                                                                                                                                                                             | [future]                                                |
-| 7   | Backtest closeout matches OANDA's closeout rule                                                                                                                                                                                                                                                                | [future]                                                |
+| #   | Invariant                                                                                                                                                                                                                                                                                                                                                                                                                      | Status                                                  |
+|-----|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
+| 1   | At ratio 1.0, every fill that increases gross exposure leaves gross notional (valued at the fill price, other positions at their admission-time marks) × ratio ≤ the equity used to admit it. Later over-limit readings caused only by post-entry mark drift are not violations (no maintenance margin in v1). While drifted over the limit, further exposure-increasing fills stay blocked and de-risking fills stay allowed. | [#414]                                                  |
+| 2   | Σ R ≤ maxPortfolioHeat × equity at every bar                                                                                                                                                                                                                                                                                                                                                                                   | [future]                                                |
+| 3   | Multiple simultaneous signals never produce combined notional > buying power                                                                                                                                                                                                                                                                                                                                                   | [#413] multi-instrument test; live concurrency [future] |
+| 4   | A tight-stop signal on a $10k account at ratio 1.0 is **rejected** with rule `account_initial_margin` and its measured/limit values journaled                                                                                                                                                                                                                                                                                  | [#413, #414]                                            |
+| 5   | FX positions risk the configured amount in account currency                                                                                                                                                                                                                                                                                                                                                                    | [future]; today cross-currency input is rejected        |
+| 6   | Drawdown ladder applies its multiplier, then halts; recovery doesn't rearm without explicit action                                                                                                                                                                                                                                                                                                                             | [future]                                                |
+| 7   | Backtest closeout matches OANDA's closeout rule                                                                                                                                                                                                                                                                                                                                                                                | [future]                                                |
 
 ---
 
@@ -441,9 +452,18 @@ Milestone **Account Margin Admission** (#409):
 3. #412 — sim per-position marks and margin-aware buying power.
 4. #413 — account-level initial-margin risk rule.
 5. #414 — `initial_margin_ratio` config and risk-engine composition.
-6. #415 — sim fill-time enforcement (parallel with 4–5 after 3).
+6. #415 — sim fill-time enforcement.
 7. #416 — report and journal observability.
-8. #417 — equity baselines and sizing guidance.
+8. #417 — baseline quantity and sizing guidance (Buy & Hold stays
+   quantity-driven).
+
+Dependencies — #415 can proceed in parallel with #413/#414 once #410, #411,
+and #412 are settled:
+
+```
+#410 → #411 → #412 ─┬─> #413 → #414 ─┐
+                    └─> #415 ────────┴─> #416, #417
+```
 
 After that, in rough priority order:
 
