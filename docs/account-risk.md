@@ -76,27 +76,27 @@ Trader that check rejects an over-limit order outright rather than shrinking it
 
 ## 2. Vocabulary
 
-| Term                              | Meaning                                                                                 | In Trader                                                                                             |
-|-----------------------------------|-----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| **Equity / NAV**                  | Cash + unrealized P&L of open positions. The base for all percentages.                  | `account.Snapshot.Equity()`                                                                           |
-| **Balance**                       | Cash only. Don't size off this when positions are open.                                 | `Snapshot.CashBalances()`                                                                             |
-| **Notional (exposure)**           | Units × price × multiplier, in account currency.                                        | computed by rules from `Input.ReferencePrice`                                                         |
-| **Gross exposure**                | Σ \|notional\| across positions. Longs and shorts both add.                             | [#411]                                                                                                |
-| **Net exposure**                  | Σ signed notional. Longs minus shorts.                                                  | [future] (`internal/portfolio` groups positions per instrument across accounts, without valuing them) |
-| **Leverage**                      | Gross exposure ÷ equity.                                                                | per-position today; account-wide [#413]                                                               |
-| **Buying power**                  | Maximum additional notional the account can open now.                                   | `Snapshot.BuyingPower()` — placeholder in sim until [#412]                                            |
-| **Initial margin**                | Collateral required to *open* exposure.                                                 | `initial_margin_ratio` [#414]                                                                         |
-| **Maintenance margin**            | Collateral required to *keep* exposure open; breach triggers margin call / liquidation. | [future] — v1 non-goal                                                                                |
-| **Margin utilization**            | Margin used ÷ equity.                                                                   | `Snapshot.MarginUsed()` [#412]                                                                        |
-| **Margin closeout**               | Broker force-closes positions below a margin threshold.                                 | [future]                                                                                              |
-| **Trade risk (R)**                | Loss if the stop is hit: units × \|entry − stop\| (+ costs).                            | `PerTradeLossRule` [today]                                                                            |
-| **Portfolio heat**                | Σ R across all open trades.                                                             | [future]                                                                                              |
-| **High-water mark (HWM)**         | Highest equity reached; drawdown is measured from it.                                   | backtest metrics [today]; as a gate [future]                                                          |
-| **Drawdown**                      | (HWM − equity) ÷ HWM.                                                                   | backtest metrics [today]                                                                              |
-| **Circuit breaker / kill switch** | Halts new entries (or flattens) on a loss threshold or operator action.                 | future `live` guard, not a risk rule                                                                  |
-| **Correlation bucket**            | Positions that behave as one bet (e.g. all USD-short pairs).                            | [future]                                                                                              |
-| **Gap risk**                      | Loss beyond the stop when price jumps past it.                                          | modeled by sim gap fills (ADR-026); not in sizing                                                     |
-| **Pre-trade risk check**          | Gate every proposal passes before submission.                                           | `risk.Engine` — approve/reject only                                                                   |
+| Term                              | Meaning                                                                                                                                            | In Trader                                                                                                                                                   |
+|-----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Equity / NAV**                  | Cash + unrealized P&L of open positions. The base for all percentages.                                                                             | `account.Snapshot.Equity()`                                                                                                                                 |
+| **Balance**                       | Cash only. Don't size off this when positions are open.                                                                                            | `Snapshot.CashBalances()`                                                                                                                                   |
+| **Notional (exposure)**           | Units × price × multiplier, in account currency.                                                                                                   | per-position rules value the proposal at `Input.ReferencePrice`; the account-wide aggregate values other open positions at their current marks [#411, #412] |
+| **Gross exposure**                | Σ \|notional\| across positions. Longs and shorts both add.                                                                                        | [#411]                                                                                                                                                      |
+| **Net exposure**                  | Σ signed notional. Longs minus shorts.                                                                                                             | [future] (`internal/portfolio` groups positions per instrument across accounts, without valuing them)                                                       |
+| **Leverage**                      | Gross exposure ÷ equity.                                                                                                                           | per-position today; account-wide [#413]                                                                                                                     |
+| **Buying power**                  | Funds available to open new positions — a money amount, not a notional; how much notional it supports depends on the multiplier and margin policy. | `Snapshot.BuyingPower()` — placeholder in sim until [#412]                                                                                                  |
+| **Initial margin**                | Collateral required to *open* exposure.                                                                                                            | `initial_margin_ratio` [#414]                                                                                                                               |
+| **Maintenance margin**            | Collateral required to *keep* exposure open; breach triggers margin call / liquidation.                                                            | [future] — v1 non-goal                                                                                                                                      |
+| **Margin utilization**            | Margin used ÷ equity.                                                                                                                              | `Snapshot.MarginUsed()` [#412]                                                                                                                              |
+| **Margin closeout**               | Broker force-closes positions below a margin threshold.                                                                                            | [future]                                                                                                                                                    |
+| **Trade risk (R)**                | Loss if the stop is hit: units × \|entry − stop\| (+ costs).                                                                                       | `PerTradeLossRule` [today]                                                                                                                                  |
+| **Portfolio heat**                | Σ R across all open trades.                                                                                                                        | [future]                                                                                                                                                    |
+| **High-water mark (HWM)**         | Highest equity reached; drawdown is measured from it.                                                                                              | backtest metrics [today]; as a gate [future]                                                                                                                |
+| **Drawdown**                      | (HWM − equity) ÷ HWM.                                                                                                                              | backtest metrics [today]                                                                                                                                    |
+| **Circuit breaker / kill switch** | Halts new entries (or flattens) on a loss threshold or operator action.                                                                            | future `live` guard, not a risk rule                                                                                                                        |
+| **Correlation bucket**            | Positions that behave as one bet (e.g. all USD-short pairs).                                                                                       | [future]                                                                                                                                                    |
+| **Gap risk**                      | Loss beyond the stop when price jumps past it.                                                                                                     | modeled by sim gap fills (ADR-026); not in sizing                                                                                                           |
+| **Pre-trade risk check**          | Gate every proposal passes before submission.                                                                                                      | `risk.Engine` — approve/reject only                                                                                                                         |
 
 The two numbers most often confused are **heat** (risk to stops) and
 **exposure** (notional). A robust system limits both. Heat without an exposure
@@ -140,8 +140,12 @@ buying-power size)` that records which constraint bound — is legitimate sizing
 rather than silent resizing; whether to add one is an open question in #410 /
 #417.
 
-Every rule must also always admit a de-risking proposal, so an account that is
-already over a limit is never trapped (ADR-034).
+Every position/exposure-limit rule — the rules ADR-034 covers, and the
+planned account initial-margin rule, which follows the same principle — must
+always admit a de-risking proposal, so an account that is already over a limit
+is never trapped. This is not a requirement on every conceivable rule: a
+future stateful or operational rule may legitimately reject a de-risking
+proposal.
 
 ### Layer 1 — Sizing intent  (`risk.Sizer`)
 
@@ -154,9 +158,13 @@ already over a limit is never trapped (ADR-034).
 - **[future]** Gap-adjusted risk: `max(stop distance, gapFactor × ATR)` for
   gap-prone instruments. A stop is an order, not a guarantee.
 - **[future]** Costs and expected slippage in per-unit risk.
-- For FX, per-unit risk must be in account currency (pip value). Today every
-  sizer and rule rejects a listing whose settlement currency differs from the
-  account currency rather than converting.
+- For FX, per-unit risk must be in account currency (pip value). Today both
+  sizers and the rules that compute monetary values (`PerTradeLossRule`,
+  `MaxInstrumentExposureRule`, `MaxPositionLeverageRule`) reject a listing
+  whose settlement currency differs from the account currency rather than
+  converting. The count/quantity rules (`MaxPositionQuantityRule`,
+  `MaxOpenPositionsRule`) don't inspect currency and can admit such a
+  proposal.
 
 ### Layer 2 — Account financing  (initial margin)
 
@@ -165,6 +173,12 @@ The missing layer behind the 4.6× run.
 ```
 prospective gross notional × initial_margin_ratio ≤ equity
 ```
+
+v1 applies the single account-level ratio to each position's notional and sums
+the results. The aggregate is defined per position (Σ notionalᵢ × rateᵢ) so a
+later per-listing or per-instrument override — an OANDA `marginRate`, or a
+futures dollars-per-contract margin — changes only that per-position input,
+not the aggregate calculation or the meaning of the account setting (#411).
 
 - **[#410]** ADR-066 settles terminology, valuation basis, fill-time
   semantics, and non-goals.
@@ -354,8 +368,8 @@ models (ADR-028).
 - **Stale data.** Sizing off a stale price is a fat-finger in disguise — a
   live guard.
 - **Account currency.** Every P&L, risk, and margin number must be in account
-  currency. Today Trader rejects cross-currency sizing/admission rather than
-  converting; `num.Money.Convert` exists for portfolio aggregation (ADR-019).
+  currency. Today the sizers and money-valuing rules reject cross-currency
+  input rather than converting (count/quantity rules don't check currency); `num.Money.Convert` exists for portfolio aggregation (ADR-019).
 - **Reconciliation (live).** Broker state is authoritative; compare and halt
   on mismatch (architecture invariant 3, M6).
 - **Audit trail.** Every rejection is journaled as a risk decision with its
@@ -406,15 +420,15 @@ Design constraints for any new account-risk code:
 
 ## 8. Tests that would have caught the bug
 
-| # | Invariant                                                                                                                                     | Status                                                  |
-|---|-----------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
-| 1 | At ratio 1.0, no bar ends with gross notional above the admitted limit as a result of a fill                                                  | [#414]                                                  |
-| 2 | Σ R ≤ maxPortfolioHeat × equity at every bar                                                                                                  | [future]                                                |
-| 3 | Multiple simultaneous signals never produce combined notional > buying power                                                                  | [#413] multi-instrument test; live concurrency [future] |
-| 4 | A tight-stop signal on a $10k account at ratio 1.0 is **rejected** with rule `account_initial_margin` and its measured/limit values journaled | [#413, #414]                                            |
-| 5 | FX positions risk the configured amount in account currency                                                                                   | [future]; today cross-currency input is rejected        |
-| 6 | Drawdown ladder applies its multiplier, then halts; recovery doesn't rearm without explicit action                                            | [future]                                                |
-| 7 | Backtest closeout matches OANDA's closeout rule                                                                                               | [future]                                                |
+| #   | Invariant                                                                                                                                                                                                                                                                                                      | Status                                                  |
+|-----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
+| 1   | At ratio 1.0, every fill that increases gross exposure leaves gross notional (valued at the fill price, other positions at their admission-time marks) × ratio ≤ the equity used to admit it. Later over-limit readings caused only by post-entry mark drift are not violations (no maintenance margin in v1). | [#414]                                                  |
+| 2   | Σ R ≤ maxPortfolioHeat × equity at every bar                                                                                                                                                                                                                                                                   | [future]                                                |
+| 3   | Multiple simultaneous signals never produce combined notional > buying power                                                                                                                                                                                                                                   | [#413] multi-instrument test; live concurrency [future] |
+| 4   | A tight-stop signal on a $10k account at ratio 1.0 is **rejected** with rule `account_initial_margin` and its measured/limit values journaled                                                                                                                                                                  | [#413, #414]                                            |
+| 5   | FX positions risk the configured amount in account currency                                                                                                                                                                                                                                                    | [future]; today cross-currency input is rejected        |
+| 6   | Drawdown ladder applies its multiplier, then halts; recovery doesn't rearm without explicit action                                                                                                                                                                                                             | [future]                                                |
+| 7   | Backtest closeout matches OANDA's closeout rule                                                                                                                                                                                                                                                                | [future]                                                |
 
 ---
 
