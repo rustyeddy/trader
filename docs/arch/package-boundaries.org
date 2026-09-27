@@ -25,6 +25,7 @@ compatibility facade for removed import paths.
 | internal/marketdata/internal/provider/* | marketdata/internal/provider/* | No | Provider adapters owned only by the internal data subsystem |
 | internal/order | order (split) | No | Canonical intents/proposals/requests/orders/fills/positions, lifecycle; depends on public order vocabulary and internal IDs |
 | internal/account | account | No | Runtime accounting snapshots |
+| internal/account/margin | account/margin | No | Pure gross-notional and initial-margin arithmetic shared by risk and the simulator (ADR-066) |
 | internal/portfolio | portfolio | No | Cross-account projections |
 | internal/backtest | backtest | No | Deterministic runner and scheduler |
 | internal/broker | broker | No | Broker ports |
