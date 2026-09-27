@@ -184,10 +184,12 @@ prospective gross notional × initial_margin_ratio ≤ equity
 ```
 
 v1 applies the single account-level ratio to each position's notional and sums
-the results. The aggregate is defined per position (Σ notionalᵢ × rateᵢ) so a
-later per-listing or per-instrument override — an OANDA `marginRate`, or a
-futures dollars-per-contract margin — changes only that per-position input,
-not the aggregate calculation or the meaning of the account setting (#411).
+the results. The aggregate is defined as a sum of per-position required-margin
+amounts (Σ required_margin(positionᵢ)), not notional × rate. A later
+per-listing or per-instrument policy — a percentage of notional such as an
+OANDA `marginRate`, or a fixed amount per futures contract — replaces only
+that per-position function, not the aggregate calculation or the meaning of
+the account setting (#411, ADR-066).
 This is designed for, not implemented: v1 is one account, one account
 currency, and one configured `initial_margin_ratio`.
 

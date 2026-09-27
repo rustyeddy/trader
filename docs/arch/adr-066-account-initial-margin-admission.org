@@ -60,6 +60,10 @@ maintained account state:
 prospective gross notional × initial_margin_ratio ≤ equity
 #+end_example
 
+(In general form, prospective required margin ≤ equity. See "One
+calculation, two enforcement points" for how required margin is defined
+per position.)
+
 It is evaluated only for a proposal or fill that would increase gross
 exposure. Existing exposure is never liquidated, and no margin call is
 raised, because later price movement pushes the account over the ratio.
@@ -101,6 +105,16 @@ magnitude test: the resulting position's magnitude in the proposal's
 instrument does not exceed the current one's. The account-level rule
 therefore applies ADR-034 without a separate definition of
 "de-risking".
+
+Whether a proposal is de-risking is decided from quantities and sides
+alone, via =resultingPosition=, before any price is looked at. A
+de-risking proposal — a full close, a partial reduction, or a reversal
+that doesn't grow the magnitude — is admitted without a
+=ReferencePrice= and without marks for other positions, as the existing
+ADR-034 rules already do (=internal/risk/maxpositionleverage_test.go=).
+Prices are required only to evaluate a proposal that increases
+exposure. A missing price must never trap an account that is trying to
+reduce exposure.
 
 This exemption is part of the initial-margin rule's own contract, like
 the other position/exposure-limit rules ADR-034 covers. It is not a
@@ -155,21 +169,37 @@ pure, exact-numeric (ADR-004) package that both =internal/risk= and
 | Admission (risk rule, #413) | =ReferencePrice=      | snapshot marks      | snapshot =Equity()=                    |
 | Fill time (simulator, #415) | actual fill price     | simulator marks     | equity after this fill's own commission |
 
-Admission cannot see the commission model, so it compares against
-pre-fee equity. The simulator knows the exact commission of the fill it
-is about to book, so the fill-time check uses equity after that
-commission. The fill-time check is therefore never less conservative
-than admission. At exactly the limit, an order admitted before fees can
-be refused at fill because of its own commission. That is deliberate:
-the invariant is about what the account actually holds after the fill.
+The two checks answer different questions. Admission estimates, from
+the reference price and pre-fee snapshot equity; it cannot see the fill
+price or the commission model. The fill-time check validates the actual
+post-fill state the simulator is about to book: the actual fill price
+and equity after that fill's actual commission.
 
-The calculation is defined per position — Σ notionalᵢ × rateᵢ — and v1
-supplies the single account-level ratio as every position's rate. A
-later per-listing or per-instrument margin policy (OANDA's per-instrument
-=marginRate=, or futures' fixed dollars per contract) changes only that
-per-position input, not the aggregate calculation or the meaning of the
-account-level setting. v1 designs for this but does not implement it or
-test mixed rates.
+Neither check is uniformly stricter than the other. A fill worse than
+the reference price, or the fill's own commission, can make an order
+that passed admission fail at fill. A fill better than the reference
+price can lower prospective notional enough to offset the commission.
+Admission is the gate that runs first; the fill-time check is what
+guarantees the invariant holds for what the account actually holds
+after the fill.
+
+The calculation is defined as a sum of per-position required-margin
+amounts, not as notional times a rate:
+
+#+begin_example
+required margin = Σ required_margin(positionᵢ, valuation priceᵢ, policyᵢ)
+
+v1:  required_margin(position) = |notional(position)| × initial_margin_ratio
+#+end_example
+
+v1 supplies one policy for every position, so v1's required margin is
+exactly gross notional × ratio. A later per-listing or per-instrument
+policy replaces only the per-position function: a percentage of notional
+(OANDA's per-instrument =marginRate=), or a fixed amount per contract
+(futures) that doesn't depend on price at all and needs no invented
+pseudo-rate. The aggregate and the meaning of the account-level setting
+don't change. v1 designs for this but does not implement it or test
+mixed policies.
 
 ** The account-level risk rule
 
@@ -182,9 +212,11 @@ and in addition to =MaxPositionLeverageRule=:
   =Limit= is equity. Its =Message= includes current gross notional,
   prospective gross notional, and the ratio, so the journal shows why
   the proposal was rejected.
-- A missing =ReferencePrice= or mark, a non-positive ratio, or a
-  currency mismatch is a classifiable error (=ErrInsufficientRuleInput=
-  or =ErrInvalidRule=), never an approval.
+- For an exposure-increasing proposal only, a missing =ReferencePrice=
+  or mark, or a currency mismatch, is a classifiable
+  =ErrInsufficientRuleInput=, never an approval. A de-risking proposal
+  needs neither (see "De-risking exemption").
+- A non-positive ratio is =ErrInvalidRule= at construction.
 
 ** Fill-time enforcement in the simulator
 
@@ -292,8 +324,11 @@ leverage produces different results: orders that previously filled over
 equity are now rejected. This includes golden fixtures (the ADR-041
 determinism suite, =report= goldens, =sma_long_hold_equivalence_test=).
 #414 regenerates them through their documented procedures and lists
-every changed fixture and why. A run can reproduce the old behavior
-explicitly with a smaller ratio, for example =0.25=.
+every changed fixture and why. A run that intentionally used leverage
+can select a smaller ratio appropriate to that experiment (for example
+=0.25= for up to 4× gross exposure). No finite ratio reproduces the
+previous simulator's unbounded behavior; the motivating SPY run itself
+(about 4.63×) would be rejected even at =0.25=.
 
 ** Non-goals (v1)
 
