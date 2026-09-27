@@ -1,0 +1,399 @@
+#+TITLE: ADR-066: Account-level initial-margin admission for the simulator/backtester
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #410, the first step of milestone Account Margin
+Admission (umbrella #409). Every later issue in the milestone (#411-#417)
+implements against the decisions recorded here. No code is introduced by
+this ADR.
+
+* Context
+
+A buy-and-hold equity backtest with $10,000 of equity opened 100 SPY
+shares at about $463.08 — $46,308 notional, roughly 4.6× equity — on
+what was meant to be an unlevered account (#409). Three facts made that
+possible:
+
+1. =risk.NewFixedFractionSizer= answers "how much am I willing to lose?"
+   (risk budget ÷ adverse distance). Its result is unbounded as the stop
+   tightens, and it never consults buying power.
+2. The backtest composition root (=cmd/trader/backtest/service.go=)
+   builds =risk.NewEngine()= with no rules at all.
+3. The simulator (=internal/adapters/broker/sim=) has no margin policy:
+   =BuyingPower= and =MarginAvailable= mirror cash, =MarginUsed= is
+   always zero, and cash may go negative — a documented M3 placeholder.
+
+The existing =MaxPositionLeverageRule= (#184, ADR-034) is per-position:
+every position passing it does not bound the account's aggregate
+exposure. Its own doc comment names the missing capability — a current
+mark for every open listing — which is also why #183 deferred a
+=MaxAggregateExposureRule=.
+
+Fixed-fraction risk sizing and financing are different controls, and
+both are needed. This ADR decides the financing control's semantics.
+Background vocabulary and the wider roadmap live in
+=docs/account-risk.md= (#418); this ADR is authoritative where they
+differ.
+
+* Decision
+
+** Terminology and the admission invariant
+
+=initial_margin_ratio= is the minimum equity required per unit of gross
+position notional:
+
+| Ratio | Maximum gross exposure |
+|-------+------------------------|
+|  1.0  | 1× equity (unlevered)  |
+|  0.5  | 2× equity              |
+|  0.25 | 4× equity              |
+
+The ratio form is kept rather than a =max_leverage= setting, so that
+=maintenance_margin_ratio= can be added later with the matching meaning
+and without renaming an existing field.
+
+The invariant is an *initial-margin admission* rule, not a continuously
+maintained account state:
+
+#+begin_example
+prospective gross notional × initial_margin_ratio ≤ equity
+#+end_example
+
+(In general form, prospective required margin ≤ equity. See "One
+calculation, two enforcement points" for how required margin is defined
+per position.)
+
+It is evaluated only for a proposal or fill that would increase gross
+exposure. Existing exposure is never liquidated, and no margin call is
+raised, because later price movement pushes the account over the ratio.
+While an account is over the limit because of that drift, further
+exposure-increasing proposals and fills are rejected, and de-risking
+ones are admitted.
+
+** Gross, not net
+
+Gross notional is the sum of the absolute notional of every open
+position:
+
+#+begin_example
+gross = Σ |quantityᵢ| × priceᵢ × multiplierᵢ
+#+end_example
+
+Longs and shorts both add. Nothing is netted across long and short
+positions or across instruments.
+
+** Resulting position, not position plus order
+
+The proposal's own instrument contributes its *resulting* position, as
+computed by the existing =risk.resultingPosition= semantics (including
+=ReduceOnly= clamping). A 100-long → 100-short reversal contributes 100
+short, never 200 or 300 units.
+
+#+begin_example
+prospective gross = gross of every other open position
+                  + |resulting quantity| × price × multiplier   (proposal's instrument)
+#+end_example
+
+** De-risking exemption
+
+A proposal whose prospective gross notional does not exceed the current
+gross notional — both computed on the same valuation basis, below — is
+always admitted, even when the account is already over the limit. With
+every other position held constant, this reduces to ADR-034's own
+magnitude test: the resulting position's magnitude in the proposal's
+instrument does not exceed the current one's. The account-level rule
+therefore applies ADR-034 without a separate definition of
+"de-risking".
+
+Whether a proposal is de-risking is decided from quantities and sides
+alone, via =resultingPosition=, before any price is looked at. A
+de-risking proposal — a full close, a partial reduction, or a reversal
+that doesn't grow the magnitude — is admitted without a
+=ReferencePrice= and without marks for other positions, as the existing
+ADR-034 rules already do (=internal/risk/maxpositionleverage_test.go=).
+Prices are required only to evaluate a proposal that increases
+exposure. A missing price must never trap an account that is trying to
+reduce exposure.
+
+This exemption is part of the initial-margin rule's own contract, like
+the other position/exposure-limit rules ADR-034 covers. It is not a
+requirement on every future risk rule.
+
+** Valuation basis
+
+Two prices are involved, and they are never blended for one position:
+
+- *The proposal's instrument* is valued, both before and after the
+  proposal, at =risk.Input.ReferencePrice= at admission and at the actual
+  fill price (after slippage and tick rounding) at fill time. Using the
+  same price for "before" and "after" keeps the de-risking comparison a
+  pure magnitude comparison.
+- *Every other open position* is valued at its current mark.
+
+A position's historical =AvgPrice= is never used for valuation (#183's
+valuation-basis rule).
+
+Current marks are exposed per open position on =account.Snapshot=
+(#412), each carrying the price and the time it was observed. The
+simulator already holds these internally (=accountState.marks=, updated
+by fills, =ObserveMark=, and =AdvanceBar=). The mark is "as of the
+simulator's last observation of that listing", not a live price.
+
+Staleness is defined, not eliminated:
+
+- Admission during =Scheduler= Phase 2 (flushing intents at time T)
+  sees marks from the previous batch's closes. Fill-time checks for
+  resting orders run in Phase 3, after the same batch's
+  =ObserveMark= calls. This is the scheduler's existing no-lookahead
+  ordering, and this ADR does not change it.
+- In a multi-instrument run whose instruments don't share a calendar,
+  one instrument's mark can be older than another's. Each is still the
+  latest observation at or before the snapshot's =AsOf=, which is the
+  best deterministic value available. Mark times are exposed so a
+  report can show them.
+- An open position with no mark is a classifiable
+  =risk.ErrInsufficientRuleInput= error, never valued at zero or at
+  =AvgPrice=. (In the simulator every position gets a mark from its
+  opening fill, so this indicates a bug or an adapter without marks.)
+
+** One calculation, two enforcement points
+
+The gross-notional and required-margin arithmetic lives in one small,
+pure, exact-numeric (ADR-004) package that both =internal/risk= and
+=internal/adapters/broker/sim= import (#411). =sim= does not import
+=risk=. Each enforcement point supplies its own inputs:
+
+| Enforcement point           | Proposal's instrument | Other positions     | Equity                                 |
+|-----------------------------+-----------------------+---------------------+----------------------------------------|
+| Admission (risk rule, #413) | =ReferencePrice=      | snapshot marks      | snapshot =Equity()=                    |
+| Fill time (simulator, #415) | actual fill price     | simulator marks     | equity after this fill's own commission |
+
+The two checks answer different questions. Admission estimates, from
+the reference price and pre-fee snapshot equity; it cannot see the fill
+price or the commission model. The fill-time check validates the actual
+post-fill state the simulator is about to book: the actual fill price
+and equity after that fill's actual commission.
+
+Neither check is uniformly stricter than the other. A fill worse than
+the reference price, or the fill's own commission, can make an order
+that passed admission fail at fill. A fill better than the reference
+price can lower prospective notional enough to offset the commission.
+Admission is the gate that runs first; the fill-time check is what
+guarantees the invariant holds for what the account actually holds
+after the fill.
+
+The calculation is defined as a sum of per-position required-margin
+amounts, not as notional times a rate:
+
+#+begin_example
+required margin = Σ required_margin(positionᵢ, valuation priceᵢ, policyᵢ)
+
+v1:  required_margin(position) = |notional(position)| × initial_margin_ratio
+#+end_example
+
+v1 supplies one policy for every position, so v1's required margin is
+exactly gross notional × ratio. A later per-listing or per-instrument
+policy replaces only the per-position function: a percentage of notional
+(OANDA's per-instrument =marginRate=), or a fixed amount per contract
+(futures) that doesn't depend on price at all and needs no invented
+pseudo-rate. The aggregate and the meaning of the account-level setting
+don't change. v1 designs for this but does not implement it or test
+mixed policies.
+
+** The account-level risk rule
+
+A new =risk.Rule=, named =account_initial_margin= (#413), distinct from
+and in addition to =MaxPositionLeverageRule=:
+
+- Strict approve/reject (ADR-029). It never changes a proposal's
+  quantity, and nothing else in Trader resizes a rejected order.
+- A violation's =Measured= is the prospective required margin and its
+  =Limit= is equity. Its =Message= includes current gross notional,
+  prospective gross notional, and the ratio, so the journal shows why
+  the proposal was rejected.
+- For an exposure-increasing proposal only, a missing =ReferencePrice=
+  or mark, or a currency mismatch, is a classifiable
+  =ErrInsufficientRuleInput=, never an approval. A de-risking proposal
+  needs neither (see "De-risking exemption").
+- A non-positive ratio is =ErrInvalidRule= at construction.
+
+** Fill-time enforcement in the simulator
+
+The simulator re-checks every exposure-increasing fill at the actual
+fill price (#415). It is configured as an ADR-028-style model on the
+simulated account, so its =ModelInfo= (name, version, canonical
+config, including the ratio) reaches the run manifest and
+=ConfigDigest=. A simulated account with no margin model configured
+keeps today's behavior, and its =ModelInfo= says so explicitly. This
+keeps existing =sim= unit tests meaningful; the backtest composition
+root always configures one (#414).
+
+An over-limit fill is not booked, in whole. There is no partial fill
+down to the limit and no resizing. Reduce-only and de-risking fills are
+never blocked.
+
+*** Order lifecycle: no ADR-018 amendment
+
+ADR-018 permits =StatusRejected= only from =StatusPendingSubmit=, and
+there is no direct =StatusWorking= → =StatusCanceled= edge. Both cases
+fit the existing graph:
+
+- *Market order refused inside =Submit=.* Nothing has been accepted
+  yet, so the simulator returns the order as =StatusRejected= with
+  =Rejection{Reason: ReasonInsufficientMargin, Detail: <numbers>}= —
+  the same pre-acceptance rejection a real broker gives, and the
+  existing reason code for it. No accept event is emitted.
+- *Resting limit/stop order refused when it triggers* (Phase 3,
+  =AdvanceBar=). The order is already =StatusWorking=, so it is
+  retired by the simulator's existing broker-initiated cancellation
+  path, =buildInternalCancellation= — =StatusWorking= →
+  =StatusPendingCancel= → =StatusCanceled=, the same two-event
+  sequence #352 already uses for a stale reduce-only order. This is
+  also how OANDA handles an order that triggers without enough margin
+  (canceled with an insufficient-margin reason).
+
+The one thing missing is a way to say *why* a broker-initiated cancel
+happened: =order.Order.Rejection= is, by invariant, non-nil only on a
+=StatusRejected= order. This ADR adds an optional
+=Order.CancelReason *Rejection=, reusing the =Rejection= type. It is
+non-nil only on a =StatusCanceled= order that the broker canceled on its
+own initiative, and nil for an operator- or strategy-requested cancel.
+=order.NewOrder= enforces that invariant. This is an additive change to
+the internal order vocabulary (ADR-017). It adds no transition, so
+ADR-018's graph is unchanged. The #352 reduce-only cancellation may
+adopt the field later; that is not required here.
+
+*** Bracket entries (ADR-059)
+
+Today, if a bracket's entry leg does not fill synchronously, the
+pipeline returns =ErrBracketEntryNotSynchronouslyFilled=. The scheduler
+treats only a /risk/ rejection of an unfilled entry as harmless; any
+other error aborts the run. A simulator margin rejection of the entry
+leg is the same harmless case — nothing was opened and the stop leg was
+never attempted — so it must not abort the run. #415 makes a broker
+rejection of an unfilled entry leg classifiable, and the scheduler
+treats it exactly like an entry-side risk rejection: the run continues.
+Once the entry has filled, the existing rule stands: any stop-leg failure
+aborts the run. The protective stop itself is reduce-only and never
+counts toward prospective exposure.
+
+** Open orders
+
+Resting, non-reduce-only orders do not count toward prospective
+exposure at admission in v1. In the simulator, the fill-time check
+catches the case where several resting entries each pass admission and
+then fill together. Reduce-only orders, including ADR-059 protective
+stops, never count.
+
+This is *not* sufficient for a live broker. There, the broker's own
+margin engine, or a Trader-side buying-power reservation made on
+approval and released on cancel or reject, decides. Pending-order
+reservation is deferred and must be revisited before any live trading
+(M6/M8). Admission makes no claim to cover it.
+
+** Ratio 1.0 means "unlevered", not "cash account"
+
+=initial_margin_ratio: 1.0= caps gross exposure at equity, and permits
+short positions up to that cap. A real cash account cannot short at all.
+v1 does not model that restriction. A future, separate, explicit
+setting (for example =allow_short=) would be recorded in the manifest
+and enforced by its own rule, never implied by the ratio. Until then,
+reports and docs describe ratio 1.0 as an "unlevered margin account".
+
+** Scope of the setting
+
+=backtest.initial_margin_ratio= configures the simulated account and the
+backtest risk engine together, from one config value (#414). The value
+must be positive. It is not a Trader-wide or live setting: a real broker
+adapter reports its own margin state, and live admission against it is
+future work.
+
+** Currency
+
+v1 supports one account currency and instruments that settle in it.
+There is no FX conversion inside the calculation. A position or proposal
+whose settlement currency differs from the account currency is a
+classifiable error, matching the existing money-valuing rules and
+sizers.
+
+** Default and compatibility
+
+The default is =1.0=. Any existing backtest that relied on implicit
+leverage produces different results: orders that previously filled over
+equity are now rejected. This includes golden fixtures (the ADR-041
+determinism suite, =report= goldens, =sma_long_hold_equivalence_test=).
+#414 regenerates them through their documented procedures and lists
+every changed fixture and why. A run that intentionally used leverage
+can select a smaller ratio appropriate to that experiment (for example
+=0.25= for up to 4× gross exposure). No finite ratio reproduces the
+previous simulator's unbounded behavior; the motivating SPY run itself
+(about 4.63×) would be rejected even at =0.25=.
+
+** Non-goals (v1)
+
+- Maintenance margin, margin calls, forced liquidation, closeout
+  simulation.
+- Broker-specific Reg-T or portfolio-margin replication.
+- Cross-currency margin.
+- Per-instrument margin rates (designed for, not implemented).
+- Shorting restrictions for cash accounts.
+- Pending-order buying-power reservation.
+- Any silent quantity resizing, by a strategy or by Trader.
+
+* Consequences
+
+- Backtests can no longer hold exposure the account couldn't finance,
+  and every refusal is observable, either as a risk decision or as a
+  broker event with a reason.
+- Account snapshots gain per-position marks (#412). This is the
+  capability #183 and #184 deferred, and it unblocks other account-wide
+  rules later (for example aggregate exposure or portfolio heat).
+- The simulator's =BuyingPower=, =MarginUsed=, and =MarginAvailable=
+  become real, derived values when a margin model is configured (#412),
+  so =FullNotionalSizer= (ADR-061), which reads =BuyingPower=, respects
+  the ratio.
+- =order.Order= gains =CancelReason=. Anything that renders or
+  journals orders should show it.
+- The bracket-entry path gains one more harmless outcome (a broker
+  margin rejection of an unfilled entry). Its safety rule for a filled
+  entry is unchanged.
+- Strategies that choose their own quantity (Buy & Hold) keep that
+  contract. A quantity the account can't finance is rejected, and
+  choosing a financeable quantity is configuration guidance (#417), not
+  a sizer change.
+- Existing leveraged results change under the 1.0 default. This is
+  intended and must be called out wherever fixtures move.
+
+* Alternatives Considered
+
+- *A =max_leverage= setting.* Rejected. It reads naturally for one
+  number but has no counterpart for maintenance margin, and
+  "margin ratio" is how venues describe the control.
+- *Net exposure.* Rejected. A long/short book with little net exposure
+  can still need substantial margin; gross is the conservative and
+  conventional basis.
+- *Resize to fit.* Rejected (ADR-029, and the #409 decision). A
+  quantity Trader silently shrank is not the trade the strategy asked
+  for, and it hides the reason in the results.
+- *Value other positions at =AvgPrice=.* Rejected (#183). It mixes a
+  historical cost basis with current prices and understates exposure
+  after gains.
+- *Admission-only, with no fill-time check.* Rejected. Next-bar fills,
+  gaps, slippage, and resting orders that trigger together can all
+  create an over-limit position that admission never saw.
+- *Continuous enforcement, with liquidation on breach.* Rejected for v1.
+  That is maintenance-margin semantics, which needs its own policy for
+  what gets closed, when, and at what price.
+- *Amend ADR-018 to allow =StatusWorking= → =StatusRejected=.* Rejected.
+  Rejection is a pre-acceptance concept in ADR-018 and at real brokers.
+  A broker-initiated cancel with a recorded reason fits the existing
+  graph and matches how brokers behave.
+- *Carry the cancel reason only on the broker event.* Rejected. The
+  order's own state would not explain its terminal status, and every
+  consumer of orders (journal, reports, strategies' fill feedback)
+  would have to correlate events to find out.
+- *Put the ratio in the risk engine only.* Rejected. It leaves the
+  simulator able to book an over-limit fill, and it gives the admission
+  and fill checks two separately configured values that could drift
+  apart.
