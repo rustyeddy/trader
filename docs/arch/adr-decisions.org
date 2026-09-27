@@ -173,6 +173,7 @@ the original decided, use full supersession instead.
 | 063 | External strategy process manager and Unix-domain socket transport (in adr-063-external-strategy-process-manager.org) | Accepted |
 | 064 | Git-describe-derived version and build metadata (in adr-064-git-describe-version-metadata.org) | Accepted |
 | 065 | Supported strategy/research API and private runtime (in adr-065-public-strategy-research-surface.org) | Accepted |
+| 066 | Account-level initial-margin admission for the simulator/backtester (in adr-066-account-initial-margin-admission.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
@@ -707,6 +708,29 @@ supervision design — =Process= exposes =Done()=/=Err()= for a
 composition root to react to, rather than restarting a crashed guest
 itself — matching the issue's own "do not let process-management
 concerns leak into Scheduler/strategy logic" constraint.
+
+Note: ADR-066 is likewise maintained in its own file,
+=docs/arch/adr-066-account-initial-margin-admission.org=, rather than
+inline in this registry. Its own Status section is authoritative.
+Issue #410 (the first step of milestone Account Margin Admission, umbrella
+#409) asks for account-level financing to be designed before
+implementation, after a buy-and-hold backtest opened roughly 4.6x equity:
+fixed-fraction sizing is unbounded, the backtest risk engine had no rules,
+and the simulator had no margin policy. This ADR records
+=initial_margin_ratio= as an admission-only invariant
+(prospective gross notional × ratio ≤ equity) with no maintenance margin
+or liquidation. It covers:
+- gross exposure, evaluated on the resulting position;
+- ADR-034's de-risking exemption;
+- one valuation basis per position: the proposal at its reference or fill
+  price, other positions at per-position snapshot marks, never =AvgPrice=;
+- one shared calculation enforced at both admission and fill time;
+- an over-limit fill of a resting order retired through the simulator's
+  existing broker-initiated cancel path, with a new additive
+  =Order.CancelReason= rather than an ADR-018 amendment;
+- a broker margin rejection of an unfilled bracket entry treated as
+  harmless;
+- the 1.0 default and its fixture impact.
 
 * ADR-001: Modular monolith before service decomposition
 
