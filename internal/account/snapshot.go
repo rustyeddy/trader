@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/id"
 	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/num"
@@ -205,18 +204,8 @@ func checkCashBalances(balances []num.Money) ([]num.Money, error) {
 	return cloned, nil
 }
 
-type listingKey struct {
-	instrumentID instrument.ID
-	provider     string
-	venue        string
-}
-
-func keyFor(l instrument.Listing) listingKey {
-	return listingKey{instrumentID: l.InstrumentID(), provider: l.Provider(), venue: l.Venue()}
-}
-
 func checkPositions(accountID id.AccountID, broker string, positions []runtimeorder.Position) ([]runtimeorder.Position, error) {
-	seen := make(map[listingKey]struct{}, len(positions))
+	seen := make(map[ListingKey]struct{}, len(positions))
 	cloned := make([]runtimeorder.Position, len(positions))
 	for i, p := range positions {
 		validated, err := runtimeorder.NewPosition(p)
@@ -231,10 +220,10 @@ func checkPositions(accountID id.AccountID, broker string, positions []runtimeor
 			return nil, fmt.Errorf("entry %d: listing provider %s does not match snapshot broker %s",
 				i, validated.Listing.Provider(), broker)
 		}
-		key := keyFor(validated.Listing)
+		key := KeyOf(validated.Listing)
 		if _, ok := seen[key]; ok {
 			return nil, fmt.Errorf("entry %d: duplicate listing %s/%s/%s",
-				i, key.instrumentID, key.provider, key.venue)
+				i, key.InstrumentID, key.Provider, key.Venue)
 		}
 		seen[key] = struct{}{}
 		cloned[i] = clonePosition(validated)

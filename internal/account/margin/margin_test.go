@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account"
 	"github.com/rustyeddy/trader/internal/clock"
 	"github.com/rustyeddy/trader/internal/id"
 	runtimeorder "github.com/rustyeddy/trader/internal/order"
@@ -26,12 +27,19 @@ func pricePtr(s string) *num.Price { p := price(s); return &p }
 // contract multiplier.
 func listing(t *testing.T, inst instrument.Instrument, symbol, multiplier string, settle num.Currency) instrument.Listing {
 	t.Helper()
+	return listingAt(t, inst, symbol, "", multiplier, settle)
+}
+
+// listingAt is listing on a specific venue.
+func listingAt(t *testing.T, inst instrument.Instrument, symbol, venue, multiplier string, settle num.Currency) instrument.Listing {
+	t.Helper()
 	spec, err := instrument.NewSpec(price("0.01"), qty("1"), rate(multiplier), settle)
 	require.NoError(t, err)
 	l, err := instrument.NewListing(instrument.ListingParams{
 		Instrument: inst,
 		Provider:   "sim",
 		Symbol:     symbol,
+		Venue:      venue,
 		Spec:       spec,
 		Tradable:   true,
 	})
@@ -147,7 +155,7 @@ func TestRatio_RequiredMargin(t *testing.T) {
 
 func TestAccount(t *testing.T) {
 	spy, qqq := equity(t, "SPY"), equity(t, "QQQ")
-	marks := Marks{spy.InstrumentID(): price("100"), qqq.InstrumentID(): price("200")}
+	marks := Marks{account.KeyOf(spy): price("100"), account.KeyOf(qqq): price("200")}
 
 	t.Run("flat account", func(t *testing.T) {
 		req, err := Account(nil, nil, ratio(t, "1"), usd)
@@ -194,7 +202,7 @@ func TestAccount(t *testing.T) {
 	})
 	t.Run("multiplier not one", func(t *testing.T) {
 		es := future(t)
-		req, err := Account([]runtimeorder.Position{position(t, es, order.Long, "1", "5000")}, Marks{es.InstrumentID(): price("5000")}, ratio(t, "0.1"), usd)
+		req, err := Account([]runtimeorder.Position{position(t, es, order.Long, "1", "5000")}, Marks{account.KeyOf(es): price("5000")}, ratio(t, "0.1"), usd)
 		require.NoError(t, err)
 		assertMoney(t, "250000", req.Gross)
 		assertMoney(t, "25000", req.Required)
@@ -205,7 +213,7 @@ func TestAccount(t *testing.T) {
 	})
 	t.Run("currency mismatch", func(t *testing.T) {
 		jpy := jpySettled(t)
-		_, err := Account([]runtimeorder.Position{position(t, jpy, order.Long, "1", "150")}, Marks{jpy.InstrumentID(): price("150")}, ratio(t, "1"), usd)
+		_, err := Account([]runtimeorder.Position{position(t, jpy, order.Long, "1", "150")}, Marks{account.KeyOf(jpy): price("150")}, ratio(t, "1"), usd)
 		assert.ErrorIs(t, err, ErrCurrencyMismatch)
 	})
 	t.Run("nil policy", func(t *testing.T) {
@@ -220,7 +228,7 @@ func TestAccount(t *testing.T) {
 
 func TestRequirement_Within(t *testing.T) {
 	spy := equity(t, "SPY")
-	marks := Marks{spy.InstrumentID(): price("100")}
+	marks := Marks{account.KeyOf(spy): price("100")}
 	eq := money("10000")
 
 	t.Run("exact limit is admitted", func(t *testing.T) {
@@ -245,7 +253,7 @@ func TestRequirement_Within(t *testing.T) {
 
 func TestAssess(t *testing.T) {
 	spy, qqq := equity(t, "SPY"), equity(t, "QQQ")
-	marks := Marks{spy.InstrumentID(): price("100"), qqq.InstrumentID(): price("200")}
+	marks := Marks{account.KeyOf(spy): price("100"), account.KeyOf(qqq): price("200")}
 	one := ratio(t, "1")
 
 	t.Run("motivating SPY order from flat", func(t *testing.T) {
@@ -385,4 +393,81 @@ func TestAssessment_IncreasesCurrencyMismatch(t *testing.T) {
 	eur := num.MustParseMoney("1", num.MustParseCurrency("EUR"))
 	_, err := Assessment{Current: Requirement{Required: money("1")}, Prospective: Requirement{Required: eur}}.Increases()
 	assert.Error(t, err)
+}
+
+func TestPolicyValidatedUpFront(t *testing.T) {
+	spy := equity(t, "SPY")
+	t.Run("flat account with zero-value Ratio", func(t *testing.T) {
+		_, err := Account(nil, nil, Ratio{}, usd)
+		assert.ErrorIs(t, err, ErrInvalidPolicy)
+	})
+	t.Run("closing change with zero-value Ratio", func(t *testing.T) {
+		_, err := Assess(nil, nil, Change{Listing: spy, Resulting: qty("0"), Price: price("100")}, Ratio{}, usd)
+		assert.ErrorIs(t, err, ErrInvalidPolicy)
+	})
+	t.Run("constructed Ratio validates", func(t *testing.T) {
+		assert.NoError(t, ratio(t, "0.5").Validate())
+	})
+}
+
+func TestIncreases_ComparesGrossNotRoundedMargin(t *testing.T) {
+	// At ratio 0.1, growing gross from 1.00000000 to 1.00000001 leaves
+	// required margin at 0.10000000 after rounding. The smallest
+	// representable increase in gross must still count as an increase.
+	spy := equity(t, "SPY")
+	positions := []runtimeorder.Position{position(t, spy, order.Long, "1", "1")}
+	a, err := Assess(positions, nil, Change{Listing: spy, Resulting: qty("1.00000001"), Price: price("1")}, ratio(t, "0.1"), usd)
+	require.NoError(t, err)
+	require.True(t, a.Prospective.Required.Equal(a.Current.Required), "required margin rounds to the same value")
+	up, err := a.Increases()
+	require.NoError(t, err)
+	assert.True(t, up)
+}
+
+func TestListingLevelIdentity(t *testing.T) {
+	inst, err := instrument.NewEquity("ARCX", "SPY")
+	require.NoError(t, err)
+	arca := listingAt(t, inst, "SPY", "ARCA", "1", usd)
+	bats := listingAt(t, inst, "SPY", "BATS", "1", usd)
+	require.True(t, arca.InstrumentID().Equal(bats.InstrumentID()), "same instrument")
+	one := ratio(t, "1")
+
+	t.Run("each listing uses its own mark", func(t *testing.T) {
+		positions := []runtimeorder.Position{
+			position(t, arca, order.Long, "10", "100"),
+			position(t, bats, order.Long, "10", "100"),
+		}
+		marks := Marks{account.KeyOf(arca): price("100"), account.KeyOf(bats): price("101")}
+		req, err := Account(positions, marks, one, usd)
+		require.NoError(t, err)
+		assertMoney(t, "2010", req.Gross)
+	})
+	t.Run("a mark for one listing does not value another", func(t *testing.T) {
+		positions := []runtimeorder.Position{position(t, bats, order.Long, "10", "100")}
+		_, err := Account(positions, Marks{account.KeyOf(arca): price("100")}, one, usd)
+		assert.ErrorIs(t, err, ErrMissingMark)
+	})
+	t.Run("two listings of one instrument are not duplicates", func(t *testing.T) {
+		positions := []runtimeorder.Position{
+			position(t, arca, order.Long, "10", "100"),
+			position(t, bats, order.Long, "10", "100"),
+		}
+		marks := Marks{account.KeyOf(bats): price("101")}
+		a, err := Assess(positions, marks, Change{Listing: arca, Resulting: qty("20"), Price: price("100")}, one, usd)
+		require.NoError(t, err)
+		assertMoney(t, "2010", a.Current.Gross)     // 10×100 + 10×101
+		assertMoney(t, "3010", a.Prospective.Gross) // 20×100 + 10×101
+	})
+	t.Run("a change in another listing does not match the existing position", func(t *testing.T) {
+		// Open in ARCA; the change is a fresh position in BATS, so the
+		// ARCA position stays at its mark and needs one.
+		positions := []runtimeorder.Position{position(t, arca, order.Long, "10", "100")}
+		_, err := Assess(positions, Marks{}, Change{Listing: bats, Resulting: qty("5"), Price: price("100")}, one, usd)
+		assert.ErrorIs(t, err, ErrMissingMark)
+
+		a, err := Assess(positions, Marks{account.KeyOf(arca): price("100")}, Change{Listing: bats, Resulting: qty("5"), Price: price("100")}, one, usd)
+		require.NoError(t, err)
+		assertMoney(t, "1000", a.Current.Gross)
+		assertMoney(t, "1500", a.Prospective.Gross)
+	})
 }

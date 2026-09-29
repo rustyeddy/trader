@@ -29,10 +29,19 @@
 // Every position is valued at exactly one price — never a blend of a
 // current price and a position's historical AvgPrice (#183). Account
 // values each open position at its current mark, supplied by the
-// caller in Marks. Assess values the changed instrument at the
-// Change's own price for both the current and the prospective state,
-// so comparing the two is a pure comparison of that instrument's
-// quantity; every other position is valued at its mark in both.
+// caller in Marks. Assess values the changed listing at the Change's
+// own price for both the current and the prospective state, so
+// comparing the two is a pure comparison of that listing's quantity;
+// every other position is valued at its mark in both.
+//
+// Positions and marks are identified by account.ListingKey (instrument,
+// provider, venue) — the level at which an account holds one net
+// position — not by instrument alone. Two listings of the same
+// instrument are separate positions with separate marks.
+//
+// Assessment.Increases, the de-risking classification, compares gross
+// notional rather than required margin, because required margin is
+// rounded and could hide a small real increase.
 //
 // Deciding whether a proposal is de-risking, and whether a price is
 // needed at all, is the caller's job (ADR-066): a de-risking proposal
