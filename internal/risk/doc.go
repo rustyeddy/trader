@@ -17,12 +17,13 @@
 // per #179's own resolution happens before execution planning, not as
 // a Rule this package evaluates) and every admission policy —
 // per-trade loss (#182), exposure/position-limit (#183), leverage/
-// margin (#184) — are each their own issue, implementing Rule as a
-// pure evaluator.
+// margin (#184), account-level initial margin (#413, ADR-066) — are
+// each their own issue, implementing Rule as a pure evaluator.
 //
 // # Dependency direction
 //
-// risk depends only on order, account, and context — never on broker
+// risk depends only on order, account (including the shared
+// account/margin calculation), and context — never on broker
 // or execution (ADR-006's own "execution and risk are separate
 // stages, neither depends on the other" rule, package-boundaries.org).
 // See boundary_test.go for the mechanical guard.
