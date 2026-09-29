@@ -24,8 +24,8 @@ const accountInitialMarginName = "account_initial_margin"
 // (ADR-034), this rule bounds the whole account: every open position
 // counts, longs and shorts both add, and nothing is netted. The
 // arithmetic is the shared internal/account/margin calculation, which
-// the simulator's fill-time check (#415) also uses, so admission and
-// fill agree on what gross exposure is.
+// the simulator's fill-time check (#415) will also use, so admission
+// and fill agree on what gross exposure is.
 //
 // # Listing-level positions
 //

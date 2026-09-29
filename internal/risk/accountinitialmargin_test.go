@@ -206,7 +206,9 @@ func TestAccountInitialMargin_ListingLevelPositions(t *testing.T) {
 	snap := marginSnapshot(t, aid, "10000", held{arca, order.Long, "50", "100"}) // 5000
 	r := marginRule(t, "1")
 
-	// A buy in BATS opens a separate BATS position: resulting 60, not 110.
+	// A buy of 50 in BATS opens a separate BATS position: the resulting
+	// BATS position is 50, not the 100 an instrument-level match would
+	// produce by adding the existing 50-share ARCA position.
 	ok, _ := evaluate(t, r, marginInput(t, snap, bats, order.Buy, "50", "100"))
 	assert.True(t, ok, "5000 (ARCA) + 5000 (BATS)")
 	ok, _ = evaluate(t, r, marginInput(t, snap, bats, order.Buy, "51", "100"))
