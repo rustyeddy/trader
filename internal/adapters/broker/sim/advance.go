@@ -90,6 +90,12 @@ func (h *accountHandle) ObserveMark(ctx context.Context, instrumentID instrument
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if close.IsZero() {
+		// Rejected before any state changes: account.Snapshot rejects
+		// a non-positive mark (ADR-066), so storing one would break
+		// every later Snapshot.
+		return fmt.Errorf("%w: mark price must be positive", ErrInvalidObservation)
+	}
 	h.state.observeMark(instrumentID, close, h.broker.deps)
 	return nil
 }

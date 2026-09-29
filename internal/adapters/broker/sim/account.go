@@ -20,6 +20,12 @@ import (
 
 // mark is the last known price of one listing and the simulator time
 // it was recorded — exposed on account.Snapshot as a PositionMark.
+//
+// at comes from Deps.Clock, like every other timestamp this package
+// produces, not from an Observation's own time (see Deps.Clock). The
+// backtest Scheduler advances the clock to each bar's time before
+// observing it, so a bar-derived mark's time equals the bar's time
+// (pinned by backtest's TestScheduler_ClockEqualsBarTimeWhenObservingMarks).
 type mark struct {
 	price num.Price
 	at    time.Time
@@ -256,9 +262,14 @@ func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 // floored at zero because it is funds available to open new positions,
 // and an over-limit account has none. The caller must hold s.mu.
 func (s *accountState) marginFieldsLocked(positions []runtimeorder.Position, equity num.Money) (buyingPower, used, available num.Money, err error) {
-	marks := make(margin.Marks, len(s.marks))
-	for key, m := range s.marks {
-		marks[key] = m.price
+	// Only open positions' marks: s.marks also keeps closed listings'
+	// last prices for history, which are not inputs to current margin.
+	marks := make(margin.Marks, len(positions))
+	for _, p := range positions {
+		key := account.KeyOf(p.Listing)
+		if m, ok := s.marks[key]; ok {
+			marks[key] = m.price
+		}
 	}
 	req, err := margin.Account(positions, marks, *s.marginPolicy, s.currency)
 	if err != nil {
@@ -764,6 +775,15 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 			return fillOutcome{}, fmt.Errorf("%w: slippage-adjusted price: %v", runtimeorder.ErrInvalidFill, err)
 		}
 		price = adjusted
+	}
+
+	// The final execution price becomes the position's mark, and
+	// account.Snapshot rejects a non-positive mark (ADR-066). Checked
+	// here, while nothing has been committed, so a zero price from
+	// Deps.Prices or a SlippageModel fails the fill and leaves the
+	// account unchanged instead of poisoning every later Snapshot.
+	if price.IsZero() {
+		return fillOutcome{}, fmt.Errorf("%w: fill price must be positive", runtimeorder.ErrInvalidFill)
 	}
 
 	var commission *num.Money

@@ -282,7 +282,30 @@ type accountWire struct {
 	Fees            num.Money      `json:"fees"`
 	Financing       num.Money      `json:"financing"`
 	Positions       []positionWire `json:"positions,omitempty"`
+	Marks           []markWire     `json:"marks,omitempty"`
 	OpenOrders      []orderWire    `json:"open_orders,omitempty"`
+}
+
+// markWire is one account.PositionMark. Its listing is identified by
+// the same instrument/provider/venue triple as a positionWire's
+// listing, and is resolved against the snapshot's own positions on
+// decode (fromAccountWire).
+type markWire struct {
+	InstrumentID string    `json:"instrument_id"`
+	Provider     string    `json:"provider"`
+	Venue        string    `json:"venue,omitempty"`
+	Price        num.Price `json:"price"`
+	AsOf         time.Time `json:"as_of"`
+}
+
+func toMarkWire(m account.PositionMark) markWire {
+	return markWire{
+		InstrumentID: m.Listing.InstrumentID.String(),
+		Provider:     m.Listing.Provider,
+		Venue:        m.Listing.Venue,
+		Price:        m.Price,
+		AsOf:         m.AsOf,
+	}
 }
 
 func toAccountWire(s account.Snapshot) accountWire {
@@ -304,6 +327,9 @@ func toAccountWire(s account.Snapshot) accountWire {
 	}
 	for _, p := range s.Positions() {
 		w.Positions = append(w.Positions, toPositionWire(p))
+	}
+	for _, m := range s.Marks() {
+		w.Marks = append(w.Marks, toMarkWire(m))
 	}
 	for _, o := range s.OpenOrders() {
 		w.OpenOrders = append(w.OpenOrders, toOrderWire(o))

@@ -1715,3 +1715,49 @@ func TestScheduler_BracketStopLegRejectedAbortsRunAfterJournalingEntryFill(t *te
 	assert.Equal(t, 1, intentKinds[order.IntentAdjustStop], "the stop leg's own sub-intent")
 	assert.True(t, foundRejectedStopDecision, "the stop leg's own risk rejection must be journaled")
 }
+
+// clockCheckingObserver records, for every ObserveMark/AdvanceBar call,
+// the simulator clock alongside the bar time the Scheduler supplied.
+type clockCheckingObserver struct {
+	clk      interface{ Now() time.Time }
+	observer backtest.MarketObserver
+	advancer backtest.IntrabarAdvancer
+	calls    []struct{ now, at time.Time }
+}
+
+func (c *clockCheckingObserver) ObserveMark(ctx context.Context, instrumentID instrument.ID, close num.Price, at time.Time) error {
+	c.calls = append(c.calls, struct{ now, at time.Time }{c.clk.Now(), at})
+	return c.observer.ObserveMark(ctx, instrumentID, close, at)
+}
+
+func (c *clockCheckingObserver) AdvanceBar(ctx context.Context, listing instrument.Listing, open, high, low, close num.Price, at time.Time) error {
+	c.calls = append(c.calls, struct{ now, at time.Time }{c.clk.Now(), at})
+	return c.advancer.AdvanceBar(ctx, listing, open, high, low, close, at)
+}
+
+// TestScheduler_ClockEqualsBarTimeWhenObservingMarks pins the invariant
+// the simulator relies on when it stamps a mark's AsOf from its own
+// clock rather than the supplied bar time (sim.Deps.Clock, ADR-026,
+// ADR-066): the Scheduler advances the clock to each bar's time before
+// calling ObserveMark or AdvanceBar with it.
+func TestScheduler_ClockEqualsBarTimeWhenObservingMarks(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &intrabarStopTriggerStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), stopPrice: "1.10065"}
+	deps := newSchedulerDeps(t, replay, strat, h)
+	rec := &clockCheckingObserver{clk: h.clockObj, observer: deps.MarketObserver, advancer: deps.IntrabarAdvancer}
+	deps.MarketObserver = rec
+	deps.IntrabarAdvancer = rec
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.NotEmpty(t, rec.calls)
+	for i, c := range rec.calls {
+		assert.True(t, c.now.Equal(c.at), "call %d: clock %s, bar time %s", i, c.now, c.at)
+	}
+}

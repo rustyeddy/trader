@@ -7,6 +7,7 @@ import (
 
 	"github.com/rustyeddy/trader/internal/account"
 	"github.com/rustyeddy/trader/internal/clock"
+	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/internal/risk"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
@@ -216,4 +217,63 @@ func TestFullNotionalSizerRespectsMarginRatio(t *testing.T) {
 	assert.True(t, size(t, "0.5").Equal(num.MustParseQuantity("9090")))
 	// Ratio 2.0 halves buying power to 5000 → 4545 units.
 	assert.True(t, size(t, "2").Equal(num.MustParseQuantity("4545")))
+}
+
+// TestZeroFillPriceLeavesAccountUnchanged: a zero fill price would
+// become a mark that account.Snapshot rejects, so the fill must fail
+// before any state is committed.
+func TestZeroFillPriceLeavesAccountUnchanged(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	prices := &mutablePriceSource{prices: map[string]num.Price{"EUR_USD": num.MustParsePrice("0")}}
+	deps.Prices = prices
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+	h := acc.(*accountHandle)
+	before := snapshot(t, h)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "100")
+	_, err = acc.Submit(ctx, req)
+	require.ErrorIs(t, err, runtimeorder.ErrInvalidFill)
+
+	after := snapshot(t, h)
+	assert.Empty(t, after.Positions())
+	assert.Empty(t, after.Marks())
+	assert.Empty(t, after.OpenOrders())
+	assert.True(t, before.AsOf().Equal(after.AsOf()))
+	assert.Empty(t, h.state.orders, "the order was never stored")
+
+	// The same request can still fill once a valid price exists.
+	prices.set("EUR_USD", num.MustParsePrice("1.10000"))
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+	require.Len(t, snapshot(t, h).Positions(), 1)
+}
+
+func TestZeroObservationPricesRejectedBeforeMutation(t *testing.T) {
+	ctx := context.Background()
+	b, deps, h := marginAccount(t, "")
+	submitMarket(t, deps, h, "EUR_USD", order.Buy, "100")
+	before := snapshot(t, h)
+	eur := mustEurUsdListing(t)
+
+	t.Run("ObserveMark", func(t *testing.T) {
+		err := h.ObserveMark(ctx, eur.InstrumentID(), num.MustParsePrice("0"), testStart)
+		assert.ErrorIs(t, err, ErrInvalidObservation)
+	})
+	t.Run("Advance", func(t *testing.T) {
+		obs := Observation{Listing: eur, Open: num.MustParsePrice("1"), High: num.MustParsePrice("1"), Low: num.MustParsePrice("0"), Close: num.MustParsePrice("0"), Time: barTime}
+		assert.ErrorIs(t, b.Advance(ctx, obs), ErrInvalidObservation)
+	})
+	t.Run("AdvanceBar", func(t *testing.T) {
+		zero, one := num.MustParsePrice("0"), num.MustParsePrice("1")
+		assert.ErrorIs(t, h.AdvanceBar(ctx, eur, one, one, zero, zero, barTime), ErrInvalidObservation)
+	})
+
+	after := snapshot(t, h)
+	assert.Equal(t, before.Marks(), after.Marks(), "marks unchanged")
+	assert.True(t, before.AsOf().Equal(after.AsOf()), "as-of unchanged")
 }
