@@ -111,12 +111,13 @@ func TestSnapshotMarginFields(t *testing.T) {
 		submitMarket(t, deps, h, "GBP_USD", order.Sell, "4000") // 5000 notional
 		assertMargin(t, snapshot(t, h), "10000", "5000", "5000", "5000")
 	})
-	t.Run("over the limit at entry", func(t *testing.T) {
-		// #412 only reports; refusing the fill is #415. 44000 notional
-		// at 1.0 leaves margin available at -34000 and no buying power.
+	t.Run("an over-limit entry is refused, leaving the fields unchanged", func(t *testing.T) {
+		// 44000 notional at 1.0 would exceed 10000 of equity (#415).
 		_, deps, h := marginAccount(t, "1")
-		submitMarket(t, deps, h, "EUR_USD", order.Buy, "40000")
-		assertMargin(t, snapshot(t, h), "10000", "44000", "-34000", "0")
+		o, err := h.Submit(context.Background(), mustMarketRequestFor(t, deps.IDs, h.Reference().AccountID, mustEurUsdListing(t), order.Buy, "40000"))
+		require.NoError(t, err)
+		assert.Equal(t, runtimeorder.StatusRejected, o.Status)
+		assertMargin(t, snapshot(t, h), "10000", "0", "10000", "10000")
 	})
 	t.Run("multi-instrument long and short is gross", func(t *testing.T) {
 		_, deps, h := marginAccount(t, "1")

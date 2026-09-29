@@ -46,3 +46,14 @@ var ErrUnsupportedSettlementCurrency = errors.New("sim: listing settlement curre
 // caller (Submit, accountState.advance) cancels the order instead of
 // filling it; buildFill performs no mutation when returning this.
 var ErrReduceOnlyNothingToReduce = errors.New("sim: reduce-only order has nothing left to reduce")
+
+// ErrInsufficientMargin reports that a fill which increases exposure
+// would leave the account above its configured initial-margin limit
+// (AccountConfig.InitialMarginRatio, ADR-066), valued at the actual
+// fill price and equity after the fill's own commission. The fill is
+// not booked, in whole. It never escapes Submit or Advance as an
+// error: a market order refused inside Submit is returned as
+// StatusRejected with ReasonInsufficientMargin, and a resting order
+// refused when it triggers is canceled by the broker with that reason
+// in Order.CancelReason.
+var ErrInsufficientMargin = errors.New("sim: fill would exceed the account's initial margin")

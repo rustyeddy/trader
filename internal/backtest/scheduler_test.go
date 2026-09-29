@@ -162,6 +162,13 @@ type schedulerHarness struct {
 
 func newSchedulerHarness(t *testing.T, start time.Time) schedulerHarness {
 	t.Helper()
+	return newSchedulerHarnessWithMargin(t, start, nil)
+}
+
+// newSchedulerHarnessWithMargin is newSchedulerHarness with the
+// simulated account's initial-margin ratio set (nil for none, ADR-066).
+func newSchedulerHarnessWithMargin(t *testing.T, start time.Time, ratio *num.Rate) schedulerHarness {
+	t.Helper()
 	c := clock.NewSimulated(start)
 	ids := id.NewGenerator(c, id.NewDeterministic(1, 2))
 	accountID, err := id.GenerateAccountID(ids)
@@ -175,8 +182,9 @@ func newSchedulerHarness(t *testing.T, start time.Time) schedulerHarness {
 			"GBP_USD": num.MustParsePrice("1.27000"),
 		},
 	}, sim.AccountConfig{
-		AccountID:    accountID,
-		StartingCash: num.MustParseMoney("100000", num.MustParseCurrency("USD")),
+		AccountID:          accountID,
+		StartingCash:       num.MustParseMoney("100000", num.MustParseCurrency("USD")),
+		InitialMarginRatio: ratio,
 	})
 	require.NoError(t, err)
 
@@ -1760,4 +1768,32 @@ func TestScheduler_ClockEqualsBarTimeWhenObservingMarks(t *testing.T) {
 	for i, c := range rec.calls {
 		assert.True(t, c.now.Equal(c.at), "call %d: clock %s, bar time %s", i, c.now, c.at)
 	}
+}
+
+// TestScheduler_BracketEntryMarginRejectedDoesNotAbortRun: the broker
+// itself rejecting a bracket's entry leg for insufficient initial
+// margin (ADR-066) is as harmless as a risk rejection — nothing opened
+// and no stop was attempted — so the run continues.
+func TestScheduler_BracketEntryMarginRejectedDoesNotAbortRun(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	// The fixed-fraction sizer sizes 100000 EUR (1% of 100000 over a
+	// 0.01 adverse distance): 110000 of notional at 1.10 on 100000 of
+	// equity, over the limit at ratio 1.0.
+	one := num.MustParseRate("1")
+	h := newSchedulerHarnessWithMargin(t, schedulerSpan(t).Start(), &one)
+	strat := &bracketEntryStrategy{requirements: bothInstrumentsRequirements(t), instID: eurusdID(t), side: order.Sell, stopPrice: "1.10065"}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()), "a broker margin rejection of the entry must not abort Run")
+
+	snap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "the entry was rejected; nothing opened")
+	assert.Empty(t, snap.OpenOrders(), "no stop leg was attempted")
+	assert.Empty(t, sched.Fills())
 }

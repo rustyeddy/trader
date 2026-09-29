@@ -75,6 +75,13 @@ type testHarness struct {
 
 func newHarness(t *testing.T, startingCash string) testHarness {
 	t.Helper()
+	return newHarnessWithMargin(t, startingCash, nil)
+}
+
+// newHarnessWithMargin is newHarness with the simulated account's
+// initial-margin ratio set (nil for none, ADR-066).
+func newHarnessWithMargin(t *testing.T, startingCash string, ratio *num.Rate) testHarness {
+	t.Helper()
 	c := clock.NewSimulated(testStart)
 	ids := id.NewGenerator(c, id.NewDeterministic(1, 2))
 	accountID, err := id.GenerateAccountID(ids)
@@ -87,8 +94,9 @@ func newHarness(t *testing.T, startingCash string) testHarness {
 			"EUR_USD": num.MustParsePrice("1.10000"),
 		},
 	}, sim.AccountConfig{
-		AccountID:    accountID,
-		StartingCash: num.MustParseMoney(startingCash, num.MustParseCurrency("USD")),
+		AccountID:          accountID,
+		StartingCash:       num.MustParseMoney(startingCash, num.MustParseCurrency("USD")),
+		InitialMarginRatio: ratio,
 	})
 	require.NoError(t, err)
 

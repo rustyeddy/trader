@@ -115,10 +115,21 @@ type AccountConfig struct {
 	// permits 4×. It must be positive when set.
 	//
 	// When nil, the account has no margin model: BuyingPower and
-	// MarginAvailable mirror cash and MarginUsed is zero, the original
-	// M3 behavior. When set, Snapshot derives all three from the shared
-	// margin calculation (see accountState.marginFieldsLocked). Either
-	// way, MarginModelInfo describes the choice for a run manifest.
+	// MarginAvailable mirror cash, MarginUsed is zero, and fills are
+	// never refused for margin — the original M3 behavior. When set:
+	//
+	//   - Snapshot derives all three fields from the shared margin
+	//     calculation (see accountState.marginFieldsLocked).
+	//   - Every fill that increases a position is checked against the
+	//     actual post-fill state, at the fill price and equity after its
+	//     own commission (see accountState.checkFillMargin). An
+	//     over-limit market order is returned StatusRejected with
+	//     ReasonInsufficientMargin; an over-limit resting order is
+	//     canceled by the broker with that reason in Order.CancelReason.
+	//     Reduce-only and de-risking fills are never refused.
+	//
+	// Either way, MarginModelInfo describes the choice for a run
+	// manifest.
 	InitialMarginRatio *num.Rate
 }
 

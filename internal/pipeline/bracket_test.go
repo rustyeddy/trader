@@ -336,3 +336,33 @@ func TestPipelineSubmit_BracketEntryNotSynchronouslyFilledReturnsError(t *testin
 	assert.Equal(t, runtimeorder.StatusWorking, result.Bracket.Entry.Order.Status)
 	assert.Equal(t, pipeline.Result{}, result.Bracket.Stop, "the stop leg must never be attempted when the entry did not fill synchronously")
 }
+
+// TestPipelineSubmit_BracketEntryBrokerRejectedReturnsClassifiedError:
+// the simulator refusing the entry leg's fill for insufficient initial
+// margin (ADR-066) returns ErrBracketEntryRejected — not
+// ErrBracketEntryNotSynchronouslyFilled — and never attempts the stop.
+func TestPipelineSubmit_BracketEntryBrokerRejectedReturnsClassifiedError(t *testing.T) {
+	ctx := context.Background()
+	one := num.MustParseRate("1")
+	h := newHarnessWithMargin(t, "10000", &one)
+	p := newPipeline(t, h)
+
+	// 1% of 10000 over a 0.01 adverse distance sizes 10000 EUR: 11000
+	// of notional at 1.10 on 10000 of equity.
+	adverse := num.MustParsePrice("0.01000")
+	result, err := p.Submit(ctx, pipeline.Input{
+		Intent:          mustEnterWithStopIntent(t, h.ids, h.listing.InstrumentID(), order.Buy, "1.05000"),
+		Listing:         h.listing,
+		Account:         h.snapshot(t, ctx),
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.ErrorIs(t, err, pipeline.ErrBracketEntryRejected)
+	assert.NotErrorIs(t, err, pipeline.ErrBracketEntryNotSynchronouslyFilled)
+	require.NotNil(t, result.Bracket)
+	assert.Equal(t, runtimeorder.StatusRejected, result.Bracket.Entry.Order.Status)
+	require.NotNil(t, result.Bracket.Entry.Order.Rejection)
+	assert.Equal(t, runtimeorder.ReasonInsufficientMargin, result.Bracket.Entry.Order.Rejection.Reason)
+	assert.Nil(t, result.Bracket.Stop.Order.Rejection)
+	assert.Empty(t, h.snapshot(t, ctx).OpenOrders(), "the stop leg was never attempted")
+}

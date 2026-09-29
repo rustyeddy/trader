@@ -71,3 +71,30 @@ func TestWriterReaderRoundTripsAccountMarks(t *testing.T) {
 		assert.True(t, want.AsOf.Equal(got[i].AsOf), "mark %d keeps its own AsOf", i)
 	}
 }
+
+// TestWriterReaderRoundTripsCancelReason proves a broker-initiated
+// cancel's reason (ADR-066) survives a JSONL write and read.
+func TestWriterReaderRoundTripsCancelReason(t *testing.T) {
+	o := mustWorkingOrderFor(t, mustAccountID(t))
+	req, err := runtimeorder.NewCancelRequest(runtimeorder.CancelRequest{OrderID: o.Request.OrderID, Metadata: id.Metadata{EventID: mustEventID(t), Timestamp: time.Now()}})
+	require.NoError(t, err)
+	pending, err := runtimeorder.ApplyCancelRequest(o, req)
+	require.NoError(t, err)
+	result, err := runtimeorder.NewCancelResult(runtimeorder.CancelResult{OrderID: o.Request.OrderID, Status: runtimeorder.StatusCanceled, Metadata: id.Metadata{CausationID: req.Metadata.EventID, Timestamp: time.Now()}})
+	require.NoError(t, err)
+	canceled, err := runtimeorder.ApplyCancelResult(pending, result)
+	require.NoError(t, err)
+	canceled.CancelReason = &runtimeorder.Rejection{Reason: runtimeorder.ReasonInsufficientMargin, Detail: "required margin exceeds equity", BrokerCode: "sim"}
+
+	w, path := mustWriter(t)
+	require.NoError(t, w.Record(context.Background(), journal.Record{RunID: mustRunID(t), Metadata: id.Metadata{Timestamp: time.Now()}, Kind: journal.KindOrder, Order: &canceled}))
+	require.NoError(t, w.Close())
+
+	entries := readAll(t, path)
+	require.Len(t, entries, 1)
+	got := entries[0].Order
+	assert.Equal(t, runtimeorder.StatusCanceled, got.Status)
+	require.NotNil(t, got.CancelReason)
+	assert.Equal(t, *canceled.CancelReason, *got.CancelReason)
+	assert.Nil(t, got.Rejection)
+}

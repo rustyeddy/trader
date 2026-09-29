@@ -853,9 +853,11 @@ func (s *Scheduler) submit(ctx context.Context, intent runtimeorder.Intent, even
 //
 //   - Entry never filled: nothing was ever opened, the identical
 //     harmless case an ordinary IntentEnter rejection already is — a
-//     risk rejection (errors.Is(submitErr, pipeline.ErrRejected))
-//     returns nil exactly like the plain path does; any other error
-//     (including ErrBracketEntryNotSynchronouslyFilled) aborts Run.
+//     risk rejection (errors.Is(submitErr, pipeline.ErrRejected)) or a
+//     broker rejection of the entry (pipeline.ErrBracketEntryRejected,
+//     ADR-066) returns nil exactly like the plain path does; any other
+//     error (including ErrBracketEntryNotSynchronouslyFilled) aborts
+//     Run.
 //   - Entry filled: any remaining submitErr necessarily belongs to the
 //     stop leg — the only thing that can still fail once the entry
 //     has already succeeded — and is *always* treated as a hard,
@@ -879,7 +881,10 @@ func (s *Scheduler) submitBracketOutcome(ctx context.Context, bracketIntent runt
 	}
 
 	if bracket.Entry.Order.Status != runtimeorder.StatusFilled {
-		if errors.Is(submitErr, pipeline.ErrRejected) {
+		// Nothing was opened: a risk rejection, or the broker itself
+		// rejecting the entry (for example for insufficient initial
+		// margin, ADR-066), is harmless and the run continues.
+		if errors.Is(submitErr, pipeline.ErrRejected) || errors.Is(submitErr, pipeline.ErrBracketEntryRejected) {
 			return nil
 		}
 		return fmt.Errorf("backtest: scheduler: submitting bracket entry intent %s: %w", bracketIntent.IntentID, submitErr)
