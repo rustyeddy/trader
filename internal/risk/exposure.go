@@ -52,7 +52,30 @@ func resultingPosition(acc account.Snapshot, proposal runtimeorder.Proposal) (or
 	if hasPosition {
 		curSide, curQty = pos.Side, pos.Quantity
 	}
+	return resultingFrom(curSide, curQty, proposal)
+}
 
+// findListingPosition returns acc's open position in exactly key's
+// listing, if any — the unit at which an account nets one position
+// (account.ListingKey), rather than findPosition's instrument-level
+// match. accountInitialMarginRule uses it so its resulting quantity
+// agrees with the listing-level position margin.Assess replaces
+// (ADR-066).
+func findListingPosition(acc account.Snapshot, key account.ListingKey) (runtimeorder.Position, bool) {
+	for _, p := range acc.Positions() {
+		if account.KeyOf(p.Listing) == key {
+			return p, true
+		}
+	}
+	return runtimeorder.Position{}, false
+}
+
+// resultingFrom is resultingPosition's arithmetic, starting from an
+// explicit current side and quantity instead of looking one up, so a
+// caller that matches positions differently (findListingPosition)
+// shares the exact same increase/reduce/close/reversal and ReduceOnly
+// semantics.
+func resultingFrom(curSide order.PositionSide, curQty num.Quantity, proposal runtimeorder.Proposal) (order.PositionSide, num.Quantity, error) {
 	sameDirection := curSide != order.Flat &&
 		((curSide == order.Long && proposal.Side == order.Buy) ||
 			(curSide == order.Short && proposal.Side == order.Sell))
