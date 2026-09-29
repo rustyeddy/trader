@@ -57,6 +57,7 @@ type Snapshot struct {
 	financing       num.Money
 
 	positions  []runtimeorder.Position
+	marks      []PositionMark
 	openOrders []runtimeorder.Order
 }
 
@@ -109,6 +110,11 @@ type SnapshotParams struct {
 	// must case-insensitively equal Broker, and no two entries may name
 	// the same (instrument, provider, venue) listing.
 	Positions []runtimeorder.Position
+	// Marks is the current valuation price of open positions, at most
+	// one per position (see PositionMark). Every entry must name an
+	// entry of Positions by its ListingKey. It may omit positions, or be
+	// empty, when the reporter has no current price for them.
+	Marks []PositionMark
 	// OpenOrders is this account's outstanding orders. Every entry's
 	// Request.AccountID must equal AccountID, every entry's
 	// Request.Listing.Provider must case-insensitively equal Broker, no
@@ -162,6 +168,11 @@ func NewSnapshot(params SnapshotParams) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("%w: positions: %v", ErrInvalidSnapshot, err)
 	}
 
+	marks, err := checkMarks(positions, params.Marks, params.AsOf)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("%w: marks: %v", ErrInvalidSnapshot, err)
+	}
+
 	openOrders, err := checkOpenOrders(params.AccountID, params.Broker, params.OpenOrders)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("%w: open orders: %v", ErrInvalidSnapshot, err)
@@ -183,6 +194,7 @@ func NewSnapshot(params SnapshotParams) (Snapshot, error) {
 		fees:            params.Fees,
 		financing:       params.Financing,
 		positions:       positions,
+		marks:           marks,
 		openOrders:      openOrders,
 	}, nil
 }
@@ -371,6 +383,24 @@ func (s Snapshot) Positions() []runtimeorder.Position {
 		cloned[i] = clonePosition(p)
 	}
 	return cloned
+}
+
+// Marks returns a copy of the open positions' current valuation
+// prices, in Positions order. A position with no current price has no
+// entry.
+func (s Snapshot) Marks() []PositionMark {
+	return append([]PositionMark(nil), s.marks...)
+}
+
+// Mark returns the current valuation price of the open position in
+// key's listing, if the snapshot has one.
+func (s Snapshot) Mark(key ListingKey) (PositionMark, bool) {
+	for _, m := range s.marks {
+		if m.Listing == key {
+			return m, true
+		}
+	}
+	return PositionMark{}, false
 }
 
 // OpenOrders returns a deep copy of the account's outstanding orders.

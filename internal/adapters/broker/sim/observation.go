@@ -33,13 +33,20 @@ type Observation struct {
 }
 
 // validate reports whether o is well-formed: Listing must be
-// constructed, Time must be non-zero, and Low <= Open, Close <= High.
+// constructed, Time must be non-zero, prices must be positive, and
+// Low <= Open, Close <= High.
 func (o Observation) validate() error {
 	if o.Listing.InstrumentID().IsZero() {
 		return fmt.Errorf("%w: listing must be constructed", ErrInvalidObservation)
 	}
 	if o.Time.IsZero() {
 		return fmt.Errorf("%w: time must be set", ErrInvalidObservation)
+	}
+	// Low is the bar's smallest price, so a positive Low makes every
+	// price positive. Close becomes a position's mark, which
+	// account.Snapshot requires to be positive (ADR-066).
+	if o.Low.IsZero() {
+		return fmt.Errorf("%w: prices must be positive", ErrInvalidObservation)
 	}
 	if o.High.Cmp(o.Low) < 0 {
 		return fmt.Errorf("%w: high %s is below low %s", ErrInvalidObservation, o.High, o.Low)

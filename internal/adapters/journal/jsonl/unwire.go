@@ -255,6 +255,10 @@ func fromAccountWire(w accountWire) (account.Snapshot, error) {
 		}
 		positions = append(positions, p)
 	}
+	marks, err := fromMarkWires(w.Marks, positions)
+	if err != nil {
+		return account.Snapshot{}, err
+	}
 	openOrders := make([]runtimeorder.Order, 0, len(w.OpenOrders))
 	for _, ow := range w.OpenOrders {
 		o, err := fromOrderWire(ow)
@@ -279,12 +283,38 @@ func fromAccountWire(w accountWire) (account.Snapshot, error) {
 		Fees:            w.Fees,
 		Financing:       w.Financing,
 		Positions:       positions,
+		Marks:           marks,
 		OpenOrders:      openOrders,
 	})
 	if err != nil {
 		return account.Snapshot{}, fmt.Errorf("%w: reconstructing account snapshot: %v", ErrCorruptEntry, err)
 	}
 	return snap, nil
+}
+
+// fromMarkWires resolves each mark's listing against positions, the
+// listings the same snapshot entry already carries. A mark naming no
+// decoded position is corrupt.
+func fromMarkWires(ws []markWire, positions []runtimeorder.Position) ([]account.PositionMark, error) {
+	if len(ws) == 0 {
+		return nil, nil
+	}
+	type wireKey struct{ instrumentID, provider, venue string }
+	keys := make(map[wireKey]account.ListingKey, len(positions))
+	for _, p := range positions {
+		k := account.KeyOf(p.Listing)
+		keys[wireKey{k.InstrumentID.String(), k.Provider, k.Venue}] = k
+	}
+	marks := make([]account.PositionMark, 0, len(ws))
+	for i, mw := range ws {
+		key, ok := keys[wireKey{mw.InstrumentID, mw.Provider, mw.Venue}]
+		if !ok {
+			return nil, fmt.Errorf("%w: mark %d names no position in listing %s/%s/%s",
+				ErrCorruptEntry, i, mw.InstrumentID, mw.Provider, mw.Venue)
+		}
+		marks = append(marks, account.PositionMark{Listing: key, Price: mw.Price, AsOf: mw.AsOf})
+	}
+	return marks, nil
 }
 
 func fromStatusWire(w statusWire) (broker.Status, error) {
