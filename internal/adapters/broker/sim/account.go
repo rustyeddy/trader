@@ -10,6 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/account"
+	"github.com/rustyeddy/trader/internal/account/margin"
 	brokerpkg "github.com/rustyeddy/trader/internal/broker"
 	"github.com/rustyeddy/trader/internal/id"
 	runtimeorder "github.com/rustyeddy/trader/internal/order"
@@ -17,17 +18,11 @@ import (
 	"github.com/rustyeddy/trader/order"
 )
 
-// positionKey identifies one (instrument, provider, venue) listing for
-// accountState.positions, matching the uniqueness rule
-// account.NewSnapshot itself enforces on Snapshot.Positions.
-type positionKey struct {
-	instrumentID instrument.ID
-	provider     string
-	venue        string
-}
-
-func keyForListing(l instrument.Listing) positionKey {
-	return positionKey{instrumentID: l.InstrumentID(), provider: l.Provider(), venue: l.Venue()}
+// mark is the last known price of one listing and the simulator time
+// it was recorded — exposed on account.Snapshot as a PositionMark.
+type mark struct {
+	price num.Price
+	at    time.Time
 }
 
 // reducibleQuantity reports how much of position a ReduceOnly order
@@ -97,7 +92,7 @@ type accountState struct {
 	// is simply empty" convention for a flat account. Use
 	// commitPosition, never a direct map write, so this invariant
 	// cannot be violated by accident.
-	positions map[positionKey]runtimeorder.Position
+	positions map[account.ListingKey]runtimeorder.Position
 	// marks holds the last known price per listing (issue #152,
 	// M3-09): set from a market order's fill price (Submit), a
 	// triggered limit/stop fill's price, or — even when no order
@@ -107,8 +102,9 @@ type accountState struct {
 	// known market observation," not live/real-time mark-to-market —
 	// see snapshotLocked's doc comment. Entries are never deleted, even
 	// after a position closes, so the last traded price remains
-	// available for history/display.
-	marks map[positionKey]num.Price
+	// available for history/display. Each mark records the simulator
+	// clock time it was set, which Snapshot reports as the mark's AsOf.
+	marks map[account.ListingKey]mark
 	// realizedPnL is this account's cumulative realized profit and
 	// loss, denominated in currency. It moves only when a fill reduces,
 	// closes, or reverses a position (see position.go); opening or
@@ -122,6 +118,10 @@ type accountState struct {
 	// injected dependencies eventually produce one. Reported directly
 	// as account.Snapshot.Fees.
 	fees num.Money
+
+	// margin is the account's initial-margin policy (ADR-066), or nil
+	// when none is configured — see AccountConfig.InitialMarginRatio.
+	marginPolicy *margin.Ratio
 
 	events       []brokerpkg.Event
 	nextSequence uint64
@@ -151,14 +151,18 @@ func zeroMoney(currency num.Currency) (num.Money, error) {
 // UnrealizedPnL is computed from s.marks against each open Position's
 // AvgPrice (see unrealizedPnLForPosition) — explicitly "as of the
 // simulator's last known market observation" (whatever last touched
-// s.marks for that listing: a fill, or a Broker.Advance revaluation),
-// not live/real-time mark-to-market; this package has no ongoing price
-// feed to mark against between those events. Equity is s.cash plus
-// that UnrealizedPnL. BuyingPower and MarginAvailable mirror s.cash
-// directly and MarginUsed is always zero: this package still models an
-// unleveraged, fully funded account with no margin policy of its own
-// (that is M4's job) — these fields are a deliberate M3 placeholder,
-// not a claim of real margin/leverage semantics.
+// s.marks for that listing: a fill, or a Broker.Advance or ObserveMark
+// revaluation), not live/real-time mark-to-market; this package has no
+// ongoing price feed to mark against between those events. Equity is
+// s.cash plus that UnrealizedPnL. The same marks are reported as
+// Snapshot.Marks, each with the simulator time it was recorded
+// (ADR-066), in Positions order.
+//
+// With no margin model configured (AccountConfig.InitialMarginRatio
+// nil), BuyingPower and MarginAvailable mirror s.cash and MarginUsed is
+// zero — the original M3 behavior, unchanged. With one configured, the
+// three are derived from the shared margin calculation (ADR-066); see
+// marginFieldsLocked.
 func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 	openOrders := make([]runtimeorder.Order, 0, len(s.orders))
 	for _, o := range s.orders {
@@ -186,12 +190,14 @@ func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 	})
 
 	unrealizedPnL := s.zero
-	for key, p := range s.positions {
-		mark, ok := s.marks[key]
+	marks := make([]account.PositionMark, 0, len(positions))
+	for _, p := range positions {
+		key := account.KeyOf(p.Listing)
+		m, ok := s.marks[key]
 		if !ok {
 			continue // a position always has a mark from its opening fill
 		}
-		delta, err := unrealizedPnLForPosition(p, mark, p.Listing.Spec().SettlementCurrency())
+		delta, err := unrealizedPnLForPosition(p, m.price, p.Listing.Spec().SettlementCurrency())
 		if err != nil {
 			return account.Snapshot{}, err
 		}
@@ -199,11 +205,20 @@ func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 		if err != nil {
 			return account.Snapshot{}, err
 		}
+		marks = append(marks, account.PositionMark{Listing: key, Price: m.price, AsOf: m.at})
 	}
 
 	equity, err := s.cash.Add(unrealizedPnL)
 	if err != nil {
 		return account.Snapshot{}, err
+	}
+
+	buyingPower, marginUsed, marginAvailable := s.cash, s.zero, s.cash
+	if s.marginPolicy != nil {
+		buyingPower, marginUsed, marginAvailable, err = s.marginFieldsLocked(positions, equity)
+		if err != nil {
+			return account.Snapshot{}, err
+		}
 	}
 
 	return account.NewSnapshot(account.SnapshotParams{
@@ -213,16 +228,58 @@ func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 		AsOf:            s.asOf,
 		CashBalances:    []num.Money{s.cash},
 		Equity:          equity,
-		BuyingPower:     s.cash,
-		MarginUsed:      s.zero,
-		MarginAvailable: s.cash,
+		BuyingPower:     buyingPower,
+		MarginUsed:      marginUsed,
+		MarginAvailable: marginAvailable,
 		RealizedPnL:     s.realizedPnL,
 		UnrealizedPnL:   unrealizedPnL,
 		Fees:            s.fees,
 		Financing:       s.zero,
 		Positions:       positions,
+		Marks:           marks,
 		OpenOrders:      openOrders,
 	})
+}
+
+// marginFieldsLocked derives the snapshot's margin fields from the
+// configured initial-margin ratio (ADR-066), using the shared margin
+// calculation so the simulator and the risk rule agree on gross
+// exposure:
+//
+//	MarginUsed      = required margin on current gross notional
+//	MarginAvailable = equity − MarginUsed (negative when over the limit)
+//	BuyingPower     = MarginAvailable ÷ ratio, floored at zero
+//
+// Every open position is valued at its mark. MarginAvailable may go
+// negative after an adverse move: v1 has no maintenance margin, so the
+// simulator reports the breach and takes no action. BuyingPower is
+// floored at zero because it is funds available to open new positions,
+// and an over-limit account has none. The caller must hold s.mu.
+func (s *accountState) marginFieldsLocked(positions []runtimeorder.Position, equity num.Money) (buyingPower, used, available num.Money, err error) {
+	marks := make(margin.Marks, len(s.marks))
+	for key, m := range s.marks {
+		marks[key] = m.price
+	}
+	req, err := margin.Account(positions, marks, *s.marginPolicy, s.currency)
+	if err != nil {
+		return num.Money{}, num.Money{}, num.Money{}, fmt.Errorf("sim: computing margin: %w", err)
+	}
+	available, err = equity.Sub(req.Required)
+	if err != nil {
+		return num.Money{}, num.Money{}, num.Money{}, fmt.Errorf("sim: computing margin available: %w", err)
+	}
+	buyingPower, err = available.DivRate(s.marginPolicy.Value())
+	if err != nil {
+		return num.Money{}, num.Money{}, num.Money{}, fmt.Errorf("sim: computing buying power: %w", err)
+	}
+	negative, err := buyingPower.Cmp(s.zero)
+	if err != nil {
+		return num.Money{}, num.Money{}, num.Money{}, fmt.Errorf("sim: comparing buying power: %w", err)
+	}
+	if negative < 0 {
+		buyingPower = s.zero
+	}
+	return buyingPower, req.Required, available, nil
 }
 
 // commitPosition stores pos as the account's current position for
@@ -230,7 +287,7 @@ func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 // s.positions is ever written, so its "only non-Flat entries" invariant
 // (see accountState's doc comment) cannot be violated by a direct map
 // write at a call site. The caller must already hold s.mu.
-func (s *accountState) commitPosition(key positionKey, pos runtimeorder.Position) {
+func (s *accountState) commitPosition(key account.ListingKey, pos runtimeorder.Position) {
 	if pos.Side == order.Flat {
 		delete(s.positions, key)
 		return
@@ -503,7 +560,7 @@ func (h *accountHandle) Submit(ctx context.Context, req runtimeorder.Request) (r
 		return runtimeorder.Order{}, err
 	}
 
-	h.state.commitFill(req.Listing, outcome)
+	h.state.commitFill(req.Listing, outcome, now)
 	h.state.asOf = now
 	h.state.commitEvents(append([]brokerpkg.Event{acceptEvent, outcome.fillEvent, outcome.filledEvent}, outcome.extraEvents...)...)
 	return outcome.order, nil
@@ -538,11 +595,11 @@ type fillOutcome struct {
 // commitPosition), records the new mark, and updates cash/realizedPnL/
 // fees. The caller must already hold s.mu and must call commitEvents
 // separately (see Submit and accountState.advance).
-func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcome) {
+func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcome, at time.Time) {
 	s.orders[outcome.order.Request.OrderID] = cloneOrder(outcome.order)
-	key := keyForListing(listing)
+	key := account.KeyOf(listing)
 	s.commitPosition(key, outcome.position)
-	s.marks[key] = outcome.mark
+	s.marks[key] = mark{price: outcome.mark, at: at}
 	s.cash = outcome.cash
 	s.realizedPnL = outcome.realizedPnL
 	s.fees = outcome.fees
@@ -601,7 +658,7 @@ func roundFillPriceToTick(price num.Price, side order.Side, tick num.Price) (num
 
 func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Price, causationID id.EventID, sequence uint64) (fillOutcome, error) {
 	req := o.Request
-	key := keyForListing(req.Listing)
+	key := account.KeyOf(req.Listing)
 	currency := req.Listing.Spec().SettlementCurrency()
 
 	// Checked first, before any other part of the fill is built:

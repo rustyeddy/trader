@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account"
 	brokerpkg "github.com/rustyeddy/trader/internal/broker"
 	"github.com/rustyeddy/trader/internal/id"
 	runtimeorder "github.com/rustyeddy/trader/internal/order"
@@ -129,16 +130,17 @@ func (s *accountState) observeMark(instrumentID instrument.ID, close num.Price, 
 		return
 	}
 
+	now := deps.Clock.Now()
 	changed := false
 	for key := range s.positions {
-		if key.instrumentID != instrumentID {
+		if key.InstrumentID != instrumentID {
 			continue
 		}
-		s.marks[key] = close
+		s.marks[key] = mark{price: close, at: now}
 		changed = true
 	}
 	if changed {
-		s.asOf = deps.Clock.Now()
+		s.asOf = now
 	}
 }
 
@@ -189,10 +191,11 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 	// (issue #152, M3-09) must not go stale merely because there was
 	// nothing to fill this bar. Any fill processed below overwrites
 	// this with its own, more specific fill price.
-	key := keyForListing(obs.Listing)
+	key := account.KeyOf(obs.Listing)
 	if _, hasPosition := s.positions[key]; hasPosition {
-		s.marks[key] = obs.Close
-		s.asOf = deps.Clock.Now()
+		now := deps.Clock.Now()
+		s.marks[key] = mark{price: obs.Close, at: now}
+		s.asOf = now
 	}
 
 	var atOpen, withinBar []triggeredOrder
@@ -280,8 +283,9 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 			continue
 		}
 
-		s.commitFill(t.order.Request.Listing, outcome)
-		s.asOf = deps.Clock.Now()
+		now := deps.Clock.Now()
+		s.commitFill(t.order.Request.Listing, outcome, now)
+		s.asOf = now
 		s.commitEvents(append([]brokerpkg.Event{outcome.fillEvent, outcome.filledEvent}, outcome.extraEvents...)...)
 	}
 

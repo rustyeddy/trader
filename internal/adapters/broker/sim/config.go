@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account/margin"
 	"github.com/rustyeddy/trader/internal/clock"
 	"github.com/rustyeddy/trader/internal/id"
 	"github.com/rustyeddy/trader/num"
@@ -101,15 +102,42 @@ func (d Deps) validate() error {
 	return nil
 }
 
-// AccountConfig describes one simulated account's identity and
-// deterministic starting capital. StartingCash's Currency becomes the
-// account's home Currency; equity, buying power, and margin available
-// all start equal to StartingCash, with margin used and PnL starting at
-// zero — this package models no leverage or margin policy of its own
-// (that is risk's concern, M4).
+// AccountConfig describes one simulated account's identity,
+// deterministic starting capital, and optional margin model.
+// StartingCash's Currency becomes the account's home Currency.
 type AccountConfig struct {
 	AccountID    id.AccountID
 	StartingCash num.Money
+
+	// InitialMarginRatio configures the account's initial-margin model
+	// (ADR-066): the minimum equity required per unit of gross position
+	// notional — 1.0 is unlevered, 0.5 permits 2× gross exposure, 0.25
+	// permits 4×. It must be positive when set.
+	//
+	// When nil, the account has no margin model: BuyingPower and
+	// MarginAvailable mirror cash and MarginUsed is zero, the original
+	// M3 behavior. When set, Snapshot derives all three from the shared
+	// margin calculation (see accountState.marginFieldsLocked). Either
+	// way, MarginModelInfo describes the choice for a run manifest.
+	InitialMarginRatio *num.Rate
+}
+
+// marginModelName and marginModelVersion identify the initial-margin
+// ratio model in MarginModelInfo.
+const (
+	marginModelName    = "initial-margin-ratio"
+	marginModelVersion = "v1"
+)
+
+// MarginModelInfo identifies c's margin model for reproducibility
+// records (ADR-028, ADR-066): Name "none" when InitialMarginRatio is
+// nil, otherwise the ratio model with its ratio in Config, so two runs
+// with different ratios are distinguishable.
+func (c AccountConfig) MarginModelInfo() ModelInfo {
+	if c.InitialMarginRatio == nil {
+		return ModelInfo{Name: "none"}
+	}
+	return ModelInfo{Name: marginModelName, Version: marginModelVersion, Config: "ratio=" + c.InitialMarginRatio.String()}
 }
 
 func (c AccountConfig) validate() error {
@@ -119,5 +147,21 @@ func (c AccountConfig) validate() error {
 	if !c.StartingCash.IsValid() {
 		return fmt.Errorf("%w: starting cash must be valid money", ErrInvalidConfig)
 	}
+	if _, err := c.marginPolicy(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// marginPolicy returns c's initial-margin policy, or nil when none is
+// configured.
+func (c AccountConfig) marginPolicy() (*margin.Ratio, error) {
+	if c.InitialMarginRatio == nil {
+		return nil, nil
+	}
+	r, err := margin.NewRatio(*c.InitialMarginRatio)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	return &r, nil
 }

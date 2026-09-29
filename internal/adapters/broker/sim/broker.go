@@ -9,7 +9,6 @@ import (
 	brokerpkg "github.com/rustyeddy/trader/internal/broker"
 	"github.com/rustyeddy/trader/internal/id"
 	runtimeorder "github.com/rustyeddy/trader/internal/order"
-	"github.com/rustyeddy/trader/num"
 )
 
 // Broker is a deterministic, in-memory implementation of broker.Broker
@@ -70,18 +69,24 @@ func NewBroker(name string, deps Deps, configs ...AccountConfig) (*Broker, error
 			return nil, fmt.Errorf("account config %d: %w", i, err)
 		}
 
+		policy, err := cfg.marginPolicy()
+		if err != nil {
+			return nil, fmt.Errorf("account config %d: %w", i, err)
+		}
+
 		accounts[cfg.AccountID] = &accountState{
-			ref:         ref,
-			currency:    cfg.StartingCash.Currency(),
-			cash:        cfg.StartingCash,
-			zero:        zero,
-			asOf:        now,
-			orders:      make(map[id.OrderID]runtimeorder.Order),
-			positions:   make(map[positionKey]runtimeorder.Position),
-			marks:       make(map[positionKey]num.Price),
-			realizedPnL: zero,
-			fees:        zero,
-			changed:     make(chan struct{}),
+			ref:          ref,
+			currency:     cfg.StartingCash.Currency(),
+			cash:         cfg.StartingCash,
+			zero:         zero,
+			asOf:         now,
+			orders:       make(map[id.OrderID]runtimeorder.Order),
+			positions:    make(map[account.ListingKey]runtimeorder.Position),
+			marks:        make(map[account.ListingKey]mark),
+			realizedPnL:  zero,
+			fees:         zero,
+			marginPolicy: policy,
+			changed:      make(chan struct{}),
 		}
 	}
 
