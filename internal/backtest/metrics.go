@@ -156,8 +156,15 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 		if !p.Equity.IsValid() || !p.Equity.Currency().Equal(currency) {
 			return Metrics{}, fmt.Errorf("%w: equity curve point %d must be valid money in %s", ErrInvalidMetrics, i, currency)
 		}
-		if p.GrossNotional != nil && (!p.GrossNotional.IsValid() || !p.GrossNotional.Currency().Equal(currency)) {
-			return Metrics{}, fmt.Errorf("%w: equity curve point %d gross notional must be valid money in %s", ErrInvalidMetrics, i, currency)
+		if p.GrossNotional != nil {
+			if !p.GrossNotional.IsValid() || !p.GrossNotional.Currency().Equal(currency) {
+				return Metrics{}, fmt.Errorf("%w: equity curve point %d gross notional must be valid money in %s", ErrInvalidMetrics, i, currency)
+			}
+			// Gross notional is a sum of absolute values; a negative one
+			// can only be a construction error.
+			if sign, err := p.GrossNotional.Cmp(zeroMoneyMust(currency)); err != nil || sign < 0 {
+				return Metrics{}, fmt.Errorf("%w: equity curve point %d gross notional must not be negative", ErrInvalidMetrics, i)
+			}
 		}
 		if i > 0 && p.Timestamp.Before(lastTS) {
 			return Metrics{}, fmt.Errorf("%w: equity curve point %d timestamp precedes point %d", ErrInvalidMetrics, i, i-1)
@@ -189,7 +196,7 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 		startingCapital: params.StartingCapital,
 		finalEquity:     params.FinalEquity,
 		netReturn:       netReturnRate,
-		equityCurve:     append([]EquityPoint(nil), params.EquityCurve...),
+		equityCurve:     cloneEquityCurve(params.EquityCurve),
 		tradeCount:      len(params.Trades),
 		accountFees:     params.AccountFees,
 	}
@@ -543,18 +550,47 @@ func (m Metrics) MaxDrawdown() num.Rate { return m.maxDrawdown }
 
 // PeakGrossNotional is the largest gross position notional observed
 // across EquityCurve (ADR-066), or nil when no point carries one.
-func (m Metrics) PeakGrossNotional() *num.Money { return m.peakGrossNotional }
+func (m Metrics) PeakGrossNotional() *num.Money { return cloneMoney(m.peakGrossNotional) }
 
 // PeakGrossLeverage is the largest gross notional ÷ equity observed
 // across EquityCurve, over points with a gross notional and positive
 // equity, or nil when there are none. 1 means gross exposure equal to
 // equity.
-func (m Metrics) PeakGrossLeverage() *num.Rate { return m.peakGrossLeverage }
+func (m Metrics) PeakGrossLeverage() *num.Rate {
+	if m.peakGrossLeverage == nil {
+		return nil
+	}
+	r := *m.peakGrossLeverage
+	return &r
+}
 
 // EquityCurve returns a defensive copy of the authoritative,
 // mark-to-market equity series this Metrics was built from.
 func (m Metrics) EquityCurve() []EquityPoint {
-	return append([]EquityPoint(nil), m.equityCurve...)
+	return cloneEquityCurve(m.equityCurve)
+}
+
+// cloneEquityCurve deep-copies curve, including each GrossNotional, so
+// neither the caller that supplied it nor one that receives it can
+// reach Metrics' internal state.
+func cloneEquityCurve(curve []EquityPoint) []EquityPoint {
+	if curve == nil {
+		return nil
+	}
+	out := make([]EquityPoint, len(curve))
+	for i, p := range curve {
+		p.GrossNotional = cloneMoney(p.GrossNotional)
+		out[i] = p
+	}
+	return out
+}
+
+func cloneMoney(m *num.Money) *num.Money {
+	if m == nil {
+		return nil
+	}
+	v := *m
+	return &v
 }
 
 // TradeCount is the number of fully closed round trips.

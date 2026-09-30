@@ -1126,13 +1126,18 @@ func (s *accountState) checkFillMargin(req runtimeorder.Request, key account.Lis
 		return nil
 	}
 
-	// The current gross notional, at current marks, for the refusal's
-	// audit detail (ADR-066, #416).
+	// The current gross notional for the refusal's audit detail
+	// (ADR-066, #416). The changed listing is valued at the fill price
+	// in both states, as ADR-066 requires, so "up from" reflects only
+	// the position change, never a price gap; other listings use their
+	// marks.
 	current := make([]runtimeorder.Position, 0, len(s.positions))
 	currentMarks := make(margin.Marks, len(s.positions))
 	for k, p := range s.positions {
 		current = append(current, p)
-		if m, ok := s.marks[k]; ok {
+		if k == key {
+			currentMarks[k] = price
+		} else if m, ok := s.marks[k]; ok {
 			currentMarks[k] = m.price
 		}
 	}

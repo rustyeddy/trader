@@ -65,15 +65,21 @@ func grossNotional(s account.Snapshot) *num.Money {
 	if err != nil {
 		return nil
 	}
+	// One map built per point, so each position's lookup is O(1)
+	// rather than a scan of every mark.
+	marks := make(map[account.ListingKey]num.Price)
+	for _, m := range s.Marks() {
+		marks[m.Listing] = m.Price
+	}
 	for _, p := range s.Positions() {
 		if p.Quantity.IsZero() {
 			continue
 		}
-		m, ok := s.Mark(account.KeyOf(p.Listing))
+		price, ok := marks[account.KeyOf(p.Listing)]
 		if !ok {
 			return nil
 		}
-		n, err := margin.Notional(margin.Valued{Listing: p.Listing, Quantity: p.Quantity, Price: m.Price}, s.Currency())
+		n, err := margin.Notional(margin.Valued{Listing: p.Listing, Quantity: p.Quantity, Price: price}, s.Currency())
 		if err != nil {
 			return nil
 		}

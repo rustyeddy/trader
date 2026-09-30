@@ -67,6 +67,16 @@ func TestMetrics_PeakGrossExposure(t *testing.T) {
 		assert.True(t, m.PeakGrossNotional().Equal(num.MustParseMoney("9000", num.MustParseCurrency("USD"))))
 		assert.True(t, m.PeakGrossLeverage().Equal(num.MustParseRate("0.1")))
 	})
+	t.Run("negative gross is rejected", func(t *testing.T) {
+		p := grossPoint(at(0), "10000", "-1")
+		_, err := backtest.NewMetrics(backtest.MetricsParams{
+			StartingCapital: num.MustParseMoney("10000", num.MustParseCurrency("USD")),
+			FinalEquity:     p.Equity,
+			EquityCurve:     []backtest.EquityPoint{p},
+			AccountFees:     num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		})
+		assert.ErrorIs(t, err, backtest.ErrInvalidMetrics)
+	})
 	t.Run("gross in another currency is rejected", func(t *testing.T) {
 		eur := num.MustParseMoney("1", num.MustParseCurrency("EUR"))
 		p := grossPoint(at(0), "10000", "")
@@ -83,4 +93,26 @@ func TestMetrics_PeakGrossExposure(t *testing.T) {
 
 func TestMarginRejectionsTotal(t *testing.T) {
 	assert.Equal(t, 5, backtest.MarginRejections{Admission: 2, Fill: 3}.Total())
+}
+
+// TestMetrics_GrossNotionalIsNotAliased pins Metrics' defensive-copy
+// guarantee for the pointer-valued GrossNotional and peak accessors.
+func TestMetrics_GrossNotionalIsNotAliased(t *testing.T) {
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	usd := num.MustParseCurrency("USD")
+	input := []backtest.EquityPoint{grossPoint(t0, "10000", "5000"), grossPoint(t0.Add(time.Hour), "10000", "8000")}
+	m := metricsFor(t, input...)
+	want := num.MustParseMoney("8000", usd)
+
+	// (1) The caller's input curve.
+	*input[1].GrossNotional = num.MustParseMoney("999999", usd)
+	// (2) A curve returned by EquityCurve.
+	*m.EquityCurve()[1].GrossNotional = num.MustParseMoney("999999", usd)
+	// (3) The peak accessors' results.
+	*m.PeakGrossNotional() = num.MustParseMoney("999999", usd)
+	*m.PeakGrossLeverage() = num.MustParseRate("99")
+
+	assert.True(t, m.EquityCurve()[1].GrossNotional.Equal(want))
+	assert.True(t, m.PeakGrossNotional().Equal(want))
+	assert.True(t, m.PeakGrossLeverage().Equal(num.MustParseRate("0.8")))
 }
