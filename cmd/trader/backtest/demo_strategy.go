@@ -30,6 +30,10 @@ import (
 // warm-up/entry state independently by instrument.ID string, the same
 // per-instrument-keyed pattern backtest's own enterThenExitStrategy
 // test fixture (#223) already established as correct.
+//
+// Setting strategy.quantity switches buy-and-hold into quantity mode
+// instead (buyHoldQuantity, issue #417): the quantity-driven Buy & Hold
+// baseline contract. demoStrategy is used only when quantity is unset.
 // demoStrategyName is the stable config/manifest name for the built-in
 // passive baseline and the generic --config strategy selector.
 const demoStrategyName = "buy-and-hold"

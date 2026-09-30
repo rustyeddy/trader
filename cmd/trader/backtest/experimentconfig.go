@@ -3,6 +3,7 @@ package backtest
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -94,6 +95,22 @@ type strategySection struct {
 	// so config.Load decodes it directly, the same way num.Rate/
 	// num.Price already do.
 	AllowedSide emacross.Side `config:"allowed_side" flag:"allowed-side" default:"both" json:"allowed_side"`
+
+	// Quantity switches buy-and-hold into quantity mode (issue #417):
+	// buy exactly this quantity, never sized or resized, of the run's
+	// single instrument. Zero (unset) keeps buy-and-hold's fixed-
+	// fraction demo behavior. BuyDate and SellDate (YYYY-MM-DD or
+	// RFC3339) apply only in quantity mode: buy on the first bar at or
+	// after BuyDate (default: the first bar), and exit on the first bar
+	// at or after SellDate if set. The run's end date is not a sell.
+	Quantity num.Quantity `config:"quantity" flag:"quantity" json:"quantity,omitempty"`
+	BuyDate  string       `config:"buy_date" flag:"buy-date" json:"buy_date,omitempty"`
+	SellDate string       `config:"sell_date" flag:"sell-date" json:"sell_date,omitempty"`
+}
+
+// quantityMode reports whether buy-and-hold runs in quantity mode.
+func (s strategySection) quantityMode() bool {
+	return s.Name == demoStrategyName && !s.Quantity.IsZero()
 }
 
 // Validate implements config's validator hook, checked after every
@@ -103,7 +120,9 @@ type strategySection struct {
 func (c runConfig) Validate() error {
 	switch c.Strategy.Name {
 	case demoStrategyName:
-		// The passive baseline has no strategy-specific parameters.
+		if err := c.Strategy.validateBuyHold(); err != nil {
+			return err
+		}
 	case emacross.Name:
 		if c.Strategy.FastPeriod <= 0 {
 			return fmt.Errorf("strategy.fast_period must be positive, got %d", c.Strategy.FastPeriod)
@@ -198,6 +217,15 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 	if cmd.Flags().Changed("allowed-side") {
 		overrides["allowed-side"] = flags.allowedSide
 	}
+	if cmd.Flags().Changed("quantity") {
+		overrides["quantity"] = flags.quantity
+	}
+	if cmd.Flags().Changed("buy-date") {
+		overrides["buy-date"] = flags.buyDate
+	}
+	if cmd.Flags().Changed("sell-date") {
+		overrides["sell-date"] = flags.sellDate
+	}
 	if cmd.Flags().Changed("data-store-root") {
 		overrides["data-store-root"] = flags.dataStoreRoot
 	}
@@ -214,4 +242,34 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 		FilePath:  flags.config,
 		Overrides: overrides,
 	})
+}
+
+// validateBuyHold checks buy-and-hold's quantity-mode parameters.
+// BuyDate and SellDate require Quantity, and SellDate must follow
+// BuyDate.
+func (s strategySection) validateBuyHold() error {
+	if s.Quantity.IsZero() {
+		if s.BuyDate != "" || s.SellDate != "" {
+			return fmt.Errorf("strategy.buy_date and strategy.sell_date require strategy.quantity")
+		}
+		return nil
+	}
+	var buy time.Time
+	if s.BuyDate != "" {
+		t, err := parseDate(s.BuyDate)
+		if err != nil {
+			return fmt.Errorf("strategy.buy_date: %w", err)
+		}
+		buy = t
+	}
+	if s.SellDate != "" {
+		sell, err := parseDate(s.SellDate)
+		if err != nil {
+			return fmt.Errorf("strategy.sell_date: %w", err)
+		}
+		if !sell.After(buy) {
+			return fmt.Errorf("strategy.sell_date (%s) must be after strategy.buy_date (%s)", s.SellDate, s.BuyDate)
+		}
+	}
+	return nil
 }
