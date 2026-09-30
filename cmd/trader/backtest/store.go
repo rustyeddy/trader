@@ -16,7 +16,9 @@ import (
 // change in a way an older reader could misinterpret, so this
 // convenient CLI artifact does not silently become an unversioned,
 // unevolvable format.
-const snapshotSchemaVersion = 1
+//
+// Version 2 (issue #416) adds the report's margin section.
+const snapshotSchemaVersion = 2
 
 // ErrSnapshotVersionMismatch marks a persisted snapshot whose
 // SchemaVersion this build of trader does not know how to read.

@@ -22,17 +22,21 @@ type RunResponse struct {
 	OpenTrades  []runtimeorder.Trade
 	EquityCurve []backtest.EquityPoint
 	Metrics     backtest.Metrics
+	// MarginRejections counts the run's initial-margin refusals
+	// (ADR-066).
+	MarginRejections backtest.MarginRejections
 }
 
 // toResponse converts a backtest.Result into a RunResponse, carrying
 // over exactly the fields Result populated.
 func toResponse(result backtest.Result) RunResponse {
 	return RunResponse{
-		Manifest:    result.Manifest,
-		Account:     result.Account,
-		Trades:      result.Trades,
-		OpenTrades:  result.OpenTrades,
-		EquityCurve: result.EquityCurve,
-		Metrics:     result.Metrics,
+		Manifest:         result.Manifest,
+		Account:          result.Account,
+		Trades:           result.Trades,
+		OpenTrades:       result.OpenTrades,
+		EquityCurve:      result.EquityCurve,
+		Metrics:          result.Metrics,
+		MarginRejections: result.MarginRejections,
 	}
 }

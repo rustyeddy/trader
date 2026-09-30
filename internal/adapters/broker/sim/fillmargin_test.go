@@ -67,6 +67,7 @@ func TestFillMargin_GapUpRejectsFullNotionalMarketOrder(t *testing.T) {
 	require.NotNil(t, o.Rejection)
 	assert.Equal(t, runtimeorder.ReasonInsufficientMargin, o.Rejection.Reason)
 	assert.Contains(t, o.Rejection.Detail, "required margin 10008.09 USD")
+	assert.Contains(t, o.Rejection.Detail, "gross notional 10008.09 USD, up from 0 USD")
 	assert.Contains(t, o.Rejection.Detail, "post-fill equity 10000 USD")
 
 	s := snapshot(t, h)
@@ -264,4 +265,24 @@ func TestFillMargin_RefusedMarketOrderConsumesOnlyItsRejectionEventID(t *testing
 
 	assert.Equal(t, first2, h1.state.events[0].Metadata.EventID, "the rejection event takes the first ID Submit could consume")
 	assert.Equal(t, next2, next1, "and nothing else was consumed")
+}
+
+// TestFillMargin_CurrentGrossUsesFillPriceAfterGap: the refusal detail
+// values the changed listing at the fill price in both states
+// (ADR-066), so a price gap is never attributed to the order.
+func TestFillMargin_CurrentGrossUsesFillPriceAfterGap(t *testing.T) {
+	_, deps, h, prices := fillMarginAccount(t, "1", nil)
+	eur := mustEurUsdListing(t)
+	_, err := h.Submit(context.Background(), mustMarketRequestFor(t, deps.IDs, h.Reference().AccountID, eur, order.Buy, "5000")) // 5500 at 1.10
+	require.NoError(t, err)
+
+	// Gap to 1.30 with no bar observed, so the stored mark is still
+	// 1.10. Equity at the fill price: 10000 + 5000 × 0.20 = 11000.
+	// Adding 4000: 9000 × 1.30 = 11700 > 11000.
+	prices.set("EUR_USD", num.MustParsePrice("1.30000"))
+	o, err := h.Submit(context.Background(), mustMarketRequestFor(t, deps.IDs, h.Reference().AccountID, eur, order.Buy, "4000"))
+	require.NoError(t, err)
+	require.Equal(t, runtimeorder.StatusRejected, o.Status)
+	assert.Contains(t, o.Rejection.Detail, "gross notional 11700 USD, up from 6500 USD",
+		"current gross is 5000 × 1.30 at the fill price, not 5000 × 1.10 at the stale mark")
 }

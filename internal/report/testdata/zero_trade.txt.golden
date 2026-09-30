@@ -10,6 +10,12 @@ Performance
   Net Return:        0
   Max Drawdown:      0
 
+Margin
+  Initial Margin Ratio:  none
+  Rejections:            0 (admission 0, fill 0)
+  Peak Gross Notional:   n/a
+  Peak Gross Leverage:   n/a
+
 Trade Statistics
   Trades:              0
   Wins / Losses:       0 / 0

@@ -20,6 +20,16 @@
 | Net Return | 0 |
 | Max Drawdown | 0 |
 
+* Margin
+| Metric | Value |
+|--------+-------|
+| Initial Margin Ratio | none |
+| Margin Rejections | 0 |
+| Admission Rejections | 0 |
+| Fill Rejections | 0 |
+| Peak Gross Notional | n/a |
+| Peak Gross Leverage | n/a |
+
 * Trade Statistics
 | Metric | Value |
 |--------+-------|

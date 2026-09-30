@@ -96,7 +96,9 @@ func fixtureDatasetManifest(t *testing.T, listing instrument.Listing) marketdata
 	return m
 }
 
-func fixtureManifest(t *testing.T, ids *id.Generator, universe []strategy.DataRequirement, dataset []marketdata.Manifest) backtest.Manifest {
+// fixtureManifest builds the fixtures' manifest. marginModel is the
+// zero ComponentInfo for a run with no margin model.
+func fixtureManifest(t *testing.T, ids *id.Generator, universe []strategy.DataRequirement, dataset []marketdata.Manifest, marginModel backtest.ComponentInfo) backtest.Manifest {
 	t.Helper()
 	fillModel, err := backtest.NewComponentInfo("bar-close", "v1", nil)
 	require.NoError(t, err)
@@ -117,6 +119,7 @@ func fixtureManifest(t *testing.T, ids *id.Generator, universe []strategy.DataRe
 		FillModel:       fillModel,
 		SlippageModel:   slippageModel,
 		CommissionModel: commissionModel,
+		MarginModel:     marginModel,
 		Dataset:         dataset,
 		TraderVersion:   "test-v0",
 	})
@@ -177,7 +180,9 @@ func newRepresentativeResult(t *testing.T) backtest.Result {
 		{Instrument: gbpusd.InstrumentID(), Interval: marketdata.H1, WarmupBars: 20},
 	}
 	dataset := []marketdata.Manifest{fixtureDatasetManifest(t, eurusd), fixtureDatasetManifest(t, gbpusd)}
-	manifest := fixtureManifest(t, ids, universe, dataset)
+	marginModel, err := backtest.NewComponentInfo("initial-margin-ratio", "v1", map[string]string{backtest.InitialMarginRatioParameter: "0.5"})
+	require.NoError(t, err)
+	manifest := fixtureManifest(t, ids, universe, dataset, marginModel)
 
 	trade1 := fixtureTrade(t, ids, acctID, eurusd, order.Long, "150", "5", day1.Add(9*time.Hour), day1.Add(10*time.Hour))
 	trade2 := fixtureTrade(t, ids, acctID, eurusd, order.Short, "-80", "4", day1.Add(13*time.Hour), day1.Add(14*time.Hour))
@@ -186,12 +191,16 @@ func newRepresentativeResult(t *testing.T) backtest.Result {
 
 	closed := []runtimeorder.Trade{trade1, trade2, trade3}
 
+	// GrossNotional: flat between the closed trades, then the open
+	// 10000 GBP/USD at 1.265 (12650, about 1.23x the 10267 equity).
+	flat := fixtureUSD("0")
+	openGross := fixtureUSD("12650")
 	curve := []backtest.EquityPoint{
-		{Timestamp: manifest.Span().Start(), Equity: fixtureUSD("10000")},
-		{Timestamp: day1.Add(10 * time.Hour), Equity: fixtureUSD("10145")},
-		{Timestamp: day1.Add(14 * time.Hour), Equity: fixtureUSD("10061")},
-		{Timestamp: day2.Add(9 * time.Hour), Equity: fixtureUSD("10255")},
-		{Timestamp: day2.Add(12 * time.Hour), Equity: fixtureUSD("10267")},
+		{Timestamp: manifest.Span().Start(), Equity: fixtureUSD("10000"), GrossNotional: &flat},
+		{Timestamp: day1.Add(10 * time.Hour), Equity: fixtureUSD("10145"), GrossNotional: &flat},
+		{Timestamp: day1.Add(14 * time.Hour), Equity: fixtureUSD("10061"), GrossNotional: &flat},
+		{Timestamp: day2.Add(9 * time.Hour), Equity: fixtureUSD("10255"), GrossNotional: &flat},
+		{Timestamp: day2.Add(12 * time.Hour), Equity: fixtureUSD("10267"), GrossNotional: &openGross},
 	}
 	finalEquity := curve[len(curve)-1].Equity
 
@@ -227,12 +236,13 @@ func newRepresentativeResult(t *testing.T) backtest.Result {
 	require.NoError(t, err)
 
 	return backtest.Result{
-		Manifest:    manifest,
-		Account:     snapshot,
-		Trades:      closed,
-		OpenTrades:  []runtimeorder.Trade{openTrade},
-		EquityCurve: curve,
-		Metrics:     metrics,
+		Manifest:         manifest,
+		Account:          snapshot,
+		Trades:           closed,
+		OpenTrades:       []runtimeorder.Trade{openTrade},
+		EquityCurve:      curve,
+		Metrics:          metrics,
+		MarginRejections: backtest.MarginRejections{Admission: 2, Fill: 1},
 	}
 }
 
@@ -246,7 +256,7 @@ func newZeroTradeResult(t *testing.T) backtest.Result {
 	eurusd := fixtureEURUSD(t)
 	universe := []strategy.DataRequirement{{Instrument: eurusd.InstrumentID(), Interval: marketdata.H1, WarmupBars: 20}}
 	dataset := []marketdata.Manifest{fixtureDatasetManifest(t, eurusd)}
-	manifest := fixtureManifest(t, ids, universe, dataset)
+	manifest := fixtureManifest(t, ids, universe, dataset, backtest.ComponentInfo{})
 
 	curve := []backtest.EquityPoint{{Timestamp: manifest.Span().Start(), Equity: fixtureUSD("10000")}}
 

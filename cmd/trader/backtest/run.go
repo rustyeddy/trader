@@ -919,12 +919,13 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	}
 
 	rep := report.NewBacktestReport(report.BacktestInput{
-		Manifest:    resp.Manifest,
-		Account:     resp.Account,
-		Trades:      resp.Trades,
-		OpenTrades:  resp.OpenTrades,
-		EquityCurve: resp.EquityCurve,
-		Metrics:     resp.Metrics,
+		Manifest:         resp.Manifest,
+		Account:          resp.Account,
+		Trades:           resp.Trades,
+		OpenTrades:       resp.OpenTrades,
+		EquityCurve:      resp.EquityCurve,
+		Metrics:          resp.Metrics,
+		MarginRejections: resp.MarginRejections,
 	})
 
 	if err := saveSnapshot(flags.outputDir, runSnapshot{SchemaVersion: snapshotSchemaVersion, Report: rep}); err != nil {

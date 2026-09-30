@@ -12,6 +12,12 @@ run without turning the CLI into a second backtest orchestrator, and
 how the resulting persisted artifact stays decoupled from both
 =backtest.Result= and =service/backtest.RunResponse=.
 
+Update (issue #416, ADR-066): =snapshotSchemaVersion= is now =2=,
+because the persisted =BacktestReport= gained a =margin= section, and
+=report.BacktestInput= gained a seventh field, =MarginRejections=. This
+is the version mechanism below working as intended, not a change to
+this decision; the text below is left as originally accepted.
+
 * Context
 
 #220 (=report=) and #221 (=service/backtest=) give this issue

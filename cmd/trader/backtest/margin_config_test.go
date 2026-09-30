@@ -15,6 +15,7 @@ import (
 	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
 	"github.com/rustyeddy/trader/internal/adapters/journal/jsonl"
 	"github.com/rustyeddy/trader/internal/journal"
+	"github.com/rustyeddy/trader/num"
 )
 
 // marginRunArgs is the committed EUR/USD H1 buy-and-hold fixture with
@@ -60,6 +61,17 @@ type marginReport struct {
 		ConfigDigest string `json:"config_digest"`
 	} `json:"run"`
 	OpenTrades []json.RawMessage `json:"open_trades"`
+	Margin     struct {
+		InitialMarginRatio  *string `json:"initial_margin_ratio"`
+		Rejections          int     `json:"margin_rejection_count"`
+		AdmissionRejections int     `json:"admission_rejection_count"`
+		FillRejections      int     `json:"fill_rejection_count"`
+		PeakGrossNotional   *struct {
+			Amount   string `json:"amount"`
+			Currency string `json:"currency"`
+		} `json:"peak_gross_notional"`
+		PeakGrossLeverage *string `json:"peak_gross_leverage"`
+	} `json:"margin"`
 }
 
 func parseMarginReport(t *testing.T, out string) marginReport {
@@ -200,4 +212,37 @@ func TestRunCLI_ExternalStrategyEnforcesMarginRule(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, parseMarginReport(t, out).OpenTrades)
 	assert.Positive(t, marginRejections(journalEntries(t, journalPath)), "the guest's entries were rejected by account_initial_margin")
+}
+
+// TestRunCLI_ReportsMarginSection covers #416 end to end: the JSON
+// report's margin section for a run with a known admission rejection,
+// and for a leveraged run that opens a position.
+func TestRunCLI_ReportsMarginSection(t *testing.T) {
+	t.Run("default ratio, rejected entry", func(t *testing.T) {
+		out, err := runReport(t, marginRunArgs(t, ""))
+		require.NoError(t, err)
+		mg := parseMarginReport(t, out).Margin
+		require.NotNil(t, mg.InitialMarginRatio)
+		assert.Equal(t, "1", *mg.InitialMarginRatio)
+		assert.Equal(t, 1, mg.Rejections)
+		assert.Equal(t, 1, mg.AdmissionRejections)
+		assert.Equal(t, 0, mg.FillRejections)
+		require.NotNil(t, mg.PeakGrossNotional)
+		assert.Equal(t, "0", mg.PeakGrossNotional.Amount, "never opened a position")
+		require.NotNil(t, mg.PeakGrossLeverage)
+		assert.Equal(t, "0", *mg.PeakGrossLeverage)
+	})
+	t.Run("leveraged run", func(t *testing.T) {
+		out, err := runReport(t, marginRunArgs(t, "", "--initial-margin-ratio", "0.25"))
+		require.NoError(t, err)
+		mg := parseMarginReport(t, out).Margin
+		assert.Equal(t, "0.25", *mg.InitialMarginRatio)
+		assert.Zero(t, mg.Rejections)
+		require.NotNil(t, mg.PeakGrossNotional)
+		gross := num.MustParseMoney(mg.PeakGrossNotional.Amount, num.MustParseCurrency("USD"))
+		assert.False(t, gross.IsZero())
+		lev := num.MustParseRate(*mg.PeakGrossLeverage)
+		assert.Equal(t, 1, lev.Cmp(num.MustParseRate("1")), "the ~1.1x entry shows leverage above 1: %s", lev)
+		assert.Equal(t, -1, lev.Cmp(num.MustParseRate("1.2")), "and below 1.2: %s", lev)
+	})
 }

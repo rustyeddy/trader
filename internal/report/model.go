@@ -37,7 +37,27 @@ type BacktestReport struct {
 	ClosedTrades  []TradeReport       `json:"closed_trades"`
 	OpenTrades    []TradeReport       `json:"open_trades"`
 	Account       AccountReport       `json:"account"`
+	Margin        MarginReport        `json:"margin"`
 	EquityCurve   []EquityPointReport `json:"equity_curve"`
+}
+
+// MarginReport is the run's initial-margin policy and its effects
+// (ADR-066, issue #416).
+//
+// InitialMarginRatio is nil when the run configured no margin model.
+// Rejections is AdmissionRejections + FillRejections: admission
+// rejections are risk decisions naming the account_initial_margin rule;
+// fill rejections are orders the simulator refused at fill time
+// (rejected market orders and canceled resting orders). The peaks come
+// from the mark-to-market equity curve; each is nil when no point
+// carries a gross notional (or, for leverage, positive equity).
+type MarginReport struct {
+	InitialMarginRatio  *num.Rate  `json:"initial_margin_ratio"`
+	Rejections          int        `json:"margin_rejection_count"`
+	AdmissionRejections int        `json:"admission_rejection_count"`
+	FillRejections      int        `json:"fill_rejection_count"`
+	PeakGrossNotional   *num.Money `json:"peak_gross_notional"`
+	PeakGrossLeverage   *num.Rate  `json:"peak_gross_leverage"`
 }
 
 // RunInfo identifies and dates the run this report describes.
@@ -205,6 +225,9 @@ type BacktestInput struct {
 	OpenTrades  []runtimeorder.Trade
 	EquityCurve []backtest.EquityPoint
 	Metrics     backtest.Metrics
+	// MarginRejections counts the run's initial-margin refusals
+	// (ADR-066).
+	MarginRejections backtest.MarginRejections
 }
 
 // BacktestInputFromResult converts result into a BacktestInput by pure
@@ -213,12 +236,13 @@ type BacktestInput struct {
 // NewBacktestReport's own report-owned input type.
 func BacktestInputFromResult(result backtest.Result) BacktestInput {
 	return BacktestInput{
-		Manifest:    result.Manifest,
-		Account:     result.Account,
-		Trades:      result.Trades,
-		OpenTrades:  result.OpenTrades,
-		EquityCurve: result.EquityCurve,
-		Metrics:     result.Metrics,
+		Manifest:         result.Manifest,
+		Account:          result.Account,
+		Trades:           result.Trades,
+		OpenTrades:       result.OpenTrades,
+		EquityCurve:      result.EquityCurve,
+		Metrics:          result.Metrics,
+		MarginRejections: result.MarginRejections,
 	}
 }
 
@@ -299,8 +323,35 @@ func NewBacktestReport(in BacktestInput) BacktestReport {
 		ClosedTrades:  closed,
 		OpenTrades:    open,
 		Account:       toAccountReport(in.Account),
-		EquityCurve:   curve,
+		Margin: MarginReport{
+			InitialMarginRatio:  initialMarginRatio(m),
+			Rejections:          in.MarginRejections.Total(),
+			AdmissionRejections: in.MarginRejections.Admission,
+			FillRejections:      in.MarginRejections.Fill,
+			PeakGrossNotional:   metrics.PeakGrossNotional(),
+			PeakGrossLeverage:   metrics.PeakGrossLeverage(),
+		},
+		EquityCurve: curve,
 	}
+}
+
+// initialMarginRatio reads the ratio recorded in m's margin model
+// parameters (backtest.InitialMarginRatioParameter), or nil when the
+// run configured no margin model or recorded no parsable ratio.
+func initialMarginRatio(m backtest.Manifest) *num.Rate {
+	model := m.MarginModel()
+	if model.Name() == "" {
+		return nil
+	}
+	var params map[string]string
+	if err := json.Unmarshal(model.Parameters(), &params); err != nil {
+		return nil
+	}
+	r, err := num.ParseRate(params[backtest.InitialMarginRatioParameter])
+	if err != nil {
+		return nil
+	}
+	return &r
 }
 
 func toInstrumentReport(im backtest.InstrumentMetrics) InstrumentReport {

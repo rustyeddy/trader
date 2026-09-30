@@ -208,7 +208,7 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
-	ratioParams := map[string]string{"initial_margin_ratio": ratio.String()}
+	ratioParams := map[string]string{backtest.InitialMarginRatioParameter: ratio.String()}
 	marginRuleInfo, err := backtest.NewComponentInfo(marginRule.Name(), "v1", ratioParams)
 	if err != nil {
 		return svcbacktest.Environment{}, err
