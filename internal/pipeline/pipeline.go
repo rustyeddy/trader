@@ -259,6 +259,11 @@ func (p *Pipeline) Evaluate(ctx context.Context, in Input) (Result, error) {
 	if errors.Is(err, execution.ErrExistingStopOrder) {
 		return p.evaluateReplace(ctx, in)
 	}
+	if isNoAction(err) {
+		// The account already satisfies this intent (ADR-067): report a
+		// classifiable no-op rather than a planning failure.
+		return Result{}, fmt.Errorf("%w: %w", ErrNoAction, err)
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("pipeline: planning intent: %w", err)
 	}
@@ -519,4 +524,14 @@ func (p *Pipeline) buildBracketSubIntent(kind order.IntentKind, bracket runtimeo
 	}
 	set(&sub)
 	return runtimeorder.NewIntent(sub)
+}
+
+// isNoAction reports whether a planning error means the account already
+// satisfies the intent, so there is nothing to act on (ADR-067): an
+// exit or protective stop with no open position, or a target exposure
+// the account already holds.
+func isNoAction(err error) bool {
+	return errors.Is(err, execution.ErrNoPositionToExit) ||
+		errors.Is(err, execution.ErrNoPositionToProtect) ||
+		errors.Is(err, execution.ErrAlreadyAtTarget)
 }

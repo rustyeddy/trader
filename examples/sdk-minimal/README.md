@@ -13,9 +13,11 @@ of that same rule.
 
 ## What it does
 
-`flipFlop` is a deliberately trivial strategy: flat on its first bar,
-it enters long; once long, the next bar exits. It exists to show the
-complete shape of a `sdk.Strategy` — `Describe`, `Start`,
+`flipFlop` is a deliberately trivial strategy: when the account is
+flat it enters long; once long, the next bar exits. It decides from
+the account position in its `View`, not from memory, since an entry
+can be refused (for example for insufficient initial margin). It
+exists to show the complete shape of a `sdk.Strategy` — `Describe`, `Start`,
 `OnBar` — and the one-line `Serve()` call a real strategy author's own
 `main()` needs. It is not a trading strategy anyone should run for
 real.

@@ -16,3 +16,9 @@ func TestFromMarkWiresEmpty(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, marks)
 }
+
+func TestParseKindNoAction(t *testing.T) {
+	k, err := parseKind("no-action")
+	assert.NoError(t, err)
+	assert.Equal(t, "no-action", k.String())
+}

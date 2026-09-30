@@ -473,6 +473,11 @@ func fromEntryWire(w entryWire) (journal.Entry, error) {
 			return journal.Entry{}, fmt.Errorf("%w: kind run-completed missing run_completed payload", ErrCorruptEntry)
 		}
 		rec.RunCompleted = &journal.RunCompleted{RunID: w.RunCompleted.RunID, EntryCount: w.RunCompleted.EntryCount}
+	case journal.KindNoAction:
+		if w.NoAction == nil {
+			return journal.Entry{}, fmt.Errorf("%w: kind no-action missing no_action payload", ErrCorruptEntry)
+		}
+		rec.NoAction = &journal.NoAction{IntentID: w.NoAction.IntentID, Reason: w.NoAction.Reason}
 	}
 
 	validated, err := journal.NewRecord(rec)
@@ -511,6 +516,8 @@ func parseKind(s string) (journal.Kind, error) {
 		return journal.KindSignal, nil
 	case "run-completed":
 		return journal.KindRunCompleted, nil
+	case "no-action":
+		return journal.KindNoAction, nil
 	default:
 		return journal.KindUnknown, fmt.Errorf("%w: unrecognized kind %q", ErrCorruptEntry, s)
 	}
