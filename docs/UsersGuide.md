@@ -369,18 +369,30 @@ Every backtest enforces an account-level **initial-margin** limit
 prospective gross notional × initial_margin_ratio ≤ equity
 ```
 
-- **Gross notional** sums every open position's size at its current
+- **Gross notional** sums every open position's
+  `|quantity| × price × contract multiplier`, each at its current
   price; longs and shorts both add.
 - The default `1` is unlevered: gross exposure may not exceed equity.
   `0.5` permits 2×, `0.25` permits 4×.
-- One value configures two checks that always agree: the
-  `account_initial_margin` risk rule, which rejects an order at
-  admission, and the simulator, which refuses a fill that would breach
-  the limit at the actual fill price after commission (a next-bar gap,
-  for example).
-- An order that would breach the limit is **rejected, never resized**.
-  The rejection is recorded in the journal (`--journal`) with the rule,
-  the required margin, and equity.
+- One value configures two checks. They share the same ratio and the
+  same calculation, but they evaluate different states, so they don't
+  always reach the same outcome:
+  - **Admission** (the `account_initial_margin` risk rule) checks the
+    order at its reference price against equity before fees.
+  - **Fill time** (the simulator) checks the actual fill price, after
+    slippage, against equity after the fill's own commission. An order
+    admitted earlier can still be refused here, for example after a
+    next-bar gap up or because of its commission.
+- An order that would breach the limit is **refused, never resized**.
+  How it appears in the journal (`--journal`) depends on where it was
+  refused:
+  - At admission: a risk decision whose violation names
+    `account_initial_margin`, with the required margin and equity.
+  - A market order refused at fill: a broker order with status
+    `rejected` and reason `insufficient_margin`.
+  - A resting limit or stop order refused when it triggers: the broker
+    cancels it, with reason `insufficient_margin` in its
+    `cancel_reason`. There is no risk decision for this case.
 - Orders that reduce or close a position are always allowed, even when
   the account is already over the limit.
 - There is no maintenance margin: a position is never liquidated
