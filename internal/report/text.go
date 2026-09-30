@@ -54,6 +54,16 @@ func (TextRenderer) Render(w io.Writer, report BacktestReport) error {
 	_ = tw.Flush()
 	_, _ = fmt.Fprintln(ew)
 
+	mg := report.Margin
+	_, _ = fmt.Fprintln(ew, "Margin")
+	tw = tabwriter.NewWriter(ew, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintf(tw, "  Initial Margin Ratio:\t%s\n", formatMarginRatio(mg.InitialMarginRatio))
+	_, _ = fmt.Fprintf(tw, "  Rejections:\t%d (admission %d, fill %d)\n", mg.Rejections, mg.AdmissionRejections, mg.FillRejections)
+	_, _ = fmt.Fprintf(tw, "  Peak Gross Notional:\t%s\n", formatOptionalMoney(mg.PeakGrossNotional))
+	_, _ = fmt.Fprintf(tw, "  Peak Gross Leverage:\t%s\n", formatOptionalRate(mg.PeakGrossLeverage))
+	_ = tw.Flush()
+	_, _ = fmt.Fprintln(ew)
+
 	ts := report.TradeStats
 	_, _ = fmt.Fprintln(ew, "Trade Statistics")
 	tw = tabwriter.NewWriter(ew, 0, 4, 2, ' ', 0)

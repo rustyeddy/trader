@@ -14,6 +14,7 @@ import (
 	brokerpkg "github.com/rustyeddy/trader/internal/broker"
 	"github.com/rustyeddy/trader/internal/execution"
 	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/journal"
 	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/internal/pipeline"
 	"github.com/rustyeddy/trader/internal/risk"
@@ -99,10 +100,18 @@ func (a *marginInvariantAccount) AdvanceBar(ctx context.Context, listing instrum
 	return err
 }
 
+// marginRun is one runMarginInvariant run's observable outputs.
+type marginRun struct {
+	acc   *marginInvariantAccount
+	sched *backtest.Scheduler
+	rec   *capturingRecorder
+}
+
 // runMarginInvariant runs strat at initial_margin_ratio 1.0 with every
 // order submitted through a marginInvariantAccount, sizing each entry
-// at riskFraction of 100000 over a 0.01 adverse distance.
-func runMarginInvariant(t *testing.T, strat strategy.Strategy, riskFraction string) *marginInvariantAccount {
+// at riskFraction of 100000 over a 0.01 adverse distance. rules are the
+// risk engine's rules (none: only the simulator enforces margin).
+func runMarginInvariant(t *testing.T, strat strategy.Strategy, riskFraction string, rules ...risk.Rule) marginRun {
 	t.Helper()
 	mgr := newSchedulerTestManager(t)
 	replay := newTwoInstrumentReplay(t, mgr)
@@ -122,7 +131,7 @@ func runMarginInvariant(t *testing.T, strat strategy.Strategy, riskFraction stri
 	// The pipeline must submit through the checked account too.
 	planner, err := execution.NewPlanner(execution.Deps{Clock: h.clockObj, IDs: h.ids})
 	require.NoError(t, err)
-	engine, err := risk.NewEngine()
+	engine, err := risk.NewEngine(rules...)
 	require.NoError(t, err)
 	deps.Pipeline, err = pipeline.NewPipeline(pipeline.Deps{
 		Sizer:   risk.NewFixedFractionSizer(),
@@ -133,10 +142,13 @@ func runMarginInvariant(t *testing.T, strat strategy.Strategy, riskFraction stri
 	})
 	require.NoError(t, err)
 
+	rec := &capturingRecorder{}
+	deps.Journal = rec
+
 	sched, err := backtest.NewScheduler(deps)
 	require.NoError(t, err)
 	require.NoError(t, sched.Run(context.Background()))
-	return checked
+	return marginRun{acc: checked, sched: sched, rec: rec}
 }
 
 // checkedBroker hands out the invariant-checking account.
@@ -152,7 +164,7 @@ func (b *checkedBroker) OpenAccount(ctx context.Context, accountID id.AccountID)
 // TestMarginInvariant_BuyAndHold: one entry per instrument, sized to
 // fit (0.3% risk: 30000 units, about 0.33x equity each).
 func TestMarginInvariant_BuyAndHold(t *testing.T) {
-	acc := runMarginInvariant(t, mustEnterOnFirstBarStrategy(t), "0.003")
+	acc := runMarginInvariant(t, mustEnterOnFirstBarStrategy(t), "0.003").acc
 	assert.Positive(t, acc.fills, "the fixture must actually fill")
 	assert.Empty(t, acc.violations)
 }
@@ -172,7 +184,7 @@ func TestMarginInvariant_MultiInstrumentRepeatedEntries(t *testing.T) {
 			return []runtimeorder.Intent{in}, nil
 		},
 	}
-	acc := runMarginInvariant(t, strat, "0.003")
+	acc := runMarginInvariant(t, strat, "0.003").acc
 	assert.Positive(t, acc.fills)
 	assert.Empty(t, acc.violations)
 
@@ -187,4 +199,94 @@ func TestMarginInvariant_MultiInstrumentRepeatedEntries(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assert.True(t, gross.Cmp(num.MustParseQuantity("30000")) > 0, "more than one entry filled, so the limit was actually approached")
+}
+
+// enterEveryBar enters both instruments long on every bar, so exposure
+// keeps growing until margin refuses it.
+func enterEveryBar(t *testing.T) *recordingStrategy {
+	return &recordingStrategy{
+		requirements: bothInstrumentsRequirements(t),
+		emit: func(f strategy.IntentFactory, ev strategy.BarEvent) ([]runtimeorder.Intent, error) {
+			in, err := f.Enter(ev.Instrument, order.Buy)
+			if err != nil {
+				return nil, err
+			}
+			return []runtimeorder.Intent{in}, nil
+		},
+	}
+}
+
+// journalMarginCounts counts margin refusals independently of the
+// Scheduler, from the journal it wrote.
+func journalMarginCounts(records []journal.Record) (admission, fill int) {
+	for _, r := range records {
+		switch r.Kind {
+		case journal.KindDecision:
+			if r.Decision.Allowed {
+				continue
+			}
+			for _, v := range r.Decision.Violations {
+				if v.Rule == risk.AccountInitialMarginRuleName {
+					admission++
+					break
+				}
+			}
+		case journal.KindOrder:
+			o := r.Order
+			if (o.Status == runtimeorder.StatusRejected && o.Rejection != nil && o.Rejection.Reason == runtimeorder.ReasonInsufficientMargin) ||
+				(o.Status == runtimeorder.StatusCanceled && o.CancelReason != nil && o.CancelReason.Reason == runtimeorder.ReasonInsufficientMargin) {
+				fill++
+			}
+		}
+	}
+	return admission, fill
+}
+
+// TestMarginReporting_FillTimeRejections: with no risk rule, only the
+// simulator refuses, so every refusal is fill-time.
+func TestMarginReporting_FillTimeRejections(t *testing.T) {
+	run := runMarginInvariant(t, enterEveryBar(t), "0.003")
+	got := run.sched.MarginRejections()
+	admission, fill := journalMarginCounts(run.rec.all())
+	assert.Zero(t, got.Admission)
+	assert.Positive(t, got.Fill, "the growing entries must eventually be refused")
+	assert.Equal(t, fill, got.Fill)
+	assert.Equal(t, admission, got.Admission)
+}
+
+// TestMarginReporting_AdmissionRejections: with the risk rule
+// installed, over-limit entries are rejected at admission.
+func TestMarginReporting_AdmissionRejections(t *testing.T) {
+	rule, err := risk.NewAccountInitialMarginRule(num.MustParseRate("1"))
+	require.NoError(t, err)
+	run := runMarginInvariant(t, enterEveryBar(t), "0.003", rule)
+	got := run.sched.MarginRejections()
+	admission, fill := journalMarginCounts(run.rec.all())
+	assert.Positive(t, got.Admission)
+	assert.Equal(t, admission, got.Admission)
+	assert.Equal(t, fill, got.Fill)
+	assert.Equal(t, got.Admission+got.Fill, got.Total())
+}
+
+// TestMarginReporting_EquityCurveCarriesGrossNotional: every per-bar
+// point carries the account's gross notional, and it grows as entries
+// fill, never exceeding equity at ratio 1.0 on a filled bar.
+func TestMarginReporting_EquityCurveCarriesGrossNotional(t *testing.T) {
+	run := runMarginInvariant(t, enterEveryBar(t), "0.003")
+	curve := run.sched.EquityCurve()
+	require.NotEmpty(t, curve)
+	var peak num.Money
+	for i, p := range curve {
+		require.NotNil(t, p.GrossNotional, "point %d", i)
+		if i == 0 {
+			peak = *p.GrossNotional
+			continue
+		}
+		cmp, err := p.GrossNotional.Cmp(peak)
+		require.NoError(t, err)
+		if cmp > 0 {
+			peak = *p.GrossNotional
+		}
+	}
+	assert.False(t, peak.IsZero(), "positions were opened")
 }

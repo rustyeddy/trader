@@ -1125,8 +1125,23 @@ func (s *accountState) checkFillMargin(req runtimeorder.Request, key account.Lis
 	if ok {
 		return nil
 	}
-	return fmt.Errorf("%w: required margin %s (gross notional %s at initial margin ratio %s) exceeds post-fill equity %s",
-		ErrInsufficientMargin, requirement.Required, requirement.Gross, s.marginPolicy.Value(), equity)
+
+	// The current gross notional, at current marks, for the refusal's
+	// audit detail (ADR-066, #416).
+	current := make([]runtimeorder.Position, 0, len(s.positions))
+	currentMarks := make(margin.Marks, len(s.positions))
+	for k, p := range s.positions {
+		current = append(current, p)
+		if m, ok := s.marks[k]; ok {
+			currentMarks[k] = m.price
+		}
+	}
+	before, err := margin.Account(current, currentMarks, *s.marginPolicy, s.currency)
+	if err != nil {
+		return fmt.Errorf("sim: computing current margin: %w", err)
+	}
+	return fmt.Errorf("%w: required margin %s (gross notional %s, up from %s, at initial margin ratio %s) exceeds post-fill equity %s",
+		ErrInsufficientMargin, requirement.Required, requirement.Gross, before.Gross, s.marginPolicy.Value(), equity)
 }
 
 // buildMarginRejection builds the StatusRejected order and its single

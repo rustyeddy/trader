@@ -107,6 +107,14 @@
     "open_positions": [],
     "open_order_count": 0
   },
+  "margin": {
+    "initial_margin_ratio": null,
+    "margin_rejection_count": 0,
+    "admission_rejection_count": 0,
+    "fill_rejection_count": 0,
+    "peak_gross_notional": null,
+    "peak_gross_leverage": null
+  },
   "equity_curve": [
     {
       "timestamp": "2024-01-01T00:00:00Z",

@@ -79,3 +79,12 @@ func (e *errWriter) Write(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+// formatMarginRatio renders a run's initial-margin ratio, or "none"
+// when it configured no margin model.
+func formatMarginRatio(r *num.Rate) string {
+	if r == nil {
+		return "none"
+	}
+	return r.String()
+}

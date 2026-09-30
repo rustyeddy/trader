@@ -352,7 +352,7 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 	// prepends the run's actual starting state, taken from the same
 	// startSnapshot already used for Manifest.StartingCapital — no
 	// second snapshot call.
-	curve := append([]EquityPoint{{Timestamp: p.Span.Start(), Equity: startSnapshot.Equity()}}, sched.EquityCurve()...)
+	curve := append([]EquityPoint{{Timestamp: p.Span.Start(), Equity: startSnapshot.Equity(), GrossNotional: grossNotional(startSnapshot)}}, sched.EquityCurve()...)
 
 	metrics, err := NewMetrics(MetricsParams{
 		StartingCapital: manifest.StartingCapital(),
@@ -366,12 +366,13 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 	}
 
 	return Result{
-		Manifest:    manifest,
-		Account:     finalSnapshot,
-		Trades:      trades.Closed,
-		OpenTrades:  trades.Open,
-		EquityCurve: curve,
-		Metrics:     metrics,
+		Manifest:         manifest,
+		Account:          finalSnapshot,
+		Trades:           trades.Closed,
+		OpenTrades:       trades.Open,
+		EquityCurve:      curve,
+		Metrics:          metrics,
+		MarginRejections: sched.MarginRejections(),
 	}, nil
 }
 
@@ -426,4 +427,7 @@ type Result struct {
 	OpenTrades  []runtimeorder.Trade
 	EquityCurve []EquityPoint
 	Metrics     Metrics
+	// MarginRejections counts the run's initial-margin refusals
+	// (ADR-066), by admission and fill time.
+	MarginRejections MarginRejections
 }

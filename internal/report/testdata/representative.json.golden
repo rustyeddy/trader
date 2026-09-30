@@ -7,7 +7,7 @@
     "span_start": "2024-01-01T00:00:00Z",
     "span_end": "2024-01-03T00:00:00Z",
     "trader_version": "test-v0",
-    "config_digest": "sha256:9bba3cca59d4312730d85c62e14b067a54b5956c622b4df216d03cbcb5979e2b"
+    "config_digest": "sha256:681fb58542b7a44337875c926c4af2d97135a4b0bd74ec82b19dbf50867702a6"
   },
   "dataset": [
     {
@@ -268,6 +268,17 @@
       }
     ],
     "open_order_count": 0
+  },
+  "margin": {
+    "initial_margin_ratio": "0.5",
+    "margin_rejection_count": 3,
+    "admission_rejection_count": 2,
+    "fill_rejection_count": 1,
+    "peak_gross_notional": {
+      "amount": "12650",
+      "currency": "USD"
+    },
+    "peak_gross_leverage": "1.23210285"
   },
   "equity_curve": [
     {

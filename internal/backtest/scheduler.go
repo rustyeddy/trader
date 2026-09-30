@@ -405,6 +405,11 @@ type Scheduler struct {
 	// batch — see runBatch's own Phase 3 for exactly when it is
 	// appended (issue #219, M5-11).
 	equityCurve []EquityPoint
+
+	// marginRejections counts initial-margin refusals as they are
+	// journaled (ADR-066): admission rejections in
+	// journalPipelineResult, broker refusals in drainAndJournal.
+	marginRejections MarginRejections
 }
 
 // NewScheduler returns a Scheduler over deps. Every field of deps must
@@ -657,7 +662,7 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 	// timestamp — the honest "equity as of right now" this batch's
 	// strategy decisions are also based on — so this is retention of an
 	// existing observation, not a second snapshot call.
-	s.equityCurve = append(s.equityCurve, EquityPoint{Timestamp: t, Equity: frozen.Equity()})
+	s.equityCurve = append(s.equityCurve, EquityPoint{Timestamp: t, Equity: frozen.Equity(), GrossNotional: grossNotional(frozen)})
 
 	cutoffs := make(map[requirementKey]int, len(s.warmupRequired))
 	for key := range s.warmupRequired {
@@ -976,6 +981,9 @@ func (s *Scheduler) journalPipelineResult(ctx context.Context, corr id.Correlati
 	}); err != nil {
 		return err
 	}
+	if isMarginAdmissionRejection(result.Decision) {
+		s.marginRejections.Admission++
+	}
 	if !result.Decision.Allowed {
 		return nil
 	}
@@ -1078,6 +1086,12 @@ func (s *Scheduler) drainAndJournal(ctx context.Context) error {
 		if event.Kind == broker.EventKindFill {
 			s.fills = append(s.fills, *event.Fill)
 		}
+		// Each refused order reaches exactly one terminal event
+		// (Rejected, or Canceled after PendingCancel), so counting
+		// terminal events counts orders.
+		if event.Kind == broker.EventKindOrder && isMarginFillRejection(*event.Order) {
+			s.marginRejections.Fill++
+		}
 	}
 	return nil
 }
@@ -1088,6 +1102,10 @@ func (s *Scheduler) drainAndJournal(ctx context.Context) error {
 func (s *Scheduler) Fills() []runtimeorder.Fill {
 	return append([]runtimeorder.Fill(nil), s.fills...)
 }
+
+// MarginRejections returns the initial-margin refusals journaled so far
+// (ADR-066), split by admission and fill time.
+func (s *Scheduler) MarginRejections() MarginRejections { return s.marginRejections }
 
 // EquityCurve returns one authoritative, mark-to-market EquityPoint
 // per batch observed over the course of Run, in chronological order —

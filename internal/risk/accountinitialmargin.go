@@ -11,9 +11,10 @@ import (
 	"github.com/rustyeddy/trader/order"
 )
 
-// accountInitialMarginName is AccountInitialMarginRule's stable
-// Rule.Name().
-const accountInitialMarginName = "account_initial_margin"
+// AccountInitialMarginRuleName is the account initial-margin rule's
+// stable Rule.Name() (ADR-066). A violation naming it is an admission-
+// time margin rejection.
+const AccountInitialMarginRuleName = "account_initial_margin"
 
 // accountInitialMarginRule is the account-level initial-margin
 // admission rule (ADR-066, issue #413): a proposal that increases
@@ -73,7 +74,7 @@ func NewAccountInitialMarginRule(ratio num.Rate) (Rule, error) {
 }
 
 // Name implements Rule.
-func (r *accountInitialMarginRule) Name() string { return accountInitialMarginName }
+func (r *accountInitialMarginRule) Name() string { return AccountInitialMarginRuleName }
 
 // Evaluate implements Rule.
 func (r *accountInitialMarginRule) Evaluate(ctx context.Context, in Input) (RuleResult, error) {

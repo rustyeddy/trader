@@ -40,6 +40,7 @@ func (OrgRenderer) Render(w io.Writer, report BacktestReport) error {
 
 	orgDatasetSection(ew, report.Dataset)
 	orgPerformanceSection(ew, report.Performance)
+	orgMarginSection(ew, report.Margin)
 	orgTradeStatsSection(ew, report.TradeStats)
 	orgPerInstrumentSection(ew, report.PerInstrument)
 	orgBySideSection(ew, report.BySide)
@@ -91,6 +92,19 @@ func orgPerformanceSection(ew *errWriter, perf Performance) {
 	_, _ = fmt.Fprintf(ew, "| Final Equity | %s |\n", formatMoney(perf.FinalEquity))
 	_, _ = fmt.Fprintf(ew, "| Net Return | %s |\n", formatRate(perf.NetReturn))
 	_, _ = fmt.Fprintf(ew, "| Max Drawdown | %s |\n", formatRate(perf.MaxDrawdown))
+	_, _ = fmt.Fprintln(ew)
+}
+
+func orgMarginSection(ew *errWriter, mg MarginReport) {
+	_, _ = fmt.Fprintln(ew, "* Margin")
+	_, _ = fmt.Fprintln(ew, "| Metric | Value |")
+	_, _ = fmt.Fprintln(ew, "|--------+-------|")
+	_, _ = fmt.Fprintf(ew, "| Initial Margin Ratio | %s |\n", formatMarginRatio(mg.InitialMarginRatio))
+	_, _ = fmt.Fprintf(ew, "| Margin Rejections | %d |\n", mg.Rejections)
+	_, _ = fmt.Fprintf(ew, "| Admission Rejections | %d |\n", mg.AdmissionRejections)
+	_, _ = fmt.Fprintf(ew, "| Fill Rejections | %d |\n", mg.FillRejections)
+	_, _ = fmt.Fprintf(ew, "| Peak Gross Notional | %s |\n", formatOptionalMoney(mg.PeakGrossNotional))
+	_, _ = fmt.Fprintf(ew, "| Peak Gross Leverage | %s |\n", formatOptionalRate(mg.PeakGrossLeverage))
 	_, _ = fmt.Fprintln(ew)
 }
 

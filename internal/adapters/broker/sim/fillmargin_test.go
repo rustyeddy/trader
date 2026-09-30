@@ -67,6 +67,7 @@ func TestFillMargin_GapUpRejectsFullNotionalMarketOrder(t *testing.T) {
 	require.NotNil(t, o.Rejection)
 	assert.Equal(t, runtimeorder.ReasonInsufficientMargin, o.Rejection.Reason)
 	assert.Contains(t, o.Rejection.Detail, "required margin 10008.09 USD")
+	assert.Contains(t, o.Rejection.Detail, "gross notional 10008.09 USD, up from 0 USD")
 	assert.Contains(t, o.Rejection.Detail, "post-fill equity 10000 USD")
 
 	s := snapshot(t, h)

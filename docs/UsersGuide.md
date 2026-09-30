@@ -400,6 +400,11 @@ prospective gross notional × initial_margin_ratio ≤ equity
   limit, only exposure-reducing orders are accepted.
 - The ratio is recorded in the run manifest (`risk_rules`,
   `margin_model`) and changes `config_digest`.
+- Every report (`table`, `json`, `org`) has a **Margin** section:
+  - the configured ratio (`none` when a run has no margin model)
+  - the number of refusals, split into admission and fill-time
+  - the peak gross notional and peak gross leverage (gross notional ÷
+    equity) observed across the run's equity curve
 
 **Sizing and margin are separate controls.** `risk_fraction` sizes a
 position from how much you're willing to lose at the adverse distance;

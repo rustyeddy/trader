@@ -25,6 +25,12 @@ var ErrInvalidMetrics = errors.New("backtest: invalid metrics params")
 type EquityPoint struct {
 	Timestamp time.Time
 	Equity    num.Money
+	// GrossNotional is the account's gross position notional at the
+	// same instant (ADR-066): Σ |quantity| × mark × multiplier over
+	// every open position, longs and shorts both adding. It is nil when
+	// it can't be computed — an open position with no mark on the
+	// snapshot, or a point constructed without it.
+	GrossNotional *num.Money
 }
 
 // InstrumentMetrics is one Trade-derived instrument's own slice of the
@@ -104,6 +110,9 @@ type Metrics struct {
 	maxDrawdown     num.Rate
 	equityCurve     []EquityPoint
 
+	peakGrossNotional *num.Money
+	peakGrossLeverage *num.Rate
+
 	tradeCount                         int
 	wins, losses                       int
 	winRate                            *num.Rate
@@ -147,6 +156,9 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 		if !p.Equity.IsValid() || !p.Equity.Currency().Equal(currency) {
 			return Metrics{}, fmt.Errorf("%w: equity curve point %d must be valid money in %s", ErrInvalidMetrics, i, currency)
 		}
+		if p.GrossNotional != nil && (!p.GrossNotional.IsValid() || !p.GrossNotional.Currency().Equal(currency)) {
+			return Metrics{}, fmt.Errorf("%w: equity curve point %d gross notional must be valid money in %s", ErrInvalidMetrics, i, currency)
+		}
 		if i > 0 && p.Timestamp.Before(lastTS) {
 			return Metrics{}, fmt.Errorf("%w: equity curve point %d timestamp precedes point %d", ErrInvalidMetrics, i, i-1)
 		}
@@ -185,6 +197,10 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 	m.maxDrawdown, err = maxDrawdown(params.EquityCurve, currency)
 	if err != nil {
 		return Metrics{}, fmt.Errorf("%w: computing max drawdown: %v", ErrInvalidMetrics, err)
+	}
+	m.peakGrossNotional, m.peakGrossLeverage, err = peakGrossExposure(params.EquityCurve, currency)
+	if err != nil {
+		return Metrics{}, fmt.Errorf("%w: computing peak gross exposure: %v", ErrInvalidMetrics, err)
 	}
 
 	if err := m.computeTradeStats(params.Trades, currency); err != nil {
@@ -525,6 +541,16 @@ func (m Metrics) NetReturn() num.Rate { return m.netReturn }
 // single-point curve.
 func (m Metrics) MaxDrawdown() num.Rate { return m.maxDrawdown }
 
+// PeakGrossNotional is the largest gross position notional observed
+// across EquityCurve (ADR-066), or nil when no point carries one.
+func (m Metrics) PeakGrossNotional() *num.Money { return m.peakGrossNotional }
+
+// PeakGrossLeverage is the largest gross notional ÷ equity observed
+// across EquityCurve, over points with a gross notional and positive
+// equity, or nil when there are none. 1 means gross exposure equal to
+// equity.
+func (m Metrics) PeakGrossLeverage() *num.Rate { return m.peakGrossLeverage }
+
 // EquityCurve returns a defensive copy of the authoritative,
 // mark-to-market equity series this Metrics was built from.
 func (m Metrics) EquityCurve() []EquityPoint {
@@ -601,4 +627,43 @@ func (m Metrics) PerInstrument() []InstrumentMetrics {
 // field's own convention.
 func (m Metrics) BySide() []SideMetrics {
 	return append([]SideMetrics(nil), m.bySide...)
+}
+
+// peakGrossExposure returns the largest gross notional and the largest
+// gross notional ÷ equity across curve (ADR-066). Points without a
+// gross notional are skipped, and points with non-positive equity are
+// skipped for leverage, where the ratio is undefined. Each result is
+// nil when no point qualifies.
+func peakGrossExposure(curve []EquityPoint, currency num.Currency) (*num.Money, *num.Rate, error) {
+	var peakGross *num.Money
+	var peakLeverage *num.Rate
+	zero := zeroMoneyMust(currency)
+	for _, p := range curve {
+		if p.GrossNotional == nil {
+			continue
+		}
+		g := *p.GrossNotional
+		if peakGross == nil {
+			peakGross = &g
+		} else if cmp, err := g.Cmp(*peakGross); err != nil {
+			return nil, nil, err
+		} else if cmp > 0 {
+			peakGross = &g
+		}
+		sign, err := p.Equity.Cmp(zero)
+		if err != nil {
+			return nil, nil, err
+		}
+		if sign <= 0 {
+			continue
+		}
+		lev, err := g.Div(p.Equity)
+		if err != nil {
+			return nil, nil, err
+		}
+		if peakLeverage == nil || lev.Cmp(*peakLeverage) > 0 {
+			peakLeverage = &lev
+		}
+	}
+	return peakGross, peakLeverage, nil
 }
