@@ -206,7 +206,9 @@ func TestBuyHoldQuantity_InvalidCombinationsRejected(t *testing.T) {
 	}{
 		{"buy date without quantity", []string{"--buy-date", "2024-01-08"}, "require strategy.quantity"},
 		{"sell date without quantity", []string{"--sell-date", "2024-01-08"}, "require strategy.quantity"},
-		{"sell before buy", []string{"--quantity", "1", "--buy-date", "2024-01-08T06:00:00Z", "--sell-date", "2024-01-08T02:00:00Z"}, "must be after strategy.buy_date"},
+		{"sell before buy", []string{"--quantity", "1", "--buy-date", "2024-01-08T06:00:00Z", "--sell-date", "2024-01-08T02:00:00Z"}, "must be after the effective buy date"},
+		{"sell before default buy date", []string{"--quantity", "1", "--sell-date", "2024-01-07"}, "must be after the effective buy date (2024-01-08T00:00:00Z)"},
+		{"explicit zero quantity", []string{"--quantity", "0"}, "strategy.quantity must be positive"},
 		{"bad date", []string{"--quantity", "1", "--buy-date", "tomorrow"}, "strategy.buy_date"},
 		{"non-numeric quantity", []string{"--quantity", "lots"}, "quantity"},
 		{"two symbols", []string{"--quantity", "1", "--symbol", "GBPUSD"}, "exactly one instrument"},
@@ -219,4 +221,86 @@ func TestBuyHoldQuantity_InvalidCombinationsRejected(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+// weekendArgs spans a weekend: EUR/USD's first bar after
+// 2024-01-06 00:00 (a Saturday) is Sunday evening.
+func weekendArgs(t *testing.T, extra ...string) []string {
+	args := buyHoldArgs(t, "", extra...)
+	for i, a := range args {
+		if a == "--from" {
+			args[i+1] = "2024-01-06T00:00:00Z"
+		}
+	}
+	return args
+}
+
+// TestBuyHoldQuantity_EntryPrecedesPassedSellDate: when both dates fall
+// before the first available bar, the strategy still buys first, then
+// exits once it holds the position.
+func TestBuyHoldQuantity_EntryPrecedesPassedSellDate(t *testing.T) {
+	t.Run("both dates before the first bar", func(t *testing.T) {
+		r := runBuyHold(t, weekendArgs(t, "--quantity", "8500", "--buy-date", "2024-01-06", "--sell-date", "2024-01-07T00:00:00Z"))
+		require.Len(t, r.ClosedTrades, 1, "entered, then exited")
+		assert.Empty(t, r.OpenTrades)
+		assert.True(t, r.ClosedTrades[0].ClosedAt.After(r.ClosedTrades[0].OpenedAt))
+	})
+	t.Run("default buy date, sell date before the first bar", func(t *testing.T) {
+		r := runBuyHold(t, weekendArgs(t, "--quantity", "8500", "--sell-date", "2024-01-07T00:00:00Z"))
+		require.Len(t, r.ClosedTrades, 1)
+	})
+}
+
+// TestBuyHoldQuantity_ExplicitZeroNeverFallsBackToDemo: an explicit
+// zero is rejected on every configuration path, never treated as
+// "unset" (which would silently run the fixed-fraction demo).
+func TestBuyHoldQuantity_ExplicitZeroNeverFallsBackToDemo(t *testing.T) {
+	t.Run("flag", func(t *testing.T) {
+		_, err := runReport(t, buyHoldArgs(t, "", "--quantity", "0"))
+		require.ErrorContains(t, err, "strategy.quantity must be positive")
+	})
+	t.Run("config file", func(t *testing.T) {
+		configPath := writeConfigFile(t, `
+backtest:
+  symbol: EURUSD
+  interval: H1
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T12:00:00Z
+  adverse_distance: 0.01000
+
+strategy:
+  name: buy-and-hold
+  quantity: 0
+`)
+		_, err := runReport(t, []string{"run", "--config", configPath, "--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir()})
+		require.ErrorContains(t, err, "strategy.quantity must be positive")
+	})
+	t.Run("environment", func(t *testing.T) {
+		t.Setenv("TRADER_STRATEGY_QUANTITY", "0")
+		_, err := runReport(t, buyHoldArgs(t, ""))
+		require.ErrorContains(t, err, "strategy.quantity must be positive")
+	})
+}
+
+// TestBuyHoldQuantity_DatesRecordCanonically: equivalent date spellings
+// record identical strategy parameters and config digests.
+func TestBuyHoldQuantity_DatesRecordCanonically(t *testing.T) {
+	store := t.TempDir() // shared: config_digest embeds dataset BuiltAt (ADR-042)
+	run := func(buy, sell string) (json.RawMessage, string) {
+		out, err := runReport(t, buyHoldArgs(t, "", "--quantity", "8500", "--buy-date", buy, "--sell-date", sell, "--data-store-root", store))
+		require.NoError(t, err)
+		var r struct {
+			Run struct {
+				StrategyParameters json.RawMessage `json:"strategy_parameters"`
+				ConfigDigest       string          `json:"config_digest"`
+			} `json:"run"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &r))
+		return r.Run.StrategyParameters, r.Run.ConfigDigest
+	}
+	p1, d1 := run("2024-01-08", "2024-01-08T06:00:00Z")
+	p2, d2 := run("2024-01-08T00:00:00Z", "2024-01-08T01:00:00-05:00")
+	assert.JSONEq(t, `{"name":"buy-and-hold","mode":"quantity","quantity":"8500","buy_date":"2024-01-08T00:00:00Z","sell_date":"2024-01-08T06:00:00Z"}`, string(p1))
+	assert.JSONEq(t, string(p1), string(p2))
+	assert.Equal(t, d1, d2)
 }

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -758,19 +757,9 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		instID := instruments.ids[0]
 		listing := instruments.simListing[instID.String()]
 
-		buyDate := span.Start()
-		if cfg.Strategy.BuyDate != "" {
-			if buyDate, err = parseDate(cfg.Strategy.BuyDate); err != nil {
-				return fmt.Errorf("strategy.buy_date: %w", err)
-			}
-		}
-		var sellDate *time.Time
-		if cfg.Strategy.SellDate != "" {
-			t, err := parseDate(cfg.Strategy.SellDate)
-			if err != nil {
-				return fmt.Errorf("strategy.sell_date: %w", err)
-			}
-			sellDate = &t
+		settings, err := cfg.Strategy.parseBuyHold(span.Start())
+		if err != nil {
+			return err
 		}
 
 		src := newNextBarOpenPriceSource()
@@ -778,7 +767,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 			return fmt.Errorf("loading canonical prices for %s: %w", instID, err)
 		}
 
-		bh := newBuyHoldQuantity(instID, interval, cfg.Strategy.Quantity, buyDate, sellDate, cfg.Strategy.BuyDate, cfg.Strategy.SellDate)
+		bh := newBuyHoldQuantity(instID, interval, settings.quantity, settings.buyDate, settings.sellDate, span.Start())
 		strat = bh
 		strategyParams = bh.params
 		prices = src

@@ -439,14 +439,16 @@ behavior into the Buy & Hold baseline:
 | Setting | Meaning |
 |---|---|
 | instrument | the run's single `--symbol` / `backtest.symbol` |
-| `quantity` | exactly how much to buy; never sized or resized |
-| `buy_date` | buy on the first bar at or after it (default: the first bar) |
-| `sell_date` | optional: exit on the first bar at or after it |
+| `quantity` | exactly how much to buy; never sized or resized. Must be positive: an explicit `0` is an error, not a fallback to the demo |
+| `buy_date` | buy on the first bar at or after it (default: `backtest.from`) |
+| `sell_date` | optional: exit on the first bar at or after it, once the position is held; must be after the (effective) buy date |
 
 - The strategy decides *what and when*. Margin decides whether that
   quantity is admissible, and the simulator decides the fill.
 - An order is decided on a bar's close and fills at the **next bar's
-  open**.
+  open**. The entry always comes first: if both dates have passed by
+  the first available bar (for example over a weekend), it buys on
+  that bar and exits on a later one.
 - A quantity the account can't finance is rejected once, with a margin
   rejection in the report. It is not resized and not retried.
 - **The run's end date is not a sell.** Without `sell_date` the position

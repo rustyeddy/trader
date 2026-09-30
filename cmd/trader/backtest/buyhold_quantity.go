@@ -53,29 +53,48 @@ type buyHoldQuantity struct {
 }
 
 // buyHoldQuantityParams is quantity mode's strategy parameters, as
-// recorded in the run manifest (and so in config_digest).
+// recorded in the run manifest (and so in config_digest). Dates are
+// the parsed UTC instants, never the user's spelling, so equivalent
+// inputs ("2024-01-08" and "2024-01-08T00:00:00Z") record identically.
+// A date the user didn't set is omitted.
 type buyHoldQuantityParams struct {
 	Name     string       `json:"name"`
 	Mode     string       `json:"mode"`
 	Quantity num.Quantity `json:"quantity"`
-	BuyDate  string       `json:"buy_date,omitempty"`
-	SellDate string       `json:"sell_date,omitempty"`
+	BuyDate  *time.Time   `json:"buy_date,omitempty"`
+	SellDate *time.Time   `json:"sell_date,omitempty"`
 }
 
-func newBuyHoldQuantity(instrumentID instrument.ID, interval marketdata.Interval, quantity num.Quantity, buyDate time.Time, sellDate *time.Time, buyDateText, sellDateText string) *buyHoldQuantity {
+// newBuyHoldQuantity returns quantity mode. buyDate and sellDate are the
+// user's settings (nil when unset); spanStart is the effective buy date
+// when buyDate is unset.
+func newBuyHoldQuantity(instrumentID instrument.ID, interval marketdata.Interval, quantity num.Quantity, buyDate, sellDate *time.Time, spanStart time.Time) *buyHoldQuantity {
+	effectiveBuy := spanStart
+	if buyDate != nil {
+		effectiveBuy = *buyDate
+	}
 	return &buyHoldQuantity{
 		instrumentID: instrumentID,
 		interval:     interval,
-		buyDate:      buyDate,
-		sellDate:     sellDate,
+		buyDate:      effectiveBuy,
+		sellDate:     utcPtr(sellDate),
 		params: buyHoldQuantityParams{
 			Name:     demoStrategyName,
 			Mode:     "quantity",
 			Quantity: quantity,
-			BuyDate:  buyDateText,
-			SellDate: sellDateText,
+			BuyDate:  utcPtr(buyDate),
+			SellDate: utcPtr(sellDate),
 		},
 	}
+}
+
+// utcPtr returns a copy of t in UTC, or nil.
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 func (s *buyHoldQuantity) Describe() strategy.Descriptor {
@@ -97,23 +116,29 @@ func (s *buyHoldQuantity) OnBar(ctx context.Context, event strategy.BarEvent, vi
 	}
 	at := event.Bar.Time
 
-	if s.sellDate != nil && !at.Before(*s.sellDate) {
-		if s.exited || !s.holding(view) {
+	// The entry comes first: if it hasn't been attempted and buy_date
+	// has passed, buy now, even when sell_date has passed too (both can
+	// fall before the first available bar, e.g. over a weekend). The
+	// exit then follows on a later bar, once the position is held.
+	if !s.entered {
+		if at.Before(s.buyDate) {
 			return nil, nil
 		}
-		s.exited = true
-		in, err := s.intents.Exit(s.instrumentID)
+		s.entered = true
+		in, err := s.intents.TargetExposure(s.instrumentID, order.Buy, s.params.Quantity)
 		if err != nil {
 			return nil, err
 		}
 		return []runtimeorder.Intent{in}, nil
 	}
 
-	if s.entered || at.Before(s.buyDate) {
+	// Exit only once the account actually holds the position: a refused
+	// entry never produces an exit.
+	if s.sellDate == nil || s.exited || at.Before(*s.sellDate) || !s.holding(view) {
 		return nil, nil
 	}
-	s.entered = true
-	in, err := s.intents.TargetExposure(s.instrumentID, order.Buy, s.params.Quantity)
+	s.exited = true
+	in, err := s.intents.Exit(s.instrumentID)
 	if err != nil {
 		return nil, err
 	}
