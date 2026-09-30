@@ -59,6 +59,7 @@ type Record struct {
 	Trade          *runtimeorder.Trade
 	Signal         *Signal
 	RunCompleted   *RunCompleted
+	NoAction       *NoAction
 }
 
 // NewRecord validates and returns a Record. RunID must be non-zero,
@@ -115,6 +116,9 @@ func NewRecord(r Record) (Record, error) {
 	if r.RunCompleted != nil {
 		populated++
 	}
+	if r.NoAction != nil {
+		populated++
+	}
 	if populated != 1 {
 		return Record{}, fmt.Errorf("%w: exactly one payload must be set, found %d", ErrInvalidRecord, populated)
 	}
@@ -147,6 +151,8 @@ func NewRecord(r Record) (Record, error) {
 		ok = r.Signal != nil
 	case KindRunCompleted:
 		ok = r.RunCompleted != nil
+	case KindNoAction:
+		ok = r.NoAction != nil
 	}
 	if !ok {
 		return Record{}, fmt.Errorf("%w: kind %s does not match the populated payload", ErrInvalidRecord, r.Kind)
@@ -165,6 +171,9 @@ func NewRecord(r Record) (Record, error) {
 	}
 	if r.Signal != nil && r.Signal.Strategy == "" {
 		return Record{}, fmt.Errorf("%w: signal strategy must be set", ErrInvalidRecord)
+	}
+	if r.NoAction != nil && (r.NoAction.IntentID.IsZero() || r.NoAction.Reason == "") {
+		return Record{}, fmt.Errorf("%w: no-action intent id and reason must be set", ErrInvalidRecord)
 	}
 
 	return r, nil

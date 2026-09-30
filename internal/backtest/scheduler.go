@@ -753,7 +753,9 @@ func (s *Scheduler) allWarm() bool {
 // submit builds and submits one intent via InputBuilder/Pipeline,
 // using event as the eligibility observation (see InputBuilder's own
 // doc comment). A risk rejection is not an error: Pipeline.ErrRejected
-// is an expected outcome, not a Scheduler failure.
+// is an expected outcome, not a Scheduler failure. Neither is
+// Pipeline.ErrNoAction (ADR-067): an intent the account already
+// satisfies is journaled as KindNoAction and the run continues.
 //
 // Every stage of this one intent's lifecycle is journaled, in true
 // causal order (issue #218, M5-10; ADR-036): Intent first, then
@@ -818,6 +820,20 @@ func (s *Scheduler) submit(ctx context.Context, intent runtimeorder.Intent, even
 	// silently behind real broker state.
 	if result.Bracket != nil {
 		return s.submitBracketOutcome(ctx, intent, corr, result.Bracket, submitErr)
+	}
+
+	// ADR-067: an intent the account already satisfies (an exit or
+	// protective stop with no open position, or a target already held)
+	// is an expected no-op, not a failure. Journal why the intent led
+	// nowhere, correlated to it, and continue; nothing reached the
+	// broker, so there is nothing to drain.
+	if errors.Is(submitErr, pipeline.ErrNoAction) {
+		return s.journalRecord(ctx, journal.Record{
+			RunID:    s.deps.RunID,
+			Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+			Kind:     journal.KindNoAction,
+			NoAction: &journal.NoAction{IntentID: intent.IntentID, Reason: submitErr.Error()},
+		})
 	}
 
 	rejected := errors.Is(submitErr, pipeline.ErrRejected)

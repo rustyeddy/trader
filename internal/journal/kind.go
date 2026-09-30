@@ -68,6 +68,11 @@ const (
 	// written only once the run finished successfully.
 	// Record.RunCompleted is populated.
 	KindRunCompleted
+	// KindNoAction reports that a journaled intent needed no order
+	// because the account already satisfied it (ADR-067).
+	// Record.NoAction is populated. It is declared last so no existing
+	// Kind's value changes.
+	KindNoAction
 )
 
 // String returns a human-readable Kind name.
@@ -99,6 +104,8 @@ func (k Kind) String() string {
 		return "signal"
 	case KindRunCompleted:
 		return "run-completed"
+	case KindNoAction:
+		return "no-action"
 	default:
 		return fmt.Sprintf("Kind(%d)", uint8(k))
 	}
@@ -107,7 +114,7 @@ func (k Kind) String() string {
 func (k Kind) valid() bool {
 	switch k {
 	case KindRunStarted, KindIntent, KindProposal, KindDecision, KindRequest, KindReplaceRequest,
-		KindOrder, KindFill, KindAccount, KindStatus, KindTrade, KindSignal, KindRunCompleted:
+		KindOrder, KindFill, KindAccount, KindStatus, KindTrade, KindSignal, KindRunCompleted, KindNoAction:
 		return true
 	default:
 		return false

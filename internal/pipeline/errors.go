@@ -80,4 +80,14 @@ var (
 	// outcome as an entry-side risk rejection (ErrRejected), and
 	// Result.Bracket.Entry.Order carries the Rejection explaining why.
 	ErrBracketEntryRejected = errors.New("pipeline: bracket entry rejected by the broker; stop leg not submitted")
+
+	// ErrNoAction reports that the account already satisfies the
+	// intent, so there is nothing to plan or submit (ADR-067): an
+	// IntentExit or IntentAdjustStop with no open position, or an
+	// IntentTargetExposure the account already holds. It wraps the
+	// execution error that explains which. It is an expected outcome,
+	// not a failure — for example, a strategy exiting after its entry
+	// was refused for insufficient margin (ADR-066) — and Result is
+	// empty: no proposal, decision, or request was produced.
+	ErrNoAction = errors.New("pipeline: nothing to do; the account already satisfies the intent")
 )

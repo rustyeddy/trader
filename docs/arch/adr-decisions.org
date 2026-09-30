@@ -174,6 +174,7 @@ the original decided, use full supersession instead.
 | 064 | Git-describe-derived version and build metadata (in adr-064-git-describe-version-metadata.org) | Accepted |
 | 065 | Supported strategy/research API and private runtime (in adr-065-public-strategy-research-surface.org) | Accepted |
 | 066 | Account-level initial-margin admission for the simulator/backtester (in adr-066-account-initial-margin-admission.org) | Accepted |
+| 067 | Intents the account already satisfies are journaled no-ops (in adr-067-no-action-intents.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
@@ -731,6 +732,17 @@ or liquidation. It covers:
 - a broker margin rejection of an unfilled bracket entry treated as
   harmless;
 - the 1.0 default and its fixture impact.
+
+Note: ADR-067 is likewise maintained in its own file,
+=docs/arch/adr-067-no-action-intents.org=, rather than inline in this
+registry. Its own Status section is authoritative. Issue #427, found
+while implementing #414: once ADR-066 made entries refusable, an exit
+or protective stop on a flat account aborted the whole backtest. This
+ADR classifies the three planning outcomes where the account already
+satisfies the intent (no position to exit, no position to protect,
+already at target) as =pipeline.ErrNoAction=. The scheduler journals
+them as a new =KindNoAction= record and continues. The reference
+external example now decides from its =View=.
 
 * ADR-001: Modular monolith before service decomposition
 

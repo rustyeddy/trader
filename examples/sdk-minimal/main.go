@@ -6,8 +6,11 @@
 // identical rule for sdk itself; this example demonstrates
 // the same discipline from an author's own, separate perspective).
 //
-// It implements a deliberately trivial "flip-flop" strategy: flat on
-// its first bar, it enters long; once long, the next bar exits. This
+// It implements a deliberately trivial "flip-flop" strategy: when the
+// account is flat it enters long; once long, the next bar exits. It
+// decides from the account's actual position in its View, not from its
+// own memory of what it asked for, because an entry can be refused
+// (for example for insufficient initial margin, ADR-066). This
 // is not a trading strategy anyone should run for real — it exists to
 // show the complete shape of a sdk.Strategy (Describe/Start/
 // OnBar) and the one-line Serve() a real author's own main() needs,
@@ -34,15 +37,13 @@ func main() {
 	}
 }
 
-// flipFlop is the smallest useful sdk.Strategy: it never
-// consults history or the account snapshot in any real way, and it
-// implements no optional capability (no FillHandler) — see
-// sdk's own doc comment for what each of Describe/Start/OnBar
-// is for.
+// flipFlop is the smallest useful sdk.Strategy: it never consults
+// history, reads only whether the account holds its instrument, and
+// implements no optional capability (no FillHandler) — see sdk's own
+// doc comment for what each of Describe/Start/OnBar is for.
 type flipFlop struct {
 	instrument instrument.ID
 	interval   marketdata.Interval
-	long       bool
 }
 
 func newFlipFlop() *flipFlop {
@@ -63,7 +64,7 @@ func newFlipFlop() *flipFlop {
 func (f *flipFlop) Describe() sdk.Descriptor {
 	return sdk.Descriptor{
 		Name:    "flipflop",
-		Version: "0.1.0",
+		Version: "0.2.0",
 		Requirements: []sdk.DataRequirement{
 			{Instrument: f.instrument, Interval: f.interval, WarmupBars: 0},
 		},
@@ -75,16 +76,27 @@ func (f *flipFlop) Start(_ context.Context, env sdk.Environment) error {
 	return nil
 }
 
-func (f *flipFlop) OnBar(_ context.Context, event sdk.BarEvent, _ sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
+func (f *flipFlop) OnBar(_ context.Context, event sdk.BarEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
 	if !event.Instrument.Equal(f.instrument) {
 		return nil, nil, nil
 	}
 
-	if !f.long {
-		f.long = true
-		return []sdk.DescribedIntent{sdk.Enter(f.instrument, order.Buy)}, nil, nil
+	// Act on what the account actually holds: an entry this strategy
+	// asked for may have been refused, and exiting a position that was
+	// never opened is meaningless.
+	if f.holding(view) {
+		return []sdk.DescribedIntent{sdk.Exit(f.instrument)}, nil, nil
 	}
+	return []sdk.DescribedIntent{sdk.Enter(f.instrument, order.Buy)}, nil, nil
+}
 
-	f.long = false
-	return []sdk.DescribedIntent{sdk.Exit(f.instrument)}, nil, nil
+// holding reports whether the account has an open position in f's
+// instrument.
+func (f *flipFlop) holding(view sdk.View) bool {
+	for _, p := range view.Account().Positions {
+		if p.Instrument.Equal(f.instrument) && p.Side != order.Flat {
+			return true
+		}
+	}
+	return false
 }

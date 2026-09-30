@@ -387,6 +387,11 @@ type runCompletedWire struct {
 	EntryCount uint64   `json:"entry_count"`
 }
 
+type noActionWire struct {
+	IntentID id.IntentID `json:"intent_id"`
+	Reason   string      `json:"reason"`
+}
+
 type signalWire struct {
 	Strategy string            `json:"strategy"`
 	Values   map[string]string `json:"values,omitempty"`
@@ -414,6 +419,7 @@ type entryWire struct {
 	Trade          *tradeWire          `json:"trade,omitempty"`
 	Signal         *signalWire         `json:"signal,omitempty"`
 	RunCompleted   *runCompletedWire   `json:"run_completed,omitempty"`
+	NoAction       *noActionWire       `json:"no_action,omitempty"`
 }
 
 // toEntryWire converts entry to its JSON wire shape. Only the payload
@@ -458,6 +464,8 @@ func toEntryWire(e journal.Entry) entryWire {
 		w.Signal = &signalWire{Strategy: e.Signal.Strategy, Values: e.Signal.Values}
 	case journal.KindRunCompleted:
 		w.RunCompleted = &runCompletedWire{RunID: e.RunCompleted.RunID, EntryCount: e.RunCompleted.EntryCount}
+	case journal.KindNoAction:
+		w.NoAction = &noActionWire{IntentID: e.NoAction.IntentID, Reason: e.NoAction.Reason}
 	}
 	return w
 }

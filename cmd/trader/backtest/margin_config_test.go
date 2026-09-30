@@ -189,20 +189,15 @@ backtest:
 }
 
 // TestRunCLI_ExternalStrategyEnforcesMarginRule proves the rule is
-// installed for --strategy-exec guests too: the first entry of
-// examples/sdk-minimal's flip-flop (~1.1x equity) is rejected by
-// account_initial_margin at the 1.0 default.
-//
-// The run then aborts, because flip-flop sends Exit on the next bar
-// without consulting its View, and an exit with no open position is a
-// planning error (execution.ErrNoPositionToExit). That pre-existing
-// behavior — first reachable now that entries can be refused — is
-// tracked by #427; this test only asserts the enforcement.
+// installed for --strategy-exec guests too: every entry
+// examples/sdk-minimal's flip-flop attempts (~1.1x equity) is rejected
+// by account_initial_margin at the 1.0 default. Because flip-flop
+// decides from its View, it never exits a position it doesn't hold, so
+// the run completes normally (#427).
 func TestRunCLI_ExternalStrategyEnforcesMarginRule(t *testing.T) {
 	journalPath := filepath.Join(t.TempDir(), "run.jsonl")
-	args := marginRunArgs(t, journalPath, "--strategy-exec", flipFlopPath)
-	_, err := runReport(t, args)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no open position to exit")
-	assert.Equal(t, 1, marginRejections(journalEntries(t, journalPath)), "the guest's entry was rejected by account_initial_margin")
+	out, err := runReport(t, marginRunArgs(t, journalPath, "--strategy-exec", flipFlopPath))
+	require.NoError(t, err)
+	assert.Empty(t, parseMarginReport(t, out).OpenTrades)
+	assert.Positive(t, marginRejections(journalEntries(t, journalPath)), "the guest's entries were rejected by account_initial_margin")
 }

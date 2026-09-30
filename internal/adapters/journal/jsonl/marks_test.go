@@ -98,3 +98,17 @@ func TestWriterReaderRoundTripsCancelReason(t *testing.T) {
 	assert.Equal(t, *canceled.CancelReason, *got.CancelReason)
 	assert.Nil(t, got.Rejection)
 }
+
+// TestWriterReaderRoundTripsNoAction (ADR-067).
+func TestWriterReaderRoundTripsNoAction(t *testing.T) {
+	na := journal.NoAction{IntentID: mustIntentID(t), Reason: "pipeline: nothing to do: execution: no open position to exit"}
+	w, path := mustWriter(t)
+	require.NoError(t, w.Record(context.Background(), journal.Record{RunID: mustRunID(t), Metadata: id.Metadata{Timestamp: time.Now()}, Kind: journal.KindNoAction, NoAction: &na}))
+	require.NoError(t, w.Close())
+
+	entries := readAll(t, path)
+	require.Len(t, entries, 1)
+	assert.Equal(t, journal.KindNoAction, entries[0].Kind)
+	require.NotNil(t, entries[0].NoAction)
+	assert.Equal(t, na, *entries[0].NoAction)
+}

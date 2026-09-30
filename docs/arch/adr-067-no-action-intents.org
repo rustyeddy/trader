@@ -1,0 +1,104 @@
+#+TITLE: ADR-067: Intents the account already satisfies are journaled no-ops
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #427, found while implementing #414 (ADR-066).
+
+* Context
+
+=execution.Planner= returns an error when an intent asks for something
+the account already has:
+
+- =ErrNoPositionToExit= — an =IntentExit= with no open position.
+- =ErrNoPositionToProtect= — an =IntentAdjustStop= with no open position.
+- =ErrAlreadyAtTarget= — an =IntentTargetExposure= the account already
+  holds.
+
+=pipeline.Pipeline= wrapped each as a generic planning error, and
+=backtest.Scheduler= treated any non-risk error as fatal, so each of
+these **aborted the whole backtest**.
+
+That was effectively unreachable while the backtest risk engine had no
+rules and the simulator filled every entry. ADR-066 changed that: an
+entry can now be refused, by the =account_initial_margin= risk rule or by
+the simulator at fill time. A strategy that emits an exit or protective
+stop on a later bar, assuming its entry filled, then crashes the run.
+The reference external strategy (=examples/sdk-minimal=) did exactly
+this: it alternated Enter and Exit from its own memory and ignored its
+=View=. =ErrAlreadyAtTarget= is the same class of outcome, reachable
+independently of margin (a target strategy that re-sends a target it
+already holds).
+
+The question is whether such an intent is a strategy bug the run should
+stop on, or a benign no-op.
+
+* Decision
+
+** An intent the account already satisfies is a no-op, not a failure
+
+The desired end state already holds: an exit wants the account flat and
+it is flat; a protective stop has nothing to protect; a target is
+already met. Stopping the run conveys nothing a journal record can't,
+and it makes strategy correctness depend on every entry filling, which
+is no longer guaranteed.
+
+- =pipeline= classifies exactly these three planning errors as a new
+  sentinel, =pipeline.ErrNoAction=, wrapping the execution error so the
+  reason is preserved (=errors.Is= matches both). Result is empty: no
+  proposal, decision, or request was produced, and nothing reaches the
+  broker. Every other planning error is unchanged.
+- =backtest.Scheduler= treats =ErrNoAction= as an expected outcome, like
+  a risk rejection: the run continues.
+
+** No-ops are journaled
+
+Every intent is journaled before submission, so without a record the
+journal would show an intent that silently led nowhere. A new
+=journal.KindNoAction= record, correlated to the intent
+(=Metadata.CorrelationID=), carries =NoAction{IntentID, Reason}=. The
+JSONL adapter encodes it as =no_action=. =KindNoAction= is declared
+after every existing kind, so no existing kind's value changes, and
+JSONL writes kinds by name.
+
+** Strategies should still decide from their View
+
+The classification makes the runtime robust; it does not make blind
+strategies correct. =examples/sdk-minimal= now decides from the
+account's actual position in its =View=: enter when flat, exit when
+holding. A strategy should never assume an intent it emitted was
+filled.
+
+** Scope
+
+The bracket path (ADR-059) is unchanged: its entry leg is an
+=IntentEnter=, which can't be a no-op, and a stop leg after a filled
+entry always has a position to protect.
+
+* Consequences
+
+- A refused entry followed by an exit or stop no longer aborts a
+  backtest. The journal shows the intent followed by a =no-action=
+  record explaining why.
+- A strategy that genuinely emits pointless exits every bar still runs;
+  its journal fills with =no-action= records, which makes the behavior
+  visible without being fatal.
+- Consumers that enumerate journal kinds see one more kind.
+- Live orchestration inherits the pipeline classification when it is
+  built; how a live session reports a no-op is decided there.
+
+* Alternatives Considered
+
+- *Keep aborting, and require strategies to consult their View.*
+  Rejected. Correct strategies should, and the example now does, but a
+  single missed check shouldn't turn an entry refusal into a crashed
+  run. A no-op with an audit record is strictly more informative than
+  an abort.
+- *Silently skip, with no journal record.* Rejected. The journal would
+  show an intent with no outcome, which breaks the "why didn't it
+  trade?" audit guarantee ADR-066 relies on.
+- *Reuse =KindSignal= for the record.* Rejected. Signals are
+  strategy-authored research evidence (ADR-044), not runtime outcomes.
+- *Treat only =ErrNoPositionToExit=.* Rejected. The other two have the
+  same meaning (the account already satisfies the intent) and the same
+  failure mode; handling them differently would be arbitrary.
