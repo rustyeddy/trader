@@ -446,6 +446,14 @@ func (p *Pipeline) submitBracket(ctx context.Context, in Input) (Result, error) 
 		return Result{Bracket: bracket}, err
 	}
 
+	if entryResult.Order.Status == runtimeorder.StatusRejected {
+		reason := ""
+		if entryResult.Order.Rejection != nil {
+			reason = entryResult.Order.Rejection.Reason.String()
+		}
+		return Result{Bracket: bracket}, fmt.Errorf("%w: entry order %s rejected (%s)",
+			ErrBracketEntryRejected, entryResult.Order.Request.OrderID, reason)
+	}
 	if entryResult.Order.Status != runtimeorder.StatusFilled {
 		return Result{Bracket: bracket}, fmt.Errorf("%w: entry order %s accepted with status %s",
 			ErrBracketEntryNotSynchronouslyFilled, entryResult.Order.Request.OrderID, entryResult.Order.Status)

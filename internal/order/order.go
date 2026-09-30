@@ -60,6 +60,14 @@ type Order struct {
 	// Rejection explains why the broker declined this order. Non-nil
 	// exactly when Status is StatusRejected.
 	Rejection *Rejection
+	// CancelReason explains why the broker canceled this order on its
+	// own initiative — for example a resting order that triggered but
+	// could not be filled within the account's initial margin
+	// (ADR-066). It may be non-nil only when Status is StatusCanceled,
+	// and is nil for a cancel the operator or strategy requested. It is
+	// distinct from Rejection, which means the order itself was
+	// declined before acceptance.
+	CancelReason *Rejection
 
 	// AppliedFillIDs records every Fill.FillID already applied via
 	// ApplyFill, and AppliedBrokerFillIDs every non-empty
@@ -138,6 +146,9 @@ func NewOrder(o Order) (Order, error) {
 	}
 	if o.Status != StatusRejected && o.Rejection != nil {
 		return Order{}, fmt.Errorf("%w: only a rejected order may carry a Rejection", ErrInvalidOrder)
+	}
+	if o.Status != StatusCanceled && o.CancelReason != nil {
+		return Order{}, fmt.Errorf("%w: only a canceled order may carry a CancelReason", ErrInvalidOrder)
 	}
 
 	pending := o.Status == StatusPendingCancel || o.Status == StatusPendingReplace

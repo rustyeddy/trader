@@ -206,6 +206,13 @@ func fromOrderWire(w orderWire) (runtimeorder.Order, error) {
 		}
 		o.Rejection = &runtimeorder.Rejection{Reason: reason, Detail: w.Rejection.Detail, BrokerCode: w.Rejection.BrokerCode}
 	}
+	if w.CancelReason != nil {
+		reason, err := parseRejectReason(w.CancelReason.Reason)
+		if err != nil {
+			return runtimeorder.Order{}, err
+		}
+		o.CancelReason = &runtimeorder.Rejection{Reason: reason, Detail: w.CancelReason.Detail, BrokerCode: w.CancelReason.BrokerCode}
+	}
 	return o, nil
 }
 

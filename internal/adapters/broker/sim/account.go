@@ -425,6 +425,10 @@ func cloneOrder(o runtimeorder.Order) runtimeorder.Order {
 		v := *o.Rejection
 		cloned.Rejection = &v
 	}
+	if o.CancelReason != nil {
+		v := *o.CancelReason
+		cloned.CancelReason = &v
+	}
 	if o.AppliedFillIDs != nil {
 		cloned.AppliedFillIDs = append([]id.FillID(nil), o.AppliedFillIDs...)
 	}
@@ -535,12 +539,11 @@ func (h *accountHandle) Submit(ctx context.Context, req runtimeorder.Request) (r
 	// report success without ever emitting the event). This is the same
 	// build-then-commit discipline for a single event extended to a
 	// market order's three (accept, fill, filled).
-	acceptEvent, err := h.state.buildOrderEvent(h.broker.deps, o, req.Metadata.EventID, h.state.nextSequence+1)
-	if err != nil {
-		return runtimeorder.Order{}, err
-	}
-
 	if req.Type != runtimeorder.Market {
+		acceptEvent, err := h.state.buildOrderEvent(h.broker.deps, o, req.Metadata.EventID, h.state.nextSequence+1)
+		if err != nil {
+			return runtimeorder.Order{}, err
+		}
 		h.state.orders[req.OrderID] = cloneOrder(o)
 		h.state.asOf = now
 		h.state.commitEvents(acceptEvent)
@@ -552,13 +555,36 @@ func (h *accountHandle) Submit(ctx context.Context, req runtimeorder.Request) (r
 		return runtimeorder.Order{}, err
 	}
 
-	outcome, err := h.state.buildFill(h.broker.deps, o, price, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
-	if errors.Is(err, ErrReduceOnlyNothingToReduce) {
+	// Prepared before the accept event is built: prepareFill consumes
+	// no ID, so a margin refusal below produces only its rejection
+	// event, and every other path consumes IDs in the same order as
+	// before (accept, then fill).
+	prepared, prepErr := h.state.prepareFill(h.broker.deps, o, price)
+	if errors.Is(prepErr, ErrInsufficientMargin) {
+		// ADR-066: a market order refused at fill inside Submit is
+		// rejected before acceptance — StatusRejected with the reason,
+		// and no accept event.
+		rejected, rejectEvent, err := h.state.buildMarginRejection(h.broker.deps, o, prepErr, now)
+		if err != nil {
+			return runtimeorder.Order{}, err
+		}
+		h.state.orders[req.OrderID] = cloneOrder(rejected)
+		h.state.asOf = now
+		h.state.commitEvents(rejectEvent)
+		return rejected, nil
+	}
+
+	acceptEvent, err := h.state.buildOrderEvent(h.broker.deps, o, req.Metadata.EventID, h.state.nextSequence+1)
+	if err != nil {
+		return runtimeorder.Order{}, err
+	}
+
+	if errors.Is(prepErr, ErrReduceOnlyNothingToReduce) {
 		// Issue #352: a ReduceOnly market order (o was just accepted
 		// above, not yet stored) with nothing left to reduce is
 		// canceled instead of filled — never silently dropped, and
 		// never allowed to open/increase/reverse a position.
-		pendingEvent, canceledEvent, canceled, cancelErr := h.state.buildInternalCancellation(h.broker.deps, o, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+		pendingEvent, canceledEvent, canceled, cancelErr := h.state.buildInternalCancellation(h.broker.deps, o, acceptEvent.Metadata.EventID, h.state.nextSequence+2, nil)
 		if cancelErr != nil {
 			return runtimeorder.Order{}, cancelErr
 		}
@@ -567,6 +593,11 @@ func (h *accountHandle) Submit(ctx context.Context, req runtimeorder.Request) (r
 		h.state.commitEvents(acceptEvent, pendingEvent, canceledEvent)
 		return canceled, nil
 	}
+	if prepErr != nil {
+		return runtimeorder.Order{}, prepErr
+	}
+
+	outcome, err := h.state.buildPreparedFill(h.broker.deps, o, prepared, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
 	if err != nil {
 		return runtimeorder.Order{}, err
 	}
@@ -667,7 +698,33 @@ func roundFillPriceToTick(price num.Price, side order.Side, tick num.Price) (num
 	return price.RoundDown(tick)
 }
 
+// preparedFill is everything one fill's execution needs that consumes
+// no ID and changes no state: the final execution price, the quantity,
+// and the commission, already checked against the account's initial
+// margin (ADR-066).
+type preparedFill struct {
+	price      num.Price
+	quantity   num.Quantity
+	commission *num.Money
+}
+
+// buildFill prepares and builds one complete fill: prepareFill, then
+// buildPreparedFill.
 func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Price, causationID id.EventID, sequence uint64) (fillOutcome, error) {
+	p, err := s.prepareFill(deps, o, price)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+	return s.buildPreparedFill(deps, o, p, causationID, sequence)
+}
+
+// prepareFill resolves one fill's final price, quantity, and commission
+// and checks it against the account's initial margin, without
+// generating any ID, building any event, or changing any state — so a
+// fill refused here (ErrInsufficientMargin, ErrReduceOnlyNothingToReduce,
+// or any other error) consumes nothing. Submit calls it before building
+// a market order's accept event for exactly that reason.
+func (s *accountState) prepareFill(deps Deps, o runtimeorder.Order, price num.Price) (preparedFill, error) {
 	req := o.Request
 	key := account.KeyOf(req.Listing)
 	currency := req.Listing.Spec().SettlementCurrency()
@@ -682,7 +739,7 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 	// enforced uniformly up front rather than left to surface only
 	// when arithmetic happens to combine mismatched currencies.
 	if !currency.Equal(s.currency) {
-		return fillOutcome{}, fmt.Errorf("%w: listing %s settles in %s, account is %s", ErrUnsupportedSettlementCurrency, req.Listing.Symbol(), currency, s.currency)
+		return preparedFill{}, fmt.Errorf("%w: listing %s settles in %s, account is %s", ErrUnsupportedSettlementCurrency, req.Listing.Symbol(), currency, s.currency)
 	}
 
 	fillQty := *o.AcceptedQuantity
@@ -702,7 +759,7 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 		existing, hasExisting := s.positions[key]
 		reducible := reducibleQuantity(existing, hasExisting, req.Side)
 		if reducible.IsZero() {
-			return fillOutcome{}, ErrReduceOnlyNothingToReduce
+			return preparedFill{}, ErrReduceOnlyNothingToReduce
 		}
 		// Clamped, never rejected outright, when the position is
 		// smaller than what this order was sized for: this keeps the
@@ -746,7 +803,7 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 	// generous").
 	rounded, err := roundFillPriceToTick(price, req.Side, req.Listing.Spec().TickSize())
 	if err != nil {
-		return fillOutcome{}, fmt.Errorf("%w: rounding fill price to tick size: %w", runtimeorder.ErrInvalidFill, err)
+		return preparedFill{}, fmt.Errorf("%w: rounding fill price to tick size: %w", runtimeorder.ErrInvalidFill, err)
 	}
 	price = rounded
 
@@ -763,7 +820,7 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 	if deps.Slippage != nil && (req.Type == runtimeorder.Market || req.Type == runtimeorder.Stop) {
 		adjusted, err := deps.Slippage.Slippage(req.Listing, req.Side, fillQty, price)
 		if err != nil {
-			return fillOutcome{}, err
+			return preparedFill{}, err
 		}
 		// Validated immediately, before anything downstream (most
 		// notably Commission) ever sees it: SlippageModel's own
@@ -772,7 +829,7 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 		// happens too late in this pipeline to prevent an invalid
 		// price from reaching Commission first.
 		if err := req.Listing.Spec().ValidatePrice(adjusted); err != nil {
-			return fillOutcome{}, fmt.Errorf("%w: slippage-adjusted price: %v", runtimeorder.ErrInvalidFill, err)
+			return preparedFill{}, fmt.Errorf("%w: slippage-adjusted price: %v", runtimeorder.ErrInvalidFill, err)
 		}
 		price = adjusted
 	}
@@ -783,17 +840,32 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 	// Deps.Prices or a SlippageModel fails the fill and leaves the
 	// account unchanged instead of poisoning every later Snapshot.
 	if price.IsZero() {
-		return fillOutcome{}, fmt.Errorf("%w: fill price must be positive", runtimeorder.ErrInvalidFill)
+		return preparedFill{}, fmt.Errorf("%w: fill price must be positive", runtimeorder.ErrInvalidFill)
 	}
 
 	var commission *num.Money
 	if deps.Commission != nil {
 		c, err := deps.Commission.Commission(req.Listing, req.Side, fillQty, price)
 		if err != nil {
-			return fillOutcome{}, err
+			return preparedFill{}, err
 		}
 		commission = c
 	}
+
+	if err := s.checkFillMargin(req, key, price, fillQty, commission); err != nil {
+		return preparedFill{}, err
+	}
+	return preparedFill{price: price, quantity: fillQty, commission: commission}, nil
+}
+
+// buildPreparedFill builds the fill, its events, and the resulting
+// account state for p, without committing anything; the caller
+// commits. Every ID it consumes belongs to a fill that will be booked.
+func (s *accountState) buildPreparedFill(deps Deps, o runtimeorder.Order, p preparedFill, causationID id.EventID, sequence uint64) (fillOutcome, error) {
+	req := o.Request
+	key := account.KeyOf(req.Listing)
+	currency := req.Listing.Spec().SettlementCurrency()
+	price, fillQty, commission := p.price, p.quantity, p.commission
 
 	fillID, err := id.GenerateFillID(deps.IDs)
 	if err != nil {
@@ -843,7 +915,7 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 	finalOrder := filled
 	var extraEvents []brokerpkg.Event
 	if req.ReduceOnly && filled.Status == runtimeorder.StatusPartiallyFilled {
-		pendingEvent, canceledEvent, canceled, err := s.buildInternalCancellation(deps, filled, filledEvent.Metadata.EventID, sequence+2)
+		pendingEvent, canceledEvent, canceled, err := s.buildInternalCancellation(deps, filled, filledEvent.Metadata.EventID, sequence+2, nil)
 		if err != nil {
 			return fillOutcome{}, err
 		}
@@ -906,7 +978,10 @@ func (s *accountState) buildFill(deps Deps, o runtimeorder.Order, price num.Pric
 // the resulting order) only once every other part of its own
 // transaction has also succeeded, matching every other builder in
 // this file.
-func (s *accountState) buildInternalCancellation(deps Deps, o runtimeorder.Order, causationID id.EventID, sequence uint64) (brokerpkg.Event, brokerpkg.Event, runtimeorder.Order, error) {
+//
+// reason, when non-nil, is recorded as the canceled order's
+// CancelReason — why the broker canceled it (ADR-066).
+func (s *accountState) buildInternalCancellation(deps Deps, o runtimeorder.Order, causationID id.EventID, sequence uint64, reason *runtimeorder.Rejection) (brokerpkg.Event, brokerpkg.Event, runtimeorder.Order, error) {
 	cancelEventID, err := id.GenerateEventID(deps.IDs)
 	if err != nil {
 		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
@@ -942,6 +1017,13 @@ func (s *accountState) buildInternalCancellation(deps Deps, o runtimeorder.Order
 	if err != nil {
 		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
 	}
+	if reason != nil {
+		r := *reason
+		canceled.CancelReason = &r
+		if canceled, err = runtimeorder.NewOrder(canceled); err != nil {
+			return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
+		}
+	}
 	canceledEvent, err := s.buildOrderEvent(deps, canceled, pendingEvent.Metadata.EventID, sequence+1)
 	if err != nil {
 		return brokerpkg.Event{}, brokerpkg.Event{}, runtimeorder.Order{}, err
@@ -962,4 +1044,110 @@ func (h *accountHandle) Events(ctx context.Context, cursor brokerpkg.EventCursor
 	endSequence := h.state.nextSequence
 	h.state.mu.Unlock()
 	return &eventReader{state: h.state, after: decodeCursor(cursor), endSequence: endSequence}, nil
+}
+
+// checkFillMargin enforces the account's initial margin (ADR-066) on
+// one prospective fill of fillQty at price in key's listing. It
+// returns nil when no margin model is configured, or when the fill
+// does not increase that listing's position — reduce-only and
+// de-risking fills are never blocked. Otherwise it values the actual
+// post-fill state — the post-fill position at the fill price, every
+// other open position at its mark, and equity after realized PnL and
+// this fill's own commission — and reports ErrInsufficientMargin when
+// the required margin would exceed that equity. It changes nothing.
+// The caller must hold s.mu.
+func (s *accountState) checkFillMargin(req runtimeorder.Request, key account.ListingKey, price num.Price, fillQty num.Quantity, commission *num.Money) error {
+	if s.marginPolicy == nil {
+		return nil
+	}
+	existing, hasExisting := s.positions[key]
+	curQty := num.Quantity{}
+	if hasExisting {
+		curQty = existing.Quantity
+	}
+	currency := req.Listing.Spec().SettlementCurrency()
+	transition, err := runtimeorder.ApplyFillToPosition(existing, hasExisting, req.AccountID, req.Listing, currency, req.Side, price, fillQty)
+	if err != nil {
+		return err
+	}
+	after := transition.Position
+	if after.Quantity.Cmp(curQty) <= 0 {
+		return nil
+	}
+
+	cashAfter, err := s.cash.Add(transition.RealizedPnL)
+	if err != nil {
+		return err
+	}
+	if commission != nil {
+		if cashAfter, _, err = applyCommission(cashAfter, s.fees, *commission); err != nil {
+			return err
+		}
+	}
+
+	positions := make([]runtimeorder.Position, 0, len(s.positions)+1)
+	marks := make(margin.Marks, len(s.positions)+1)
+	equity := cashAfter
+	value := func(p runtimeorder.Position, mark num.Price) error {
+		positions = append(positions, p)
+		marks[account.KeyOf(p.Listing)] = mark
+		pnl, err := unrealizedPnLForPosition(p, mark, p.Listing.Spec().SettlementCurrency())
+		if err != nil {
+			return err
+		}
+		equity, err = equity.Add(pnl)
+		return err
+	}
+	for k, p := range s.positions {
+		if k == key {
+			continue
+		}
+		m, ok := s.marks[k]
+		if !ok {
+			return fmt.Errorf("%w: no mark for open position in %s", margin.ErrMissingMark, k.InstrumentID)
+		}
+		if err := value(p, m.price); err != nil {
+			return err
+		}
+	}
+	if err := value(after, price); err != nil {
+		return err
+	}
+
+	requirement, err := margin.Account(positions, marks, *s.marginPolicy, s.currency)
+	if err != nil {
+		return fmt.Errorf("sim: computing fill margin: %w", err)
+	}
+	ok, err := requirement.Within(equity)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return fmt.Errorf("%w: required margin %s (gross notional %s at initial margin ratio %s) exceeds post-fill equity %s",
+		ErrInsufficientMargin, requirement.Required, requirement.Gross, s.marginPolicy.Value(), equity)
+}
+
+// buildMarginRejection builds the StatusRejected order and its single
+// order event for a market order refused at fill inside Submit
+// (ADR-066): rejected before acceptance, with ReasonInsufficientMargin
+// and cause's text as the detail. It changes nothing; the caller
+// commits. The caller must hold s.mu.
+func (s *accountState) buildMarginRejection(deps Deps, o runtimeorder.Order, cause error, now time.Time) (runtimeorder.Order, brokerpkg.Event, error) {
+	rejected, err := runtimeorder.NewOrder(runtimeorder.Order{
+		Request:       o.Request,
+		BrokerOrderID: o.BrokerOrderID,
+		Status:        runtimeorder.StatusRejected,
+		Rejection:     &runtimeorder.Rejection{Reason: runtimeorder.ReasonInsufficientMargin, Detail: cause.Error()},
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		return runtimeorder.Order{}, brokerpkg.Event{}, err
+	}
+	ev, err := s.buildOrderEvent(deps, rejected, o.Request.Metadata.EventID, s.nextSequence+1)
+	if err != nil {
+		return runtimeorder.Order{}, brokerpkg.Event{}, err
+	}
+	return rejected, ev, nil
 }

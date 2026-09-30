@@ -197,6 +197,7 @@ type orderWire struct {
 	FilledQuantity       num.Quantity   `json:"filled_quantity"`
 	AvgFillPrice         *num.Price     `json:"avg_fill_price,omitempty"`
 	Rejection            *rejectionWire `json:"rejection,omitempty"`
+	CancelReason         *rejectionWire `json:"cancel_reason,omitempty"`
 	AppliedFillIDs       []id.FillID    `json:"applied_fill_ids,omitempty"`
 	AppliedBrokerFillIDs []string       `json:"applied_broker_fill_ids,omitempty"`
 	UpdatedAt            time.Time      `json:"updated_at"`
@@ -218,6 +219,9 @@ func toOrderWire(o runtimeorder.Order) orderWire {
 	}
 	if o.Rejection != nil {
 		w.Rejection = &rejectionWire{Reason: o.Rejection.Reason.String(), Detail: o.Rejection.Detail, BrokerCode: o.Rejection.BrokerCode}
+	}
+	if o.CancelReason != nil {
+		w.CancelReason = &rejectionWire{Reason: o.CancelReason.Reason.String(), Detail: o.CancelReason.Detail, BrokerCode: o.CancelReason.BrokerCode}
 	}
 	return w
 }

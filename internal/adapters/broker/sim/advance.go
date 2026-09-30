@@ -274,9 +274,25 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 			// (for example a same-bar or earlier direct exit) —
 			// canceled here instead of filled, rather than reversing
 			// the account into a position on the wrong side.
-			pendingEvent, canceledEvent, canceled, cancelErr := s.buildInternalCancellation(deps, t.order, id.EventID{}, s.nextSequence+1)
+			pendingEvent, canceledEvent, canceled, cancelErr := s.buildInternalCancellation(deps, t.order, id.EventID{}, s.nextSequence+1, nil)
 			if cancelErr != nil {
 				errs = append(errs, fmt.Errorf("order %s: canceling stale reduce-only order: %w", t.order.Request.OrderID, cancelErr))
+				continue
+			}
+			s.orders[t.order.Request.OrderID] = cloneOrder(canceled)
+			s.asOf = deps.Clock.Now()
+			s.commitEvents(pendingEvent, canceledEvent)
+			continue
+		}
+		if errors.Is(err, ErrInsufficientMargin) {
+			// ADR-066: a resting order that triggers but would exceed
+			// the account's initial margin is already Working, so it is
+			// retired by a broker-initiated cancel carrying the reason
+			// (Working -> PendingCancel -> Canceled, no ADR-018 change).
+			reason := &runtimeorder.Rejection{Reason: runtimeorder.ReasonInsufficientMargin, Detail: err.Error()}
+			pendingEvent, canceledEvent, canceled, cancelErr := s.buildInternalCancellation(deps, t.order, id.EventID{}, s.nextSequence+1, reason)
+			if cancelErr != nil {
+				errs = append(errs, fmt.Errorf("order %s: canceling order for insufficient margin: %w", t.order.Request.OrderID, cancelErr))
 				continue
 			}
 			s.orders[t.order.Request.OrderID] = cloneOrder(canceled)

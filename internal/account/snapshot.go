@@ -319,6 +319,10 @@ func cloneOrder(o runtimeorder.Order) runtimeorder.Order {
 		v := *o.Rejection
 		cloned.Rejection = &v
 	}
+	if o.CancelReason != nil {
+		v := *o.CancelReason
+		cloned.CancelReason = &v
+	}
 	if o.AppliedFillIDs != nil {
 		cloned.AppliedFillIDs = append([]id.FillID(nil), o.AppliedFillIDs...)
 	}

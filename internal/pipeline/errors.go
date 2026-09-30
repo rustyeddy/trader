@@ -70,4 +70,14 @@ var (
 	// now-current account state, or an operator alert) — Pipeline
 	// itself makes no such decision on the caller's behalf.
 	ErrBracketEntryNotSynchronouslyFilled = errors.New("pipeline: bracket entry did not fill synchronously; stop leg not submitted")
+
+	// ErrBracketEntryRejected reports that an order.IntentEnterWithStop's
+	// entry leg was rejected by the broker itself — for example the
+	// simulator refusing a fill that would exceed the account's initial
+	// margin (ADR-066) — so nothing was opened and the stop leg was
+	// never attempted. Unlike ErrBracketEntryNotSynchronouslyFilled,
+	// there is no unprotected position: this is the same harmless
+	// outcome as an entry-side risk rejection (ErrRejected), and
+	// Result.Bracket.Entry.Order carries the Rejection explaining why.
+	ErrBracketEntryRejected = errors.New("pipeline: bracket entry rejected by the broker; stop leg not submitted")
 )
