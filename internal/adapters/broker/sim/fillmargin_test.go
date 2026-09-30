@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	brokerpkg "github.com/rustyeddy/trader/internal/broker"
+	"github.com/rustyeddy/trader/internal/id"
 	runtimeorder "github.com/rustyeddy/trader/internal/order"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
@@ -235,4 +236,32 @@ func TestFillMargin_NoModelFillsOverTheLimit(t *testing.T) {
 	o, err := h.Submit(context.Background(), mustMarketRequestFor(t, deps.IDs, h.Reference().AccountID, mustEurUsdListing(t), order.Buy, "40000"))
 	require.NoError(t, err)
 	assert.Equal(t, runtimeorder.StatusFilled, o.Status, "legacy behavior without a margin model")
+}
+
+// TestFillMargin_RefusedMarketOrderConsumesOnlyItsRejectionEventID pins
+// that a margin refusal inside Submit consumes exactly one ID — its own
+// rejection event's — and no discarded accept-event ID, so it never
+// shifts later IDs.
+func TestFillMargin_RefusedMarketOrderConsumesOnlyItsRejectionEventID(t *testing.T) {
+	ctx := context.Background()
+
+	// Scenario 1: submit an over-limit market order.
+	_, deps1, h1, _ := fillMarginAccount(t, "1", nil)
+	req1 := mustMarketRequestFor(t, deps1.IDs, h1.Reference().AccountID, mustEurUsdListing(t), order.Buy, "20000")
+	_, err := h1.Submit(ctx, req1)
+	require.NoError(t, err)
+	require.Len(t, h1.state.events, 1)
+	next1, err := id.GenerateEventID(deps1.IDs)
+	require.NoError(t, err)
+
+	// Scenario 2: identical setup, drawing IDs directly instead.
+	_, deps2, h2, _ := fillMarginAccount(t, "1", nil)
+	_ = mustMarketRequestFor(t, deps2.IDs, h2.Reference().AccountID, mustEurUsdListing(t), order.Buy, "20000")
+	first2, err := id.GenerateEventID(deps2.IDs)
+	require.NoError(t, err)
+	next2, err := id.GenerateEventID(deps2.IDs)
+	require.NoError(t, err)
+
+	assert.Equal(t, first2, h1.state.events[0].Metadata.EventID, "the rejection event takes the first ID Submit could consume")
+	assert.Equal(t, next2, next1, "and nothing else was consumed")
 }
