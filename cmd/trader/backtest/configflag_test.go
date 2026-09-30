@@ -42,6 +42,8 @@ backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 `)
 
 	outputDir := t.TempDir()
@@ -77,6 +79,8 @@ backtest:
   starting_capital: 1
   risk_fraction: 0.01
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 `)
 
 	outputDir := t.TempDir()
@@ -121,6 +125,8 @@ backtest:
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 
 strategy:
   name: ema-cross
@@ -149,6 +155,8 @@ backtest:
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 `)
 
 	runCmd := cmdbacktest.New()
@@ -183,6 +191,8 @@ backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 
 strategy:
   name: ema-cross
@@ -238,6 +248,8 @@ backtest:
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 
 strategy:
   name: some-other-strategy
@@ -273,6 +285,8 @@ backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 `)
 
 	outputDir := t.TempDir()
@@ -330,6 +344,8 @@ backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
+  # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
+  initial_margin_ratio: 0.25
 
 strategy:
   name: ema-cross

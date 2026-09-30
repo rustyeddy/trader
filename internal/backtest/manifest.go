@@ -40,8 +40,13 @@ type ManifestParams struct {
 	FillModel          ComponentInfo
 	SlippageModel      ComponentInfo
 	CommissionModel    ComponentInfo
-	Dataset            []marketdata.Manifest
-	TraderVersion      string
+	// MarginModel is the simulated account's initial-margin model
+	// (ADR-066), or the zero ComponentInfo when the run configured none.
+	// Unlike the fill, slippage, and commission models it is optional,
+	// and a run without one serializes exactly as before.
+	MarginModel   ComponentInfo
+	Dataset       []marketdata.Manifest
+	TraderVersion string
 }
 
 // Manifest is the immutable record of everything needed to identify
@@ -82,6 +87,7 @@ type Manifest struct {
 	fillModel       ComponentInfo
 	slippageModel   ComponentInfo
 	commissionModel ComponentInfo
+	marginModel     ComponentInfo
 
 	dataset []marketdata.Manifest
 
@@ -171,6 +177,7 @@ func NewManifest(p ManifestParams) (Manifest, error) {
 		fillModel:          p.FillModel,
 		slippageModel:      p.SlippageModel,
 		commissionModel:    p.CommissionModel,
+		marginModel:        p.MarginModel,
 		dataset:            dataset,
 		traderVersion:      p.TraderVersion,
 	}, nil
@@ -282,6 +289,10 @@ func (m Manifest) SlippageModel() ComponentInfo { return m.slippageModel }
 // CommissionModel returns the run's own configured commission model.
 func (m Manifest) CommissionModel() ComponentInfo { return m.commissionModel }
 
+// MarginModel returns the run's own configured initial-margin model
+// (ADR-066), or the zero ComponentInfo when it configured none.
+func (m Manifest) MarginModel() ComponentInfo { return m.marginModel }
+
 // Dataset returns a defensive copy of the canonical dataset provenance
 // (one marketdata.Manifest per touched partition) this run replayed
 // from, in canonical (instrument, interval, span start) order.
@@ -349,6 +360,7 @@ type configWire struct {
 	FillModel          componentInfoWire          `json:"fill_model"`
 	SlippageModel      componentInfoWire          `json:"slippage_model"`
 	CommissionModel    componentInfoWire          `json:"commission_model"`
+	MarginModel        *componentInfoWire         `json:"margin_model,omitempty"`
 	Dataset            []marketdata.Manifest      `json:"dataset"`
 	TraderVersion      string                     `json:"trader_version,omitempty"`
 }
@@ -375,6 +387,11 @@ func (m Manifest) configWire() configWire {
 	for i, r := range m.riskRules {
 		riskRules[i] = r.wire()
 	}
+	var marginModel *componentInfoWire
+	if m.marginModel.name != "" {
+		w := m.marginModel.wire()
+		marginModel = &w
+	}
 	return configWire{
 		StrategyName:       m.strategyName,
 		StrategyVersion:    m.strategyVersion,
@@ -388,6 +405,7 @@ func (m Manifest) configWire() configWire {
 		FillModel:          m.fillModel.wire(),
 		SlippageModel:      m.slippageModel.wire(),
 		CommissionModel:    m.commissionModel.wire(),
+		MarginModel:        marginModel,
 		Dataset:            m.dataset,
 		TraderVersion:      m.traderVersion,
 	}

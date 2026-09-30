@@ -54,6 +54,7 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (RunResponse, error) 
 		FillModel:          env.FillModel,
 		SlippageModel:      env.SlippageModel,
 		CommissionModel:    env.CommissionModel,
+		MarginModel:        env.MarginModel,
 		Strategy:           req.Strategy,
 		StrategyParameters: req.StrategyParameters,
 		Span:               req.Span,

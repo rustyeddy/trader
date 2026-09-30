@@ -102,6 +102,10 @@ func TestVerticalSlice_RunWithStrategyExec(t *testing.T) {
 		"--currency", "USD",
 		"--risk-fraction", "0.01",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
@@ -164,6 +168,10 @@ func TestVerticalSlice_RunWithStrategyExec_RecordsProvenance(t *testing.T) {
 		"--from", "2024-01-08T00:00:00Z",
 		"--to", "2024-01-08T04:00:00Z",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
@@ -248,6 +256,10 @@ func TestVerticalSlice_RunWithStrategyExec_ProcessCrashReportedAsFailure(t *test
 		"--from", "2024-01-08T00:00:00Z",
 		"--to", "2024-01-08T04:00:00Z",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--data-store-root", t.TempDir(),
 		"--output-dir", t.TempDir(),
@@ -310,6 +322,10 @@ func TestRun_StrategyExecLaunchFailureReportedClearly(t *testing.T) {
 		"--from", "2024-01-08T00:00:00Z",
 		"--to", "2024-01-08T04:00:00Z",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--data-store-root", t.TempDir(),
 		"--output-dir", t.TempDir(),
