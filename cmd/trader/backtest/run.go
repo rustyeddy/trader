@@ -68,6 +68,10 @@ type runFlags struct {
 	slowPeriod   int
 	allowedSide  string
 
+	quantity string
+	buyDate  string
+	sellDate string
+
 	strategyExec   string
 	strategyArgs   []string
 	strategyConfig string
@@ -138,6 +142,9 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period; used by the ema-cross strategy")
 	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; used by the ema-cross strategy")
 	cmd.Flags().StringVar(&flags.allowedSide, "allowed-side", "", "restrict ema-cross to one position direction: both, long-only, or short-only")
+	cmd.Flags().StringVar(&flags.quantity, "quantity", "", "buy-and-hold quantity mode: buy exactly this quantity of the single --symbol (never sized or resized)")
+	cmd.Flags().StringVar(&flags.buyDate, "buy-date", "", "buy-and-hold quantity mode: buy on the first bar at or after this date (default: the first bar)")
+	cmd.Flags().StringVar(&flags.sellDate, "sell-date", "", "buy-and-hold quantity mode: exit on the first bar at or after this date (default: hold through the run's end)")
 
 	cmd.Flags().StringVar(&flags.strategyExec, "strategy-exec", "", "path to an out-of-tree strategy executable, launched and driven over Strategy Protocol v1 (ADR-062/ADR-063) instead of an in-tree strategy; mutually exclusive with --config")
 	cmd.Flags().StringArrayVar(&flags.strategyArgs, "strategy-args", nil, "extra argument passed to --strategy-exec's own executable, unmodified; repeatable, in order; requires --strategy-exec")
@@ -668,6 +675,15 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		storeRoot = dir
 	}
 
+	if cfg.Strategy.quantityMode() {
+		if flags.strategyExec != "" {
+			return fmt.Errorf("--quantity applies to the in-process buy-and-hold strategy, not --strategy-exec")
+		}
+		if len(symbols) != 1 {
+			return fmt.Errorf("buy-and-hold quantity mode trades exactly one instrument; got %d symbols", len(symbols))
+		}
+	}
+
 	oandaResolver := instrument.NewMemoryResolver()
 	simResolver := instrument.NewMemoryResolver()
 	instruments, err := resolveInstrumentSet(symbols, provider, oandaResolver, simResolver)
@@ -733,6 +749,27 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 
 		strat = emaStrategy
 		strategyParams = emaStrategy.Config()
+		prices = src
+	} else if cfg.Strategy.quantityMode() {
+		// buy-and-hold quantity mode (issue #417): one instrument, an
+		// exact quantity, filled from the real per-bar next-open price
+		// source so an exit on sell_date fills at its own bar.
+		instID := instruments.ids[0]
+		listing := instruments.simListing[instID.String()]
+
+		settings, err := cfg.Strategy.parseBuyHold(span.Start())
+		if err != nil {
+			return err
+		}
+
+		src := newNextBarOpenPriceSource()
+		if err := src.load(ctx, manager, listing.Symbol(), marketruntime.BarQuery{Instrument: instID, Interval: interval, Range: span}); err != nil {
+			return fmt.Errorf("loading canonical prices for %s: %w", instID, err)
+		}
+
+		bh := newBuyHoldQuantity(instID, interval, settings.quantity, settings.buyDate, settings.sellDate, span.Start())
+		strat = bh
+		strategyParams = bh.params
 		prices = src
 	} else if flags.strategyExec != "" {
 		// The external strategy's own Descriptor (received during its

@@ -306,6 +306,9 @@ There are three strategy paths:
 | `--fast-period`      | —                               | EMA fast period for `ema-cross`                                                       |
 | `--slow-period`      | —                               | EMA slow period for `ema-cross`                                                       |
 | `--allowed-side`     | `both`                          | restrict `ema-cross`: `both`, `long-only`, or `short-only`                           |
+| `--quantity`         | —                               | `buy-and-hold` quantity mode: buy exactly this quantity of the single `--symbol` (see below) |
+| `--buy-date`         | first bar                       | quantity mode: buy on the first bar at or after this date                             |
+| `--sell-date`        | —                               | quantity mode: exit on the first bar at or after this date; unset = hold to the run's end |
 | `--strategy-exec`    | —                               | path to an out-of-tree strategy executable; mutually exclusive with `--config`         |
 | `--strategy-args`    | —                               | extra argument passed to `--strategy-exec`'s own executable, unmodified; repeatable    |
 | `--strategy-config`  | —                               | path to a config file for `--strategy-exec`'s own executable (see below)               |
@@ -350,6 +353,9 @@ strategy:
   fast_period: 20              # used when name is ema-cross
   slow_period: 50              # used when name is ema-cross
   allowed_side: both           # used when name is ema-cross
+  quantity: 8500               # buy-and-hold quantity mode (see below)
+  buy_date: 2024-01-08         # quantity mode; default: the first bar
+  sell_date: 2024-06-28        # quantity mode; optional
 ```
 
 Precedence for each of the fields shown above (the ones with a `config:`
@@ -414,6 +420,61 @@ example, 1% risk over a 0.0050 adverse distance on $10,000 sizes
 Either size smaller or opt into leverage explicitly with a smaller
 `initial_margin_ratio`. Runs made before this limit existed had no
 margin cap at all, so no ratio reproduces them exactly.
+
+#### Margin and sizing
+
+Two separate questions decide whether a position is opened:
+
+- **Sizing: "how much am I willing to lose?"** `risk_fraction` sizes a
+  position from the loss you'll accept at the adverse distance. It says
+  nothing about whether the account can pay for the result.
+- **Margin: "can the account finance it?"** `initial_margin_ratio`
+  (above) admits or refuses the order. It never resizes it.
+
+#### Buy & Hold baseline (`buy-and-hold` quantity mode)
+
+Setting `quantity` switches `buy-and-hold` from its fixed-fraction demo
+behavior into the Buy & Hold baseline:
+
+| Setting | Meaning |
+|---|---|
+| instrument | the run's single `--symbol` / `backtest.symbol` |
+| `quantity` | exactly how much to buy; never sized or resized. Must be positive: an explicit `0` is an error, not a fallback to the demo |
+| `buy_date` | buy on the first bar at or after it (default: `backtest.from`) |
+| `sell_date` | optional: exit on the first bar at or after it, once the position is held; must be after the (effective) buy date |
+
+- The strategy decides *what and when*. Margin decides whether that
+  quantity is admissible, and the simulator decides the fill.
+- An order is decided on a bar's close and fills at the **next bar's
+  open**. The entry always comes first: if both dates have passed by
+  the first available bar (for example over a weekend), it buys on
+  that bar and exits on a later one.
+- A quantity the account can't finance is rejected once, with a margin
+  rejection in the report. It is not resized and not retried.
+- **The run's end date is not a sell.** Without `sell_date` the position
+  stays open in the final account state, valued at the final mark, and
+  no closing trade is added.
+- The quantity and dates are recorded in the run manifest as strategy
+  parameters, so they change `config_digest`.
+
+**Choosing a financeable quantity.** Pick one where
+
+```
+quantity × price × multiplier  ≤  starting cash ÷ initial_margin_ratio
+```
+
+with headroom for the fill. The fill happens at the next bar's open, not
+the price you looked at, and any commission comes out of equity first.
+For example, with $10,000 at the default ratio of 1 and EUR/USD near
+1.10:
+
+- 9,000 units is about $9,900: it fills only if the next open doesn't
+  gap up more than about 1%.
+- 8,500 units is about $9,350, leaving about 6.5% headroom, which is a
+  reasonable baseline.
+
+If the report shows a margin rejection and no trades, the quantity was
+too large for the account.
 
 ### External strategies
 
@@ -584,7 +645,7 @@ Concretely, per command:
   `_INTERVAL`, `_FROM`, `_TO`, `_CURRENCY`, `_STARTING_CAPITAL`,
   `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_INITIAL_MARGIN_RATIO`, `_DATA_STORE_ROOT`, `_DATA_RAW_ROOT`, and
   `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
-  `_ALLOWED_SIDE`. `--provider`, `--journal`, `--output-dir`, `--format`, and `--warmup-bars` are **not**
+  `_ALLOWED_SIDE`, `_QUANTITY`, `_BUY_DATE`, `_SELL_DATE`. `--provider`, `--journal`, `--output-dir`, `--format`, and `--warmup-bars` are **not**
   env-backed — flag only.
 - **`trader data`** (all subcommands) — only the parent command's
   persistent flags are env-backed: `TRADER_STORE_ROOT`,

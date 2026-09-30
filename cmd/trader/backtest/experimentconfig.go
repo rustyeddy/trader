@@ -3,6 +3,7 @@ package backtest
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -94,6 +95,68 @@ type strategySection struct {
 	// so config.Load decodes it directly, the same way num.Rate/
 	// num.Price already do.
 	AllowedSide emacross.Side `config:"allowed_side" flag:"allowed-side" default:"both" json:"allowed_side"`
+
+	// Quantity switches buy-and-hold into quantity mode (issue #417):
+	// buy exactly this quantity, never sized or resized, of the run's
+	// single instrument. It is decoded as text so that supplying it —
+	// by flag, YAML, or environment — is distinct from omitting it:
+	// omitted keeps buy-and-hold's fixed-fraction demo behavior, and a
+	// supplied value must be a positive quantity (an explicit 0 is an
+	// error, never a silent fallback to the demo). BuyDate and SellDate
+	// (YYYY-MM-DD or RFC3339) apply only in quantity mode: buy on the
+	// first bar at or after BuyDate (default: backtest.from), and exit
+	// on the first bar at or after SellDate if set. The run's end date
+	// is not a sell.
+	Quantity string `config:"quantity" flag:"quantity" json:"quantity,omitempty"`
+	BuyDate  string `config:"buy_date" flag:"buy-date" json:"buy_date,omitempty"`
+	SellDate string `config:"sell_date" flag:"sell-date" json:"sell_date,omitempty"`
+}
+
+// quantityMode reports whether buy-and-hold runs in quantity mode:
+// quantity was supplied, whatever its value (validateBuyHold rejects a
+// non-positive one).
+func (s strategySection) quantityMode() bool {
+	return s.Name == demoStrategyName && s.Quantity != ""
+}
+
+// buyHoldSettings is quantity mode's parsed settings.
+type buyHoldSettings struct {
+	quantity num.Quantity
+	buyDate  *time.Time
+	sellDate *time.Time
+}
+
+// parseBuyHold parses and validates quantity mode's settings. from is
+// the run's start, the effective buy date when buy_date is omitted.
+func (s strategySection) parseBuyHold(from time.Time) (buyHoldSettings, error) {
+	var out buyHoldSettings
+	q, err := num.ParseQuantity(s.Quantity)
+	if err != nil {
+		return out, fmt.Errorf("strategy.quantity: %w", err)
+	}
+	if q.IsZero() {
+		return out, fmt.Errorf("strategy.quantity must be positive, got %s", s.Quantity)
+	}
+	out.quantity = q
+	effectiveBuy := from
+	if s.BuyDate != "" {
+		t, err := parseDate(s.BuyDate)
+		if err != nil {
+			return out, fmt.Errorf("strategy.buy_date: %w", err)
+		}
+		out.buyDate, effectiveBuy = &t, t
+	}
+	if s.SellDate != "" {
+		t, err := parseDate(s.SellDate)
+		if err != nil {
+			return out, fmt.Errorf("strategy.sell_date: %w", err)
+		}
+		if !t.After(effectiveBuy) {
+			return out, fmt.Errorf("strategy.sell_date (%s) must be after the effective buy date (%s)", s.SellDate, effectiveBuy.Format(time.RFC3339))
+		}
+		out.sellDate = &t
+	}
+	return out, nil
 }
 
 // Validate implements config's validator hook, checked after every
@@ -103,7 +166,9 @@ type strategySection struct {
 func (c runConfig) Validate() error {
 	switch c.Strategy.Name {
 	case demoStrategyName:
-		// The passive baseline has no strategy-specific parameters.
+		if err := c.Strategy.validateBuyHold(c.Backtest.From); err != nil {
+			return err
+		}
 	case emacross.Name:
 		if c.Strategy.FastPeriod <= 0 {
 			return fmt.Errorf("strategy.fast_period must be positive, got %d", c.Strategy.FastPeriod)
@@ -198,6 +263,15 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 	if cmd.Flags().Changed("allowed-side") {
 		overrides["allowed-side"] = flags.allowedSide
 	}
+	if cmd.Flags().Changed("quantity") {
+		overrides["quantity"] = flags.quantity
+	}
+	if cmd.Flags().Changed("buy-date") {
+		overrides["buy-date"] = flags.buyDate
+	}
+	if cmd.Flags().Changed("sell-date") {
+		overrides["sell-date"] = flags.sellDate
+	}
 	if cmd.Flags().Changed("data-store-root") {
 		overrides["data-store-root"] = flags.dataStoreRoot
 	}
@@ -214,4 +288,22 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 		FilePath:  flags.config,
 		Overrides: overrides,
 	})
+}
+
+// validateBuyHold checks buy-and-hold's quantity-mode parameters:
+// buy_date and sell_date require quantity, and quantity mode's settings
+// must parse (see parseBuyHold). from is backtest.from.
+func (s strategySection) validateBuyHold(from string) error {
+	if s.Quantity == "" {
+		if s.BuyDate != "" || s.SellDate != "" {
+			return fmt.Errorf("strategy.buy_date and strategy.sell_date require strategy.quantity")
+		}
+		return nil
+	}
+	start, err := parseDate(from)
+	if err != nil {
+		return fmt.Errorf("backtest.from: %w", err)
+	}
+	_, err = s.parseBuyHold(start)
+	return err
 }
