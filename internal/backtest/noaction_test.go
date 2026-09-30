@@ -83,3 +83,48 @@ func TestScheduler_IntentWithNothingToDoIsJournaledNoAction(t *testing.T) {
 	assert.True(t, sawExit)
 	assert.True(t, sawStop)
 }
+
+// TestScheduler_TargetAlreadyHeldIsJournaledNoAction pins ADR-067's
+// third case end to end: re-sending a target exposure the account
+// already holds journals a no-action instead of aborting.
+func TestScheduler_TargetAlreadyHeldIsJournaledNoAction(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	eur := eurusdID(t)
+	strat := &recordingStrategy{
+		requirements: bothInstrumentsRequirements(t),
+		emit: func(f strategy.IntentFactory, ev strategy.BarEvent) ([]runtimeorder.Intent, error) {
+			if !ev.Instrument.Equal(eur) {
+				return nil, nil
+			}
+			in, err := f.TargetExposure(ev.Instrument, order.Buy, num.MustParseQuantity("1000"))
+			if err != nil {
+				return nil, err
+			}
+			return []runtimeorder.Intent{in}, nil
+		},
+	}
+	deps := newSchedulerDeps(t, replay, strat, h)
+	rec := &capturingRecorder{}
+	deps.Journal = rec
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	var fills, noActions int
+	for _, r := range rec.all() {
+		switch r.Kind {
+		case journal.KindFill:
+			fills++
+		case journal.KindNoAction:
+			noActions++
+			assert.Contains(t, r.NoAction.Reason, "already at the target exposure")
+		}
+	}
+	assert.Equal(t, 1, fills, "the first target opens the position")
+	assert.Positive(t, noActions, "every later identical target is a journaled no-op")
+}

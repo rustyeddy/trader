@@ -64,7 +64,7 @@ func newFlipFlop() *flipFlop {
 func (f *flipFlop) Describe() sdk.Descriptor {
 	return sdk.Descriptor{
 		Name:    "flipflop",
-		Version: "0.1.0",
+		Version: "0.2.0",
 		Requirements: []sdk.DataRequirement{
 			{Instrument: f.instrument, Interval: f.interval, WarmupBars: 0},
 		},
