@@ -296,6 +296,7 @@ There are three strategy paths:
 | `--starting-cash`    | `10000`                         | starting account cash amount                                                           |
 | `--risk-fraction`    | `0.01`                          | fraction of account equity to risk                                                     |
 | `--adverse-distance` | —                               | adverse price distance for sizing, **required** (or via `--config`)                    |
+| `--initial-margin-ratio` | `1`                         | equity required per unit of gross notional; `1` unlevered, `0.5` = 2×, `0.25` = 4× (see below) |
 | `--warmup-bars`      | `0`                             | warm-up bars before the **demo** strategy may trade (ignored with `--config`)          |
 | `--data-raw-root`    | —                               | raw archive root (required, or supplied by `backtest.data_raw_root`)                  |
 | `--data-store-root`  | `/srv/trading/data/canonical`\* | canonical data store root; an explicit empty value opts into a fresh temp dir per run  |
@@ -318,9 +319,12 @@ pass `--data-store-root` explicitly, or rely on the automatic temporary-
 directory fallback by passing an explicit empty value.
 
 ```sh
+# This sizing is about 2.2x equity, so it opts into up to 4x leverage;
+# without --initial-margin-ratio the default (1, unlevered) rejects it.
 trader backtest run \
   --symbol EURUSD --interval H1 --from 2024-01-01 --to 2024-06-01 \
   --starting-cash 10000 --risk-fraction 0.01 --adverse-distance 0.0050 \
+  --initial-margin-ratio 0.25 \
   --data-raw-root /path/to/raw/oanda --format table
 ```
 
@@ -336,6 +340,7 @@ backtest:
   starting_capital: 10000      # default 10000
   risk_fraction: 0.01          # default 0.01
   adverse_distance: 0.0050     # required
+  initial_margin_ratio: 1      # default 1 (unlevered); must be positive
   data_raw_root: /path/to/raw/oanda  # required
   data_store_root: /path/to/canonical  # default /srv/trading/data/canonical
   provider: oanda                    # default oanda; e.g. stooq
@@ -354,6 +359,56 @@ is: explicit CLI flag > `--config` file value > `TRADER_BACKTEST_*`/
 `--journal`, `--output-dir`, `--format`,
 and `--warmup-bars` are plain CLI flags with no `--config`/environment-
 variable backing at all — see the flag table above for which is which.
+
+#### Initial margin (`initial_margin_ratio`)
+
+Every backtest enforces an account-level **initial-margin** limit
+(ADR-066, `docs/account-risk.md`):
+
+```
+prospective gross notional × initial_margin_ratio ≤ equity
+```
+
+- **Gross notional** sums every open position's
+  `|quantity| × price × contract multiplier`, each at its current
+  price; longs and shorts both add.
+- The default `1` is unlevered: gross exposure may not exceed equity.
+  `0.5` permits 2×, `0.25` permits 4×.
+- One value configures two checks. They share the same ratio and the
+  same calculation, but they evaluate different states, so they don't
+  always reach the same outcome:
+  - **Admission** (the `account_initial_margin` risk rule) checks the
+    order at its reference price against equity before fees.
+  - **Fill time** (the simulator) checks the actual fill price, after
+    slippage, against equity after the fill's own commission. An order
+    admitted earlier can still be refused here, for example after a
+    next-bar gap up or because of its commission.
+- An order that would breach the limit is **refused, never resized**.
+  How it appears in the journal (`--journal`) depends on where it was
+  refused:
+  - At admission: a risk decision whose violation names
+    `account_initial_margin`, with the required margin and equity.
+  - A market order refused at fill: a broker order with status
+    `rejected` and reason `insufficient_margin`.
+  - A resting limit or stop order refused when it triggers: the broker
+    cancels it, with reason `insufficient_margin` in its
+    `cancel_reason`. There is no risk decision for this case.
+- Orders that reduce or close a position are always allowed, even when
+  the account is already over the limit.
+- There is no maintenance margin: a position is never liquidated
+  because prices later move against it. While the account is over the
+  limit, only exposure-reducing orders are accepted.
+- The ratio is recorded in the run manifest (`risk_rules`,
+  `margin_model`) and changes `config_digest`.
+
+**Sizing and margin are separate controls.** `risk_fraction` sizes a
+position from how much you're willing to lose at the adverse distance;
+it does not check whether the account can finance that position. For
+example, 1% risk over a 0.0050 adverse distance on $10,000 sizes
+20,000 EUR/USD (about 2.2× equity), which the default ratio rejects.
+Either size smaller or opt into leverage explicitly with a smaller
+`initial_margin_ratio`. Runs made before this limit existed had no
+margin cap at all, so no ratio reproduces them exactly.
 
 ### External strategies
 
@@ -522,7 +577,7 @@ Concretely, per command:
 - **`trader backtest run`** — only the fields shown in the `--config`
   YAML reference above are env-backed: `TRADER_BACKTEST_SYMBOL`,
   `_INTERVAL`, `_FROM`, `_TO`, `_CURRENCY`, `_STARTING_CAPITAL`,
-  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_DATA_STORE_ROOT`, `_DATA_RAW_ROOT`, and
+  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_INITIAL_MARGIN_RATIO`, `_DATA_STORE_ROOT`, `_DATA_RAW_ROOT`, and
   `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
   `_ALLOWED_SIDE`. `--provider`, `--journal`, `--output-dir`, `--format`, and `--warmup-bars` are **not**
   env-backed — flag only.

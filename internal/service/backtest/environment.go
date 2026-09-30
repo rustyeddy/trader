@@ -64,6 +64,9 @@ type Environment struct {
 	FillModel       backtest.ComponentInfo
 	SlippageModel   backtest.ComponentInfo
 	CommissionModel backtest.ComponentInfo
+	// MarginModel describes Account's initial-margin model (ADR-066);
+	// the zero value means Account has none.
+	MarginModel backtest.ComponentInfo
 
 	Journal journal.Recorder
 }

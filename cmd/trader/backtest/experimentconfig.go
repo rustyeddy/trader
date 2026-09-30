@@ -52,6 +52,14 @@ type backtestSection struct {
 	RiskFraction    num.Rate  `config:"risk_fraction" flag:"risk-fraction" default:"0.01"`
 	AdverseDistance num.Price `config:"adverse_distance" flag:"adverse-distance" required:"true"`
 
+	// InitialMarginRatio is the account's initial-margin ratio
+	// (ADR-066): the minimum equity required per unit of gross position
+	// notional. 1.0 (the default) is unlevered; 0.5 permits 2× gross
+	// exposure, 0.25 permits 4×. This one value configures both the
+	// account_initial_margin risk rule and the simulated account's
+	// fill-time margin model — they are never configured separately.
+	InitialMarginRatio num.Rate `config:"initial_margin_ratio" flag:"initial-margin-ratio" default:"1"`
+
 	// DataStoreRoot is the canonical data store's persistent home
 	// (issue #268): unlike every other field here, its default is not
 	// a research-neutral placeholder but a real, opinionated local
@@ -125,6 +133,10 @@ func (c runConfig) Validate() error {
 		return fmt.Errorf("backtest.interval: %w", err)
 	}
 
+	if c.Backtest.InitialMarginRatio.Sign() <= 0 {
+		return fmt.Errorf("backtest.initial_margin_ratio must be positive, got %s", c.Backtest.InitialMarginRatio)
+	}
+
 	return nil
 }
 
@@ -170,6 +182,9 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 	}
 	if cmd.Flags().Changed("adverse-distance") {
 		overrides["adverse-distance"] = flags.adverse
+	}
+	if cmd.Flags().Changed("initial-margin-ratio") {
+		overrides["initial-margin-ratio"] = flags.initialMarginRatio
 	}
 	if cmd.Flags().Changed("strategy-name") {
 		overrides["strategy-name"] = flags.strategyName

@@ -39,6 +39,10 @@ func runMultiInstrumentBacktest(t *testing.T, outputDir, dataStoreRoot string, s
 		"--currency", "USD",
 		"--risk-fraction", "0.01",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--data-store-root", dataStoreRoot,
 		"--output-dir", outputDir,
@@ -133,6 +137,10 @@ func TestVerticalSlice_MultiInstrumentRun_RejectsDuplicateSymbol(t *testing.T) {
 		"--from", "2024-01-08T00:00:00Z",
 		"--to", "2024-01-08T04:00:00Z",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--output-dir", t.TempDir(),
 	})
@@ -157,6 +165,10 @@ func TestVerticalSlice_MultiInstrumentRun_RejectsCaseInsensitiveDuplicate(t *tes
 		"--from", "2024-01-08T00:00:00Z",
 		"--to", "2024-01-08T04:00:00Z",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--output-dir", t.TempDir(),
 	})

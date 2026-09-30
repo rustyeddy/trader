@@ -59,6 +59,10 @@ func TestVerticalSlice_RunThenShow(t *testing.T) {
 		"--currency", "USD",
 		"--risk-fraction", "0.01",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
@@ -132,6 +136,10 @@ func TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar(t
 		"--currency", "USD",
 		"--risk-fraction", "0.01",
 		"--adverse-distance", "0.01000",
+		// This fixture sizes ~1.1x equity per position (1% risk over a
+		// 0.01 adverse distance); it tests pipeline mechanics, not
+		// margin, so it opts into leverage explicitly (ADR-066).
+		"--initial-margin-ratio", "0.25",
 		"--warmup-bars", "1",
 		"--data-raw-root", "testdata/raw/oanda",
 		"--data-store-root", t.TempDir(),

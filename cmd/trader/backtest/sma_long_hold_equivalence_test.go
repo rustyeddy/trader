@@ -339,7 +339,10 @@ func runInTreeSMATrend(t *testing.T, manager *marketruntime.Manager, simResolver
 	}))
 
 	rec := &capturingRecorder{}
-	factory := environmentFactory{prices: src, journal: rec}
+	// This fixture sizes ~11x equity (10% risk over a 0.01 adverse
+	// distance); it tests CLI/in-tree equivalence, not margin, so it
+	// opts into up to 20x leverage explicitly (ADR-066).
+	factory := environmentFactory{prices: src, journal: rec, initialMarginRatio: num.MustParseRate("0.05")}
 	svc, err := svcbacktest.New(manager, simResolver, factory, nil)
 	require.NoError(t, err)
 
@@ -399,7 +402,10 @@ func runExternalSMALongHold(t *testing.T, manager *marketruntime.Manager, simRes
 	}))
 
 	rec := &capturingRecorder{}
-	factory := environmentFactory{prices: src, journal: rec}
+	// This fixture sizes ~11x equity (10% risk over a 0.01 adverse
+	// distance); it tests CLI/in-tree equivalence, not margin, so it
+	// opts into up to 20x leverage explicitly (ADR-066).
+	factory := environmentFactory{prices: src, journal: rec, initialMarginRatio: num.MustParseRate("0.05")}
 	svc, err := svcbacktest.New(manager, simResolver, factory, nil)
 	require.NoError(t, err)
 

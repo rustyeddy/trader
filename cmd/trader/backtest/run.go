@@ -60,6 +60,8 @@ type runFlags struct {
 	adverse      string
 	warmupBars   int
 
+	initialMarginRatio string
+
 	config       string
 	strategyName string
 	fastPeriod   int
@@ -129,6 +131,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.riskFraction, "risk-fraction", "0.01", "fraction of account equity to risk, e.g. 0.01 for 1%")
 	cmd.Flags().StringVar(&flags.adverse, "adverse-distance", "", "adverse price distance used for sizing (required, unless supplied by --config)")
 	cmd.Flags().IntVar(&flags.warmupBars, "warmup-bars", 0, "warm-up bars required before the demo strategy may trade, per instrument")
+	cmd.Flags().StringVar(&flags.initialMarginRatio, "initial-margin-ratio", "1", "account initial-margin ratio (ADR-066): equity required per unit of gross notional; 1 is unlevered, 0.5 permits 2x, 0.25 permits 4x")
 
 	cmd.Flags().StringVar(&flags.config, "config", "", "YAML config file supplying backtest/strategy parameters (issue #247); explicit flags above always override it")
 	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "in-process strategy name selected by --config")
@@ -860,7 +863,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		jrnl = w
 	}
 
-	factory := environmentFactory{prices: prices, journal: jrnl}
+	factory := environmentFactory{prices: prices, journal: jrnl, initialMarginRatio: cfg.Backtest.InitialMarginRatio}
 
 	svc, err := svcbacktest.New(manager, simResolver, factory, clictx.LoggerFromContext(ctx))
 	if err != nil {

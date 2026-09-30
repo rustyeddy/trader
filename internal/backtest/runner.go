@@ -100,6 +100,9 @@ type RunnerParams struct {
 	FillModel       ComponentInfo
 	SlippageModel   ComponentInfo
 	CommissionModel ComponentInfo
+	// MarginModel describes the Account's initial-margin model
+	// (ADR-066); the zero value means none was configured.
+	MarginModel ComponentInfo
 
 	// Strategy is the strategy this run drives. Describe() supplies
 	// its own DataRequirements (Replay's universe) and warm-up needs.
@@ -266,6 +269,7 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		FillModel:          p.FillModel,
 		SlippageModel:      p.SlippageModel,
 		CommissionModel:    p.CommissionModel,
+		MarginModel:        p.MarginModel,
 		Dataset:            replay.Manifests(),
 		TraderVersion:      p.TraderVersion,
 	})

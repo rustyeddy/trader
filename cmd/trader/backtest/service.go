@@ -158,6 +158,11 @@ type environmentFactory struct {
 	// backtest.Runner (backtest/runner.go) — the common case, since
 	// most invocations do not pass --journal.
 	journal journal.Recorder
+	// initialMarginRatio is the run's one initial-margin ratio
+	// (ADR-066). It configures both the simulated account's margin
+	// model and the account_initial_margin risk rule, so admission and
+	// fill-time enforcement always agree.
+	initialMarginRatio num.Rate
 }
 
 func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.EnvironmentRequest) (svcbacktest.Environment, error) {
@@ -175,11 +180,13 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 		return svcbacktest.Environment{}, err
 	}
 
+	ratio := f.initialMarginRatio
+	accountCfg := simbroker.AccountConfig{AccountID: accountID, StartingCash: req.StartingCapital, InitialMarginRatio: &ratio}
 	b, err := simbroker.NewBroker("sim", simbroker.Deps{
 		Clock:  c,
 		IDs:    ids,
 		Prices: f.prices,
-	}, simbroker.AccountConfig{AccountID: accountID, StartingCash: req.StartingCapital})
+	}, accountCfg)
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
@@ -193,7 +200,21 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
-	engine, err := risk.NewEngine()
+	marginRule, err := risk.NewAccountInitialMarginRule(ratio)
+	if err != nil {
+		return svcbacktest.Environment{}, err
+	}
+	engine, err := risk.NewEngine(marginRule)
+	if err != nil {
+		return svcbacktest.Environment{}, err
+	}
+	ratioParams := map[string]string{"initial_margin_ratio": ratio.String()}
+	marginRuleInfo, err := backtest.NewComponentInfo(marginRule.Name(), "v1", ratioParams)
+	if err != nil {
+		return svcbacktest.Environment{}, err
+	}
+	modelInfo := accountCfg.MarginModelInfo()
+	marginModel, err := backtest.NewComponentInfo(modelInfo.Name, modelInfo.Version, ratioParams)
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
@@ -238,8 +259,10 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 		Account:         account,
 		Pipeline:        pl,
 		Journal:         f.journal,
+		RiskRules:       []backtest.ComponentInfo{marginRuleInfo},
 		FillModel:       fill,
 		SlippageModel:   slippage,
 		CommissionModel: commission,
+		MarginModel:     marginModel,
 	}, nil
 }
