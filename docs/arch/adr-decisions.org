@@ -176,10 +176,18 @@ the original decided, use full supersession instead.
 | 066 | Account-level initial-margin admission for the simulator/backtester (in adr-066-account-initial-margin-admission.org) | Accepted |
 | 067 | Intents the account already satisfies are journaled no-ops (in adr-067-no-action-intents.org) | Accepted |
 | 068 | MCP as a thin, capability-oriented application-service adapter (in adr-068-mcp-application-service-adapter.org) | Accepted |
+| 069 | Shared transport application behavior and repeatable service operations (in adr-069-shared-transport-application-behavior.org) | Accepted, partial amendment of 039, 040, 068 |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
 Their remaining behavior contracts are unchanged; see their Status notes.
+
+ADR-069 partially amends ADR-039 (report model assembly moves into the
+application layer; =RunResponse= still carries no rendering concerns), ADR-040
+(run-snapshot persistence moves from the CLI to a shared application-layer
+store; =report= still knows nothing about paths), and ADR-068 (shared transport
+behavior moves below the transports; service operations must be repeatable).
+Their remaining decisions are unchanged; see their Status notes.
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —

@@ -7,25 +7,9 @@ Accepted. Issue #433 and PR #438 establish Trader's MCP composition root and
 write-access policy. This ADR specializes ADR-022 for the MCP transport without
 changing ADR-022's general application-service boundary.
 
-Clarification (2026-10-02, review of #439/#437; append-only, the decision
-below is unchanged):
-
-- *Shared transport logic moves down; it is never copied.* When one transport
-  (today the CLI) implements something another transport (MCP) needs, that code
-  moves below both transports before the second one uses it:
-  - application logic (instrument resolution, data preparation, run-snapshot
-    persistence, report building) goes to =internal/service/...=;
-  - concrete adapter wiring, which ADR-039 keeps out of service packages, goes
-    to a shared composition package under =cmd/internal/= (as
-    =cmd/internal/marketdatacfg= did in #433).
-  Transports keep only request parsing and response rendering.
-- *Service operations must be safe to repeat.* A transport may send repeated
-  symbols in one request, or reuse a provider-scoped service across requests
-  (#442). Operations a transport calls must therefore be idempotent with respect
-  to request-scoped state. For example, instrument registration looks up before
-  registering instead of failing with =ErrDuplicateListing=.
-- *Where the capability interface lives* is decided in #439 and recorded here
-  when it lands.
+Amended by ADR-069: CLI behavior that MCP also needs moves below both
+transports instead of being copied, and service operations that transports
+call must be repeatable.
 
 * Context
 

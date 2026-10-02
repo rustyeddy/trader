@@ -18,6 +18,12 @@ because the persisted =BacktestReport= gained a =margin= section, and
 is the version mechanism below working as intended, not a change to
 this decision; the text below is left as originally accepted.
 
+Amended by ADR-069: run-snapshot persistence (directory layout, atomic
+writes, schema and run-ID validation) moves from the CLI's =store.go= to a
+shared application-layer store, so =trader backtest show= and MCP read the
+same records. =report= still knows nothing about paths, and rendering stays
+in each transport.
+
 * Context
 
 #220 (=report=) and #221 (=service/backtest=) give this issue

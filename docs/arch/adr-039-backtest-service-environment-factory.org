@@ -13,6 +13,11 @@ every call stay consistent with every other =service/*= package's
 
 Amended by ADR-065: backtest service composition is private to Trader.
 
+Amended by ADR-069: assembling the backtest report model, and persisting and
+retrieving run records, move into the application layer once more than one
+transport needs them. =RunResponse= itself still carries no rendering or
+serialization concerns.
+
 * Context
 
 =backtest.Runner= is single-use: =RunnerParams= bundles a freshly
