@@ -1,37 +1,30 @@
 package data
 
 import (
-	"os"
-	"path/filepath"
+	"errors"
+	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
+
+	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
-func TestFindStooqArchiveFindsUniqueSymbolArchive(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "daily", "spy_us_d.zip")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	require.NoError(t, os.WriteFile(path, []byte("zip"), 0o644))
-
-	got, err := findStooqArchive(root, "SPY")
-	require.NoError(t, err)
-	require.Equal(t, path, got)
-}
-
-func TestFindStooqArchiveRejectsAmbiguousMatches(t *testing.T) {
-	root := t.TempDir()
-	for _, name := range []string{"spy_2024.zip", "spy_2025.zip"} {
-		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte("zip"), 0o644))
+func TestStooqArchiveErrorAddsFlagGuidance(t *testing.T) {
+	wrap := func(err error) error { return fmt.Errorf("%w: detail", err) }
+	tests := map[string]struct {
+		err  error
+		want string
+	}{
+		"root not configured": {wrap(svc.ErrArchiveRootNotConfigured), "stooq archive root is not configured; provide --archive or --archive-root"},
+		"not found":           {wrap(svc.ErrArchiveNotFound), `no Stooq archive for SPY found under "/arch"; provide --archive`},
+		"ambiguous":           {wrap(svc.ErrAmbiguousArchive), `multiple Stooq archives for SPY found under "/arch"; provide --archive`},
 	}
-
-	_, err := findStooqArchive(root, "SPY")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "multiple Stooq archives")
-}
-
-func TestFindStooqArchiveRequiresConfiguredRoot(t *testing.T) {
-	_, err := findStooqArchive("", "SPY")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "--archive")
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.EqualError(t, stooqArchiveError(tc.err, "SPY", "/arch"), tc.want)
+		})
+	}
+	other := errors.New("boom")
+	assert.Same(t, other, stooqArchiveError(other, "SPY", "/arch"))
 }

@@ -10,6 +10,11 @@
 // it establishes the package's construction and request-DTO
 // conventions those issues build on.
 //
+// ConvertStooqArchive (issue #434) owns native Stooq archive handling —
+// discovery under an archive root, member extraction, and the reference
+// listing defaults (DefaultListing) — so every transport converts an
+// archive through the same operation (ADR-069).
+//
 // Service never reaches into marketdata/internal, never formats a
 // response, and never depends on a transport framework — see the
 // service package's own doc comment for the full set of rules every

@@ -1,12 +1,7 @@
 package data
 
 import (
-	"archive/zip"
-	"context"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,8 +10,9 @@ import (
 )
 
 // newConvertCmd imports one native Stooq archive member into managed raw
-// partitions and builds the requested canonical range. Extraction is always
-// temporary; the original ZIP remains the source of truth.
+// partitions and builds the requested canonical range. The service
+// extracts the member to a temporary directory; the original ZIP remains
+// the source of truth.
 func newConvertCmd() *cobra.Command {
 	var flags datasetArgFlags
 	var archivePath string
@@ -43,17 +39,8 @@ func newConvertCmd() *cobra.Command {
 			if strings.ToUpper(args[1]) != "D1" {
 				return fmt.Errorf("stooq conversion currently supports only D1")
 			}
-			tmp, err := os.MkdirTemp("", "trader-stooq-convert-")
-			if err != nil {
-				return fmt.Errorf("create temporary extraction directory: %w", err)
-			}
-			defer func() { _ = os.RemoveAll(tmp) }()
-			extracted, err := extractStooqMember(cmd.Context(), archivePath, args[0], tmp)
-			if err != nil {
-				return err
-			}
-			resp, err := dc.Service.Convert(cmd.Context(), svc.ConvertRequest{
-				DatasetRequest: req, ArchivePath: extracted,
+			resp, err := dc.Service.ConvertStooqArchive(cmd.Context(), svc.ConvertStooqArchiveRequest{
+				DatasetRequest: req, Symbol: args[0], ArchivePath: archivePath,
 			})
 			if err != nil {
 				return err
@@ -68,45 +55,4 @@ func newConvertCmd() *cobra.Command {
 	cmd.Flags().StringVar(&archivePath, "archive", "", "native Stooq ZIP archive path")
 	addDatasetConversionFlags(cmd, &flags)
 	return cmd
-}
-
-func extractStooqMember(ctx context.Context, archivePath, symbol, destination string) (string, error) {
-	zr, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return "", fmt.Errorf("open archive: %w", err)
-	}
-	defer func() { _ = zr.Close() }()
-	want := strings.ToLower(strings.TrimSpace(symbol)) + ".us.txt"
-	for _, entry := range zr.File {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		if strings.ToLower(filepath.Base(entry.Name)) != want {
-			continue
-		}
-		if entry.FileInfo().IsDir() {
-			continue
-		}
-		in, err := entry.Open()
-		if err != nil {
-			return "", fmt.Errorf("open archive member %q: %w", entry.Name, err)
-		}
-		path := filepath.Join(destination, filepath.Base(entry.Name))
-		out, err := os.Create(path)
-		if err != nil {
-			_ = in.Close()
-			return "", fmt.Errorf("create extracted archive member: %w", err)
-		}
-		_, copyErr := io.Copy(out, in)
-		closeInErr := in.Close()
-		closeOutErr := out.Close()
-		if copyErr != nil {
-			return "", fmt.Errorf("extract archive member %q: %w", entry.Name, copyErr)
-		}
-		if closeInErr != nil || closeOutErr != nil {
-			return "", fmt.Errorf("close extracted archive member %q: %v %v", entry.Name, closeInErr, closeOutErr)
-		}
-		return path, nil
-	}
-	return "", fmt.Errorf("archive %q contains no %s member", archivePath, want)
 }
