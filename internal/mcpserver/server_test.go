@@ -12,7 +12,7 @@ import (
 
 func TestVersionToolThroughMCP(t *testing.T) {
 	ctx := context.Background()
-	server := New()
+	server := New(Deps{})
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
 	require.NoError(t, err)

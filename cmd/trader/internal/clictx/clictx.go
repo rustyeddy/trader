@@ -16,12 +16,14 @@ package clictx
 import (
 	"context"
 	"log/slog"
+
+	"github.com/rustyeddy/trader/cmd/internal/marketdatacfg"
 )
 
 // EnvPrefix is the environment-variable prefix every trader flag's
 // backing config.Load call uses, matching config's own documented
 // convention for Trader's binaries (config/doc.go).
-const EnvPrefix = "TRADER"
+const EnvPrefix = marketdatacfg.EnvPrefix
 
 // loggerKey is an unexported context key type so this package's logger
 // value can never collide with a key defined elsewhere.

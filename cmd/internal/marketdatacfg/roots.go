@@ -1,4 +1,4 @@
-package data
+package marketdatacfg
 
 import (
 	"fmt"
@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 )
 
-// defaultTraderDataDir returns the per-user directory trader uses to
+// DefaultDataDir returns the per-user directory trader uses to
 // compute a default --store-root/--raw-root when neither is
 // explicitly configured (issue #141): $XDG_DATA_HOME/trader when
 // XDG_DATA_HOME is set, otherwise ~/.local/share/trader — the XDG Base
 // Directory convention, so trader's default data location matches
 // where other modern Linux CLI tools already keep their own per-user
 // data, rather than inventing a Trader-specific convention.
-func defaultTraderDataDir() (string, error) {
+func DefaultDataDir() (string, error) {
 	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "trader"), nil
 	}
@@ -24,7 +24,7 @@ func defaultTraderDataDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "trader"), nil
 }
 
-// applyDefaultDataRoots fills cfg.StoreRoot and cfg.RawRoot with a
+// ApplyDefaultRoots fills cfg.StoreRoot and cfg.RawRoot with a
 // computed default (issue #141) whenever the caller left either empty
 // -- meaning neither a flag nor TRADER_STORE_ROOT/TRADER_RAW_ROOT
 // configured it, since neither field carries a config default:"value"
@@ -49,12 +49,12 @@ func defaultTraderDataDir() (string, error) {
 // (oanda.WritePartition's and canonicalCSVStore.publish's own
 // os.MkdirAll), exactly at the point they actually write, which is
 // where directory creation as a side effect belongs.
-func applyDefaultDataRoots(cfg *datasetConfig) error {
+func ApplyDefaultRoots(cfg *Config) error {
 	if cfg.StoreRoot != "" && cfg.RawRoot != "" {
 		return nil
 	}
 
-	dataDir, err := defaultTraderDataDir()
+	dataDir, err := DefaultDataDir()
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package data
+package marketdatacfg
 
 import (
 	"path/filepath"
@@ -8,19 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultTraderDataDir_PrefersXDGDataHome(t *testing.T) {
+func TestDefaultDataDir_PrefersXDGDataHome(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "/xdg-home")
 
-	dir, err := defaultTraderDataDir()
+	dir, err := DefaultDataDir()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/xdg-home", "trader"), dir)
 }
 
-func TestDefaultTraderDataDir_FallsBackToHomeLocalShare(t *testing.T) {
+func TestDefaultDataDir_FallsBackToHomeLocalShare(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HOME", "/home-dir")
 
-	dir, err := defaultTraderDataDir()
+	dir, err := DefaultDataDir()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/home-dir", ".local", "share", "trader"), dir)
 }
@@ -30,11 +30,11 @@ func TestDefaultTraderDataDir_FallsBackToHomeLocalShare(t *testing.T) {
 // unusable path when neither XDG_DATA_HOME nor HOME can be resolved --
 // os.UserHomeDir returns an explicit error for an empty $HOME on Unix,
 // which this function must propagate, not ignore.
-func TestDefaultTraderDataDir_ReturnsErrorWhenHomeUnknown(t *testing.T) {
+func TestDefaultDataDir_ReturnsErrorWhenHomeUnknown(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HOME", "")
 
-	_, err := defaultTraderDataDir()
+	_, err := DefaultDataDir()
 	require.Error(t, err)
 }
 
@@ -42,8 +42,8 @@ func TestApplyDefaultDataRoots_FillsBothWhenEmpty(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
 
-	cfg := datasetConfig{Provider: "oanda"}
-	require.NoError(t, applyDefaultDataRoots(&cfg))
+	cfg := Config{Provider: "oanda"}
+	require.NoError(t, ApplyDefaultRoots(&cfg))
 
 	wantStoreRoot := filepath.Join(dataDir, "trader", "data")
 	wantRawRoot := filepath.Join(dataDir, "trader", "raw", "oanda")
@@ -64,11 +64,11 @@ func TestApplyDefaultDataRoots_NeverCreatesDirectories(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
 
-	cfg := datasetConfig{Provider: "oanda"}
-	require.NoError(t, applyDefaultDataRoots(&cfg))
+	cfg := Config{Provider: "oanda"}
+	require.NoError(t, ApplyDefaultRoots(&cfg))
 
-	assert.NoDirExists(t, cfg.StoreRoot, "applyDefaultDataRoots must never create a directory itself")
-	assert.NoDirExists(t, cfg.RawRoot, "applyDefaultDataRoots must never create a directory itself")
+	assert.NoDirExists(t, cfg.StoreRoot, "ApplyDefaultRoots must never create a directory itself")
+	assert.NoDirExists(t, cfg.RawRoot, "ApplyDefaultRoots must never create a directory itself")
 }
 
 // TestApplyDefaultDataRoots_ExplicitEmptyStringIsTreatedAsUnset
@@ -76,12 +76,12 @@ func TestApplyDefaultDataRoots_NeverCreatesDirectories(t *testing.T) {
 // review: config.Load cannot distinguish "the caller never supplied
 // --store-root/TRADER_STORE_ROOT at all" from "the caller explicitly
 // supplied an empty value" -- a plain string field carries no such
-// presence information once decoded, and datasetConfig's StoreRoot/
+// presence information once decoded, and Config's StoreRoot/
 // RawRoot fields carry no required:"true" tag to make an empty value
 // a load-time error either. An empty string in either field is
 // therefore always treated as "use the computed default," regardless
 // of how it became empty. This is judged acceptable specifically
-// because applyDefaultDataRoots no longer creates any directory
+// because ApplyDefaultRoots no longer creates any directory
 // (see TestApplyDefaultDataRoots_NeverCreatesDirectories): the
 // original review concern was that auto-creation could mask a
 // misconfiguration behind a silently-created directory, and that risk
@@ -90,8 +90,8 @@ func TestApplyDefaultDataRoots_ExplicitEmptyStringIsTreatedAsUnset(t *testing.T)
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
 
-	cfg := datasetConfig{StoreRoot: "", RawRoot: "", Provider: "oanda"}
-	require.NoError(t, applyDefaultDataRoots(&cfg))
+	cfg := Config{StoreRoot: "", RawRoot: "", Provider: "oanda"}
+	require.NoError(t, ApplyDefaultRoots(&cfg))
 
 	assert.Equal(t, filepath.Join(dataDir, "trader", "data"), cfg.StoreRoot)
 	assert.Equal(t, filepath.Join(dataDir, "trader", "raw", "oanda"), cfg.RawRoot)
@@ -105,8 +105,8 @@ func TestApplyDefaultDataRoots_RawRootIsScopedByProvider(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
 
-	cfg := datasetConfig{Provider: "some-other-provider"}
-	require.NoError(t, applyDefaultDataRoots(&cfg))
+	cfg := Config{Provider: "some-other-provider"}
+	require.NoError(t, ApplyDefaultRoots(&cfg))
 
 	assert.Equal(t, filepath.Join(dataDir, "trader", "raw", "some-other-provider"), cfg.RawRoot)
 }
@@ -122,9 +122,9 @@ func TestApplyDefaultDataRoots_NeverTouchesExplicitPaths(t *testing.T) {
 
 	explicitStoreRoot := filepath.Join(t.TempDir(), "does-not-exist-store")
 	explicitRawRoot := filepath.Join(t.TempDir(), "does-not-exist-raw")
-	cfg := datasetConfig{StoreRoot: explicitStoreRoot, RawRoot: explicitRawRoot, Provider: "oanda"}
+	cfg := Config{StoreRoot: explicitStoreRoot, RawRoot: explicitRawRoot, Provider: "oanda"}
 
-	require.NoError(t, applyDefaultDataRoots(&cfg))
+	require.NoError(t, ApplyDefaultRoots(&cfg))
 
 	assert.Equal(t, explicitStoreRoot, cfg.StoreRoot)
 	assert.Equal(t, explicitRawRoot, cfg.RawRoot)
@@ -137,9 +137,9 @@ func TestApplyDefaultDataRoots_FillsOnlyTheEmptyField(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", dataDir)
 
 	explicitStoreRoot := t.TempDir()
-	cfg := datasetConfig{StoreRoot: explicitStoreRoot, Provider: "oanda"}
+	cfg := Config{StoreRoot: explicitStoreRoot, Provider: "oanda"}
 
-	require.NoError(t, applyDefaultDataRoots(&cfg))
+	require.NoError(t, ApplyDefaultRoots(&cfg))
 
 	assert.Equal(t, explicitStoreRoot, cfg.StoreRoot, "an already-set StoreRoot must not be overwritten")
 	assert.Equal(t, filepath.Join(dataDir, "trader", "raw", "oanda"), cfg.RawRoot)
@@ -149,7 +149,7 @@ func TestApplyDefaultDataRoots_PropagatesDataDirError(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HOME", "")
 
-	cfg := datasetConfig{Provider: "oanda"}
-	err := applyDefaultDataRoots(&cfg)
+	cfg := Config{Provider: "oanda"}
+	err := ApplyDefaultRoots(&cfg)
 	require.Error(t, err)
 }
