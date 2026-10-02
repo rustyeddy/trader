@@ -1,0 +1,150 @@
+#+TITLE: ADR-069: Shared transport application behavior and repeatable service operations
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Review of the MCP Server milestone issues (#434, #437, #439, #440)
+and PR #444. Partially amends ADR-039, ADR-040, and ADR-068 (see the Partial
+Amendment Rules in =adr-decisions.org=). Each of those ADRs remains in force
+except for the specific sub-decision named here.
+
+* Context
+
+Trader now has two transports over the same application services: the
+operator CLI (=cmd/trader=) and the MCP server (=cmd/trader-mcp=, ADR-068).
+ADR-022 already requires transports to stay thin, but until now the CLI was the
+only transport, so behavior that both now need sits in CLI packages:
+
+- *Instrument resolution* is implemented twice inside the CLI alone:
+  =registerRequestedInstrument= (=cmd/trader/data=) and
+  =registerBacktestInstrument= / =resolveInstrumentSet= (=cmd/trader/backtest=).
+  MCP would make a third.
+- *Stooq archive handling* (discovery, extraction, symbol defaults) lives in
+  the =stq2bars= CLI command (#434).
+- *Backtest run orchestration* (preparing canonical data, building the report
+  model, persisting run snapshots) lives in =cmd/trader/backtest= (#437).
+
+Two accepted decisions currently place parts of that last item in the CLI on
+purpose:
+
+- ADR-039: "=RunResponse= carries no reporting or serialization concerns;
+  =report.NewBacktestReport= (issue #220) remains the presentation boundary
+  over whichever =Result=-shaped value a caller obtains."
+- ADR-040, "Filesystem ownership stays in the CLI; =report= knows nothing about
+  paths": "=store.go= (this package) owns directory creation, atomic writes,
+  and the schema/identity validation on read."
+
+Both were right with one transport. With two, keeping them means MCP either
+copies the CLI's code or calls into a CLI package, and both are exactly what
+ADR-022 and ADR-068 forbid.
+
+There is also a new hazard. Today every CLI invocation and every MCP request
+builds fresh services with an empty in-memory resolver, so request-scoped
+state never persists. Instrument registration (=MemoryResolver.Register=)
+fails with =ErrDuplicateListing= on a second registration. That is harmless
+only while nothing repeats within a service's lifetime. Once registration
+moves inside service operations (#439), a request naming a symbol twice, or
+any reuse of a service across requests (#442), would fail.
+
+* Decision
+
+** 1. Behavior shared by transports moves below them; it is never copied
+
+When one transport implements behavior another transport needs, that code
+moves below both transports before the second one uses it:
+
+- *Application logic* goes to =internal/service/...=. Examples: instrument
+  resolution, Stooq archive conversion, preparing canonical data for a run,
+  and the run-record operations in Decision 3.
+- *Concrete adapter wiring*, which ADR-039 keeps out of service packages (the
+  simulated broker, price sources, strategy construction), goes to a shared
+  composition package under =cmd/internal/=, as =cmd/internal/marketdatacfg=
+  did in #433.
+
+Transports keep only request parsing, transport policy (such as MCP write
+access, ADR-068), and response rendering. Where both transports already
+implement the same behavior, they converge on the shared code rather than
+keeping parallel copies.
+
+** 2. Service operations called by transports are repeatable
+
+An operation a transport calls must be idempotent with respect to
+request-scoped state. Calling it twice within one request, or across requests
+on the same service, must not fail merely because the first call already
+established that state.
+
+The first concrete case is instrument registration: an operation that
+resolves symbols looks a listing up before registering it, and treats an
+identical existing listing as success instead of failing with
+=ErrDuplicateListing=. #439 implements this.
+
+This makes service reuse across requests (#442) possible later. It does not
+require it.
+
+** 3. Report model assembly and run records move below the transports
+
+Partially amends ADR-039 and ADR-040, for the backtest use case:
+
+- *Report model assembly* — projecting a run's result into the
+  transport-neutral =report.BacktestReport= model — becomes an
+  application-layer step that every transport shares.
+- *Run-record persistence and retrieval* — directory layout, atomic writes,
+  schema-version and run-ID validation (the ADR-040 snapshot behavior) — move
+  from the CLI's =store.go= to a shared application-layer store. The
+  composition root supplies its directory, so =trader backtest show= and MCP's
+  =trader_backtest_result= read the same records.
+
+Unchanged:
+
+- =service/backtest.RunResponse= still carries no rendering or serialization
+  concerns (ADR-039). Model assembly is a separate application step, not a
+  field of the run response.
+- The =report= package still knows nothing about paths or I/O destinations
+  (ADR-040). The store is a separate application-layer component.
+- *Rendering stays transport-side* (ADR-022): Org, JSON, and terminal output
+  remain presentation, as does MCP's encoding of results. Only the model and
+  the run records move.
+
+** Not decided here
+
+Where the capability interface consumed by =internal/mcpserver= lives (ADR-068
+leaves its shape open) is decided in #439, and recorded as an amendment when
+it lands.
+
+* Consequences
+
+- CLI and MCP run the same code for every shared use case, so behavior cannot
+  drift between transports.
+- Some MCP tools wait on refactors that move CLI code down first: #434 and
+  #439 for market data, #437 for backtests.
+- The CLI's two existing instrument-resolution paths collapse into one (#439).
+- Service operations gain an idempotency contract, tested directly.
+- A new application-layer run-record store exists, configured with a directory
+  by each composition root.
+- Moving code out of the CLI must preserve its behavior; the existing CLI tests
+  are the regression gate for each move.
+
+* Alternatives Considered
+
+- *Let MCP import CLI packages.* Rejected: it couples one transport to
+  another's packages and leaves the logic in a transport layer, against
+  ADR-022.
+- *Copy the needed CLI logic into MCP.* Rejected: two implementations of the
+  same behavior drift, which is the problem ADR-068 exists to prevent.
+- *Keep run-snapshot persistence in the CLI and have MCP write its own.*
+  Rejected: =trader backtest show= and =trader_backtest_result= must read the
+  same records with the same schema and validation.
+- *Make registration callers handle =ErrDuplicateListing=.* Rejected: every
+  transport would repeat the same handling. Idempotency belongs in the
+  operation.
+- *An append-only clarification on ADR-068* (the first draft of PR #444).
+  Rejected in review: these are new decisions that amend accepted ADRs, so the
+  registry requires an amending ADR.
+
+* Related
+
+- ADR-022: CLI and application service layer.
+- ADR-039: backtest application service (partially amended).
+- ADR-040: thin backtest CLI and run snapshots (partially amended).
+- ADR-068: MCP application-service adapter (partially amended).
+- #434, #437, #439, #440, #442.

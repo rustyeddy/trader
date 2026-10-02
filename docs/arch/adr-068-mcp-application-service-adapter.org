@@ -7,6 +7,10 @@ Accepted. Issue #433 and PR #438 establish Trader's MCP composition root and
 write-access policy. This ADR specializes ADR-022 for the MCP transport without
 changing ADR-022's general application-service boundary.
 
+Amended by ADR-069: CLI behavior that MCP also needs moves below both
+transports instead of being copied, and service operations that transports
+call must be repeatable.
+
 * Context
 
 Trader now exposes a Model Context Protocol (MCP) server alongside the operator
