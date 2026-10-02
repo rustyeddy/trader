@@ -367,3 +367,23 @@ func TestReadPartitionFile_OverlongLineIsMalformed(t *testing.T) {
 	assert.ErrorIs(t, err, errStoreMalformed)
 	assert.True(t, skippableLoadError(err))
 }
+
+func TestCanonicalCSVStoreMonths_StatErrorPropagates(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	mgr := newTestManagerWithRaw(t, t.TempDir())
+	publishH1(t, mgr, utcHour(2024, time.January, 8, 10))
+	publishH1(t, mgr, utcHour(2024, time.March, 4, 9))
+	// The March directory stays listable from its parent, but without
+	// search permission its partition file cannot be stat'ed.
+	marchDir := filepath.Join(mgr.storeRoot, "oanda", "EURUSD", "2024", "03")
+	require.NoError(t, os.Chmod(marchDir, 0o600))
+	t.Cleanup(func() { _ = os.Chmod(marchDir, 0o755) })
+
+	_, err := newCanonicalCSVStore(mgr.storeRoot).months(context.Background(), "oanda", "EURUSD", marketdata.H1)
+	require.ErrorIs(t, err, fs.ErrPermission)
+
+	_, err = mgr.Inventory(context.Background(), eurusd(), marketdata.H1)
+	require.ErrorIs(t, err, fs.ErrPermission, "an unstat-able newest partition must not report an earlier end")
+}

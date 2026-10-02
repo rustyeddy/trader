@@ -780,7 +780,10 @@ type yearMonth struct {
 
 // months lists the months with a partition file for provider/symbol/
 // interval by walking the root/provider/SYMBOL/YYYY/MM tree. A missing
-// tree is an empty listing, not an error.
+// tree or partition file is simply not listed, and entries that aren't
+// regular files or zero-padded year/month directories are ignored. Any
+// other filesystem error fails the listing, so an unreadable partition
+// is never mistaken for an absent one.
 func (s *canonicalCSVStore) months(ctx context.Context, provider, symbol string, interval marketdata.Interval) ([]yearMonth, error) {
 	if err := validatePathComponent(provider); err != nil {
 		return nil, fmt.Errorf("marketdata: store: months: %w: provider: %v", errStoreInvalidPartitionKey, err)
@@ -821,7 +824,13 @@ func (s *canonicalCSVStore) months(ctx context.Context, provider, symbol string,
 			if err != nil {
 				return nil, err
 			}
-			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			info, err := os.Stat(path)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				// no partition this month, or removed since the listing
+			case err != nil:
+				return nil, fmt.Errorf("marketdata: store: months: %w", err)
+			case info.Mode().IsRegular():
 				out = append(out, yearMonth{year: year, month: time.Month(month)})
 			}
 		}
