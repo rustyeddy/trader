@@ -60,9 +60,9 @@ const EnvPrefix = "TRADER"
 //
 // AlpacaKeyID/AlpacaSecretKey follow OANDAToken's identical reasoning
 // and pattern (issue #331): no CLI flag, secret:"true", supplied only
-// via TRADER_ALPACA_KEY_ID/TRADER_ALPACA_SECRET_KEY (or a Trader-owned
-// --config YAML file using this same dotted config-key naming — see
-// config.Options.FilePath). This is deliberately the one and only
+// via TRADER_ALPACA_KEY_ID/TRADER_ALPACA_SECRET_KEY. Load reads no
+// config file, and neither consuming binary has a --config flag for
+// this configuration. This is deliberately the one and only
 // credential source, for consistency with OANDA's own CLI story: this
 // package does not additionally read a third-party tool's own profile
 // file format (for example a local Alpaca CLI's own
@@ -93,8 +93,10 @@ type Config struct {
 
 // Load resolves a Config from environ (TRADER_* variables) layered under
 // overrides, keyed by flag name, via the same config.Load every Trader
-// composition root uses. Credentials have no flag and come from the
-// environment only (see Config).
+// composition root uses. A nil environ reads the real process
+// environment; tests pass an explicit, possibly empty, slice.
+// Credentials have no flag and come from the environment only (see
+// Config).
 func Load(environ []string, overrides map[string]string) (Config, error) {
 	return config.Load[Config](config.Options{
 		EnvPrefix: EnvPrefix,

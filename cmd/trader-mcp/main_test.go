@@ -13,15 +13,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// baseEnv points every root at a temp dir and logs to a file, so a test
-// never touches real data or writes to the test's stdout.
+// baseEnv points every data root at a temp dir and logs to a file, so a
+// test never touches real data or writes to the test's stdout. The roots
+// are set explicitly in the supplied environment, and XDG_DATA_HOME is
+// also set on the process: DefaultDataDir, used for any root left unset
+// (and for non-default providers), reads the process environment.
 func baseEnv(t *testing.T) (env []string, logPath string) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "xdg"))
 	logPath = filepath.Join(dir, "trader-mcp.log")
 	return []string{
-		"XDG_DATA_HOME=" + filepath.Join(dir, "xdg"),
 		"TRADER_STORE_ROOT=" + filepath.Join(dir, "store"),
+		"TRADER_RAW_ROOT=" + filepath.Join(dir, "raw"),
+		"TRADER_ARCHIVE_ROOT=" + filepath.Join(dir, "archive"),
 		"TRADER_OUTPUT=" + logPath,
 	}, logPath
 }
@@ -150,6 +155,22 @@ func TestRun_StopsWhenContextEnds(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not return after the context ended")
 	}
+}
+
+func TestRun_HelpIsSuccess(t *testing.T) {
+	env, _ := baseEnv(t)
+	_, serverT := mcp.NewInMemoryTransports()
+	var stderr bytes.Buffer
+	err := run(context.Background(), []string{"--help"}, env, serverT, &stderr)
+	require.NoError(t, err, "help is not a startup failure")
+	assert.Contains(t, stderr.String(), "-allow-writes", "usage was printed")
+}
+
+func TestBuild_RejectsPositionalArguments(t *testing.T) {
+	env, _ := baseEnv(t)
+	_, _, err := build([]string{"--allow-writes", "typo"}, env, &bytes.Buffer{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unexpected arguments ["typo"]`)
 }
 
 func TestRun_BuildErrorReturned(t *testing.T) {

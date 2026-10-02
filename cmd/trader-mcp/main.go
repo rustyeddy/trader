@@ -53,6 +53,9 @@ func main() {
 // transport until ctx ends or the client disconnects.
 func run(ctx context.Context, args, environ []string, transport mcp.Transport, stderr io.Writer) error {
 	srv, closer, err := build(args, environ, stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil // -h/--help printed usage; that is success, not a startup error
+	}
 	if err != nil {
 		return err
 	}
@@ -87,6 +90,9 @@ func build(args, environ []string, stderr io.Writer) (*mcp.Server, io.Closer, er
 	fs.String("log-output", "", "log output: stderr or a file path (default stderr)")
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
+	}
+	if fs.NArg() > 0 {
+		return nil, nil, fmt.Errorf("unexpected arguments %q: trader-mcp takes flags only", fs.Args())
 	}
 
 	// Only flags actually given override environment and defaults, as in

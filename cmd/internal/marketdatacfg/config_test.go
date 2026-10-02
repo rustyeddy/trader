@@ -31,7 +31,7 @@ func TestLoad_EnvironmentAndOverrides(t *testing.T) {
 }
 
 func TestLoad_Defaults(t *testing.T) {
-	cfg, err := Load(nil, nil)
+	cfg, err := Load([]string{}, nil) // non-nil: never read the real environment
 	require.NoError(t, err)
 	assert.Equal(t, "oanda", cfg.Provider)
 	assert.Empty(t, cfg.StoreRoot, "roots are resolved later by ApplyDefaultRoots")
