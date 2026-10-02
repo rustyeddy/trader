@@ -1,10 +1,8 @@
 package data
 
 import (
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,22 +11,10 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 )
 
-// stq2barsDefaults contains the small set of reference listings Trader can
-// resolve without asking an operator to repeat catalog metadata. Symbols
-// outside this set require --exchange and --kind so the command never guesses
-// an instrument identity from a Stooq directory name.
-var stq2barsDefaults = map[string]struct {
-	exchange string
-	kind     string
-}{
-	"SPY":  {exchange: "ARCA", kind: "etf"},
-	"QQQ":  {exchange: "NASDAQ", kind: "etf"},
-	"AAPL": {exchange: "NASDAQ", kind: "equity"},
-}
-
-// newStq2BarsCmd implements the ergonomic Stooq D1 conversion path. It only
-// resolves policy and defaults; extraction, raw import, canonicalization, and
-// provenance remain owned by the existing data conversion service.
+// newStq2BarsCmd implements the ergonomic Stooq D1 conversion path. It
+// parses flags and formats output; listing defaults, archive discovery,
+// extraction, raw import, and canonicalization belong to the
+// service (svc.ConvertStooqArchive, issue #434).
 func newStq2BarsCmd() *cobra.Command {
 	var from, to, exchange, kind, archive string
 	var rebuild bool
@@ -50,46 +36,32 @@ func newStq2BarsCmd() *cobra.Command {
 			if symbol == "" {
 				return fmt.Errorf("symbol must not be empty")
 			}
-			if exchange == "" && kind == "" {
-				defaults, known := stq2barsDefaults[symbol]
-				if !known {
-					return fmt.Errorf("unknown Stooq instrument %q: provide --exchange and --kind", symbol)
-				}
-				exchange, kind = defaults.exchange, defaults.kind
-			} else if exchange == "" || kind == "" {
+			identity, err := svc.ResolveListingIdentity(symbol, exchange, kind)
+			switch {
+			case errors.Is(err, svc.ErrNoListingDefault):
+				return fmt.Errorf("unknown Stooq instrument %q: provide --exchange and --kind", symbol)
+			case errors.Is(err, svc.ErrInvalidRequest):
 				return fmt.Errorf("--exchange and --kind must be provided together")
-			}
-			req, err := resolveStq2BarsRequest(cmd, symbol, from, to, exchange, kind)
-			if err != nil {
+			case err != nil:
 				return err
 			}
-			archivePath := archive
-			if archivePath == "" {
-				archivePath, err = findStooqArchive(dc.ArchiveRoot, symbol)
-				if err != nil {
-					return err
-				}
+			req, err := resolveStq2BarsRequest(dc, symbol, from, to, identity)
+			if err != nil {
+				return err
 			}
 			action := "updated"
 			if rebuild {
 				action = "rebuilt"
 			}
-			tmp, err := os.MkdirTemp("", "trader-stooq-stq2bars-")
-			if err != nil {
-				return fmt.Errorf("create temporary extraction directory: %w", err)
-			}
-			defer func() { _ = os.RemoveAll(tmp) }()
-			extracted, err := extractStooqMember(cmd.Context(), archivePath, symbol, tmp)
-			if err != nil {
-				return err
-			}
-			resp, err := dc.Service.Convert(cmd.Context(), svc.ConvertRequest{
+			resp, err := dc.Service.ConvertStooqArchive(cmd.Context(), svc.ConvertStooqArchiveRequest{
 				DatasetRequest: req,
-				ArchivePath:    extracted,
+				Symbol:         symbol,
+				ArchivePath:    archive,
+				ArchiveRoot:    dc.ArchiveRoot,
 				Force:          rebuild,
 			})
 			if err != nil {
-				return err
+				return stooqArchiveError(err, symbol, dc.ArchiveRoot)
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "converted %s (%s): imported %d rows across %d raw months; published %d canonical partitions\n",
 				symbol, action, resp.Import.RowsImported, resp.Import.MonthsWritten, len(resp.Build.Result.Published))
@@ -106,12 +78,8 @@ func newStq2BarsCmd() *cobra.Command {
 	return cmd
 }
 
-func resolveStq2BarsRequest(cmd *cobra.Command, symbol, from, to, exchange, kind string) (svc.DatasetRequest, error) {
-	dc, ok := dataContextFrom(cmd.Context())
-	if !ok {
-		return svc.DatasetRequest{}, fmt.Errorf("data service is not configured on this command's context")
-	}
-	id, err := registerRequestedInstrument(dc, symbol, datasetArgFlags{exchange: exchange, kind: kind})
+func resolveStq2BarsRequest(dc dataContext, symbol, from, to string, identity svc.ListingDefault) (svc.DatasetRequest, error) {
+	id, err := registerRequestedInstrument(dc, symbol, datasetArgFlags{exchange: identity.Exchange, kind: identity.Kind})
 	if err != nil {
 		return svc.DatasetRequest{}, err
 	}
@@ -137,44 +105,16 @@ func resolveStq2BarsRequest(cmd *cobra.Command, symbol, from, to, exchange, kind
 	return req, nil
 }
 
-func findStooqArchive(root, symbol string) (string, error) {
-	if root == "" {
-		return "", fmt.Errorf("stooq archive root is not configured; provide --archive or --archive-root")
+// stooqArchiveError adds the CLI's flag guidance to archive-discovery
+// failures; other errors pass through unchanged.
+func stooqArchiveError(err error, symbol, root string) error {
+	switch {
+	case errors.Is(err, svc.ErrArchiveRootNotConfigured):
+		return fmt.Errorf("stooq archive root is not configured; provide --archive or --archive-root")
+	case errors.Is(err, svc.ErrArchiveNotFound):
+		return fmt.Errorf("no Stooq archive for %s found under %q; provide --archive", symbol, root)
+	case errors.Is(err, svc.ErrAmbiguousArchive):
+		return fmt.Errorf("multiple Stooq archives for %s found under %q; provide --archive", symbol, root)
 	}
-	symbol = strings.ToLower(symbol)
-	var matches []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		name := strings.ToLower(entry.Name())
-		if strings.HasSuffix(name, ".zip") && archiveNameHasSymbol(name, symbol) {
-			matches = append(matches, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("search Stooq archive root %q: %w", root, err)
-	}
-	if len(matches) == 0 {
-		return "", fmt.Errorf("no Stooq archive for %s found under %q; provide --archive", strings.ToUpper(symbol), root)
-	}
-	sort.Strings(matches)
-	if len(matches) > 1 {
-		return "", fmt.Errorf("multiple Stooq archives for %s found under %q; provide --archive", strings.ToUpper(symbol), root)
-	}
-	return matches[0], nil
-}
-
-func archiveNameHasSymbol(name, symbol string) bool {
-	base := strings.TrimSuffix(strings.ToLower(filepath.Base(name)), ".zip")
-	for _, token := range strings.FieldsFunc(base, func(r rune) bool { return r == '_' || r == '.' || r == '-' }) {
-		if token == strings.ToLower(symbol) {
-			return true
-		}
-	}
-	return false
+	return err
 }

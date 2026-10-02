@@ -80,3 +80,24 @@ func TestStq2BarsRejectsUnknownInstrumentWithoutIdentityOverride(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "provide --exchange and --kind")
 }
+
+func TestStq2BarsDiscoversArchiveUnderArchiveRoot(t *testing.T) {
+	archiveRoot := t.TempDir()
+	content := []byte("<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>\n" +
+		"SPY.US,D,20200131,000000,100,101,99,100.5,1000,0\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(archiveRoot, "daily"), 0o755))
+	writeZIPMember(t, filepath.Join(archiveRoot, "daily", "spy_us_d.zip"), "data/daily/us/nyse etfs/spy.us.txt", content)
+	rawRoot, storeRoot := t.TempDir(), t.TempDir()
+
+	out, err := runData(t, storeRoot, rawRoot, "stq2bars", "SPY", "--archive-root", archiveRoot)
+	require.NoError(t, err)
+	require.Contains(t, out, "converted SPY (updated): imported 1 rows across 1 raw months; published 1 canonical partitions")
+}
+
+func TestStq2BarsReportsMissingArchiveWithFlagGuidance(t *testing.T) {
+	archiveRoot := t.TempDir()
+	_, err := runData(t, t.TempDir(), t.TempDir(), "stq2bars", "SPY", "--archive-root", archiveRoot)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no Stooq archive for SPY found under")
+	require.Contains(t, err.Error(), "; provide --archive")
+}
