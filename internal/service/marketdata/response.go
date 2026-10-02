@@ -28,6 +28,11 @@ type CoverageResponse struct {
 	Coverage marketruntime.Coverage
 }
 
+// InventoryResponse is the structured result of the Inventory use case.
+type InventoryResponse struct {
+	Inventory marketruntime.Inventory
+}
+
 // PlanResponse is the structured result of the Plan use case: the work
 // required to make the requested dataset available. A PlanResponse
 // describes work; it never performs any of it.

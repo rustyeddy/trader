@@ -29,6 +29,9 @@ func (f fakeStore) publish(context.Context, partitionKey, marketdata.Manifest, m
 func (f fakeStore) load(context.Context, partitionKey) (marketdata.Manifest, marketdata.BarSet, error) {
 	return marketdata.Manifest{}, marketdata.BarSet{}, errors.New("fakeStore: load not implemented")
 }
+func (f fakeStore) months(context.Context, string, string, marketdata.Interval) ([]yearMonth, error) {
+	return nil, errors.New("fakeStore: months not implemented")
+}
 
 // testClock returns a deterministic clock for construction tests; no test
 // here depends on wall-clock time.

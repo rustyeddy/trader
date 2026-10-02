@@ -520,14 +520,14 @@ func readPartitionFile(path string, key partitionKey) (marketdata.Manifest, []ma
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	if !scanner.Scan() {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: empty file", errStoreMalformed, path)
+		return marketdata.Manifest{}, nil, scanFailure(scanner, path, "empty file")
 	}
 	if err := crossCheckPartitionSchema(scanner.Text(), path, key); err != nil {
 		return marketdata.Manifest{}, nil, err
 	}
 
 	if !scanner.Scan() {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: missing manifest header", errStoreMalformed, path)
+		return marketdata.Manifest{}, nil, scanFailure(scanner, path, "missing manifest header")
 	}
 	m, err := decodeManifestJSON(scanner.Text(), path, key.instrument)
 	if err != nil {
@@ -535,7 +535,7 @@ func readPartitionFile(path string, key partitionKey) (marketdata.Manifest, []ma
 	}
 
 	if !scanner.Scan() {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: missing column header", errStoreMalformed, path)
+		return marketdata.Manifest{}, nil, scanFailure(scanner, path, "missing column header")
 	}
 	if got := scanner.Text(); got != canonicalCSVHeader {
 		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: unexpected column header %q, want %q", errStoreMalformed, path, got, canonicalCSVHeader)
@@ -556,9 +556,30 @@ func readPartitionFile(path string, key partitionKey) (marketdata.Manifest, []ma
 		bars = append(bars, b)
 	}
 	if err := scanner.Err(); err != nil {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: %v", errStoreMalformed, path, err)
+		return marketdata.Manifest{}, nil, scanError(path, err)
 	}
 	return m, bars, nil
+}
+
+// scanFailure reports why scanner stopped before an expected line: its
+// read error, or, when the file simply ended, a malformed file missing
+// what.
+func scanFailure(scanner *bufio.Scanner, path, what string) error {
+	if err := scanner.Err(); err != nil {
+		return scanError(path, err)
+	}
+	return fmt.Errorf("%w: %s: %s", errStoreMalformed, path, what)
+}
+
+// scanError classifies a scanner error. An over-long line is malformed
+// content; anything else is a read failure, returned unclassified (with
+// its *fs.PathError intact) so callers can tell I/O failures from bad
+// data.
+func scanError(path string, err error) error {
+	if errors.Is(err, bufio.ErrTooLong) {
+		return fmt.Errorf("%w: %s: %v", errStoreMalformed, path, err)
+	}
+	return fmt.Errorf("marketdata: store: read %s: %w", path, err)
 }
 
 func crossCheckPartitionSchema(comment, path string, key partitionKey) error {
@@ -748,4 +769,71 @@ func parseOptionalTime(s string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return t.UTC(), nil
+}
+
+// yearMonth is one UTC calendar month, the canonical store's partition
+// granularity.
+type yearMonth struct {
+	year  int
+	month time.Month
+}
+
+// months lists the months with a partition file for provider/symbol/
+// interval by walking the root/provider/SYMBOL/YYYY/MM tree. A missing
+// tree or partition file is simply not listed, and entries that aren't
+// regular files or zero-padded year/month directories are ignored. Any
+// other filesystem error fails the listing, so an unreadable partition
+// is never mistaken for an absent one.
+func (s *canonicalCSVStore) months(ctx context.Context, provider, symbol string, interval marketdata.Interval) ([]yearMonth, error) {
+	if err := validatePathComponent(provider); err != nil {
+		return nil, fmt.Errorf("marketdata: store: months: %w: provider: %v", errStoreInvalidPartitionKey, err)
+	}
+	if err := validatePathComponent(symbol); err != nil {
+		return nil, fmt.Errorf("marketdata: store: months: %w: symbol: %v", errStoreInvalidPartitionKey, err)
+	}
+	if _, err := intervalToken(interval); err != nil {
+		return nil, err
+	}
+	years, err := os.ReadDir(filepath.Join(s.rootDir, provider, symbol))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("marketdata: store: months: %w", err)
+	}
+	var out []yearMonth
+	for _, y := range years { // os.ReadDir sorts by name; YYYY and MM are zero-padded
+		year, err := strconv.Atoi(y.Name())
+		if !y.IsDir() || err != nil || len(y.Name()) != 4 {
+			continue
+		}
+		monthDirs, err := os.ReadDir(filepath.Join(s.rootDir, provider, symbol, y.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("marketdata: store: months: %w", err)
+		}
+		for _, md := range monthDirs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			month, err := strconv.Atoi(md.Name())
+			if !md.IsDir() || err != nil || len(md.Name()) != 2 || month < 1 || month > 12 {
+				continue
+			}
+			key := partitionKey{provider: provider, symbol: symbol, interval: interval, year: year, month: time.Month(month)}
+			path, err := key.path(s.rootDir)
+			if err != nil {
+				return nil, err
+			}
+			info, err := os.Stat(path)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				// no partition this month, or removed since the listing
+			case err != nil:
+				return nil, fmt.Errorf("marketdata: store: months: %w", err)
+			case info.Mode().IsRegular():
+				out = append(out, yearMonth{year: year, month: time.Month(month)})
+			}
+		}
+	}
+	return out, nil
 }

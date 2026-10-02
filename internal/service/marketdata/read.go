@@ -108,3 +108,23 @@ func (s *Service) Plan(ctx context.Context, req PlanRequest) (PlanResponse, erro
 		"action_count", len(plan.Actions))
 	return PlanResponse{Plan: plan}, nil
 }
+
+// Inventory implements the read-only Inventory use case (issue #435):
+// what raw and canonical data exist for req's instrument and interval,
+// without a caller-supplied range. Use it to default a range — the full
+// raw span to canonicalize, or the canonical end to update from — and
+// Coverage over that range for gaps. Inventory performs no
+// acquisition, build, or write.
+func (s *Service) Inventory(ctx context.Context, req InventoryRequest) (InventoryResponse, error) {
+	if err := req.Validate(); err != nil {
+		return InventoryResponse{}, err
+	}
+	dataset := DatasetRequest{Instrument: req.Instrument, Interval: req.Interval}
+	inv, err := s.manager.Inventory(ctx, req.Instrument, req.Interval)
+	s.logOutcome(ctx, slog.LevelDebug, "inventory queried", "inventory query failed", dataset, err,
+		"has_raw", inv.Raw != nil, "has_canonical", inv.Canonical != nil)
+	if err != nil {
+		return InventoryResponse{}, err
+	}
+	return InventoryResponse{Inventory: inv}, nil
+}

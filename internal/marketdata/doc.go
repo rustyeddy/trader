@@ -53,9 +53,11 @@
 // # Manager: the historical-data gateway
 //
 // Manager is the only way to reach historical market data. It separates
-// read-only operations (Bars, Coverage, and Plan — Plan is deterministic
-// and read-only too, reporting what acquisition or build work a query
-// would require without performing any of it), which never download,
+// read-only operations (Bars, Coverage, Inventory, and Plan — Plan is
+// deterministic and read-only too, reporting what acquisition or build
+// work a query would require without performing any of it; Inventory
+// reports the raw and canonical spans that exist for an instrument and
+// interval without a query range, issue #435), which never download,
 // rebuild, or publish anything and report missing data explicitly, from
 // the explicit acquisition and build commands (Sync, Build) that a
 // caller executes a Plan's Actions through. Provider- and storage-native

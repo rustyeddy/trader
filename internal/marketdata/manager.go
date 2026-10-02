@@ -259,6 +259,10 @@ type barStore interface {
 		// ErrInvalidConfig is returned (wrapped) by New when a required dependency
 		// is missing or invalid.
 		BarSet, error)
+	// months lists, in chronological order, every month with a
+	// published partition file for provider/symbol/interval. It is a
+	// pure read: a partition it lists may still fail to load.
+	months(ctx context.Context, provider, symbol string, interval marketdata.Interval) ([]yearMonth, error)
 }
 
 var ErrInvalidConfig = errors.New("marketdata: invalid manager config")

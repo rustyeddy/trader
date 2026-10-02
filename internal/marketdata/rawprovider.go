@@ -69,6 +69,7 @@ type rawPartitionInfo struct {
 	rowCount        int
 	incompleteCount int
 	lastComplete    bool
+	firstTime       time.Time
 	lastTime        time.Time
 	fingerprint     string
 }
@@ -165,7 +166,7 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, interval marketdata.In
 			lookup[rawPartitionKey{p.Symbol, rawInterval, p.Year, p.Month}] = rawPartitionInfo{
 				year: p.Year, month: p.Month,
 				status: stooqStatusToRaw(p.Status), rowCount: p.RowCount,
-				lastComplete: p.LastComplete, lastTime: p.LastTime, fingerprint: p.Fingerprint,
+				lastComplete: p.LastComplete, firstTime: p.FirstTime, lastTime: p.LastTime, fingerprint: p.Fingerprint,
 			}
 		}
 		return lookup, nil
@@ -182,7 +183,7 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, interval marketdata.In
 			lookup[rawPartitionKey{p.Symbol, rawInterval, p.Year, p.Month}] = rawPartitionInfo{
 				year: p.Year, month: p.Month,
 				status: alpacaStatusToRaw(p.Status), rowCount: p.RowCount,
-				lastComplete: p.LastComplete, lastTime: p.LastTime, fingerprint: p.Fingerprint,
+				lastComplete: p.LastComplete, firstTime: p.FirstTime, lastTime: p.LastTime, fingerprint: p.Fingerprint,
 			}
 		}
 		return lookup, nil
@@ -196,7 +197,7 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, interval marketdata.In
 			lookup[rawPartitionKey{p.Symbol, string(p.Interval), p.Year, p.Month}] = rawPartitionInfo{
 				year: p.Year, month: p.Month,
 				status: oandaStatusToRaw(p.Status), rowCount: p.RowCount, incompleteCount: p.IncompleteCount,
-				lastComplete: p.LastComplete, lastTime: p.LastTime, fingerprint: p.Fingerprint,
+				lastComplete: p.LastComplete, firstTime: p.FirstTime, lastTime: p.LastTime, fingerprint: p.Fingerprint,
 			}
 		}
 		return lookup, nil
