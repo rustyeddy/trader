@@ -345,6 +345,9 @@ func New(cfg Config) (*Manager, error) {
 	}, nil
 }
 
+// ProviderName is the provider this Manager serves (Config.ProviderName).
+func (m *Manager) ProviderName() string { return m.providerName }
+
 // configured reports whether m was constructed through New with its
 // required dependencies. It is the explicit, tested predicate for the
 // zero-value-unusable contract: the zero-value Manager, and a nil *Manager,

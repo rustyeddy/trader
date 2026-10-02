@@ -11,6 +11,10 @@ Amended by ADR-069: CLI behavior that MCP also needs moves below both
 transports instead of being copied, and service operations that transports
 call must be repeatable.
 
+Amended by ADR-070: the capability interface is defined in
+=internal/mcpserver= and implemented by =service/marketdata.Service=, which
+owns its resolver and archive root.
+
 * Context
 
 Trader now exposes a Model Context Protocol (MCP) server alongside the operator

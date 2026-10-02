@@ -161,9 +161,9 @@ type marketDataFactory struct{ f *marketdatacfg.Factory }
 func (m marketDataFactory) DefaultProvider() string { return m.f.DefaultProvider() }
 
 func (m marketDataFactory) ForProvider(provider string) (mcpserver.MarketData, error) {
-	b, err := m.f.ForProvider(provider)
+	s, err := m.f.ForProvider(provider)
 	if err != nil {
-		return mcpserver.MarketData{}, err
+		return nil, err
 	}
-	return mcpserver.MarketData{Service: b.Service, Resolver: b.Resolver, Provider: b.Provider, ArchiveRoot: b.ArchiveRoot}, nil
+	return s, nil
 }

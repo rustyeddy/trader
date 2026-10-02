@@ -135,8 +135,9 @@ func TestResolveListingIdentity(t *testing.T) {
 	t.Run("unsupported explicit kind", func(t *testing.T) {
 		_, err := svc.ResolveListingIdentity("ES", "CME", "future")
 		require.ErrorIs(t, err, svc.ErrInvalidRequest)
+		assert.ErrorIs(t, err, svc.ErrInvalidListingKind)
 		assert.NotErrorIs(t, err, svc.ErrIncompleteListingIdentity)
-		assert.ErrorContains(t, err, `invalid kind "future"`)
+		assert.ErrorContains(t, err, `"future"`)
 	})
 }
 

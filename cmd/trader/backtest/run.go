@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -500,38 +501,6 @@ func effectiveSymbols(flagSymbols []string, configSymbol string) ([]string, erro
 	return nil, fmt.Errorf("at least one --symbol, or backtest.symbol in --config, is required")
 }
 
-var backtestEquityReferences = map[string]struct {
-	exchange string
-	kind     string
-}{
-	"SPY":  {exchange: "ARCA", kind: "etf"},
-	"QQQ":  {exchange: "NASDAQ", kind: "etf"},
-	"AAPL": {exchange: "NASDAQ", kind: "equity"},
-}
-
-func registerBacktestInstrument(resolver *instrument.MemoryResolver, provider, symbol string) (instrument.ID, error) {
-	if provider == "oanda" {
-		return svcmarketdata.RegisterFXInstrument(resolver, provider, symbol)
-	}
-
-	reference, ok := backtestEquityReferences[symbol]
-	if !ok {
-		return instrument.ID{}, fmt.Errorf("unsupported equity %q for provider %q: add reference metadata before backtesting it", symbol, provider)
-	}
-	providerSymbol := symbol
-	registration := svcmarketdata.EquityRegistration{
-		Provider:       provider,
-		Exchange:       reference.exchange,
-		Ticker:         symbol,
-		ProviderSymbol: providerSymbol,
-		Currency:       num.MustParseCurrency("USD"),
-	}
-	if reference.kind == "etf" {
-		return svcmarketdata.RegisterETFInstrument(resolver, registration)
-	}
-	return svcmarketdata.RegisterEquityInstrument(resolver, registration)
-}
-
 // resolveInstrumentSet parses flags.symbols into a canonical
 // instrumentSet: each symbol is registered under both the oanda-side
 // resolver (Manager's own bar-fetching resolver) and the sim-side
@@ -555,40 +524,34 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 	for _, raw := range symbols {
 		symbol := strings.ToUpper(strings.TrimSpace(raw))
 
-		// Duplicate detection happens here, against the normalized
-		// symbol string directly, deliberately before either resolver
-		// is touched (issue #224 review, point 3): registering the same
-		// (provider, symbol) pair twice would also be caught by
-		// instrument.MemoryResolver.Register's own duplicate check, but
-		// that error is worded for a resolver-internal audience, not a
-		// CLI user, and would additionally leave a partially-registered
-		// sim-side resolver from the first of the two colliding calls.
+		// A repeated --symbol is a CLI validation error (issue #224
+		// review, point 3), checked against the normalized symbol before
+		// either resolver is touched. Registration itself is idempotent
+		// (issue #448), but two identical DataRequirements would still
+		// fail deeper in Replay/Runner.
 		if first, dup := seen[symbol]; dup {
 			return instrumentSet{}, fmt.Errorf("duplicate --symbol %q: already requested as %q", symbol, first)
 		}
 		seen[symbol] = symbol
 
-		instrumentID, err := registerBacktestInstrument(oandaResolver, provider, symbol)
+		// One shared identification (issue #448), registered under both
+		// the data provider and the simulated broker.
+		identity, err := svcmarketdata.IdentifyInstrument(provider, svcmarketdata.InstrumentRequest{Symbol: symbol})
+		if errors.Is(err, svcmarketdata.ErrNoListingDefault) {
+			return instrumentSet{}, fmt.Errorf("unsupported equity %q for provider %q: add reference metadata before backtesting it", symbol, provider)
+		}
 		if err != nil {
 			return instrumentSet{}, err
 		}
-		if provider == "oanda" {
-			if _, err := svcmarketdata.RegisterFXInstrument(simResolver, "sim", symbol); err != nil {
-				return instrumentSet{}, err
-			}
-		} else {
-			if _, err := registerBacktestInstrument(simResolver, "sim", symbol); err != nil {
-				return instrumentSet{}, err
-			}
-		}
-		simListing, err := simResolver.ResolveInstrument(instrumentID, "sim", "")
+		oandaListing, err := svcmarketdata.RegisterIdentity(oandaResolver, provider, identity)
 		if err != nil {
 			return instrumentSet{}, err
 		}
-		oandaListing, err := oandaResolver.ResolveInstrument(instrumentID, provider, "")
+		simListing, err := svcmarketdata.RegisterIdentity(simResolver, "sim", identity)
 		if err != nil {
 			return instrumentSet{}, err
 		}
+		instrumentID := oandaListing.InstrumentID()
 
 		key := instrumentID.String()
 		set.ids = append(set.ids, instrumentID)

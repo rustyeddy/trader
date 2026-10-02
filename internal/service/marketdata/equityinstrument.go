@@ -85,8 +85,22 @@ func RegisterETFInstrument(resolver *instrument.MemoryResolver, reg EquityRegist
 
 // registerEquityLikeListing builds and registers the Listing shared by
 // RegisterEquityInstrument and RegisterETFInstrument, which differ only
-// in which instrument.New* constructor produced inst.
+// in which instrument.New* constructor produced inst. Registration is
+// idempotent; see registerListing.
 func registerEquityLikeListing(resolver *instrument.MemoryResolver, reg EquityRegistration, inst instrument.Instrument) (instrument.ID, error) {
+	listing, err := equityLikeListing(reg, inst)
+	if err != nil {
+		return instrument.ID{}, err
+	}
+	if _, err := registerListing(resolver, listing); err != nil {
+		return instrument.ID{}, fmt.Errorf("registering equity %s:%s: %w", reg.Exchange, reg.Ticker, err)
+	}
+	return listing.InstrumentID(), nil
+}
+
+// equityLikeListing builds registerEquityLikeListing's Listing without
+// registering it.
+func equityLikeListing(reg EquityRegistration, inst instrument.Instrument) (instrument.Listing, error) {
 	providerSymbol := strings.TrimSpace(reg.ProviderSymbol)
 	if providerSymbol == "" {
 		providerSymbol = strings.ToUpper(strings.TrimSpace(reg.Ticker))
@@ -102,7 +116,7 @@ func registerEquityLikeListing(resolver *instrument.MemoryResolver, reg EquityRe
 		reg.Currency,
 	)
 	if err != nil {
-		return instrument.ID{}, fmt.Errorf("invalid equity registration %s:%s: %w", reg.Exchange, reg.Ticker, err)
+		return instrument.Listing{}, fmt.Errorf("invalid equity registration %s:%s: %w", reg.Exchange, reg.Ticker, err)
 	}
 
 	listing, err := instrument.NewListing(instrument.ListingParams{
@@ -121,12 +135,7 @@ func registerEquityLikeListing(resolver *instrument.MemoryResolver, reg EquityRe
 		Tradable: true,
 	})
 	if err != nil {
-		return instrument.ID{}, fmt.Errorf("invalid equity registration %s:%s: %w", reg.Exchange, reg.Ticker, err)
+		return instrument.Listing{}, fmt.Errorf("invalid equity registration %s:%s: %w", reg.Exchange, reg.Ticker, err)
 	}
-
-	if err := resolver.Register(listing); err != nil {
-		return instrument.ID{}, fmt.Errorf("registering equity %s:%s: %w", reg.Exchange, reg.Ticker, err)
-	}
-
-	return listing.InstrumentID(), nil
+	return listing, nil
 }

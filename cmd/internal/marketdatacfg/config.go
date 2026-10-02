@@ -105,13 +105,10 @@ func Load(environ []string, overrides map[string]string) (Config, error) {
 	})
 }
 
-// fxProviders names the providers whose instruments are FX pairs.
-// "oanda" is Trader's only FX provider today; every other provider is
-// treated as an equity/ETF provider.
-var fxProviders = map[string]bool{"oanda": true}
-
-// IsFXProvider reports whether provider's instruments are FX pairs.
-func IsFXProvider(provider string) bool { return fxProviders[provider] }
+// IsFXProvider reports whether provider's instruments are FX pairs. The
+// service layer owns the answer (svc.IsFXProvider), so composition and
+// instrument resolution never disagree.
+func IsFXProvider(provider string) bool { return svc.IsFXProvider(provider) }
 
 // oandaTokenCredential satisfies marketdata.Config.OANDACredential's
 // oanda.CredentialProvider interface structurally
@@ -248,7 +245,7 @@ func New(cfg Config, logger *slog.Logger) (Bundle, error) {
 		return Bundle{}, err
 	}
 
-	service, err := svc.New(manager, logger)
+	service, err := svc.New(manager, logger, svc.WithResolver(resolver), svc.WithArchiveRoot(cfg.ArchiveRoot))
 	if err != nil {
 		return Bundle{}, err
 	}
