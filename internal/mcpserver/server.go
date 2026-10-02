@@ -1,7 +1,8 @@
 // Package mcpserver provides Trader's narrow MCP research adapter.
 //
 // MCP is an agent-facing transport over Trader's application services
-// (ADR-022): tool handlers translate requests and results, and every
+// (ADR-022, specialized for MCP by ADR-068): tool handlers translate
+// requests and results, and every
 // piece of business logic stays in the services below. The server
 // receives those services by injection (Deps), constructed at the
 // composition root (cmd/trader-mcp), so tests can build it with doubles
