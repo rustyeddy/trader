@@ -122,3 +122,25 @@ type ConvertRequest struct {
 	// Force rebuilds canonical partitions even when their fingerprints are unchanged.
 	Force bool
 }
+
+// InventoryRequest names the (instrument, interval) the Inventory use
+// case reports on. Unlike DatasetRequest it has no range: reporting the
+// range that exists is the point.
+type InventoryRequest struct {
+	// Instrument is the canonical instrument identity. Required.
+	Instrument instrument.ID
+	// Interval is the canonical bar interval. Required.
+	Interval marketdata.Interval
+}
+
+// Validate reports whether r is well-formed, returning a wrapped
+// ErrInvalidRequest for the first problem found.
+func (r InventoryRequest) Validate() error {
+	if r.Instrument.IsZero() {
+		return fmt.Errorf("%w: instrument is zero", ErrInvalidRequest)
+	}
+	if !r.Interval.Valid() {
+		return fmt.Errorf("%w: interval is invalid", ErrInvalidRequest)
+	}
+	return nil
+}

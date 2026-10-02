@@ -749,3 +749,61 @@ func parseOptionalTime(s string) (time.Time, error) {
 	}
 	return t.UTC(), nil
 }
+
+// yearMonth is one UTC calendar month, the canonical store's partition
+// granularity.
+type yearMonth struct {
+	year  int
+	month time.Month
+}
+
+// months lists the months with a partition file for provider/symbol/
+// interval by walking the root/provider/SYMBOL/YYYY/MM tree. A missing
+// tree is an empty listing, not an error.
+func (s *canonicalCSVStore) months(ctx context.Context, provider, symbol string, interval marketdata.Interval) ([]yearMonth, error) {
+	if err := validatePathComponent(provider); err != nil {
+		return nil, fmt.Errorf("marketdata: store: months: %w: provider: %v", errStoreInvalidPartitionKey, err)
+	}
+	if err := validatePathComponent(symbol); err != nil {
+		return nil, fmt.Errorf("marketdata: store: months: %w: symbol: %v", errStoreInvalidPartitionKey, err)
+	}
+	if _, err := intervalToken(interval); err != nil {
+		return nil, err
+	}
+	years, err := os.ReadDir(filepath.Join(s.rootDir, provider, symbol))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("marketdata: store: months: %w", err)
+	}
+	var out []yearMonth
+	for _, y := range years { // os.ReadDir sorts by name; YYYY and MM are zero-padded
+		year, err := strconv.Atoi(y.Name())
+		if !y.IsDir() || err != nil || len(y.Name()) != 4 {
+			continue
+		}
+		monthDirs, err := os.ReadDir(filepath.Join(s.rootDir, provider, symbol, y.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("marketdata: store: months: %w", err)
+		}
+		for _, md := range monthDirs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			month, err := strconv.Atoi(md.Name())
+			if !md.IsDir() || err != nil || len(md.Name()) != 2 || month < 1 || month > 12 {
+				continue
+			}
+			key := partitionKey{provider: provider, symbol: symbol, interval: interval, year: year, month: time.Month(month)}
+			path, err := key.path(s.rootDir)
+			if err != nil {
+				return nil, err
+			}
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+				out = append(out, yearMonth{year: year, month: time.Month(month)})
+			}
+		}
+	}
+	return out, nil
+}
