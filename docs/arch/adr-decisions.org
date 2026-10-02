@@ -175,6 +175,7 @@ the original decided, use full supersession instead.
 | 065 | Supported strategy/research API and private runtime (in adr-065-public-strategy-research-surface.org) | Accepted |
 | 066 | Account-level initial-margin admission for the simulator/backtester (in adr-066-account-initial-margin-admission.org) | Accepted |
 | 067 | Intents the account already satisfies are journaled no-ops (in adr-067-no-action-intents.org) | Accepted |
+| 068 | MCP as a thin, capability-oriented application-service adapter (in adr-068-mcp-application-service-adapter.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

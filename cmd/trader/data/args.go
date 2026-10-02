@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/cmd/internal/marketdatacfg"
+
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/instrument"
@@ -80,24 +82,15 @@ func addDatasetArgFlags(cmd *cobra.Command, flags *datasetArgFlags) {
 		"output format: "+formatTable+" or "+formatJSON)
 }
 
-// fxProviders names the providers whose bare INSTRUMENT argument is a
-// 6-letter FX pair symbol, resolved via svc.RegisterFXInstrument.
-// "oanda" is Trader's only FX provider today; every other configured
-// provider (currently only "alpaca") is treated as an equity/ETF
-// provider by registerRequestedInstrument — issue #331's own scope,
-// deliberately a two-way split rather than a per-provider table, since
-// Trader has exactly two asset classes wired into the CLI so far.
-var fxProviders = map[string]bool{"oanda": true}
-
 // registerRequestedInstrument resolves symbol into a registered
 // instrument.ID, choosing FX or equity/ETF registration based on
 // dc.Provider (issue #331). An unrecognized/future provider is
-// treated as equity/ETF, matching fxProviders' own "oanda is the one
+// treated as equity/ETF, matching marketdatacfg.IsFXProvider's own "oanda is the one
 // FX provider" framing — not because that is guaranteed correct for
 // every future provider, but because guessing FX for an unknown
 // provider would be the more surprising default of the two.
 func registerRequestedInstrument(dc dataContext, symbol string, flags datasetArgFlags) (instrument.ID, error) {
-	if fxProviders[dc.Provider] {
+	if marketdatacfg.IsFXProvider(dc.Provider) {
 		return svc.RegisterFXInstrument(dc.Resolver, dc.Provider, symbol)
 	}
 

@@ -626,6 +626,38 @@ trader backtest show run_01HKK5WY00D5982ACAHT01Q80K --format org
 
 ---
 
+## `trader-mcp` — MCP Server
+
+`trader-mcp` serves Trader's research tools to MCP clients (Claude,
+Codex, and others) over stdio. Build it with
+`go build ./cmd/trader-mcp`, then register the binary as a stdio MCP
+server in your client.
+
+It resolves configuration exactly as `trader data` does: the same
+`TRADER_*` environment variables, default data roots, and credentials.
+
+| Flag | Environment | Meaning |
+|---|---|---|
+| `--store-root`, `--raw-root`, `--archive-root` | `TRADER_STORE_ROOT`, `TRADER_RAW_ROOT`, `TRADER_ARCHIVE_ROOT` | data roots, as for `trader data` |
+| `--provider` | `TRADER_PROVIDER` | default provider (`oanda`, `alpaca`, or `stooq`) for requests that don't name one |
+| `--oanda-base-url`, `--alpaca-base-url` | `TRADER_OANDA_BASE_URL`, `TRADER_ALPACA_BASE_URL` | provider endpoints |
+| — | `TRADER_OANDA_TOKEN`, `TRADER_ALPACA_KEY_ID`, `TRADER_ALPACA_SECRET_KEY` | credentials (environment only; never logged or returned) |
+| `--allow-writes` | `TRADER_MCP_ALLOW_WRITES` | enable data-mutating tools (default off) |
+| `--log-level`, `--log-format`, `--log-output` | `TRADER_LEVEL`, `TRADER_FORMAT`, `TRADER_OUTPUT` | logging; output is stderr or a file, never stdout |
+
+- **Write access is off by default.** Tools that change data, by
+  writing to the raw or canonical store or downloading with your
+  credentials, refuse to run unless the server was started with
+  `--allow-writes`. Read-only tools always work.
+- A raw or archive root you configure applies to the default provider
+  only. Requests for another provider use that provider's own default
+  under the Trader data directory, because raw data is
+  provider-specific.
+- **stdout is the protocol stream.** `--log-output stdout` is rejected,
+  and logs default to stderr.
+
+---
+
 ## Environment Variables
 
 **Not every flag documented above is settable as an environment

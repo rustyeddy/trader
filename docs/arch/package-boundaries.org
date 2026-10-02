@@ -39,6 +39,7 @@ compatibility facade for removed import paths.
 | internal/report | report | No | Runtime result rendering |
 | internal/chart | chart | No | Research/result visualization |
 | internal/config | config | No | Composition-root configuration plumbing |
+| internal/mcpserver | mcpserver | No | MCP transport adapter over application services (ADR-022/ADR-068); dependencies injected by cmd/trader-mcp; no provider/archive/storage orchestration in handlers |
 | internal/logging | logging | No | Logging configuration; SDK uses slog directly |
 | internal/clock | clock | No | Runtime clock/timer implementations |
 | internal/id | id | No | Canonical typed IDs and generation |
@@ -60,6 +61,8 @@ external guest executable
     -> analysis -> indicator, public marketdata/instrument
 
 cmd/trader -> internal/service -> internal/backtest / internal/pipeline
+cmd/trader, cmd/trader-mcp -> cmd/internal/marketdatacfg -> internal/service/marketdata
+cmd/trader-mcp -> internal/mcpserver -> internal/service/*
 internal/backtest -> internal/strategy, broker, journal, public values
 internal/pipeline -> internal/execution, risk, broker
 internal/marketdata -> public marketdata, instrument, num

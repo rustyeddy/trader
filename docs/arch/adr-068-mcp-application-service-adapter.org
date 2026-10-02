@@ -1,0 +1,177 @@
+#+TITLE: ADR-068: MCP as a thin, capability-oriented application-service adapter
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #433 and PR #438 establish Trader's MCP composition root and
+write-access policy. This ADR specializes ADR-022 for the MCP transport without
+changing ADR-022's general application-service boundary.
+
+* Context
+
+Trader now exposes a Model Context Protocol (MCP) server alongside the operator
+CLI. MCP clients are long-running, agent-facing transports that may select a
+market-data provider per request and will eventually invoke coverage,
+canonicalization/update, and backtest use cases.
+
+ADR-022 already requires transport adapters to remain thin and to call
+transport-neutral application services rather than coordinating domain or
+storage implementation details themselves.
+
+While adding the MCP composition root, a convenient dependency shape emerged
+that can carry a concrete market-data service together with composition details
+such as a mutable MemoryResolver and provider archive path. That is useful as a
+temporary construction seam, but it must not become the MCP tool contract:
+request-time instrument registration, archive discovery, provider parsing,
+storage layout, and Manager orchestration belong below the transport boundary.
+
+MCP also introduces the first agent-facing data-mutating operations. The
+original MCP slice (#405) was intentionally read/research oriented, so mutation
+needs an explicit operator policy rather than becoming available merely because
+a tool exists.
+
+* Decision
+
+** MCP follows ADR-022 as a transport adapter
+
+The dependency direction is:
+
+#+BEGIN_EXAMPLE
+MCP tool handler
+      |
+      v
+application/service operation
+      |
+      v
+Trader domain/runtime packages
+#+END_EXAMPLE
+
+MCP tool handlers may:
+
+- validate and translate MCP request fields;
+- select a configured provider/application capability;
+- call one transport-neutral application operation;
+- translate structured results and errors to MCP output;
+- enforce MCP-specific transport policy such as write authorization.
+
+MCP tool handlers must not:
+
+- parse provider-native data;
+- inspect or manipulate provider archive paths;
+- register instruments by mutating a resolver as part of transport
+  orchestration when that registration can live in the application service;
+- call several Manager primitives to implement an application workflow;
+- write canonical/raw partitions directly;
+- duplicate provenance, gap-planning, or provider-specific policy;
+- expose credentials, filesystem layout, or other composition internals.
+
+If an MCP capability cannot be expressed without those details, the missing
+operation belongs in =internal/service/...= (or the appropriate lower layer)
+first.
+
+** Capability-oriented dependencies, not composition internals
+
+The long-term dependency supplied to =internal/mcpserver= should represent
+application capabilities. A temporary bundle may exist at composition time, but
+MCP tool implementations should not harden concrete resolver or archive-root
+details into their API.
+
+For market data, the desired shape is conceptually:
+
+#+BEGIN_SRC go
+type MarketData interface {
+    Instruments(context.Context, InstrumentsRequest) (InstrumentsResponse, error)
+    Coverage(context.Context, CoverageRequest) (CoverageResponse, error)
+    Canonicalize(context.Context, CanonicalizeRequest) (CanonicalizeResponse, error)
+    Update(context.Context, UpdateRequest) (UpdateResponse, error)
+}
+#+END_SRC
+
+The exact Go interface is not prescribed; concrete service methods are equally
+acceptable. The invariant is that the transport asks for a use case and does
+not assemble one from composition internals.
+
+Issue #434 moves Stooq archive discovery/extraction into the market-data
+application path. Follow-on MCP work must use that path rather than passing
+archive mechanics upward.
+
+** Mutating MCP tools are opt-in
+
+Read-only MCP research tools are available by default.
+
+Any MCP tool that downloads provider data or mutates Trader's raw/canonical
+stores must refuse to run unless the server was explicitly started with write
+access enabled.
+
+The initial operator controls are:
+
+#+BEGIN_EXAMPLE
+trader-mcp --allow-writes
+TRADER_MCP_ALLOW_WRITES=true
+#+END_EXAMPLE
+
+Write authorization is a server-level transport policy. It does not replace
+normal application/domain validation and does not grant generic filesystem,
+shell, broker-order, or credential access.
+
+** Provider/service lifetime is not fixed by this ADR
+
+PR #438 may construct a fresh provider-scoped service bundle per request. That
+is safe initial behavior while resolver state is request-specific.
+
+This ADR does not require per-request construction. A long-running transport may
+later reuse provider-scoped Manager/service instances when their mutable
+request-specific state has been removed or made concurrency-safe. That lifecycle
+optimization must not weaken the application-service boundary above.
+
+* Consequences
+
+** Positive
+
+- MCP remains another thin Trader transport instead of becoming a second
+  application layer.
+- CLI and MCP share the same deterministic application behavior.
+- Provider/archive/storage internals remain owned below transports.
+- New MCP tools expose narrow typed capabilities rather than generic remote
+  control.
+- Data mutation requires an explicit operator decision.
+- Future REST/streaming transports can reuse the same application operations.
+
+** Costs
+
+- Some useful MCP tools require new service operations before their handlers can
+  be implemented.
+- Composition may temporarily need adapters between concrete services and the
+  capability interface expected by MCP.
+- Per-provider lifecycle/caching optimization is deferred until request-specific
+  resolver state no longer makes reuse unsafe.
+
+* Alternatives considered
+
+** Let MCP handlers coordinate Manager/resolver/archive details
+
+Rejected. It would violate ADR-022, duplicate CLI/application orchestration, and
+make the agent-facing transport dependent on storage and provider
+implementation details.
+
+** Expose all mutating tools whenever they are compiled into the server
+
+Rejected. The MCP server is primarily a research/control surface, and mutation
+must be an explicit operator choice.
+
+** Require a new process/Manager for every request permanently
+
+Not decided. Fresh construction is safe initially, but lifecycle is an
+implementation concern that can be optimized later without changing the
+transport/application boundary.
+
+* Related
+
+- ADR-022 — CLI and application service layer.
+- ADR-020 — historical market-data ownership and boundaries.
+- #405 — initial MCP server.
+- #432 — MCP marketdata canonicalize/update operations.
+- #433 / PR #438 — MCP configuration, composition, and write policy.
+- #434 — move Stooq archive conversion out of the CLI.
+- #436 — MCP instruments and marketdata coverage.
+- #437 — MCP backtest tools.
