@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,6 +33,16 @@ var (
 	// ErrNoListingDefault reports a symbol with no reference listing
 	// default, so its exchange and kind must be supplied explicitly.
 	ErrNoListingDefault = errors.New("no listing default for symbol")
+	// ErrIncompleteListingIdentity reports an exchange without a kind, or
+	// a kind without an exchange. It is returned wrapped together with
+	// ErrInvalidRequest.
+	ErrIncompleteListingIdentity = errors.New("exchange and kind must be provided together")
+)
+
+// Listing kinds a ListingDefault may name.
+const (
+	KindEquity = "equity"
+	KindETF    = "etf"
 )
 
 // ListingDefault is the exchange and kind ("equity" or "etf") of a
@@ -46,9 +57,9 @@ type ListingDefault struct {
 // need an explicit exchange and kind, so nothing guesses an instrument
 // identity from a symbol.
 var listingDefaults = map[string]ListingDefault{
-	"SPY":  {Exchange: "ARCA", Kind: "etf"},
-	"QQQ":  {Exchange: "NASDAQ", Kind: "etf"},
-	"AAPL": {Exchange: "NASDAQ", Kind: "equity"},
+	"SPY":  {Exchange: "ARCA", Kind: KindETF},
+	"QQQ":  {Exchange: "NASDAQ", Kind: KindETF},
+	"AAPL": {Exchange: "NASDAQ", Kind: KindEquity},
 }
 
 // DefaultListing returns the reference listing default for symbol
@@ -59,15 +70,20 @@ func DefaultListing(symbol string) (ListingDefault, bool) {
 }
 
 // ResolveListingIdentity returns the exchange and kind to register symbol
-// under. Explicit values must be given together and win; with neither,
-// the symbol's DefaultListing applies, and a symbol without one fails
-// with ErrNoListingDefault.
+// under. Explicit values must be given together and win; the kind is
+// normalized to KindEquity or KindETF and any other kind fails with
+// ErrInvalidRequest. With neither, the symbol's DefaultListing applies,
+// and a symbol without one fails with ErrNoListingDefault.
 func ResolveListingIdentity(symbol, exchange, kind string) (ListingDefault, error) {
+	exchange, kind = strings.TrimSpace(exchange), strings.ToLower(strings.TrimSpace(kind))
 	switch {
 	case exchange != "" && kind != "":
+		if kind != KindEquity && kind != KindETF {
+			return ListingDefault{}, fmt.Errorf("%w: invalid kind %q: expected %q or %q", ErrInvalidRequest, kind, KindEquity, KindETF)
+		}
 		return ListingDefault{Exchange: exchange, Kind: kind}, nil
 	case exchange != "" || kind != "":
-		return ListingDefault{}, fmt.Errorf("%w: exchange and kind must be provided together", ErrInvalidRequest)
+		return ListingDefault{}, fmt.Errorf("%w: %w", ErrInvalidRequest, ErrIncompleteListingIdentity)
 	}
 	d, ok := DefaultListing(symbol)
 	if !ok {
@@ -99,8 +115,10 @@ type ConvertStooqArchiveRequest struct {
 
 // ConvertStooqArchive locates the archive, extracts the symbol's member
 // to a temporary directory it removes before returning, and converts it
-// through Convert. The archive itself is never modified.
-func (s *Service) ConvertStooqArchive(ctx context.Context, req ConvertStooqArchiveRequest) (ConvertResponse, error) {
+// the way Convert does. The archive itself is never modified. Once the
+// request validates, the operation logs exactly one outcome record,
+// covering discovery and extraction failures too.
+func (s *Service) ConvertStooqArchive(ctx context.Context, req ConvertStooqArchiveRequest) (resp ConvertResponse, err error) {
 	if err := validateConvertRequest(req.ConvertRequest()); err != nil {
 		return ConvertResponse{}, err
 	}
@@ -111,10 +129,13 @@ func (s *Service) ConvertStooqArchive(ctx context.Context, req ConvertStooqArchi
 	if symbol == "" {
 		return ConvertResponse{}, fmt.Errorf("%w: symbol is required", ErrInvalidRequest)
 	}
+	defer func() {
+		s.logOutcome(ctx, slog.LevelInfo, "stooq archive convert completed", "stooq archive convert failed", req.DatasetRequest, err,
+			"symbol", symbol, "rows_imported", resp.Import.RowsImported, "published_partitions", len(resp.Build.Result.Published))
+	}()
 	archivePath := req.ArchivePath
 	if archivePath == "" {
-		var err error
-		if archivePath, err = FindStooqArchive(req.ArchiveRoot, symbol); err != nil {
+		if archivePath, err = FindStooqArchive(ctx, req.ArchiveRoot, symbol); err != nil {
 			return ConvertResponse{}, err
 		}
 	}
@@ -129,7 +150,7 @@ func (s *Service) ConvertStooqArchive(ctx context.Context, req ConvertStooqArchi
 	}
 	convert := req.ConvertRequest()
 	convert.ArchivePath = extracted
-	return s.Convert(ctx, convert)
+	return s.convert(ctx, convert)
 }
 
 // ConvertRequest returns the Convert request req describes, without an
@@ -140,8 +161,8 @@ func (req ConvertStooqArchiveRequest) ConvertRequest() ConvertRequest {
 
 // FindStooqArchive returns the one ZIP under root whose file name contains
 // symbol as a '_', '.', or '-' separated token (case-insensitive), such as
-// spy_us_d.zip for SPY.
-func FindStooqArchive(root, symbol string) (string, error) {
+// spy_us_d.zip for SPY. The walk stops with ctx's error once ctx is done.
+func FindStooqArchive(ctx context.Context, root, symbol string) (string, error) {
 	if root == "" {
 		return "", ErrArchiveRootNotConfigured
 	}
@@ -149,6 +170,9 @@ func FindStooqArchive(root, symbol string) (string, error) {
 	var matches []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if entry.IsDir() {
@@ -160,6 +184,9 @@ func FindStooqArchive(root, symbol string) (string, error) {
 		}
 		return nil
 	})
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
 	if err != nil {
 		return "", fmt.Errorf("search Stooq archive root %q: %w", root, err)
 	}
@@ -208,10 +235,13 @@ func extractStooqMember(ctx context.Context, archivePath, symbol, destination st
 			_ = in.Close()
 			return "", fmt.Errorf("create extracted archive member: %w", err)
 		}
-		_, copyErr := io.Copy(out, in)
+		_, copyErr := io.Copy(out, ctxReader{ctx: ctx, r: in})
 		closeInErr := in.Close()
 		closeOutErr := out.Close()
 		if copyErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", ctxErr
+			}
 			return "", fmt.Errorf("extract archive member %q: %w", entry.Name, copyErr)
 		}
 		if closeInErr != nil || closeOutErr != nil {
@@ -220,4 +250,18 @@ func extractStooqMember(ctx context.Context, archivePath, symbol, destination st
 		return path, nil
 	}
 	return "", fmt.Errorf("%w: archive %q contains no %s member", ErrArchiveMemberNotFound, archivePath, want)
+}
+
+// ctxReader is an io.Reader that fails with ctx's error once ctx is done,
+// so a long copy stops promptly on cancellation.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }

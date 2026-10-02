@@ -4,8 +4,10 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/sha256"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/clock"
+	"github.com/rustyeddy/trader/internal/logging"
 	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
@@ -46,6 +49,7 @@ func writeZIP(t *testing.T, path string, members map[string]string) {
 // stooqFixture is a stooq Service with SPY registered.
 type stooqFixture struct {
 	service   *svc.Service
+	resolver  *instrument.MemoryResolver
 	spy       instrument.ID
 	rawRoot   string
 	storeRoot string
@@ -67,7 +71,7 @@ func newStooqFixture(t *testing.T) stooqFixture {
 	require.NoError(t, err)
 	service, err := svc.New(manager, nil)
 	require.NoError(t, err)
-	return stooqFixture{service: service, spy: id, rawRoot: rawRoot, storeRoot: storeRoot}
+	return stooqFixture{service: service, resolver: resolver, spy: id, rawRoot: rawRoot, storeRoot: storeRoot}
 }
 
 func (f stooqFixture) request(archivePath, archiveRoot string) svc.ConvertStooqArchiveRequest {
@@ -116,13 +120,24 @@ func TestResolveListingIdentity(t *testing.T) {
 		require.ErrorIs(t, err, svc.ErrNoListingDefault)
 		assert.ErrorContains(t, err, `"UNKNOWN"`)
 	})
-	for name, args := range map[string][2]string{"exchange only": {"ARCA", ""}, "kind only": {"", "etf"}} {
+	for name, args := range map[string][2]string{"exchange only": {"ARCA", ""}, "kind only": {"", "etf"}, "blank kind": {"ARCA", "  "}} {
 		t.Run(name, func(t *testing.T) {
 			_, err := svc.ResolveListingIdentity("SPY", args[0], args[1])
 			require.ErrorIs(t, err, svc.ErrInvalidRequest)
-			assert.ErrorContains(t, err, "together")
+			assert.ErrorIs(t, err, svc.ErrIncompleteListingIdentity)
 		})
 	}
+	t.Run("explicit kind is normalized", func(t *testing.T) {
+		got, err := svc.ResolveListingIdentity("SPY", " ARCA ", " ETF ")
+		require.NoError(t, err)
+		assert.Equal(t, svc.ListingDefault{Exchange: "ARCA", Kind: svc.KindETF}, got)
+	})
+	t.Run("unsupported explicit kind", func(t *testing.T) {
+		_, err := svc.ResolveListingIdentity("ES", "CME", "future")
+		require.ErrorIs(t, err, svc.ErrInvalidRequest)
+		assert.NotErrorIs(t, err, svc.ErrIncompleteListingIdentity)
+		assert.ErrorContains(t, err, `invalid kind "future"`)
+	})
 }
 
 func TestFindStooqArchive(t *testing.T) {
@@ -133,19 +148,19 @@ func TestFindStooqArchive(t *testing.T) {
 		writeZIP(t, filepath.Join(root, "qqq_us_d.zip"), nil)
 		require.NoError(t, os.WriteFile(filepath.Join(root, "spy.txt"), nil, 0o644))
 
-		got, err := svc.FindStooqArchive(root, "spy")
+		got, err := svc.FindStooqArchive(context.Background(), root, "spy")
 		require.NoError(t, err)
 		assert.Equal(t, path, got)
 	})
 	t.Run("matches whole name tokens only", func(t *testing.T) {
 		root := t.TempDir()
 		writeZIP(t, filepath.Join(root, "spyder.zip"), nil)
-		_, err := svc.FindStooqArchive(root, "SPY")
+		_, err := svc.FindStooqArchive(context.Background(), root, "SPY")
 		require.ErrorIs(t, err, svc.ErrArchiveNotFound)
 	})
 	t.Run("missing archive", func(t *testing.T) {
 		root := t.TempDir()
-		_, err := svc.FindStooqArchive(root, "SPY")
+		_, err := svc.FindStooqArchive(context.Background(), root, "SPY")
 		require.ErrorIs(t, err, svc.ErrArchiveNotFound)
 		assert.ErrorContains(t, err, "SPY")
 		assert.ErrorContains(t, err, root)
@@ -154,15 +169,23 @@ func TestFindStooqArchive(t *testing.T) {
 		root := t.TempDir()
 		writeZIP(t, filepath.Join(root, "spy_2024.zip"), nil)
 		writeZIP(t, filepath.Join(root, "spy-2025.zip"), nil)
-		_, err := svc.FindStooqArchive(root, "SPY")
+		_, err := svc.FindStooqArchive(context.Background(), root, "SPY")
 		require.ErrorIs(t, err, svc.ErrAmbiguousArchive)
 	})
 	t.Run("root not configured", func(t *testing.T) {
-		_, err := svc.FindStooqArchive("", "SPY")
+		_, err := svc.FindStooqArchive(context.Background(), "", "SPY")
 		require.ErrorIs(t, err, svc.ErrArchiveRootNotConfigured)
 	})
+	t.Run("canceled context stops the walk", func(t *testing.T) {
+		root := t.TempDir()
+		writeZIP(t, filepath.Join(root, "spy_us_d.zip"), nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := svc.FindStooqArchive(ctx, root, "SPY")
+		require.ErrorIs(t, err, context.Canceled)
+	})
 	t.Run("unreadable root", func(t *testing.T) {
-		_, err := svc.FindStooqArchive(filepath.Join(t.TempDir(), "absent"), "SPY")
+		_, err := svc.FindStooqArchive(context.Background(), filepath.Join(t.TempDir(), "absent"), "SPY")
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, svc.ErrArchiveNotFound)
 		assert.ErrorContains(t, err, "search Stooq archive root")
@@ -292,4 +315,72 @@ func mustRead(t *testing.T, path string) []byte {
 	b, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return b
+}
+
+func TestConvertStooqArchive_CanceledBeforeDiscovery(t *testing.T) {
+	f := newStooqFixture(t)
+	root := t.TempDir()
+	writeZIP(t, filepath.Join(root, "spy_us_d.zip"), map[string]string{"spy.us.txt": spyTwoMonths})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := f.service.ConvertStooqArchive(ctx, f.request("", root))
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestConvertStooqArchive_LogsOneOutcomeRecord(t *testing.T) {
+	newLogged := func(t *testing.T) (stooqFixture, *logging.Recorder) {
+		logger, rec := logging.Capture()
+		f := newStooqFixture(t)
+		manager, err := marketruntime.New(marketruntime.Config{
+			Clock: clock.NewSimulated(time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC)), StoreRoot: f.storeRoot,
+			RawRoot: f.rawRoot, Resolver: f.resolver, ProviderName: "stooq",
+			Calendar: marketdata.NewUSEquityCalendar(marketdata.StandardUSEquityHolidays(2020)),
+		})
+		require.NoError(t, err)
+		f.service, err = svc.New(manager, logger)
+		require.NoError(t, err)
+		return f, rec
+	}
+	operationRecords := func(rec *logging.Recorder) []logging.Record {
+		var out []logging.Record
+		for _, r := range rec.Records() {
+			if strings.Contains(r.Message, "convert") {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+
+	t.Run("discovery failure", func(t *testing.T) {
+		f, rec := newLogged(t)
+		_, err := f.service.ConvertStooqArchive(context.Background(), f.request("", t.TempDir()))
+		require.ErrorIs(t, err, svc.ErrArchiveNotFound)
+		records := operationRecords(rec)
+		require.Len(t, records, 1)
+		assert.Equal(t, "stooq archive convert failed", records[0].Message)
+		assert.Equal(t, slog.LevelError, records[0].Level)
+		assert.Equal(t, "SPY", records[0].Attrs["symbol"])
+		assert.Contains(t, records[0].Attrs, "error")
+	})
+	t.Run("success", func(t *testing.T) {
+		f, rec := newLogged(t)
+		archivePath := filepath.Join(t.TempDir(), "spy.zip")
+		writeZIP(t, archivePath, map[string]string{"spy.us.txt": spyTwoMonths})
+		_, err := f.service.ConvertStooqArchive(context.Background(), f.request(archivePath, ""))
+		require.NoError(t, err)
+		records := operationRecords(rec)
+		require.Len(t, records, 1, "no nested Convert record")
+		assert.Equal(t, "stooq archive convert completed", records[0].Message)
+		assert.Equal(t, int64(2), records[0].Attrs["rows_imported"])
+		assert.NotContains(t, records[0].Attrs, "error")
+	})
+	t.Run("invalid request is not logged", func(t *testing.T) {
+		f, rec := newLogged(t)
+		req := f.request("", "")
+		req.Symbol = ""
+		_, err := f.service.ConvertStooqArchive(context.Background(), req)
+		require.ErrorIs(t, err, svc.ErrInvalidRequest)
+		assert.Empty(t, operationRecords(rec))
+	})
 }

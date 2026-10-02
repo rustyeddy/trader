@@ -24,6 +24,12 @@ func (s *Service) Convert(ctx context.Context, req ConvertRequest) (resp Convert
 		s.logOutcome(ctx, slog.LevelInfo, "convert completed", "convert failed", req.DatasetRequest, err,
 			"rows_imported", resp.Import.RowsImported, "published_partitions", len(resp.Build.Result.Published))
 	}()
+	return s.convert(ctx, req)
+}
+
+// convert is Convert without validation or its outcome log, so
+// ConvertStooqArchive can log one record for its whole operation.
+func (s *Service) convert(ctx context.Context, req ConvertRequest) (ConvertResponse, error) {
 	imported, err := s.manager.ImportStooqArchive(ctx, req.ArchivePath, req.Instrument)
 	if err != nil {
 		return ConvertResponse{}, err
@@ -47,8 +53,7 @@ func (s *Service) Convert(ctx context.Context, req ConvertRequest) (resp Convert
 		return ConvertResponse{}, fmt.Errorf("%w: source range does not overlap requested range: %v", ErrInvalidRequest, err)
 	}
 	build, err := s.Build(ctx, BuildRequest{DatasetRequest: req.DatasetRequest, Force: req.Force})
-	resp = ConvertResponse{Import: imported, Build: build}
-	return resp, err
+	return ConvertResponse{Import: imported, Build: build}, err
 }
 
 func validateConvertRequest(req ConvertRequest) error {

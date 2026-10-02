@@ -40,8 +40,10 @@ func newStq2BarsCmd() *cobra.Command {
 			switch {
 			case errors.Is(err, svc.ErrNoListingDefault):
 				return fmt.Errorf("unknown Stooq instrument %q: provide --exchange and --kind", symbol)
-			case errors.Is(err, svc.ErrInvalidRequest):
+			case errors.Is(err, svc.ErrIncompleteListingIdentity):
 				return fmt.Errorf("--exchange and --kind must be provided together")
+			case errors.Is(err, svc.ErrInvalidRequest):
+				return fmt.Errorf(`invalid --kind %q: expected "equity" or "etf"`, kind)
 			case err != nil:
 				return err
 			}

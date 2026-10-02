@@ -101,3 +101,12 @@ func TestStq2BarsReportsMissingArchiveWithFlagGuidance(t *testing.T) {
 	require.Contains(t, err.Error(), "no Stooq archive for SPY found under")
 	require.Contains(t, err.Error(), "; provide --archive")
 }
+
+func TestStq2BarsIdentityFlagErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.zip")
+	_, err := runData(t, t.TempDir(), t.TempDir(), "stq2bars", "SPY", "--archive", missing, "--exchange", "ARCA")
+	require.EqualError(t, err, "--exchange and --kind must be provided together")
+
+	_, err = runData(t, t.TempDir(), t.TempDir(), "stq2bars", "ES", "--archive", missing, "--exchange", "CME", "--kind", "future")
+	require.EqualError(t, err, `invalid --kind "future": expected "equity" or "etf"`)
+}
