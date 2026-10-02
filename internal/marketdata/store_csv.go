@@ -520,14 +520,14 @@ func readPartitionFile(path string, key partitionKey) (marketdata.Manifest, []ma
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	if !scanner.Scan() {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: empty file", errStoreMalformed, path)
+		return marketdata.Manifest{}, nil, scanFailure(scanner, path, "empty file")
 	}
 	if err := crossCheckPartitionSchema(scanner.Text(), path, key); err != nil {
 		return marketdata.Manifest{}, nil, err
 	}
 
 	if !scanner.Scan() {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: missing manifest header", errStoreMalformed, path)
+		return marketdata.Manifest{}, nil, scanFailure(scanner, path, "missing manifest header")
 	}
 	m, err := decodeManifestJSON(scanner.Text(), path, key.instrument)
 	if err != nil {
@@ -535,7 +535,7 @@ func readPartitionFile(path string, key partitionKey) (marketdata.Manifest, []ma
 	}
 
 	if !scanner.Scan() {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: missing column header", errStoreMalformed, path)
+		return marketdata.Manifest{}, nil, scanFailure(scanner, path, "missing column header")
 	}
 	if got := scanner.Text(); got != canonicalCSVHeader {
 		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: unexpected column header %q, want %q", errStoreMalformed, path, got, canonicalCSVHeader)
@@ -556,9 +556,30 @@ func readPartitionFile(path string, key partitionKey) (marketdata.Manifest, []ma
 		bars = append(bars, b)
 	}
 	if err := scanner.Err(); err != nil {
-		return marketdata.Manifest{}, nil, fmt.Errorf("%w: %s: %v", errStoreMalformed, path, err)
+		return marketdata.Manifest{}, nil, scanError(path, err)
 	}
 	return m, bars, nil
+}
+
+// scanFailure reports why scanner stopped before an expected line: its
+// read error, or, when the file simply ended, a malformed file missing
+// what.
+func scanFailure(scanner *bufio.Scanner, path, what string) error {
+	if err := scanner.Err(); err != nil {
+		return scanError(path, err)
+	}
+	return fmt.Errorf("%w: %s: %s", errStoreMalformed, path, what)
+}
+
+// scanError classifies a scanner error. An over-long line is malformed
+// content; anything else is a read failure, returned unclassified (with
+// its *fs.PathError intact) so callers can tell I/O failures from bad
+// data.
+func scanError(path string, err error) error {
+	if errors.Is(err, bufio.ErrTooLong) {
+		return fmt.Errorf("%w: %s: %v", errStoreMalformed, path, err)
+	}
+	return fmt.Errorf("marketdata: store: read %s: %w", path, err)
 }
 
 func crossCheckPartitionSchema(comment, path string, key partitionKey) error {

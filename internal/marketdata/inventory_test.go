@@ -2,8 +2,13 @@ package marketdata
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -280,4 +285,85 @@ func TestCanonicalCSVStoreMonths(t *testing.T) {
 	cancel()
 	_, err = store.months(canceled, "oanda", "EURUSD", marketdata.H1)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// failingLoadStore is a canonical CSV store whose load fails with a
+// chosen error for chosen months.
+type failingLoadStore struct {
+	*canonicalCSVStore
+	fail map[yearMonth]error
+}
+
+func (s failingLoadStore) load(ctx context.Context, key partitionKey) (marketdata.Manifest, marketdata.BarSet, error) {
+	if err, ok := s.fail[yearMonth{key.year, key.month}]; ok {
+		return marketdata.Manifest{}, marketdata.BarSet{}, err
+	}
+	return s.canonicalCSVStore.load(ctx, key)
+}
+
+func newFailingLoadManager(t *testing.T, fail map[yearMonth]error) *Manager {
+	t.Helper()
+	root := t.TempDir()
+	mgr, err := New(Config{
+		Clock: testClock(), StoreRoot: root, RawRoot: t.TempDir(), Resolver: testResolver(t), ProviderName: "oanda",
+		store: failingLoadStore{canonicalCSVStore: newCanonicalCSVStore(root), fail: fail},
+	})
+	require.NoError(t, err)
+	publishH1(t, mgr, utcHour(2024, time.January, 8, 10))
+	publishH1(t, mgr, utcHour(2024, time.March, 4, 9))
+	return mgr
+}
+
+func TestInventory_CanonicalIOErrorsPropagate(t *testing.T) {
+	march := yearMonth{2024, time.March}
+	tests := map[string]error{
+		"permission denied": &fs.PathError{Op: "open", Path: "EURUSD-2024-03-h1.csv", Err: fs.ErrPermission},
+		"read failure":      fmt.Errorf("marketdata: store: read x: %w", &fs.PathError{Op: "read", Path: "x", Err: syscall.EIO}),
+	}
+	for name, loadErr := range tests {
+		t.Run(name, func(t *testing.T) {
+			mgr := newFailingLoadManager(t, map[yearMonth]error{march: loadErr})
+			_, err := mgr.Inventory(context.Background(), eurusd(), marketdata.H1)
+			require.Error(t, err, "an unreadable newest partition must not report an earlier end")
+			assert.ErrorIs(t, err, loadErr)
+		})
+	}
+}
+
+func TestInventory_CanonicalSkipsRemovedAndMalformed(t *testing.T) {
+	march := yearMonth{2024, time.March}
+	tests := map[string]error{
+		"removed since listing": &fs.PathError{Op: "open", Path: "x", Err: fs.ErrNotExist},
+		"malformed":             fmt.Errorf("%w: x: bad row", errStoreMalformed),
+		"invalid bar set":       errors.New("bar set: bars out of order"),
+	}
+	for name, loadErr := range tests {
+		t.Run(name, func(t *testing.T) {
+			mgr := newFailingLoadManager(t, map[yearMonth]error{march: loadErr})
+			inv, err := mgr.Inventory(context.Background(), eurusd(), marketdata.H1)
+			require.NoError(t, err)
+			require.NotNil(t, inv.Canonical)
+			assert.Equal(t, 2, inv.Canonical.Partitions)
+			assert.True(t, inv.Canonical.Last.Equal(utcHour(2024, time.January, 8, 10)), inv.Canonical.Last)
+		})
+	}
+}
+
+func TestReadPartitionFile_ReadErrorIsNotMalformed(t *testing.T) {
+	// Opening a directory succeeds; reading it fails with a *fs.PathError.
+	dir := t.TempDir()
+	_, _, err := readPartitionFile(dir, partitionKey{})
+	require.Error(t, err)
+	var pathErr *fs.PathError
+	assert.ErrorAs(t, err, &pathErr)
+	assert.NotErrorIs(t, err, errStoreMalformed)
+	assert.False(t, skippableLoadError(err))
+}
+
+func TestReadPartitionFile_OverlongLineIsMalformed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "long.csv")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("x", 2*1024*1024)), 0o644))
+	_, _, err := readPartitionFile(path, partitionKey{})
+	assert.ErrorIs(t, err, errStoreMalformed)
+	assert.True(t, skippableLoadError(err))
 }

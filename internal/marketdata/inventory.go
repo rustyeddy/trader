@@ -2,7 +2,9 @@ package marketdata
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
@@ -32,8 +34,8 @@ type Inventory struct {
 	Raw *DataSpan
 	// Canonical is nil when no canonical partition has been published.
 	// Partitions counts every published partition file, including one
-	// that fails to load; First and Last come from the partitions that
-	// load. Gaps within the span are available from Coverage over
+	// whose content is malformed or invalid; First and Last come from the
+	// partitions that load. Gaps within the span are available from Coverage over
 	// [First, Last].
 	Canonical *DataSpan
 }
@@ -41,7 +43,9 @@ type Inventory struct {
 // Inventory is a pure read: it never downloads, builds, or writes. It
 // fails only for an invalid request, an unresolvable instrument, a
 // provider that cannot hold the interval, or an I/O error reading
-// either tree.
+// either tree. A canonical partition that fails with an I/O error (for
+// example permission denied) fails Inventory rather than being skipped,
+// so an unreadable newest partition never reports an earlier end.
 func (m *Manager) Inventory(ctx context.Context, id instrument.ID, interval marketdata.Interval) (Inventory, error) {
 	if !m.configured() {
 		return Inventory{}, fmt.Errorf("marketdata: inventory: %w: manager is not configured", ErrInvalidConfig)
@@ -115,14 +119,16 @@ func (m *Manager) canonicalSpan(ctx context.Context, symbol string, id instrumen
 	load := func(ym yearMonth) (marketdata.BarSet, bool, error) {
 		key := partitionKey{provider: m.providerName, symbol: symbol, instrument: id, interval: interval, year: ym.year, month: ym.month}
 		_, bs, err := m.loadPartition(ctx, key)
-		if err != nil {
-			if ctx.Err() != nil {
-				return marketdata.BarSet{}, false, ctx.Err()
-			}
-			// Invalid, or removed since listing; Coverage reports it.
+		switch {
+		case err == nil:
+			return bs, len(bs.Bars) > 0, nil
+		case ctx.Err() != nil:
+			return marketdata.BarSet{}, false, ctx.Err()
+		case skippableLoadError(err):
 			return marketdata.BarSet{}, false, nil
+		default:
+			return marketdata.BarSet{}, false, err
 		}
-		return bs, len(bs.Bars) > 0, nil
 	}
 	for _, ym := range months {
 		bs, ok, err := load(ym)
@@ -145,4 +151,18 @@ func (m *Manager) canonicalSpan(ctx context.Context, symbol string, id instrumen
 		}
 	}
 	return &span, nil
+}
+
+// skippableLoadError reports whether a canonical partition that failed to
+// load can be skipped when finding the canonical span: a file removed
+// since it was listed, or one whose content is malformed or invalid
+// (Coverage reports those as Invalid). Any other filesystem error —
+// permission denied, a failed read — is an operational failure, not a
+// shorter dataset, and must not be skipped.
+func skippableLoadError(err error) bool {
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	var pathErr *fs.PathError
+	return !errors.As(err, &pathErr)
 }
