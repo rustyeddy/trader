@@ -1,6 +1,8 @@
 package data
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
@@ -21,23 +23,30 @@ func newCoverageCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req, err := resolveDatasetRequestRange(cmd, args, flags, true)
+			req, err := parseDatasetsRequest(args, flags, true)
 			if err != nil {
 				return err
 			}
 
+			// The same coverage operation MCP runs (issue #439), for one
+			// symbol.
 			dc, _ := dataContextFrom(cmd.Context())
-			resp, err := dc.Service.Coverage(cmd.Context(), svc.CoverageRequest{DatasetRequest: req})
+			resp, err := dc.Service.DatasetsCoverage(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
+			if len(resp.Results) != 1 {
+				return fmt.Errorf("expected one coverage result, got %d", len(resp.Results))
+			}
+			if res := resp.Results[0]; res.Err != nil {
+				return instrumentFlagError(res.Err, dc.Provider, flags)
+			}
 
-			return formatter.FormatCoverage(cmd.OutOrStdout(), resp)
+			return formatter.FormatCoverage(cmd.OutOrStdout(), svc.CoverageResponse{Coverage: resp.Results[0].Coverage})
 		},
 	}
 
 	addDatasetArgFlags(cmd, &flags)
-	cmd.Flags().Lookup("from").Usage = "range start (YYYY-MM-DD or RFC3339); with --to, or omit both for the existing canonical span"
-	cmd.Flags().Lookup("to").Usage = "range end (YYYY-MM-DD or RFC3339); with --from, or omit both for the existing canonical span"
+	optionalRangeUsage(cmd, "the existing canonical span")
 	return cmd
 }

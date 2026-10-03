@@ -2,6 +2,7 @@ package marketdata_test
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,7 +78,7 @@ func TestCanonicalizeDatasets_StooqArchive(t *testing.T) {
 	s := datasetsService(t, "stooq", d(2020, 3, 1), t.TempDir(), svc.WithArchiveRoot(archiveRoot))
 	req := svc.DatasetsRequest{Instruments: symbols("SPY", "spy", "MSFT"), Interval: marketdata.D1}
 
-	resp, err := s.CanonicalizeDatasets(ctx, req, false)
+	resp, err := s.CanonicalizeDatasets(ctx, req, svc.CanonicalizeOptions{})
 	require.NoError(t, err, "one failing symbol does not fail the call")
 	require.Len(t, resp.Results, 3)
 
@@ -101,7 +102,7 @@ func TestCanonicalizeDatasets_StooqArchive(t *testing.T) {
 	assert.ErrorIs(t, resp.Results[2].Err, svc.ErrNoListingDefault)
 	assert.True(t, resp.Results[2].Instrument.IsZero())
 
-	forced, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, true)
+	forced, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, svc.CanonicalizeOptions{Force: true})
 	require.NoError(t, err)
 	assert.Equal(t, svc.DatasetBuilt, forced.Results[0].Status, "force rebuilds current partitions")
 	require.NotNil(t, forced.Results[0].CanonicalBefore)
@@ -114,7 +115,7 @@ func TestCanonicalizeDatasets_StooqExplicitRange(t *testing.T) {
 	span, err := marketdata.NewTimeRange(d(2020, 1, 1), d(2020, 2, 1))
 	require.NoError(t, err)
 
-	resp, err := s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1, Range: span}, false)
+	resp, err := s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1, Range: span}, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 	res := resp.Results[0]
 	require.NoError(t, res.Err)
@@ -129,11 +130,11 @@ func TestCanonicalizeDatasets_StooqFallsBackToImportedRaw(t *testing.T) {
 	archivePath := filepath.Join(archiveDir, "spy.zip")
 	writeZIP(t, archivePath, map[string]string{"spy.us.txt": spyTwoMonths})
 	s := datasetsService(t, "stooq", d(2020, 3, 1), t.TempDir(), svc.WithArchiveRoot(archiveDir))
-	_, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, false)
+	_, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(archivePath))
 
-	resp, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, true)
+	resp, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, svc.CanonicalizeOptions{Force: true})
 	require.NoError(t, err)
 	res := resp.Results[0]
 	require.NoError(t, res.Err, "no archive, but the imported raw data is still there")
@@ -143,7 +144,7 @@ func TestCanonicalizeDatasets_StooqFallsBackToImportedRaw(t *testing.T) {
 
 func TestCanonicalizeDatasets_StooqNoArchiveNoRaw(t *testing.T) {
 	s := datasetsService(t, "stooq", d(2020, 3, 1), t.TempDir(), svc.WithArchiveRoot(t.TempDir()))
-	resp, err := s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, false)
+	resp, err := s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, svc.DatasetFailed, resp.Results[0].Status)
 	assert.ErrorIs(t, resp.Results[0].Err, svc.ErrArchiveNotFound)
@@ -153,7 +154,7 @@ func TestCanonicalizeDatasets_RawProvider(t *testing.T) {
 	ctx := context.Background()
 	s := datasetsService(t, "oanda", d(2024, 2, 1), copyFixtureRaw(t))
 
-	resp, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD", "GBPUSD"), Interval: marketdata.H1}, false)
+	resp, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD", "GBPUSD"), Interval: marketdata.H1}, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 	eur := resp.Results[0]
 	require.NoError(t, eur.Err)
@@ -172,7 +173,7 @@ func TestCanonicalizeDatasets_RawProvider(t *testing.T) {
 	// schedules for an "extend" rebuild on every run until raw catches
 	// up, so the full-span default would still publish February.)
 	complete := svc.DatasetsRequest{Instruments: symbols("EURUSD"), Interval: marketdata.H1, Range: fixtureSpan(t)}
-	again, err := s.CanonicalizeDatasets(ctx, complete, false)
+	again, err := s.CanonicalizeDatasets(ctx, complete, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 	require.NoError(t, again.Results[0].Err)
 	assert.Equal(t, svc.DatasetCurrent, again.Results[0].Status)
@@ -186,7 +187,7 @@ func TestUpdateDatasets_StooqPicksUpNewerArchiveData(t *testing.T) {
 	writeZIP(t, archivePath, map[string]string{"spy.us.txt": spyJanuary})
 	s := datasetsService(t, "stooq", d(2020, 3, 1), t.TempDir(), svc.WithArchiveRoot(archiveRoot))
 	req := svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}
-	_, err := s.CanonicalizeDatasets(ctx, req, false)
+	_, err := s.CanonicalizeDatasets(ctx, req, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 
 	current, err := s.UpdateDatasets(ctx, req)
@@ -236,7 +237,7 @@ func TestUpdateDatasets_AlreadyAtNow(t *testing.T) {
 	// The clock stands at the last canonical bar: nothing can be newer.
 	s := datasetsService(t, "stooq", d(2020, 1, 31), t.TempDir(), svc.WithArchiveRoot(archiveRoot))
 	req := svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}
-	_, err := s.CanonicalizeDatasets(ctx, req, false)
+	_, err := s.CanonicalizeDatasets(ctx, req, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 
 	resp, err := s.UpdateDatasets(ctx, req)
@@ -277,7 +278,7 @@ func TestDatasetsCoverage(t *testing.T) {
 	assert.NotNil(t, before.Results[0].Inventory.Raw)
 	assert.Error(t, before.Results[1].Err)
 
-	_, err = s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD"), Interval: marketdata.H1, Range: fixtureSpan(t)}, false)
+	_, err = s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD"), Interval: marketdata.H1, Range: fixtureSpan(t)}, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 
 	after, err := s.DatasetsCoverage(ctx, req)
@@ -302,7 +303,7 @@ func TestDatasetsOperations_CallFailures(t *testing.T) {
 
 	t.Run("invalid request", func(t *testing.T) {
 		s := datasetsService(t, "oanda", d(2024, 2, 1), copyFixtureRaw(t))
-		_, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Interval: marketdata.H1}, false)
+		_, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Interval: marketdata.H1}, svc.CanonicalizeOptions{})
 		assert.ErrorIs(t, err, svc.ErrInvalidRequest)
 		_, err = s.UpdateDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD")})
 		assert.ErrorIs(t, err, svc.ErrInvalidRequest)
@@ -311,7 +312,7 @@ func TestDatasetsOperations_CallFailures(t *testing.T) {
 	})
 	t.Run("missing resolver", func(t *testing.T) {
 		s := newTestService(t)
-		_, err := s.CanonicalizeDatasets(ctx, req, false)
+		_, err := s.CanonicalizeDatasets(ctx, req, svc.CanonicalizeOptions{})
 		assert.ErrorIs(t, err, svc.ErrResolverNotConfigured)
 		_, err = s.DatasetsCoverage(ctx, req)
 		assert.ErrorIs(t, err, svc.ErrResolverNotConfigured)
@@ -338,7 +339,7 @@ func TestDatasetsOperations_LogOneAggregateRecord(t *testing.T) {
 	s, err := svc.New(manager, logger, svc.WithResolver(resolver))
 	require.NoError(t, err)
 
-	_, err = s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("EURUSD", "GBPUSD"), Interval: marketdata.H1}, false)
+	_, err = s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("EURUSD", "GBPUSD"), Interval: marketdata.H1}, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 
 	var aggregate []logging.Record
@@ -367,7 +368,7 @@ func TestCoverage_OmittedRange(t *testing.T) {
 	assert.True(t, empty.Coverage.Instrument.Equal(resolved.Instrument))
 	assert.True(t, empty.Coverage.Range.Start().IsZero())
 
-	_, err = s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD"), Interval: marketdata.H1, Range: fixtureSpan(t)}, false)
+	_, err = s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD"), Interval: marketdata.H1, Range: fixtureSpan(t)}, svc.CanonicalizeOptions{})
 	require.NoError(t, err)
 	full, err := s.Coverage(ctx, req)
 	require.NoError(t, err)
@@ -376,4 +377,107 @@ func TestCoverage_OmittedRange(t *testing.T) {
 
 	_, err = s.Coverage(ctx, svc.CoverageRequest{DatasetRequest: svc.DatasetRequest{Interval: marketdata.H1}})
 	assert.ErrorIs(t, err, svc.ErrInvalidRequest, "an omitted range still needs an instrument")
+}
+
+func TestCanonicalizeDatasets_NoSourceDataInRangeFails(t *testing.T) {
+	ctx := context.Background()
+	s := datasetsService(t, "oanda", d(2024, 2, 1), copyFixtureRaw(t))
+	march, err := marketdata.NewTimeRange(d(2024, 3, 1), d(2024, 4, 1))
+	require.NoError(t, err)
+
+	resp, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD", "GBPUSD"), Interval: marketdata.H1, Range: march}, svc.CanonicalizeOptions{})
+	require.NoError(t, err)
+	for _, res := range resp.Results {
+		assert.Equal(t, svc.DatasetFailed, res.Status, res.Request.Symbol)
+		assert.ErrorIs(t, res.Err, svc.ErrNoRawData, "no raw data in range is not 'current'")
+		require.NotNil(t, res.Build, "the build's plan is still reported")
+	}
+
+	// A range only partly backed by raw data still builds what it can.
+	partial, err := marketdata.NewTimeRange(fixtureSpan(t).Start(), d(2024, 4, 1))
+	require.NoError(t, err)
+	resp, err = s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD"), Interval: marketdata.H1, Range: partial}, svc.CanonicalizeOptions{})
+	require.NoError(t, err)
+	require.NoError(t, resp.Results[0].Err)
+	assert.Equal(t, svc.DatasetBuilt, resp.Results[0].Status)
+}
+
+func TestCanonicalizeDatasets_ArchivePathOption(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "anything.zip")
+	writeZIP(t, archive, map[string]string{"spy.us.txt": spyTwoMonths})
+	s := datasetsService(t, "stooq", d(2020, 3, 1), t.TempDir()) // no archive root
+
+	resp, err := s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, svc.CanonicalizeOptions{ArchivePath: archive})
+	require.NoError(t, err)
+	res := resp.Results[0]
+	require.NoError(t, res.Err)
+	assert.Equal(t, svc.DatasetBuilt, res.Status)
+	require.NotNil(t, res.Convert)
+	assert.Equal(t, 2, res.Convert.Import.RowsImported)
+	assert.Nil(t, res.Build)
+
+	_, err = s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("SPY", "QQQ"), Interval: marketdata.D1}, svc.CanonicalizeOptions{ArchivePath: archive})
+	assert.ErrorIs(t, err, svc.ErrInvalidRequest, "one archive cannot serve several instruments")
+}
+
+func TestCanonicalizeDatasets_FailedStepKeepsProgress(t *testing.T) {
+	// January is valid; February's rows are out of order, so the build
+	// publishes January and then fails on February, after the archive
+	// was already imported to raw.
+	bad := stooqHeader +
+		"SPY.US,D,20200131,000000,100,101,99,100.5,1000,0\n" +
+		"SPY.US,D,20200204,000000,100.5,102,100,101.5,2000,0\n" +
+		"SPY.US,D,20200203,000000,100.5,102,100,101.5,2000,0\n"
+	archive := filepath.Join(t.TempDir(), "spy.zip")
+	writeZIP(t, archive, map[string]string{"spy.us.txt": bad})
+	s := datasetsService(t, "stooq", d(2020, 3, 1), t.TempDir())
+
+	resp, err := s.CanonicalizeDatasets(context.Background(), svc.DatasetsRequest{Instruments: symbols("SPY"), Interval: marketdata.D1}, svc.CanonicalizeOptions{ArchivePath: archive})
+	require.NoError(t, err)
+	res := resp.Results[0]
+	require.Error(t, res.Err)
+	assert.Equal(t, svc.DatasetFailed, res.Status)
+	require.NotNil(t, res.Convert, "the failed step's response is kept")
+	assert.Positive(t, res.Convert.Import.RowsImported)
+	require.NotNil(t, res.Raw, "the after-inventory is taken even on failure")
+	assert.Equal(t, 1, res.PublishedPartitions, "January was published before February failed")
+	assert.Equal(t, 1, res.PublishedBars)
+	require.NotNil(t, res.CanonicalAfter, "the partial publication shows in the after-state")
+	assert.True(t, res.CanonicalAfter.Last.Equal(d(2020, 1, 31)))
+	assert.False(t, res.Range.Start().IsZero(), "the range it acted on is kept")
+}
+
+// cancelOn is a slog handler that cancels a context when it sees a
+// record with the given message, so a test can cancel mid-operation.
+type cancelOn struct {
+	msg    string
+	cancel context.CancelFunc
+}
+
+func (c cancelOn) Enabled(context.Context, slog.Level) bool { return true }
+func (c cancelOn) Handle(_ context.Context, r slog.Record) error {
+	if r.Message == c.msg {
+		c.cancel()
+	}
+	return nil
+}
+func (c cancelOn) WithAttrs([]slog.Attr) slog.Handler { return c }
+func (c cancelOn) WithGroup(string) slog.Handler      { return c }
+
+func TestCanonicalizeDatasets_CancelDuringOnlySymbol(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resolver := instrument.NewMemoryResolver()
+	manager, err := marketruntime.New(marketruntime.Config{
+		Clock: clock.NewSimulated(d(2024, 2, 1)), StoreRoot: t.TempDir(), RawRoot: copyFixtureRaw(t),
+		Resolver: resolver, ProviderName: "oanda",
+	})
+	require.NoError(t, err)
+	s, err := svc.New(manager, slog.New(cancelOn{msg: "build completed", cancel: cancel}), svc.WithResolver(resolver))
+	require.NoError(t, err)
+
+	resp, err := s.CanonicalizeDatasets(ctx, svc.DatasetsRequest{Instruments: symbols("EURUSD"), Interval: marketdata.H1, Range: fixtureSpan(t)}, svc.CanonicalizeOptions{})
+	require.ErrorIs(t, err, context.Canceled, "cancellation during the last symbol fails the call")
+	require.Len(t, resp.Results, 1, "the interrupted symbol's result is kept")
+	assert.Equal(t, 1, resp.Results[0].PublishedPartitions, "its build finished before the cancellation")
 }

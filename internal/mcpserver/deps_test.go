@@ -49,7 +49,7 @@ func (providerOnly) DatasetsCoverage(context.Context, svcmarketdata.DatasetsRequ
 	return svcmarketdata.DatasetsCoverageResponse{}, errors.New("not implemented")
 }
 
-func (providerOnly) CanonicalizeDatasets(context.Context, svcmarketdata.DatasetsRequest, bool) (svcmarketdata.DatasetsResponse, error) {
+func (providerOnly) CanonicalizeDatasets(context.Context, svcmarketdata.DatasetsRequest, svcmarketdata.CanonicalizeOptions) (svcmarketdata.DatasetsResponse, error) {
 	return svcmarketdata.DatasetsResponse{}, errors.New("not implemented")
 }
 

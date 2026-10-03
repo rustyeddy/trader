@@ -90,21 +90,67 @@ func registerRequestedInstrument(dc dataContext, symbol string, flags datasetArg
 	listing, err := svc.RegisterInstrument(dc.Resolver, dc.Provider, svc.InstrumentRequest{
 		Symbol: symbol, Exchange: flags.exchange, Kind: flags.kind,
 	})
+	if err != nil {
+		return instrument.ID{}, instrumentFlagError(err, dc.Provider, flags)
+	}
+	return listing.InstrumentID(), nil
+}
+
+// instrumentFlagError translates the service's instrument-resolution
+// errors into --exchange/--kind guidance; any other error passes through.
+func instrumentFlagError(err error, provider string, flags datasetArgFlags) error {
 	switch {
-	case err == nil:
-		return listing.InstrumentID(), nil
 	case errors.Is(err, svc.ErrNoListingDefault),
 		errors.Is(err, svc.ErrIncompleteListingIdentity) && flags.exchange == "":
-		return instrument.ID{}, fmt.Errorf(
-			"--exchange is required for provider %q (for example --exchange ARCA or --exchange NASDAQ)", dc.Provider)
+		return fmt.Errorf(
+			"--exchange is required for provider %q (for example --exchange ARCA or --exchange NASDAQ)", provider)
 	case errors.Is(err, svc.ErrIncompleteListingIdentity):
-		return instrument.ID{}, fmt.Errorf(
-			`--kind is required for provider %q: expected "equity" or "etf"`, dc.Provider)
+		return fmt.Errorf(`--kind is required for provider %q: expected "equity" or "etf"`, provider)
 	case errors.Is(err, svc.ErrInvalidListingKind):
-		return instrument.ID{}, fmt.Errorf(`invalid --kind %q: expected "equity" or "etf"`, flags.kind)
+		return fmt.Errorf(`invalid --kind %q: expected "equity" or "etf"`, flags.kind)
 	default:
-		return instrument.ID{}, err
+		return err
 	}
+}
+
+// parseDatasetsRequest parses args (exactly [INSTRUMENT, INTERVAL]) and
+// flags into a one-instrument svc.DatasetsRequest for the multi-symbol
+// operations (issue #439), without resolving the instrument: the service
+// operation does that. With rangeOptional, omitting both --from and --to
+// leaves the range for the service to default.
+func parseDatasetsRequest(args []string, flags datasetArgFlags, rangeOptional bool) (svc.DatasetsRequest, error) {
+	if len(args) != 2 {
+		return svc.DatasetsRequest{}, fmt.Errorf("expected exactly two arguments: INSTRUMENT INTERVAL")
+	}
+	interval, err := parseInterval(args[1])
+	if err != nil {
+		return svc.DatasetsRequest{}, err
+	}
+	req := svc.DatasetsRequest{
+		Instruments: []svc.InstrumentRequest{{Symbol: args[0], Exchange: flags.exchange, Kind: flags.kind}},
+		Interval:    interval,
+	}
+	if rangeOptional && flags.from == "" && flags.to == "" {
+		return req, nil
+	}
+	if flags.from == "" || flags.to == "" {
+		if rangeOptional {
+			return svc.DatasetsRequest{}, fmt.Errorf("--from and --to must be provided together")
+		}
+		return svc.DatasetsRequest{}, fmt.Errorf("--from and --to are both required")
+	}
+	from, err := parseDate(flags.from)
+	if err != nil {
+		return svc.DatasetsRequest{}, err
+	}
+	to, err := parseDate(flags.to)
+	if err != nil {
+		return svc.DatasetsRequest{}, err
+	}
+	if req.Range, err = marketdata.NewTimeRange(from, to); err != nil {
+		return svc.DatasetsRequest{}, fmt.Errorf("invalid range: %w", err)
+	}
+	return req, nil
 }
 
 // resolveDatasetRequest parses args (exactly [INSTRUMENT, INTERVAL])
@@ -122,13 +168,6 @@ func registerRequestedInstrument(dc dataContext, symbol string, flags datasetArg
 // size and friends) that a CLI adapter has no business fabricating
 // itself, and the MCP transport resolves through the same code.
 func resolveDatasetRequest(cmd *cobra.Command, args []string, flags datasetArgFlags) (svc.DatasetRequest, error) {
-	return resolveDatasetRequestRange(cmd, args, flags, false)
-}
-
-// resolveDatasetRequestRange is resolveDatasetRequest, except that when
-// rangeOptional is set, omitting both --from and --to leaves the request's
-// Range zero for the service to default (issue #439).
-func resolveDatasetRequestRange(cmd *cobra.Command, args []string, flags datasetArgFlags, rangeOptional bool) (svc.DatasetRequest, error) {
 	dc, ok := dataContextFrom(cmd.Context())
 	if !ok {
 		return svc.DatasetRequest{}, fmt.Errorf("data service is not configured on this command's context")
@@ -147,13 +186,7 @@ func resolveDatasetRequestRange(cmd *cobra.Command, args []string, flags dataset
 		return svc.DatasetRequest{}, err
 	}
 
-	if rangeOptional && flags.from == "" && flags.to == "" {
-		return svc.DatasetRequest{Instrument: instrumentID, Interval: interval}, nil
-	}
 	if flags.from == "" || flags.to == "" {
-		if rangeOptional {
-			return svc.DatasetRequest{}, fmt.Errorf("--from and --to must be provided together")
-		}
 		return svc.DatasetRequest{}, fmt.Errorf("--from and --to are both required")
 	}
 	from, err := parseDate(flags.from)

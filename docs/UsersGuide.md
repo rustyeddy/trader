@@ -119,8 +119,8 @@ INTERVAL is one of the values listed under `backtest run` below.
 
 | Flag                | Default                                | Meaning                                                                  |
 |---------------------|-----------------------------------------|---------------------------------------------------------------------------|
-| `--from`            | —                                      | range start (`YYYY-MM-DD` or RFC3339), **required**                     |
-| `--to`              | —                                      | range end (`YYYY-MM-DD` or RFC3339), **required**                       |
+| `--from`            | —                                      | range start (`YYYY-MM-DD` or RFC3339); **required**, except that `build`, `update`, and `coverage` accept omitting both ends (see each command) |
+| `--to`              | —                                      | range end (`YYYY-MM-DD` or RFC3339); given together with `--from`        |
 | `--format`          | `table`                                | `table` or `json`                                                       |
 | `--provider`        | `oanda`                                | canonical dataset provider name (e.g. `oanda`, `alpaca`)                |
 | `--raw-root`        | `$XDG_DATA_HOME/trader/raw/<provider>` | raw provider archive root                                                |
@@ -163,13 +163,22 @@ trader data sync SPY D1 --provider alpaca --exchange ARCA --kind etf \
 
 ### `trader data build INSTRUMENT INTERVAL`
 
-Builds and publishes canonical data from raw data already present under
-`--raw-root` — never fetches from a live provider.
+Builds and publishes canonical data from the provider's native data — never
+fetches from a live provider. For `stooq` that is the native archive (under
+`--archive-root`), falling back to raw data already imported when no archive is
+found; for other providers it is the raw data already present under
+`--raw-root`. Omit `--from`/`--to` to build the whole source span. A range with
+no source data at all is an error, not a silent no-op. This is the same
+operation `trader-mcp`'s canonicalize tool runs.
 
 ### `trader data update INSTRUMENT INTERVAL`
 
 Runs plan, then sync, then build, as each step actually requires — the
-one-command path to "make sure this dataset is current."
+one-command path to "make sure this dataset is current." Omit `--from`/`--to`
+to update from the last canonical bar through now; that needs existing
+canonical data (build it first). `stooq` has no live feed, so its update
+re-converts the native archive and picks up whatever newer data it holds. This
+is the same operation `trader-mcp`'s update tool runs.
 
 ### `trader data coverage INSTRUMENT INTERVAL`
 

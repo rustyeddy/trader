@@ -63,7 +63,7 @@ type MarketData interface {
 	// coverage, and the data-mutating canonicalize and update, which
 	// tools gate with requireWrites.
 	DatasetsCoverage(context.Context, svcmarketdata.DatasetsRequest) (svcmarketdata.DatasetsCoverageResponse, error)
-	CanonicalizeDatasets(ctx context.Context, req svcmarketdata.DatasetsRequest, force bool) (svcmarketdata.DatasetsResponse, error)
+	CanonicalizeDatasets(context.Context, svcmarketdata.DatasetsRequest, svcmarketdata.CanonicalizeOptions) (svcmarketdata.DatasetsResponse, error)
 	UpdateDatasets(context.Context, svcmarketdata.DatasetsRequest) (svcmarketdata.DatasetsResponse, error)
 }
 

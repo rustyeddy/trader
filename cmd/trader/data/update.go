@@ -1,11 +1,7 @@
 package data
 
 import (
-	"errors"
-
 	"github.com/spf13/cobra"
-
-	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // newUpdateCmd implements "trader data update INSTRUMENT INTERVAL
@@ -26,30 +22,26 @@ func newUpdateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req, err := resolveDatasetRequest(cmd, args, flags)
+			req, err := parseDatasetsRequest(args, flags, true)
 			if err != nil {
 				return err
 			}
 
+			// The same update operation MCP runs (issue #439), for one
+			// symbol. A failed update prints only its partial progress
+			// (FormatUpdateProgress), never FormatUpdate's success-only
+			// "already current" claim.
 			dc, _ := dataContextFrom(cmd.Context())
-			resp, err := dc.Service.Update(cmd.Context(), svc.UpdateRequest{DatasetRequest: req})
+			res, err := singleResult(dc.Service.UpdateDatasets(cmd.Context(), req))
 			if err != nil {
-				// FormatUpdateProgress, not FormatUpdate: the latter's
-				// "already current" claim is success-only and would
-				// misrepresent a failed Update (see Formatter's own
-				// doc comment). Same join-don't-mask policy as
-				// sync.go/build.go for a secondary formatting
-				// failure.
-				if formatErr := formatter.FormatUpdateProgress(cmd.OutOrStdout(), resp); formatErr != nil {
-					return errors.Join(err, formatErr)
-				}
 				return err
 			}
-
-			return formatter.FormatUpdate(cmd.OutOrStdout(), resp)
+			res.Err = instrumentFlagError(res.Err, dc.Provider, flags)
+			return formatDatasetResult(cmd.OutOrStdout(), formatter, res)
 		},
 	}
 
 	addDatasetArgFlags(cmd, &flags)
+	optionalRangeUsage(cmd, "from the last canonical bar through now")
 	return cmd
 }

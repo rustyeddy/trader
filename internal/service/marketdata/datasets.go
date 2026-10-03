@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/rustyeddy/trader/instrument"
 	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
@@ -88,7 +89,14 @@ type DatasetResult struct {
 	// published.
 	PublishedPartitions int
 	PublishedBars       int
-	Err                 error
+	// The step's full response, for callers that report it in detail
+	// (the CLI). At most one is set: Convert for a stooq archive
+	// conversion, Build for a build from raw, Update for an update. It
+	// is set even when the step failed, holding its partial progress.
+	Convert *ConvertResponse
+	Build   *BuildResponse
+	Update  *UpdateResponse
+	Err     error
 }
 
 // DatasetsResponse holds one DatasetResult per requested instrument, in
@@ -118,8 +126,8 @@ type DatasetsCoverageResponse struct {
 // inventory, read-only. An omitted range means each instrument's own
 // canonical span (see Coverage). One instrument failing is recorded on
 // its result and never hides the others; the call itself fails only for
-// an invalid request, a missing resolver, or ctx, and then returns the
-// results gathered so far.
+// an invalid request, a missing resolver, or ctx; a canceled ctx returns
+// its error with the results gathered so far.
 func (s *Service) DatasetsCoverage(ctx context.Context, req DatasetsRequest) (resp DatasetsCoverageResponse, err error) {
 	if err := req.Validate(); err != nil {
 		return DatasetsCoverageResponse{}, err
@@ -140,7 +148,7 @@ func (s *Service) DatasetsCoverage(ctx context.Context, req DatasetsRequest) (re
 		}
 		resp.Results = append(resp.Results, res)
 	}
-	return resp, nil
+	return resp, ctx.Err()
 }
 
 func (s *Service) coverageOne(ctx context.Context, req DatasetsRequest, res *CoverageResult) error {
@@ -152,41 +160,63 @@ func (s *Service) coverageOne(ctx context.Context, req DatasetsRequest, res *Cov
 	if res.Inventory, err = s.manager.Inventory(ctx, res.Instrument, req.Interval); err != nil {
 		return err
 	}
-	cov, err := s.coverage(ctx, CoverageRequest{DatasetRequest: DatasetRequest{Instrument: res.Instrument, Interval: req.Interval, Range: req.Range}})
+	rng := req.Range
+	if !req.hasRange() {
+		// The canonical span, from the inventory already taken, rather
+		// than letting coverage scan the raw tree a second time.
+		span := res.Inventory.Canonical
+		if span == nil || span.First.IsZero() {
+			res.Coverage = marketruntime.Coverage{Instrument: res.Instrument, Interval: req.Interval}
+			return nil
+		}
+		if rng, err = marketdata.NewTimeRange(span.First, span.End); err != nil {
+			return err
+		}
+	}
+	cov, err := s.coverage(ctx, CoverageRequest{DatasetRequest: DatasetRequest{Instrument: res.Instrument, Interval: req.Interval, Range: rng}})
 	res.Coverage = cov.Coverage
 	return err
+}
+
+// CanonicalizeOptions adjusts CanonicalizeDatasets.
+type CanonicalizeOptions struct {
+	// Force rebuilds partitions that are already current.
+	Force bool
+	// ArchivePath names the native archive to convert (stooq only), in
+	// place of discovery under the Service's archive root. It is valid
+	// only for a single-instrument request.
+	ArchivePath string
 }
 
 // CanonicalizeDatasets builds canonical data from each instrument's
 // provider-native data through the existing Plan/Build path:
 //
 //   - for stooq, by converting the instrument's native archive
-//     (ConvertStooqArchive, under the Service's archive root), or, when
-//     no archive is found, from raw data already imported;
+//     (ConvertStooqArchive: opts.ArchivePath, or discovery under the
+//     Service's archive root), or, when no archive is found, from raw
+//     data already imported;
 //   - for every other provider, from the raw data already present.
 //
-// An omitted range means each instrument's whole source: the archive's
-// span, or [Raw.First, Raw.End). Force rebuilds partitions that are
-// already current. Each result is DatasetBuilt when partitions were
-// published and DatasetCurrent when none needed to be. See
-// DatasetsCoverage for failure semantics.
-func (s *Service) CanonicalizeDatasets(ctx context.Context, req DatasetsRequest, force bool) (DatasetsResponse, error) {
+// It never downloads. An omitted range means each instrument's whole
+// source: the archive's span, or [Raw.First, Raw.End). Each result is
+// DatasetBuilt when partitions were published and DatasetCurrent when
+// none needed to be. An instrument with no source data anywhere in the
+// range fails with ErrNoRawData rather than reporting DatasetCurrent.
+// See DatasetsCoverage for failure semantics.
+func (s *Service) CanonicalizeDatasets(ctx context.Context, req DatasetsRequest, opts CanonicalizeOptions) (DatasetsResponse, error) {
+	if opts.ArchivePath != "" && len(req.Instruments) != 1 {
+		return DatasetsResponse{}, fmt.Errorf("%w: an archive path applies to exactly one instrument", ErrInvalidRequest)
+	}
 	return s.eachDataset(ctx, "canonicalize", req, func(ctx context.Context, res *DatasetResult, symbol string, before marketruntime.Inventory) error {
-		return s.canonicalizeOne(ctx, req, force, res, symbol, before)
+		return s.canonicalizeOne(ctx, req, opts, res, symbol, before)
 	})
 }
 
-func (s *Service) canonicalizeOne(ctx context.Context, req DatasetsRequest, force bool, res *DatasetResult, symbol string, before marketruntime.Inventory) error {
+func (s *Service) canonicalizeOne(ctx context.Context, req DatasetsRequest, opts CanonicalizeOptions, res *DatasetResult, symbol string, before marketruntime.Inventory) error {
 	dataset := DatasetRequest{Instrument: res.Instrument, Interval: req.Interval, Range: req.Range}
 	if s.provider == "stooq" {
-		conv, err := s.ConvertStooqArchive(ctx, ConvertStooqArchiveRequest{DatasetRequest: dataset, Symbol: symbol, Force: force})
-		if err == nil {
-			res.Range = conv.Range
-			res.recordPublished(conv.Build.Result, DatasetBuilt)
-			return nil
-		}
-		noArchive := errors.Is(err, ErrArchiveNotFound) || errors.Is(err, ErrArchiveRootNotConfigured)
-		if !noArchive || before.Raw == nil {
+		done, err := s.stooqConvert(ctx, res, dataset, symbol, opts.ArchivePath, opts.Force, before, DatasetBuilt)
+		if done || err != nil {
 			return err
 		}
 		// No archive, but raw data was imported earlier: build from it.
@@ -201,13 +231,56 @@ func (s *Service) canonicalizeOne(ctx context.Context, req DatasetsRequest, forc
 		}
 		dataset.Range = rng
 	}
-	build, err := s.Build(ctx, BuildRequest{DatasetRequest: dataset, Force: force})
+	res.Range = dataset.Range
+	build, err := s.Build(ctx, BuildRequest{DatasetRequest: dataset, Force: opts.Force})
+	res.Build = &build
+	res.recordPublished(build.Result, DatasetBuilt)
 	if err != nil {
 		return err
 	}
-	res.Range = dataset.Range
-	res.recordPublished(build.Result, DatasetBuilt)
+	if res.PublishedPartitions == 0 && missingEverywhere(build.Plan, dataset.Range) {
+		return fmt.Errorf("%w in [%s, %s)", ErrNoRawData,
+			dataset.Range.Start().UTC().Format(time.RFC3339), dataset.Range.End().UTC().Format(time.RFC3339))
+	}
 	return nil
+}
+
+// stooqConvert converts the stooq archive into res. done reports that it
+// handled the dataset (successfully or not, with err); !done with a nil
+// err means no archive was found but raw data exists, so the caller
+// should build from that raw data instead.
+func (s *Service) stooqConvert(ctx context.Context, res *DatasetResult, dataset DatasetRequest, symbol, archivePath string, force bool, before marketruntime.Inventory, status DatasetStatus) (done bool, err error) {
+	conv, err := s.ConvertStooqArchive(ctx, ConvertStooqArchiveRequest{DatasetRequest: dataset, Symbol: symbol, ArchivePath: archivePath, Force: force})
+	noArchive := errors.Is(err, ErrArchiveNotFound) || errors.Is(err, ErrArchiveRootNotConfigured)
+	if noArchive && before.Raw != nil {
+		return false, nil
+	}
+	res.Convert = &conv
+	res.Range = conv.Range
+	res.recordPublished(conv.Build.Result, status)
+	return true, err
+}
+
+// missingEverywhere reports whether plan found no raw data for any month
+// of rng: every month needs a raw download for missing data. A derived
+// interval (W1) never plans downloads, so it never matches.
+func missingEverywhere(plan marketruntime.Plan, rng marketdata.TimeRange) bool {
+	missing := map[[2]int]bool{}
+	for _, a := range plan.Actions {
+		if a.Kind == marketruntime.ActionDownloadRaw && a.Reason == "missing" {
+			missing[[2]int{a.Year, int(a.Month)}] = true
+		}
+	}
+	if len(missing) == 0 {
+		return false
+	}
+	start, end := rng.Start().UTC(), rng.End().UTC()
+	for m := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC); m.Before(end); m = m.AddDate(0, 1, 0) {
+		if !missing[[2]int{m.Year(), int(m.Month())}] {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateDatasets brings each instrument's canonical data forward to the
@@ -219,7 +292,8 @@ func (s *Service) canonicalizeOne(ctx context.Context, req DatasetsRequest, forc
 //
 //   - stooq has no live feed: its update re-converts the instrument's
 //     native archive over that range, picking up whatever newer data the
-//     archive now holds.
+//     archive now holds; with no archive it rebuilds from imported raw
+//     data, as CanonicalizeDatasets does.
 //   - every other provider runs Update: Plan, Sync, Build.
 //
 // Each result is DatasetUpdated when partitions were published and
@@ -248,28 +322,30 @@ func (s *Service) updateOne(ctx context.Context, req DatasetsRequest, res *Datas
 		}
 		dataset.Range = rng
 	}
+	res.Range = dataset.Range
 	if s.provider == "stooq" {
-		conv, err := s.ConvertStooqArchive(ctx, ConvertStooqArchiveRequest{DatasetRequest: dataset, Symbol: symbol})
-		if err != nil {
+		done, err := s.stooqConvert(ctx, res, dataset, symbol, "", false, before, DatasetUpdated)
+		if done || err != nil {
 			return err
 		}
-		res.Range = conv.Range
-		res.recordPublished(conv.Build.Result, DatasetUpdated)
-		return nil
-	}
-	upd, err := s.Update(ctx, UpdateRequest{DatasetRequest: dataset})
-	if err != nil {
+		build, err := s.Build(ctx, BuildRequest{DatasetRequest: dataset})
+		res.Build = &build
+		res.recordPublished(build.Result, DatasetUpdated)
 		return err
 	}
-	res.Range = dataset.Range
+	upd, err := s.Update(ctx, UpdateRequest{DatasetRequest: dataset})
+	res.Update = &upd
 	res.recordPublished(upd.Build.Result, DatasetUpdated)
-	return nil
+	return err
 }
 
 // recordPublished counts build's publications and sets the status: done
-// when anything was published, DatasetCurrent otherwise.
+// when anything was published, DatasetCurrent otherwise. Callers record
+// before checking the step's error, so a failed step still reports what
+// it published.
 func (res *DatasetResult) recordPublished(build marketruntime.BuildResult, done DatasetStatus) {
 	res.PublishedPartitions = len(build.Published)
+	res.PublishedBars = 0
 	for _, p := range build.Published {
 		res.PublishedBars += p.BarCount
 	}
@@ -281,10 +357,13 @@ func (res *DatasetResult) recordPublished(build marketruntime.BuildResult, done 
 
 // eachDataset runs op for each requested instrument: resolve it, take its
 // inventory, run op, and take its inventory again. A failure is recorded
-// on that instrument's result. It logs one aggregate record after
-// validation, whichever way it exits; the operations it calls (Build,
-// Update, ConvertStooqArchive) log their own step records, as Update's
-// Sync and Build steps do.
+// on that instrument's result, along with whatever the step had already
+// done. It logs one aggregate record after validation, whichever way it
+// exits; the operations it calls (Build, Update, ConvertStooqArchive) log
+// their own step records, as Update's Sync and Build steps do.
+//
+// If ctx is canceled, the call returns ctx's error with the results
+// gathered so far, including a symbol the cancellation interrupted.
 func (s *Service) eachDataset(ctx context.Context, op string, req DatasetsRequest,
 	run func(ctx context.Context, res *DatasetResult, symbol string, before marketruntime.Inventory) error,
 ) (resp DatasetsResponse, err error) {
@@ -308,7 +387,7 @@ func (s *Service) eachDataset(ctx context.Context, op string, req DatasetsReques
 		published += res.PublishedPartitions
 		resp.Results = append(resp.Results, res)
 	}
-	return resp, nil
+	return resp, ctx.Err()
 }
 
 func (s *Service) runDataset(ctx context.Context, interval marketdata.Interval, res *DatasetResult,
@@ -324,15 +403,17 @@ func (s *Service) runDataset(ctx context.Context, interval marketdata.Interval, 
 		return err
 	}
 	res.CanonicalBefore = before.Canonical
-	if err := run(ctx, res, resolved.Identity.Symbol, before); err != nil {
-		return err
-	}
+	runErr := run(ctx, res, resolved.Identity.Symbol, before)
+	// The after-state is taken even when the step failed: a failed step
+	// can already have imported raw data or published partitions.
 	after, err := s.manager.Inventory(ctx, res.Instrument, interval)
-	if err != nil {
-		return err
+	if err == nil {
+		res.Raw, res.CanonicalAfter = after.Raw, after.Canonical
 	}
-	res.Raw, res.CanonicalAfter = after.Raw, after.Canonical
-	return nil
+	if runErr != nil {
+		return runErr
+	}
+	return err
 }
 
 // logDatasets emits a multi-symbol operation's one aggregate record.
