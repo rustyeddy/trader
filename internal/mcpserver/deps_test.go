@@ -45,6 +45,18 @@ func (providerOnly) Inventory(context.Context, svcmarketdata.InventoryRequest) (
 	return svcmarketdata.InventoryResponse{}, errors.New("not implemented")
 }
 
+func (providerOnly) DatasetsCoverage(context.Context, svcmarketdata.DatasetsRequest) (svcmarketdata.DatasetsCoverageResponse, error) {
+	return svcmarketdata.DatasetsCoverageResponse{}, errors.New("not implemented")
+}
+
+func (providerOnly) CanonicalizeDatasets(context.Context, svcmarketdata.DatasetsRequest, svcmarketdata.CanonicalizeOptions) (svcmarketdata.DatasetsResponse, error) {
+	return svcmarketdata.DatasetsResponse{}, errors.New("not implemented")
+}
+
+func (providerOnly) UpdateDatasets(context.Context, svcmarketdata.DatasetsRequest) (svcmarketdata.DatasetsResponse, error) {
+	return svcmarketdata.DatasetsResponse{}, errors.New("not implemented")
+}
+
 func TestRequireWrites(t *testing.T) {
 	var logs bytes.Buffer
 	s := &server{deps: Deps{Logger: slog.New(slog.NewTextHandler(&logs, nil))}}

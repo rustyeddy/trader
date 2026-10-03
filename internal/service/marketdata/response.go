@@ -123,5 +123,8 @@ type UpdateResponse struct {
 // ConvertResponse reports the imported raw source and canonical build.
 type ConvertResponse struct {
 	Import marketruntime.StooqImportResult
-	Build  BuildResponse
+	// Range is the range built: the request's range clipped to the
+	// imported source, or the whole source when the request gave none.
+	Range marketdata.TimeRange
+	Build BuildResponse
 }

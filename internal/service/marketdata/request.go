@@ -75,6 +75,16 @@ type CoverageRequest struct {
 	DatasetRequest
 }
 
+// Validate is DatasetRequest.Validate, except that Range may be omitted
+// entirely (both ends zero): Coverage then reports over the dataset's
+// existing canonical span (issue #439).
+func (r CoverageRequest) Validate() error {
+	if r.Range.Start().IsZero() && r.Range.End().IsZero() {
+		return InventoryRequest{Instrument: r.Instrument, Interval: r.Interval}.Validate()
+	}
+	return r.DatasetRequest.Validate()
+}
+
 // PlanRequest is the request for the read-only Plan use case (issue
 // #105): the acquisition/build work required to make one dataset
 // available. Plan is read-only itself — it never performs the work it

@@ -18,6 +18,12 @@ type DataSpan struct {
 	// records found. Both are zero when no partition could be read.
 	First time.Time
 	Last  time.Time
+	// End is the exclusive end of the bar opening at Last, from the
+	// Manager's calendar, so [First, End) is a half-open range covering
+	// every record found. When the calendar cannot place Last (a raw
+	// record off the calendar's grid), End is Last plus the interval's
+	// nominal length. Zero when Last is zero.
+	End time.Time
 	// Partitions counts the monthly partitions found.
 	Partitions int
 }
@@ -101,6 +107,7 @@ func (m *Manager) rawSpan(ctx context.Context, symbol string, interval marketdat
 	if span.Partitions == 0 {
 		return nil, nil
 	}
+	span.End = m.barEnd(span.Last, interval)
 	return &span, nil
 }
 
@@ -150,7 +157,34 @@ func (m *Manager) canonicalSpan(ctx context.Context, symbol string, id instrumen
 			break
 		}
 	}
+	span.End = m.barEnd(span.Last, interval)
 	return &span, nil
+}
+
+// barEnd returns the exclusive end of the bar opening at last; see
+// DataSpan.End.
+func (m *Manager) barEnd(last time.Time, interval marketdata.Interval) time.Time {
+	if last.IsZero() {
+		return time.Time{}
+	}
+	if bar, err := m.calendar.Bar(last, interval); err == nil && bar.End().After(last) {
+		return bar.End()
+	}
+	return last.Add(nominalLength(interval))
+}
+
+// nominalLength is interval's length ignoring calendar adjustments.
+func nominalLength(interval marketdata.Interval) time.Duration {
+	unit := time.Minute
+	switch interval.Unit() {
+	case marketdata.UnitHour:
+		unit = time.Hour
+	case marketdata.UnitDay:
+		unit = 24 * time.Hour
+	case marketdata.UnitWeek:
+		unit = 7 * 24 * time.Hour
+	}
+	return time.Duration(interval.Count()) * unit
 }
 
 // skippableLoadError reports whether a canonical partition that failed to

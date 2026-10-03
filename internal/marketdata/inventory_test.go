@@ -71,11 +71,13 @@ func TestInventory_OANDARawAheadOfCanonical(t *testing.T) {
 	assert.Equal(t, 2, inv.Raw.Partitions)
 	assert.True(t, inv.Raw.First.Equal(utcHour(2024, time.January, 8, 10)), inv.Raw.First)
 	assert.True(t, inv.Raw.Last.Equal(utcHour(2024, time.February, 6, 14)), "an incomplete last record still counts: %s", inv.Raw.Last)
+	assert.True(t, inv.Raw.End.Equal(utcHour(2024, time.February, 6, 15)), "End closes the last H1 bar: %s", inv.Raw.End)
 
 	require.NotNil(t, inv.Canonical)
 	assert.Equal(t, 1, inv.Canonical.Partitions)
 	assert.True(t, inv.Canonical.First.Equal(utcHour(2024, time.January, 8, 10)))
 	assert.True(t, inv.Canonical.Last.Equal(utcHour(2024, time.January, 8, 11)))
+	assert.True(t, inv.Canonical.End.Equal(utcHour(2024, time.January, 8, 12)))
 }
 
 func TestInventory_RawIgnoresOtherSymbolsIntervalsAndUnhealthyPartitions(t *testing.T) {
@@ -143,6 +145,7 @@ func TestInventory_CanonicalAllInvalidHasZeroTimes(t *testing.T) {
 	assert.Equal(t, 1, inv.Canonical.Partitions)
 	assert.True(t, inv.Canonical.First.IsZero())
 	assert.True(t, inv.Canonical.Last.IsZero())
+	assert.True(t, inv.Canonical.End.IsZero())
 }
 
 func TestInventory_W1HasNoRawAndNeedsNoRawRoot(t *testing.T) {
@@ -178,6 +181,7 @@ func TestInventory_StooqRawAndCanonical(t *testing.T) {
 	assert.Equal(t, 2, inv.Raw.Partitions)
 	assert.True(t, inv.Raw.First.Equal(first), inv.Raw.First)
 	assert.True(t, inv.Raw.Last.Equal(last), inv.Raw.Last)
+	assert.True(t, inv.Raw.End.Equal(last.AddDate(0, 0, 1)), "the US equity D1 bar ends at the next UTC midnight: %s", inv.Raw.End)
 	assert.Nil(t, inv.Canonical, "nothing built yet")
 
 	span, err := marketdata.NewTimeRange(first, last.AddDate(0, 0, 1))
@@ -386,4 +390,25 @@ func TestCanonicalCSVStoreMonths_StatErrorPropagates(t *testing.T) {
 
 	_, err = mgr.Inventory(context.Background(), eurusd(), marketdata.H1)
 	require.ErrorIs(t, err, fs.ErrPermission, "an unstat-able newest partition must not report an earlier end")
+}
+
+func TestBarEndFallsBackToNominalLength(t *testing.T) {
+	mgr := newStooqTestManager(t, t.TempDir()) // USEquityCalendar: D1 only
+	monday := time.Date(2020, 5, 4, 0, 0, 0, 0, time.UTC)
+
+	assert.True(t, mgr.barEnd(monday, marketdata.D1).Equal(monday.AddDate(0, 0, 1)))
+	assert.True(t, mgr.barEnd(monday, marketdata.W1).Equal(monday.AddDate(0, 0, 7)), "the calendar cannot place W1: nominal length")
+	assert.True(t, mgr.barEnd(time.Time{}, marketdata.D1).IsZero())
+}
+
+func TestNominalLength(t *testing.T) {
+	assert.Equal(t, time.Minute, nominalLength(marketdata.M1))
+	assert.Equal(t, 4*time.Hour, nominalLength(marketdata.H4))
+	assert.Equal(t, 24*time.Hour, nominalLength(marketdata.D1))
+	assert.Equal(t, 7*24*time.Hour, nominalLength(marketdata.W1))
+}
+
+func TestManagerNow(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, t.TempDir())
+	assert.True(t, mgr.Now().Equal(testClock().Now()))
 }

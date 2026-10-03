@@ -10,9 +10,10 @@ import (
 )
 
 // newConvertCmd imports one native Stooq archive member into managed raw
-// partitions and builds the requested canonical range. The service
-// extracts the member to a temporary directory; the original ZIP remains
-// the source of truth.
+// partitions and builds the requested canonical range, through the
+// service's CanonicalizeDatasets (issue #439). The service extracts the
+// member to a temporary directory; the original ZIP remains the source of
+// truth.
 func newConvertCmd() *cobra.Command {
 	var flags datasetArgFlags
 	var archivePath string
@@ -32,24 +33,31 @@ func newConvertCmd() *cobra.Command {
 			if strings.ToLower(dc.Provider) != "stooq" {
 				return fmt.Errorf("convert currently supports only provider stooq")
 			}
-			req, err := resolveDatasetRequest(cmd, args, flags)
+			req, err := parseDatasetsRequest(args, flags, false)
 			if err != nil {
 				return err
 			}
 			if strings.ToUpper(args[1]) != "D1" {
 				return fmt.Errorf("stooq conversion currently supports only D1")
 			}
-			resp, err := dc.Service.ConvertStooqArchive(cmd.Context(), svc.ConvertStooqArchiveRequest{
-				DatasetRequest: req, Symbol: args[0], ArchivePath: archivePath,
-			})
+			// The same canonicalize operation MCP runs (issue #439), for
+			// one symbol and this archive.
+			res, err := singleResult(dc.Service.CanonicalizeDatasets(cmd.Context(), req,
+				svc.CanonicalizeOptions{ArchivePath: archivePath}))
 			if err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "imported %d rows across %d raw months; published %d canonical partitions\n",
-				resp.Import.RowsImported, resp.Import.MonthsWritten, len(resp.Build.Result.Published)); err != nil {
-				return err
+			if res.Err != nil {
+				return instrumentFlagError(res.Err, dc.Provider, flags)
 			}
-			return nil
+			imported := 0
+			months := 0
+			if res.Convert != nil {
+				imported, months = res.Convert.Import.RowsImported, res.Convert.Import.MonthsWritten
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "imported %d rows across %d raw months; published %d canonical partitions\n",
+				imported, months, res.PublishedPartitions)
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&archivePath, "archive", "", "native Stooq ZIP archive path")

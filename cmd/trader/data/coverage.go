@@ -1,14 +1,17 @@
 package data
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 // newCoverageCmd implements "trader data coverage INSTRUMENT INTERVAL
-// --from --to [--format]" (issue #109, formatting added by #111): the
-// read-only Coverage use case.
+// [--from --to] [--format]" (issue #109, formatting added by #111): the
+// read-only coverage use case, through the same service operation MCP
+// uses (DatasetsCoverage, issue #439) for one symbol.
 func newCoverageCmd() *cobra.Command {
 	var flags datasetArgFlags
 
@@ -21,21 +24,30 @@ func newCoverageCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req, err := resolveDatasetRequest(cmd, args, flags)
+			req, err := parseDatasetsRequest(args, flags, true)
 			if err != nil {
 				return err
 			}
 
+			// The same coverage operation MCP runs (issue #439), for one
+			// symbol.
 			dc, _ := dataContextFrom(cmd.Context())
-			resp, err := dc.Service.Coverage(cmd.Context(), svc.CoverageRequest{DatasetRequest: req})
+			resp, err := dc.Service.DatasetsCoverage(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
+			if len(resp.Results) != 1 {
+				return fmt.Errorf("expected one coverage result, got %d", len(resp.Results))
+			}
+			if res := resp.Results[0]; res.Err != nil {
+				return instrumentFlagError(res.Err, dc.Provider, flags)
+			}
 
-			return formatter.FormatCoverage(cmd.OutOrStdout(), resp)
+			return formatter.FormatCoverage(cmd.OutOrStdout(), svc.CoverageResponse{Coverage: resp.Results[0].Coverage})
 		},
 	}
 
 	addDatasetArgFlags(cmd, &flags)
+	optionalRangeUsage(cmd, "the existing canonical span")
 	return cmd
 }

@@ -8,13 +8,12 @@ import (
 	"github.com/spf13/cobra"
 
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
-	"github.com/rustyeddy/trader/marketdata"
 )
 
 // newStq2BarsCmd implements the ergonomic Stooq D1 conversion path. It
-// parses flags and formats output; listing defaults, archive discovery,
-// extraction, raw import, and canonicalization belong to the
-// service (svc.ConvertStooqArchive, issue #434).
+// parses flags and formats output; resolution, listing defaults, archive
+// discovery, extraction, raw import, and canonicalization belong to the
+// service's CanonicalizeDatasets (issues #434, #439).
 func newStq2BarsCmd() *cobra.Command {
 	var from, to, exchange, kind, archive string
 	var rebuild bool
@@ -36,18 +35,8 @@ func newStq2BarsCmd() *cobra.Command {
 			if symbol == "" {
 				return fmt.Errorf("symbol must not be empty")
 			}
-			identity, err := svc.ResolveListingIdentity(symbol, exchange, kind)
-			switch {
-			case errors.Is(err, svc.ErrNoListingDefault):
-				return fmt.Errorf("unknown Stooq instrument %q: provide --exchange and --kind", symbol)
-			case errors.Is(err, svc.ErrIncompleteListingIdentity):
-				return fmt.Errorf("--exchange and --kind must be provided together")
-			case errors.Is(err, svc.ErrInvalidListingKind):
-				return fmt.Errorf(`invalid --kind %q: expected "equity" or "etf"`, kind)
-			case err != nil:
-				return err
-			}
-			req, err := resolveStq2BarsRequest(dc, symbol, from, to, identity)
+			req, err := parseDatasetsRequest([]string{symbol, "D1"},
+				datasetArgFlags{from: from, to: to, exchange: exchange, kind: kind}, true)
 			if err != nil {
 				return err
 			}
@@ -55,18 +44,23 @@ func newStq2BarsCmd() *cobra.Command {
 			if rebuild {
 				action = "rebuilt"
 			}
-			resp, err := dc.Service.ConvertStooqArchive(cmd.Context(), svc.ConvertStooqArchiveRequest{
-				DatasetRequest: req,
-				Symbol:         symbol,
-				ArchivePath:    archive,
-				ArchiveRoot:    dc.ArchiveRoot,
-				Force:          rebuild,
-			})
+			// The same canonicalize operation MCP runs (issue #439), for
+			// one symbol.
+			res, err := singleResult(dc.Service.CanonicalizeDatasets(cmd.Context(), req,
+				svc.CanonicalizeOptions{Force: rebuild, ArchivePath: archive}))
 			if err != nil {
-				return stooqArchiveError(err, symbol, dc.ArchiveRoot)
+				return err
+			}
+			if res.Err != nil {
+				return stq2barsError(res.Err, symbol, kind, dc.ArchiveRoot)
+			}
+			if res.Convert == nil {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "converted %s (%s): no archive found; built from existing raw data; published %d canonical partitions\n",
+					symbol, action, res.PublishedPartitions)
+				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "converted %s (%s): imported %d rows across %d raw months; published %d canonical partitions\n",
-				symbol, action, resp.Import.RowsImported, resp.Import.MonthsWritten, len(resp.Build.Result.Published))
+				symbol, action, res.Convert.Import.RowsImported, res.Convert.Import.MonthsWritten, res.PublishedPartitions)
 			return err
 		},
 	}
@@ -80,31 +74,18 @@ func newStq2BarsCmd() *cobra.Command {
 	return cmd
 }
 
-func resolveStq2BarsRequest(dc dataContext, symbol, from, to string, identity svc.ListingDefault) (svc.DatasetRequest, error) {
-	id, err := registerRequestedInstrument(dc, symbol, datasetArgFlags{exchange: identity.Exchange, kind: identity.Kind})
-	if err != nil {
-		return svc.DatasetRequest{}, err
+// stq2barsError adds stq2bars's flag guidance to identity errors, and
+// stooqArchiveError's to archive errors.
+func stq2barsError(err error, symbol, kind, root string) error {
+	switch {
+	case errors.Is(err, svc.ErrNoListingDefault):
+		return fmt.Errorf("unknown Stooq instrument %q: provide --exchange and --kind", symbol)
+	case errors.Is(err, svc.ErrIncompleteListingIdentity):
+		return fmt.Errorf("--exchange and --kind must be provided together")
+	case errors.Is(err, svc.ErrInvalidListingKind):
+		return fmt.Errorf(`invalid --kind %q: expected "equity" or "etf"`, kind)
 	}
-	req := svc.DatasetRequest{Instrument: id, Interval: marketdata.D1}
-	if from == "" && to == "" {
-		return req, nil
-	}
-	if from == "" || to == "" {
-		return svc.DatasetRequest{}, fmt.Errorf("--from and --to must be provided together")
-	}
-	start, err := parseDate(from)
-	if err != nil {
-		return svc.DatasetRequest{}, err
-	}
-	end, err := parseDate(to)
-	if err != nil {
-		return svc.DatasetRequest{}, err
-	}
-	req.Range, err = marketdata.NewTimeRange(start, end)
-	if err != nil {
-		return svc.DatasetRequest{}, fmt.Errorf("invalid range: %w", err)
-	}
-	return req, nil
+	return stooqArchiveError(err, symbol, root)
 }
 
 // stooqArchiveError adds the CLI's flag guidance to archive-discovery
