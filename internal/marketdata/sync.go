@@ -107,6 +107,10 @@ func (m *Manager) Sync(ctx context.Context, plan Plan) (SyncResult, error) {
 	if err := ctx.Err(); err != nil {
 		return SyncResult{}, err
 	}
+	if err := m.writeLock.acquire(ctx); err != nil {
+		return SyncResult{}, err
+	}
+	defer m.writeLock.release()
 
 	// requireSyncClient is checked only once a real ActionDownloadRaw is
 	// about to execute, not unconditionally up front: a plan containing

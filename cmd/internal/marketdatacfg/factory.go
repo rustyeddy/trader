@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
@@ -44,16 +45,25 @@ func KnownProviders() []string {
 // to the base Provider, because raw data and downloaded archives are
 // provider-specific; every other provider gets its own default under
 // DefaultDataDir (raw/<provider>, archive/<provider>).
+//
+// Every Manager the Factory builds for a provider shares one
+// marketdata.WriteLock: the per-request Services all write the same
+// stores, and their writes must not overlap (a raw extend is a
+// read-modify-write; see marketdata.WriteLock).
 type Factory struct {
 	base   Config
 	logger *slog.Logger
+	locks  map[string]*marketruntime.WriteLock // per provider; fixed at construction
 }
 
 // NewFactory returns a Factory over base, an unresolved Config as Load
 // returns it. It builds the base provider's Bundle once to fail fast on
 // invalid configuration (for example a one-sided Alpaca credential).
 func NewFactory(base Config, logger *slog.Logger) (*Factory, error) {
-	f := &Factory{base: base, logger: logger}
+	f := &Factory{base: base, logger: logger, locks: make(map[string]*marketruntime.WriteLock, len(knownProviders))}
+	for p := range knownProviders {
+		f.locks[p] = marketruntime.NewWriteLock()
+	}
 	if _, err := f.bundle(base.Provider); err != nil {
 		return nil, err
 	}
@@ -97,7 +107,7 @@ func (f *Factory) bundle(provider string) (Bundle, error) {
 		}
 		cfg.ArchiveRoot = filepath.Join(dir, "archive", cfg.Provider)
 	}
-	b, err := New(cfg, f.logger)
+	b, err := newBundle(cfg, f.logger, f.locks[cfg.Provider])
 	if err != nil {
 		return Bundle{}, fmt.Errorf("market data for provider %q: %w", cfg.Provider, err)
 	}

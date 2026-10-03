@@ -85,3 +85,28 @@ func TestFactory_InvalidBaseConfigFailsFast(t *testing.T) {
 func TestKnownProviders(t *testing.T) {
 	assert.Equal(t, []string{"alpaca", "oanda", "stooq"}, KnownProviders())
 }
+
+// TestFactory_SharesWriteLockPerProvider: every Bundle the Factory builds
+// for a provider shares that provider's write lock, so per-request
+// Services over the same stores never write concurrently (PR #452
+// review); different providers' locks are independent.
+func TestFactory_SharesWriteLockPerProvider(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f, err := NewFactory(Config{StoreRoot: t.TempDir(), Provider: "oanda"}, discard())
+	require.NoError(t, err)
+
+	a, err := f.bundle("stooq")
+	require.NoError(t, err)
+	b, err := f.bundle("stooq")
+	require.NoError(t, err)
+	require.NotNil(t, a.writeLock)
+	assert.Same(t, a.writeLock, b.writeLock, "same provider, same lock")
+
+	o, err := f.bundle("")
+	require.NoError(t, err)
+	assert.NotSame(t, a.writeLock, o.writeLock, "providers lock independently")
+
+	cli, err := New(Config{StoreRoot: t.TempDir(), RawRoot: t.TempDir(), Provider: "oanda"}, discard())
+	require.NoError(t, err)
+	assert.Nil(t, cli.writeLock, "a standalone Bundle gets its Manager's own lock")
+}

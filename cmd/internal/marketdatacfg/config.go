@@ -178,6 +178,9 @@ type Bundle struct {
 	Resolver    *instrument.MemoryResolver
 	Provider    string
 	ArchiveRoot string
+	// writeLock is the lock shared with other Bundles over the same
+	// stores, or nil (see newBundle).
+	writeLock *marketruntime.WriteLock
 }
 
 // New constructs the *marketdata.Manager and Service for cfg. cfg's roots
@@ -187,6 +190,13 @@ type Bundle struct {
 // Alpaca pair is rejected here, with a message naming the missing
 // variables but never their values.
 func New(cfg Config, logger *slog.Logger) (Bundle, error) {
+	return newBundle(cfg, logger, nil)
+}
+
+// newBundle is New with the write lock the Manager shares with others
+// over the same stores; nil gives the Manager its own (one Manager per
+// process, as in the CLI).
+func newBundle(cfg Config, logger *slog.Logger, writeLock *marketruntime.WriteLock) (Bundle, error) {
 	resolver := instrument.NewMemoryResolver()
 	managerCfg := marketruntime.Config{
 		Clock:        clock.Real{},
@@ -195,6 +205,7 @@ func New(cfg Config, logger *slog.Logger) (Bundle, error) {
 		Resolver:     resolver,
 		ProviderName: cfg.Provider,
 		Calendar:     calendarForProvider(cfg.Provider),
+		WriteLock:    writeLock,
 	}
 	// OANDACredential must stay a genuinely nil interface when no token
 	// was supplied: oandaTokenCredential("") is a *non-nil* interface
@@ -250,5 +261,5 @@ func New(cfg Config, logger *slog.Logger) (Bundle, error) {
 		return Bundle{}, err
 	}
 
-	return Bundle{Service: service, Resolver: resolver, Provider: cfg.Provider, ArchiveRoot: cfg.ArchiveRoot}, nil
+	return Bundle{Service: service, Resolver: resolver, Provider: cfg.Provider, ArchiveRoot: cfg.ArchiveRoot, writeLock: writeLock}, nil
 }

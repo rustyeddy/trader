@@ -688,7 +688,9 @@ The write tools return a result per symbol (`built`, `updated`, `current`, or
 `failed`, with the source used, the range acted on, canonical data before and
 after, and what was published) plus a summary with counts and `ok`. A failing
 symbol never fails the call. A client that sends a progress token receives a
-progress notification as each symbol finishes. A typical workflow:
+progress notification as each symbol finishes. Writes for one provider run one
+at a time, even across concurrent tool calls, so two overlapping updates can
+never lose each other's data; a call simply waits its turn. A typical workflow:
 
 ```text
 trader_marketdata_coverage   → what exists
