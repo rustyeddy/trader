@@ -21,7 +21,7 @@ func newCoverageCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			req, err := resolveDatasetRequest(cmd, args, flags)
+			req, err := resolveDatasetRequestRange(cmd, args, flags, true)
 			if err != nil {
 				return err
 			}
@@ -37,5 +37,7 @@ func newCoverageCmd() *cobra.Command {
 	}
 
 	addDatasetArgFlags(cmd, &flags)
+	cmd.Flags().Lookup("from").Usage = "range start (YYYY-MM-DD or RFC3339); with --to, or omit both for the existing canonical span"
+	cmd.Flags().Lookup("to").Usage = "range end (YYYY-MM-DD or RFC3339); with --from, or omit both for the existing canonical span"
 	return cmd
 }

@@ -174,7 +174,13 @@ one-command path to "make sure this dataset is current."
 ### `trader data coverage INSTRUMENT INTERVAL`
 
 Reports canonical/raw coverage and any gaps for the dataset over the given
-range.
+range. `--from` and `--to` are optional here: omit both to report over the
+dataset's existing canonical span. Before anything has been built that report
+is empty rather than an error.
+
+```sh
+trader data coverage EURUSD H1          # the whole canonical span
+```
 
 ---
 

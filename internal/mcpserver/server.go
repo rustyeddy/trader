@@ -59,6 +59,12 @@ type MarketData interface {
 	ResolveInstruments(context.Context, svcmarketdata.ResolveInstrumentsRequest) (svcmarketdata.ResolveInstrumentsResponse, error)
 	Coverage(context.Context, svcmarketdata.CoverageRequest) (svcmarketdata.CoverageResponse, error)
 	Inventory(context.Context, svcmarketdata.InventoryRequest) (svcmarketdata.InventoryResponse, error)
+	// Multi-symbol use cases with per-symbol results (#439): read-only
+	// coverage, and the data-mutating canonicalize and update, which
+	// tools gate with requireWrites.
+	DatasetsCoverage(context.Context, svcmarketdata.DatasetsRequest) (svcmarketdata.DatasetsCoverageResponse, error)
+	CanonicalizeDatasets(ctx context.Context, req svcmarketdata.DatasetsRequest, force bool) (svcmarketdata.DatasetsResponse, error)
+	UpdateDatasets(context.Context, svcmarketdata.DatasetsRequest) (svcmarketdata.DatasetsResponse, error)
 }
 
 var _ MarketData = (*svcmarketdata.Service)(nil)

@@ -265,3 +265,27 @@ func TestDataBars_NoWritesToDefaultStoreOrRawRootsOnReadCommands(t *testing.T) {
 	require.True(t, os.IsNotExist(err),
 		"a read-only command must never create the default trader data directory")
 }
+
+// TestDataCoverage_OmittedRangeUsesCanonicalSpan: without --from/--to,
+// coverage reports over the existing canonical span (issue #439), and is
+// empty — not an error — before anything is built.
+func TestDataCoverage_OmittedRangeUsesCanonicalSpan(t *testing.T) {
+	rawRoot := copyFixtureRaw(t)
+	storeRoot := t.TempDir()
+
+	before, err := runData(t, storeRoot, rawRoot, "coverage", "EURUSD", "H1", "--format", "json")
+	require.NoError(t, err)
+	require.NotContains(t, before, `"status"`, "no canonical partitions yet")
+
+	_, err = runData(t, storeRoot, rawRoot, "build", "EURUSD", "H1", "--from", "2024-01-07T22:00:00Z", "--to", "2024-01-19T22:00:00Z")
+	require.NoError(t, err)
+
+	after, err := runData(t, storeRoot, rawRoot, "coverage", "EURUSD", "H1", "--format", "json")
+	require.NoError(t, err)
+	require.Contains(t, after, `"current"`)
+}
+
+func TestDataCoverage_RequiresBothRangeEnds(t *testing.T) {
+	_, err := runData(t, t.TempDir(), copyFixtureRaw(t), "coverage", "EURUSD", "H1", "--from", "2024-01-07")
+	require.EqualError(t, err, "--from and --to must be provided together")
+}

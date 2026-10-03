@@ -53,7 +53,7 @@ func (s *Service) convert(ctx context.Context, req ConvertRequest) (ConvertRespo
 		return ConvertResponse{}, fmt.Errorf("%w: source range does not overlap requested range: %v", ErrInvalidRequest, err)
 	}
 	build, err := s.Build(ctx, BuildRequest{DatasetRequest: req.DatasetRequest, Force: req.Force})
-	return ConvertResponse{Import: imported, Build: build}, err
+	return ConvertResponse{Import: imported, Range: req.Range, Build: build}, err
 }
 
 func validateConvertRequest(req ConvertRequest) error {

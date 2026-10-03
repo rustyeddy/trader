@@ -122,6 +122,13 @@ func registerRequestedInstrument(dc dataContext, symbol string, flags datasetArg
 // size and friends) that a CLI adapter has no business fabricating
 // itself, and the MCP transport resolves through the same code.
 func resolveDatasetRequest(cmd *cobra.Command, args []string, flags datasetArgFlags) (svc.DatasetRequest, error) {
+	return resolveDatasetRequestRange(cmd, args, flags, false)
+}
+
+// resolveDatasetRequestRange is resolveDatasetRequest, except that when
+// rangeOptional is set, omitting both --from and --to leaves the request's
+// Range zero for the service to default (issue #439).
+func resolveDatasetRequestRange(cmd *cobra.Command, args []string, flags datasetArgFlags, rangeOptional bool) (svc.DatasetRequest, error) {
 	dc, ok := dataContextFrom(cmd.Context())
 	if !ok {
 		return svc.DatasetRequest{}, fmt.Errorf("data service is not configured on this command's context")
@@ -140,7 +147,13 @@ func resolveDatasetRequest(cmd *cobra.Command, args []string, flags datasetArgFl
 		return svc.DatasetRequest{}, err
 	}
 
+	if rangeOptional && flags.from == "" && flags.to == "" {
+		return svc.DatasetRequest{Instrument: instrumentID, Interval: interval}, nil
+	}
 	if flags.from == "" || flags.to == "" {
+		if rangeOptional {
+			return svc.DatasetRequest{}, fmt.Errorf("--from and --to must be provided together")
+		}
 		return svc.DatasetRequest{}, fmt.Errorf("--from and --to are both required")
 	}
 	from, err := parseDate(flags.from)

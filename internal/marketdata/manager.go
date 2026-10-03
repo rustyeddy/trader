@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/clock"
@@ -347,6 +348,10 @@ func New(cfg Config) (*Manager, error) {
 
 // ProviderName is the provider this Manager serves (Config.ProviderName).
 func (m *Manager) ProviderName() string { return m.providerName }
+
+// Now is the current time from the Manager's clock, so callers defaulting
+// a range to "through now" stay deterministic under a simulated clock.
+func (m *Manager) Now() time.Time { return m.clock.Now() }
 
 // configured reports whether m was constructed through New with its
 // required dependencies. It is the explicit, tested predicate for the

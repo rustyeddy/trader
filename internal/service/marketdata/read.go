@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -75,13 +76,37 @@ func (s *Service) Bars(ctx context.Context, req BarsRequest) (BarsResponse, erro
 // coverage and gap reporting for req's dataset. Coverage performs no
 // acquisition or build; it only reports what Manager already knows or
 // can determine by inspecting the raw archive and canonical store.
+//
+// An omitted Range (issue #439) means the dataset's existing canonical
+// span, from Inventory: [Canonical.First, Canonical.End). With no
+// readable canonical data there is nothing to cover, and Coverage
+// returns an empty Coverage (no partitions, zero Range) rather than an
+// error.
 func (s *Service) Coverage(ctx context.Context, req CoverageRequest) (CoverageResponse, error) {
 	if err := req.Validate(); err != nil {
 		return CoverageResponse{}, err
 	}
-
-	cov, err := s.manager.Coverage(ctx, req.query())
+	resp, err := s.coverage(ctx, req)
 	s.logOutcome(ctx, slog.LevelDebug, "coverage queried", "coverage query failed", req.DatasetRequest, err)
+	return resp, err
+}
+
+// coverage is Coverage without validation or its outcome log.
+func (s *Service) coverage(ctx context.Context, req CoverageRequest) (CoverageResponse, error) {
+	if req.Range.Start().IsZero() {
+		inv, err := s.manager.Inventory(ctx, req.Instrument, req.Interval)
+		if err != nil {
+			return CoverageResponse{}, err
+		}
+		span := inv.Canonical
+		if span == nil || span.First.IsZero() {
+			return CoverageResponse{Coverage: marketruntime.Coverage{Instrument: req.Instrument, Interval: req.Interval}}, nil
+		}
+		if req.Range, err = marketdata.NewTimeRange(span.First, span.End); err != nil {
+			return CoverageResponse{}, err
+		}
+	}
+	cov, err := s.manager.Coverage(ctx, req.query())
 	if err != nil {
 		return CoverageResponse{}, err
 	}

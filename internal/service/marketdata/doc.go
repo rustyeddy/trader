@@ -15,6 +15,13 @@
 // listing defaults (DefaultListing) — so every transport converts an
 // archive through the same operation (ADR-069).
 //
+// ResolveInstrument(s) resolves symbols through the Service's own resolver
+// (issue #448, ADR-070). DatasetsCoverage, CanonicalizeDatasets, and
+// UpdateDatasets (issue #439) act on several symbols at once and report
+// a result per symbol; an omitted range defaults per symbol from
+// Inventory (the canonical span, the raw span, or the canonical end
+// through now).
+//
 // Service never reaches into marketdata/internal, never formats a
 // response, and never depends on a transport framework — see the
 // service package's own doc comment for the full set of rules every
