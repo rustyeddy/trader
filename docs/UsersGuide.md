@@ -681,6 +681,20 @@ It resolves configuration exactly as `trader data` does: the same
 | `trader_version` | read | the Trader build serving the session |
 | `trader_instruments` | read | resolve `symbols` for a `provider`: instrument ID, kind (`fx`, `equity`, `etf`), exchange, and the provider's symbol |
 | `trader_marketdata_coverage` | read | for `symbols` at an `interval` (`M1`, `H1`, `H4`, `D1`, `W1`): monthly partitions and their status, gaps, and the raw and canonical data held. `from`/`to` are optional; omit both to cover each symbol's existing canonical data |
+| `trader_marketdata_canonicalize` | write | build canonical data for `symbols` at an `interval` from data already held: a stooq archive under the archive root, or raw data in the raw store. Never downloads. Omit `from`/`to` for each symbol's whole source; `force` rebuilds current partitions. Same operation as `trader data build` |
+| `trader_marketdata_update` | write | bring canonical data forward: oanda and alpaca download new raw data; stooq has no live feed and re-reads its archive. Omit `from`/`to` to update from each symbol's last canonical bar through now (canonicalize first). Same operation as `trader data update` |
+
+The write tools return a result per symbol (`built`, `updated`, `current`, or
+`failed`, with the source used, the range acted on, canonical data before and
+after, and what was published) plus a summary with counts and `ok`. A failing
+symbol never fails the call. A client that sends a progress token receives a
+progress notification as each symbol finishes. A typical workflow:
+
+```text
+trader_marketdata_coverage   → what exists
+trader_marketdata_update     → bring it current (or canonicalize for a new archive)
+trader_marketdata_coverage   → confirm
+```
 
 Every market-data tool takes a list of symbols and returns one result per
 symbol, so an unknown symbol is reported on its own entry without hiding
