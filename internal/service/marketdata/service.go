@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/logging"
 	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 )
@@ -17,15 +18,38 @@ var ErrNilManager = errors.New("service/marketdata: manager is nil")
 // spans several Manager calls (see Update, issue #107) is implemented
 // once and reused by every transport.
 //
-// Service holds no transport, formatting, or presentation state, and no
-// mutable state of its own beyond the *marketdata.Manager it wraps and
-// the *slog.Logger New scoped: its own concurrency properties are
-// therefore exactly whatever the wrapped Manager's are, whatever those
-// turn out to be documented as — logging a record adds no additional
-// mutable state or synchronization of Service's own.
+// Service holds no transport, formatting, or presentation state. Its
+// collaborators are the *marketdata.Manager it wraps, the *slog.Logger
+// New scoped, and, when configured, the instrument resolver
+// (WithResolver) and archive root (WithArchiveRoot); the Service's own
+// fields never change after New. The resolver is the one mutable
+// collaborator: ResolveInstrument registers listings into it, so it must
+// be safe for concurrent use — instrument.MemoryResolver is, and
+// registration through it is atomic (RegisterOrGet). Beyond that, the
+// Service's concurrency properties are exactly the wrapped Manager's;
+// logging adds no mutable state or synchronization of its own.
 type Service struct {
-	manager *marketruntime.Manager
-	logger  *slog.Logger
+	manager     *marketruntime.Manager
+	logger      *slog.Logger
+	provider    string
+	resolver    *instrument.MemoryResolver
+	archiveRoot string
+}
+
+// Option configures a Service at construction.
+type Option func(*Service)
+
+// WithResolver gives the Service the resolver its Manager resolves
+// instruments through, so ResolveInstrument can register into it. It
+// must be the same resolver the Manager was configured with.
+func WithResolver(resolver *instrument.MemoryResolver) Option {
+	return func(s *Service) { s.resolver = resolver }
+}
+
+// WithArchiveRoot sets where ConvertStooqArchive looks for provider
+// archives when a request names neither an archive nor a root.
+func WithArchiveRoot(root string) Option {
+	return func(s *Service) { s.archiveRoot = root }
 }
 
 // New constructs a Service over manager. manager must not be nil.
@@ -41,12 +65,26 @@ type Service struct {
 // an acceptable default" convention (logging/doc.go) — so existing
 // callers that have no logger to hand New yet are not forced to
 // construct one merely to satisfy this signature.
-func New(manager *marketruntime.Manager, logger *slog.Logger) (*Service, error) {
+//
+// opts add the resolver and archive root that instrument resolution and
+// archive conversion need (WithResolver, WithArchiveRoot).
+func New(manager *marketruntime.Manager, logger *slog.Logger, opts ...Option) (*Service, error) {
 	if manager == nil {
 		return nil, ErrNilManager
 	}
 	if logger == nil {
 		logger = logging.Discard()
 	}
-	return &Service{manager: manager, logger: logging.WithComponent(logger, logging.ComponentMarketData)}, nil
+	s := &Service{
+		manager:  manager,
+		logger:   logging.WithComponent(logger, logging.ComponentMarketData),
+		provider: manager.ProviderName(),
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }
+
+// Provider is the market-data provider this Service serves.
+func (s *Service) Provider() string { return s.provider }

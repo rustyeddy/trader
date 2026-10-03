@@ -35,7 +35,6 @@ import (
 	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rustyeddy/trader/instrument"
 	svcmarketdata "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/version"
 )
@@ -48,15 +47,21 @@ var ErrWritesDisabled = errors.New("data-mutating tools are disabled on this ser
 // constructed without a MarketData factory.
 var ErrMarketDataUnavailable = errors.New("market data is not configured on this server")
 
-// MarketData is one provider's market-data service: the application
-// service, the resolver its Manager resolves instruments through
-// (registered per request), and the provider and archive root it serves.
-type MarketData struct {
-	Service     *svcmarketdata.Service
-	Resolver    *instrument.MemoryResolver
-	Provider    string
-	ArchiveRoot string
+// MarketData is the market-data capability MCP tools consume for one
+// provider (ADR-070). It is defined here, by its consumer, and
+// implemented by *service/marketdata.Service: tools ask for use cases
+// (resolve instruments, report coverage or inventory) and never see a
+// resolver, archive path, or Manager (ADR-068). It grows as tools need
+// more use cases.
+type MarketData interface {
+	// Provider is the provider this capability serves.
+	Provider() string
+	ResolveInstruments(context.Context, svcmarketdata.ResolveInstrumentsRequest) (svcmarketdata.ResolveInstrumentsResponse, error)
+	Coverage(context.Context, svcmarketdata.CoverageRequest) (svcmarketdata.CoverageResponse, error)
+	Inventory(context.Context, svcmarketdata.InventoryRequest) (svcmarketdata.InventoryResponse, error)
 }
+
+var _ MarketData = (*svcmarketdata.Service)(nil)
 
 // MarketDataFactory builds the market-data service for a request's
 // provider. A Manager serves exactly one provider, so the server asks
@@ -112,11 +117,11 @@ func (s *server) requireWrites(tool string) error {
 	return fmt.Errorf("%s: %w", tool, ErrWritesDisabled)
 }
 
-// marketData returns the market-data service for provider, or
+// marketData returns the market-data capability for provider, or
 // ErrMarketDataUnavailable when the server has none.
 func (s *server) marketData(provider string) (MarketData, error) {
 	if s.deps.MarketData == nil {
-		return MarketData{}, ErrMarketDataUnavailable
+		return nil, ErrMarketDataUnavailable
 	}
 	return s.deps.MarketData.ForProvider(provider)
 }

@@ -178,3 +178,24 @@ func TestRegisterRequestedInstrument_OANDAIgnoresExchangeAndKind(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
 }
+
+// TestRegisterRequestedInstrument_UsesListingDefault: with the shared
+// resolution path (issue #448), a symbol with a listing default needs
+// neither --exchange nor --kind, and repeating it is harmless.
+func TestRegisterRequestedInstrument_UsesListingDefault(t *testing.T) {
+	dc := newTestDataContextForProvider("alpaca")
+	id, err := registerRequestedInstrument(dc, "spy", datasetArgFlags{})
+	require.NoError(t, err)
+	require.True(t, id.Equal(instrument.ETFID("ARCA", "SPY")))
+
+	again, err := registerRequestedInstrument(dc, "SPY", datasetArgFlags{})
+	require.NoError(t, err)
+	require.True(t, again.Equal(id))
+}
+
+func TestRegisterRequestedInstrument_UnknownSymbolWithoutFlagsNeedsExchange(t *testing.T) {
+	dc := newTestDataContextForProvider("alpaca")
+	_, err := registerRequestedInstrument(dc, "MSFT", datasetArgFlags{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--exchange is required")
+}

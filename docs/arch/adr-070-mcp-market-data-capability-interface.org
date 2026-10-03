@@ -1,0 +1,154 @@
+#+TITLE: ADR-070: Consumer-defined MCP market-data capability and service-owned resolution
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #448 (step 1 of #439). Partially amends ADR-068 (see the
+Partial Amendment Rules in =adr-decisions.org=): it settles the
+capability-interface shape ADR-068 left open. Settles the item ADR-069
+deferred to #439 ("Not decided here").
+
+* Context
+
+ADR-068 says the dependency =internal/mcpserver= consumes "should represent
+application capabilities", and gives a conceptual =MarketData= interface,
+but states: "The exact Go interface is not prescribed; concrete service
+methods are equally acceptable." ADR-069 defers the decision to #439: "Where
+the capability interface consumed by =internal/mcpserver= lives ... is
+decided in #439, and recorded as an amendment when it lands."
+
+PR #438 left a temporary seam in its place: =mcpserver.MarketData= was a
+struct carrying =*service/marketdata.Service=, the mutable
+=*instrument.MemoryResolver= its Manager resolves through, the provider
+name, and the archive root. An MCP tool would have had to register
+instruments into that resolver and pass the archive root back down, which
+is exactly the orchestration ADR-068 keeps out of handlers.
+
+Instrument resolution had the same problem one layer up. The data CLI
+(=registerRequestedInstrument=) and the backtest CLI
+(=registerBacktestInstrument=, =resolveInstrumentSet=) each chose FX versus
+equity/ETF and registered listings themselves, with separate copies of the
+reference listing defaults. Neither was idempotent: =MemoryResolver.Register=
+rejects a second registration (ADR-016), so a repeated symbol, or reuse of
+a service across requests, failed (ADR-069 Decision 2).
+
+* Decision
+
+** 1. The interface is defined by its consumer
+
+=internal/mcpserver= defines =MarketData=, the interface its tools consume,
+following the Go convention that interfaces belong to the package that uses
+them. =*service/marketdata.Service= implements it, which a compile-time
+assertion in =mcpserver= checks. The interface lists only the use cases
+tools call, and grows as tools need more (canonicalize and update arrive
+with #439 step 2):
+
+#+BEGIN_SRC go
+type MarketData interface {
+    Provider() string
+    ResolveInstruments(context.Context, svcmarketdata.ResolveInstrumentsRequest) (svcmarketdata.ResolveInstrumentsResponse, error)
+    Coverage(context.Context, svcmarketdata.CoverageRequest) (svcmarketdata.CoverageResponse, error)
+    Inventory(context.Context, svcmarketdata.InventoryRequest) (svcmarketdata.InventoryResponse, error)
+}
+#+END_SRC
+
+=MarketDataFactory.ForProvider= returns this interface, and
+=marketdatacfg.Factory.ForProvider= returns the =*Service= itself, never a
+bundle exposing a resolver or archive root.
+
+** 2. The Service owns its resolver and archive root
+
+=service/marketdata.New= takes options: =WithResolver= (the same resolver
+its Manager uses) and =WithArchiveRoot=. The Service's provider comes from
+its Manager. Callers name instruments by symbol and the Service registers
+them; =ConvertStooqArchive= searches the Service's own archive root when a
+request names none.
+
+** 3. One resolution path, shared by every transport
+
+=service/marketdata= owns instrument resolution:
+
+- =IdentifyInstrument(provider, req)= decides what a symbol names: an FX
+  pair for an FX provider (=IsFXProvider=, now the single source the
+  composition code also uses), otherwise an equity or ETF from an explicit
+  exchange and kind or the symbol's reference listing default (#434).
+- =RegisterIdentity(resolver, provider, identity)= registers it under any
+  provider, so a backtest can register the same identity under its data
+  provider and its simulated broker.
+- =RegisterInstrument(resolver, provider, req)= is the two combined.
+- =Service.ResolveInstrument= and =Service.ResolveInstruments= (per-symbol
+  results, so one bad symbol never hides the others) wrap the same
+  primitives for a transport holding only a Service, against the
+  Service's own resolver and provider.
+
+Each transport calls the level that fits it, and all of them run the same
+identification and registration code:
+
+- MCP holds only the capability interface, so it calls
+  =Service.ResolveInstruments=.
+- The data CLI is a composition root holding its own resolver and
+  provider, so it calls =RegisterInstrument= directly.
+- The backtest CLI registers one identity under two providers (its data
+  provider and the simulated broker), so it calls =IdentifyInstrument=
+  once and =RegisterIdentity= twice. The Service methods, bound to one
+  provider, cannot express that.
+
+The CLIs keep only flag parsing and their flag-specific error messages.
+
+** 4. Registration is idempotent
+
+Registering a listing whose provider, venue, and symbol are already
+registered to the same instrument returns the existing listing. A
+different instrument under the same key fails with =ErrListingConflict=.
+
+The check is exact and atomic, so it lives at the resolver:
+=MemoryResolver= gains =RegisterOrGet=, which compares the exact
+provider/venue/symbol key under the resolver's lock. An empty venue (spot
+FX) matches only an empty venue. A service-side fallback through
+=ResolveSymbol= cannot do this, because =ResolveSymbol= treats an empty
+venue as a wildcard: an FX listing re-registered while the same
+provider/symbol also exists on a named venue would look ambiguous (PR #449
+review). =RegisterOrGet= is additive to ADR-016; =Register= is unchanged
+and still rejects every duplicate.
+
+* Consequences
+
+- MCP tools receive only use cases; ADR-068's handler rules hold by
+  construction, since the interface exposes no resolver, archive path, or
+  Manager.
+- The two CLI copies of instrument resolution and listing defaults are
+  gone. The data CLI now accepts the reference symbols (SPY, QQQ, AAPL)
+  without =--exchange=/=--kind=, as =stq2bars= and =backtest run= already
+  did. Every previous error message is preserved.
+- A service can be called repeatedly, and a request can repeat a symbol,
+  without failing (#442's reuse becomes possible, not required).
+- Adding an MCP tool that needs a new use case means adding a Service
+  method first, then widening the interface.
+
+* Alternatives Considered
+
+- *Define the interface in =service/marketdata= (provider-side).*
+  Rejected: it would couple the service to one consumer's needs, and Go
+  convention puts interfaces with their consumers.
+- *Pass concrete =*Service= to =mcpserver= with no interface.* Rejected:
+  ADR-068 allows it, but tests would need a full Manager and fixture data
+  for every handler test, and nothing would stop a handler reaching past
+  the use cases.
+- *Make =MemoryResolver.Register= itself idempotent.* Rejected: it would
+  rewrite ADR-016's accepted resolver contract. =RegisterOrGet= adds the
+  idempotent operation alongside it instead.
+- *Detect duplicates in the service by looking the listing up with
+  =ResolveSymbol=.* Rejected: the empty-venue wildcard makes the lookup
+  inexact, and the lookup and registration would not be atomic.
+- *Route both CLIs through the Service methods.* Rejected: the backtest
+  must register one identity under two providers, which a Service bound
+  to one provider cannot do.
+- *Keep the CLI resolution copies and add a third for MCP.* Rejected by
+  ADR-069 Decision 1.
+
+* Related
+
+- ADR-016: symbol and listing resolution.
+- ADR-068: MCP application-service adapter (partially amended).
+- ADR-069: shared transport application behavior (settles its deferred item).
+- #434, #439, #442, #448.

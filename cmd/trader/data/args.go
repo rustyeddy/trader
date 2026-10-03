@@ -1,18 +1,16 @@
 package data
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/cmd/internal/marketdatacfg"
 
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/instrument"
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 	"github.com/rustyeddy/trader/marketdata"
-	"github.com/rustyeddy/trader/num"
 )
 
 // intervalsByName is the CLI's own string vocabulary for
@@ -55,7 +53,8 @@ func parseDate(s string) (time.Time, error) {
 // flag values every dataset command (bars, coverage, plan, sync,
 // build, update) shares. exchange/kind are used only when the
 // configured provider needs equity/ETF instrument registration rather
-// than FX (issue #331) — see registerRequestedInstrument.
+// than FX (issue #331), and may be omitted for a symbol with a listing
+// default — see registerRequestedInstrument.
 type datasetArgFlags struct {
 	from     string
 	to       string
@@ -83,42 +82,28 @@ func addDatasetArgFlags(cmd *cobra.Command, flags *datasetArgFlags) {
 }
 
 // registerRequestedInstrument resolves symbol into a registered
-// instrument.ID, choosing FX or equity/ETF registration based on
-// dc.Provider (issue #331). An unrecognized/future provider is
-// treated as equity/ETF, matching marketdatacfg.IsFXProvider's own "oanda is the one
-// FX provider" framing — not because that is guaranteed correct for
-// every future provider, but because guessing FX for an unknown
-// provider would be the more surprising default of the two.
+// instrument.ID through the service layer's one resolution path
+// (svc.RegisterInstrument, issue #448): FX for an FX provider, otherwise
+// an equity/ETF from --exchange/--kind or the symbol's listing default.
+// It only translates the service's errors into flag guidance.
 func registerRequestedInstrument(dc dataContext, symbol string, flags datasetArgFlags) (instrument.ID, error) {
-	if marketdatacfg.IsFXProvider(dc.Provider) {
-		return svc.RegisterFXInstrument(dc.Resolver, dc.Provider, symbol)
-	}
-
-	if flags.exchange == "" {
+	listing, err := svc.RegisterInstrument(dc.Resolver, dc.Provider, svc.InstrumentRequest{
+		Symbol: symbol, Exchange: flags.exchange, Kind: flags.kind,
+	})
+	switch {
+	case err == nil:
+		return listing.InstrumentID(), nil
+	case errors.Is(err, svc.ErrNoListingDefault),
+		errors.Is(err, svc.ErrIncompleteListingIdentity) && flags.exchange == "":
 		return instrument.ID{}, fmt.Errorf(
 			"--exchange is required for provider %q (for example --exchange ARCA or --exchange NASDAQ)", dc.Provider)
-	}
-	reg := svc.EquityRegistration{
-		Provider: dc.Provider,
-		Exchange: flags.exchange,
-		Ticker:   symbol,
-		// USD is Phase 1's one settlement currency for every reference
-		// equity/ETF instrument (ADR-047); not configurable here since
-		// nothing in scope needs it to be yet, matching
-		// EquityRegistration's own doc comment about Currency being a
-		// genuinely required field with no FX-style inference available.
-		Currency: num.MustParseCurrency("USD"),
-	}
-	switch strings.ToLower(strings.TrimSpace(flags.kind)) {
-	case "etf":
-		return svc.RegisterETFInstrument(dc.Resolver, reg)
-	case "equity":
-		return svc.RegisterEquityInstrument(dc.Resolver, reg)
-	case "":
+	case errors.Is(err, svc.ErrIncompleteListingIdentity):
 		return instrument.ID{}, fmt.Errorf(
 			`--kind is required for provider %q: expected "equity" or "etf"`, dc.Provider)
-	default:
+	case errors.Is(err, svc.ErrInvalidListingKind):
 		return instrument.ID{}, fmt.Errorf(`invalid --kind %q: expected "equity" or "etf"`, flags.kind)
+	default:
+		return instrument.ID{}, err
 	}
 }
 
@@ -131,13 +116,11 @@ func registerRequestedInstrument(dc dataContext, symbol string, flags datasetArg
 //
 // Instrument resolution — turning the bare INSTRUMENT string into a
 // registered instrument.ID the service's Manager can resolve — is
-// deliberately not done here beyond dispatching to
-// registerRequestedInstrument: svc.RegisterFXInstrument/
-// RegisterEquityInstrument/RegisterETFInstrument own the actual
-// registration, living in the service layer rather than this
-// transport, since each has to invent domain/execution metadata (tick
+// deliberately not done here beyond calling registerRequestedInstrument:
+// svc.RegisterInstrument owns it, in the service layer rather than this
+// transport, since it has to invent domain/execution metadata (tick
 // size and friends) that a CLI adapter has no business fabricating
-// itself. See each function's own doc comment for the full reasoning.
+// itself, and the MCP transport resolves through the same code.
 func resolveDatasetRequest(cmd *cobra.Command, args []string, flags datasetArgFlags) (svc.DatasetRequest, error) {
 	dc, ok := dataContextFrom(cmd.Context())
 	if !ok {

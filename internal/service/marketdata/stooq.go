@@ -37,6 +37,9 @@ var (
 	// a kind without an exchange. It is returned wrapped together with
 	// ErrInvalidRequest.
 	ErrIncompleteListingIdentity = errors.New("exchange and kind must be provided together")
+	// ErrInvalidListingKind reports a kind other than KindEquity or
+	// KindETF. It is returned wrapped together with ErrInvalidRequest.
+	ErrInvalidListingKind = errors.New("invalid listing kind")
 )
 
 // Listing kinds a ListingDefault may name.
@@ -72,14 +75,14 @@ func DefaultListing(symbol string) (ListingDefault, bool) {
 // ResolveListingIdentity returns the exchange and kind to register symbol
 // under. Explicit values must be given together and win; the kind is
 // normalized to KindEquity or KindETF and any other kind fails with
-// ErrInvalidRequest. With neither, the symbol's DefaultListing applies,
+// ErrInvalidListingKind (and ErrInvalidRequest). With neither, the symbol's DefaultListing applies,
 // and a symbol without one fails with ErrNoListingDefault.
 func ResolveListingIdentity(symbol, exchange, kind string) (ListingDefault, error) {
 	exchange, kind = strings.TrimSpace(exchange), strings.ToLower(strings.TrimSpace(kind))
 	switch {
 	case exchange != "" && kind != "":
 		if kind != KindEquity && kind != KindETF {
-			return ListingDefault{}, fmt.Errorf("%w: invalid kind %q: expected %q or %q", ErrInvalidRequest, kind, KindEquity, KindETF)
+			return ListingDefault{}, fmt.Errorf("%w: %w %q: expected %q or %q", ErrInvalidRequest, ErrInvalidListingKind, kind, KindEquity, KindETF)
 		}
 		return ListingDefault{Exchange: exchange, Kind: kind}, nil
 	case exchange != "" || kind != "":
@@ -107,7 +110,8 @@ type ConvertStooqArchiveRequest struct {
 	// ArchivePath is the native Stooq ZIP. When empty, the one archive
 	// under ArchiveRoot whose name contains Symbol is used.
 	ArchivePath string
-	// ArchiveRoot is searched when ArchivePath is empty.
+	// ArchiveRoot is searched when ArchivePath is empty. When it is empty
+	// too, the Service's own archive root (WithArchiveRoot) is used.
 	ArchiveRoot string
 	// Force rebuilds canonical partitions even when they are current.
 	Force bool
@@ -135,7 +139,11 @@ func (s *Service) ConvertStooqArchive(ctx context.Context, req ConvertStooqArchi
 	}()
 	archivePath := req.ArchivePath
 	if archivePath == "" {
-		if archivePath, err = FindStooqArchive(ctx, req.ArchiveRoot, symbol); err != nil {
+		root := req.ArchiveRoot
+		if root == "" {
+			root = s.archiveRoot
+		}
+		if archivePath, err = FindStooqArchive(ctx, root, symbol); err != nil {
 			return ConvertResponse{}, err
 		}
 	}

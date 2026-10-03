@@ -350,3 +350,79 @@ func TestConcurrentRegisterAndResolve(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "EUR_USD", got.Symbol())
 }
+
+func TestRegisterOrGetRegistersThenReturnsExisting(t *testing.T) {
+	eurUsd := mustEurUsd(t)
+	r := NewMemoryResolver()
+	l := mustListing(t, eurUsd, "oanda", "", "EURUSD")
+
+	got, err := r.RegisterOrGet(l)
+	require.NoError(t, err)
+	assert.Equal(t, l, got)
+
+	again, err := r.RegisterOrGet(mustListing(t, eurUsd, "OANDA", "", "eurusd"))
+	require.NoError(t, err, "same key (case-insensitive), same instrument")
+	assert.Equal(t, l, again, "the existing listing is returned")
+
+	listings, err := r.ResolveInstrument(eurUsd.ID(), "oanda", "")
+	require.NoError(t, err, "still exactly one listing")
+	assert.Equal(t, "EURUSD", listings.Symbol())
+}
+
+// TestRegisterOrGetEmptyVenueIsLiteral: an empty venue matches only an
+// empty venue. Re-registering an empty-venue listing stays idempotent even
+// when the same provider/symbol also exists on a named venue — the case a
+// wildcard ResolveSymbol lookup would report as ambiguous (PR #449 review).
+func TestRegisterOrGetEmptyVenueIsLiteral(t *testing.T) {
+	eurUsd := mustEurUsd(t)
+	r := NewMemoryResolver()
+	spot := mustListing(t, eurUsd, "oanda", "", "EURUSD")
+	venued := mustListing(t, eurUsd, "oanda", "LMAX", "EURUSD")
+
+	_, err := r.RegisterOrGet(spot)
+	require.NoError(t, err)
+	got, err := r.RegisterOrGet(venued)
+	require.NoError(t, err, "a named venue is a different key from the empty venue")
+	assert.Equal(t, "LMAX", got.Venue())
+	_, err = r.ResolveSymbol("oanda", "", "EURUSD")
+	require.ErrorIs(t, err, ErrAmbiguousSymbol, "the wildcard lookup is ambiguous here")
+
+	again, err := r.RegisterOrGet(spot)
+	require.NoError(t, err)
+	assert.Equal(t, "", again.Venue())
+}
+
+func TestRegisterOrGetRejectsDifferentInstrumentUnderSameKey(t *testing.T) {
+	r := NewMemoryResolver()
+	_, err := r.RegisterOrGet(mustListing(t, mustEurUsd(t), "oanda", "", "PAIR"))
+	require.NoError(t, err)
+
+	gbpUsd, err := NewCurrencyPair(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	_, err = r.RegisterOrGet(mustListing(t, gbpUsd, "oanda", "", "PAIR"))
+	require.ErrorIs(t, err, ErrDuplicateListing)
+	assert.Contains(t, err.Error(), "different instrument")
+}
+
+func TestRegisterOrGetRejectsZeroListing(t *testing.T) {
+	_, err := NewMemoryResolver().RegisterOrGet(Listing{})
+	require.ErrorIs(t, err, ErrInvalidListing)
+}
+
+func TestRegisterOrGetConcurrentRegistersOnce(t *testing.T) {
+	eurUsd := mustEurUsd(t)
+	l := mustListing(t, eurUsd, "oanda", "", "EURUSD")
+	r := NewMemoryResolver()
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := r.RegisterOrGet(l)
+			assert.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+	_, err := r.ResolveInstrument(eurUsd.ID(), "oanda", "")
+	require.NoError(t, err, "exactly one listing after concurrent calls")
+}

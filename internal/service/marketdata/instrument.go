@@ -35,29 +35,45 @@ import (
 // consumer needs a real, trustworthy Spec, it needs a real instrument
 // catalog, not this function.
 //
+// Registration is idempotent (ADR-069 Decision 2): registering the same
+// listing again succeeds; see registerListing.
+//
 // This is a deliberately narrow, FX-only v0 convention (M2's only
 // asset class so far), not a general instrument catalog or
 // symbol-resolution service.
 func RegisterFXInstrument(resolver *instrument.MemoryResolver, provider, symbol string) (instrument.ID, error) {
+	listing, err := fxListing(provider, symbol)
+	if err != nil {
+		return instrument.ID{}, err
+	}
+	if _, err := registerListing(resolver, listing); err != nil {
+		return instrument.ID{}, fmt.Errorf("registering instrument %q: %w", listing.Symbol(), err)
+	}
+	return listing.InstrumentID(), nil
+}
+
+// fxListing builds RegisterFXInstrument's Listing for symbol under
+// provider without registering it.
+func fxListing(provider, symbol string) (instrument.Listing, error) {
 	symbol = strings.ToUpper(strings.TrimSpace(symbol))
 	if len(symbol) != 6 {
-		return instrument.ID{}, fmt.Errorf(
+		return instrument.Listing{}, fmt.Errorf(
 			"invalid instrument %q: expected a 6-letter FX pair symbol, e.g. EURUSD", symbol)
 	}
 	base, quote := symbol[:3], symbol[3:]
 
 	baseCur, err := num.ParseCurrency(base)
 	if err != nil {
-		return instrument.ID{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
 	}
 	quoteCur, err := num.ParseCurrency(quote)
 	if err != nil {
-		return instrument.ID{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
 	}
 
 	inst, err := instrument.NewCurrencyPair(baseCur, quoteCur)
 	if err != nil {
-		return instrument.ID{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
 	}
 
 	tick := "0.00001"
@@ -71,7 +87,7 @@ func RegisterFXInstrument(resolver *instrument.MemoryResolver, provider, symbol 
 		quoteCur,
 	)
 	if err != nil {
-		return instrument.ID{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
 	}
 
 	listing, err := instrument.NewListing(instrument.ListingParams{
@@ -82,12 +98,7 @@ func RegisterFXInstrument(resolver *instrument.MemoryResolver, provider, symbol 
 		Tradable:   true,
 	})
 	if err != nil {
-		return instrument.ID{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
 	}
-
-	if err := resolver.Register(listing); err != nil {
-		return instrument.ID{}, fmt.Errorf("registering instrument %q: %w", symbol, err)
-	}
-
-	return listing.InstrumentID(), nil
+	return listing, nil
 }

@@ -58,12 +58,18 @@ func TestRegisterFXInstrument_RejectsInvalidCurrencyCode(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestRegisterFXInstrument_DuplicateRegistrationFails(t *testing.T) {
+// TestRegisterFXInstrument_RepeatRegistrationIsIdempotent replaces the
+// former "duplicate registration fails" test: ADR-069 Decision 2 (issue
+// #448) makes service registration idempotent. instrument.MemoryResolver
+// itself still rejects duplicates (ADR-016); the service layer treats an
+// identical existing listing as success.
+func TestRegisterFXInstrument_RepeatRegistrationIsIdempotent(t *testing.T) {
 	resolver := instrument.NewMemoryResolver()
 
-	_, err := svc.RegisterFXInstrument(resolver, "oanda", "EURUSD")
+	first, err := svc.RegisterFXInstrument(resolver, "oanda", "EURUSD")
 	require.NoError(t, err)
 
-	_, err = svc.RegisterFXInstrument(resolver, "oanda", "EURUSD")
-	require.Error(t, err, "registering the exact same provider/venue/symbol twice must fail, per instrument.Resolver's own contract (ADR-016)")
+	second, err := svc.RegisterFXInstrument(resolver, "oanda", "eurusd")
+	require.NoError(t, err)
+	require.True(t, first.Equal(second))
 }

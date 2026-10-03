@@ -107,9 +107,12 @@ two positional arguments and shares the same flag set.
 
 INSTRUMENT is a plain symbol. For the default `oanda` provider (or any FX
 provider) it is a 6-letter FX pair, e.g. `EURUSD`. For a non-FX provider such
-as `alpaca` it is an equity or ETF ticker, e.g. `AAPL` or `SPY` — `--exchange`
-and `--kind` are then both **required**, since a bare ticker does not name
-its own listing exchange or asset kind the way an FX pair's symbol does.
+as `alpaca` it is an equity or ETF ticker, e.g. `AAPL` or `SPY`. A bare ticker
+does not name its own listing exchange or asset kind the way an FX pair's
+symbol does, so `--exchange` and `--kind` are **required together** — except
+for the reference symbols SPY (ARCA ETF), QQQ (NASDAQ ETF), and AAPL (NASDAQ
+equity), which resolve without them. The same resolution is used by
+`backtest run` and `trader-mcp`.
 INTERVAL is one of the values listed under `backtest run` below.
 
 ### Shared `data` flags
@@ -124,8 +127,8 @@ INTERVAL is one of the values listed under `backtest run` below.
 | `--store-root`      | `$XDG_DATA_HOME/trader/data`           | canonical data store root                                                |
 | `--oanda-base-url`  | —                                      | OANDA API base URL; required only for `sync`/`update`                   |
 | `--alpaca-base-url` | `https://data.alpaca.markets`          | Alpaca Market Data API base URL; only used with `--provider alpaca`     |
-| `--exchange`        | —                                      | listing exchange (e.g. `ARCA`, `NASDAQ`); required for a non-FX provider |
-| `--kind`            | —                                      | `equity` or `etf`; required for a non-FX provider                       |
+| `--exchange`        | —                                      | listing exchange (e.g. `ARCA`, `NASDAQ`); required for a non-FX provider unless the symbol has reference metadata |
+| `--kind`            | —                                      | `equity` or `etf`; required with `--exchange`                           |
 
 The OANDA API token itself is never a flag — set the `TRADER_OANDA_TOKEN`
 environment variable instead. Likewise, Alpaca's key ID and secret key are

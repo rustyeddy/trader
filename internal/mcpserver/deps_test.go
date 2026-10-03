@@ -2,12 +2,15 @@ package mcpserver
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	svcmarketdata "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
 type fakeMarketData struct {
@@ -20,9 +23,26 @@ func (f *fakeMarketData) DefaultProvider() string { return "oanda" }
 func (f *fakeMarketData) ForProvider(provider string) (MarketData, error) {
 	f.asked = append(f.asked, provider)
 	if f.err != nil {
-		return MarketData{}, f.err
+		return nil, f.err
 	}
-	return MarketData{Provider: provider}, nil
+	return providerOnly(provider), nil
+}
+
+// providerOnly is a MarketData that knows only its provider.
+type providerOnly string
+
+func (p providerOnly) Provider() string { return string(p) }
+
+func (providerOnly) ResolveInstruments(context.Context, svcmarketdata.ResolveInstrumentsRequest) (svcmarketdata.ResolveInstrumentsResponse, error) {
+	return svcmarketdata.ResolveInstrumentsResponse{}, errors.New("not implemented")
+}
+
+func (providerOnly) Coverage(context.Context, svcmarketdata.CoverageRequest) (svcmarketdata.CoverageResponse, error) {
+	return svcmarketdata.CoverageResponse{}, errors.New("not implemented")
+}
+
+func (providerOnly) Inventory(context.Context, svcmarketdata.InventoryRequest) (svcmarketdata.InventoryResponse, error) {
+	return svcmarketdata.InventoryResponse{}, errors.New("not implemented")
 }
 
 func TestRequireWrites(t *testing.T) {
@@ -48,7 +68,7 @@ func TestMarketData(t *testing.T) {
 		s := &server{deps: Deps{MarketData: f}}
 		md, err := s.marketData("stooq")
 		require.NoError(t, err)
-		assert.Equal(t, "stooq", md.Provider)
+		assert.Equal(t, "stooq", md.Provider())
 		_, _ = s.marketData("")
 		assert.Equal(t, []string{"stooq", ""}, f.asked)
 	})
