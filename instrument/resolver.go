@@ -103,6 +103,35 @@ func (r *MemoryResolver) Register(listing Listing) error {
 	return nil
 }
 
+// RegisterOrGet registers listing like Register, except that when a
+// Listing with the same Provider, Venue, and Symbol (all
+// case-insensitive; an empty Venue matches only an empty Venue, never as
+// a wildcard) is already registered to the same InstrumentID, it returns
+// that existing Listing and no error. The check and the registration
+// happen atomically. A Listing under the same key for a different
+// instrument reports ErrDuplicateListing, as Register does.
+func (r *MemoryResolver) RegisterOrGet(listing Listing) (Listing, error) {
+	if listing.InstrumentID().IsZero() {
+		return Listing{}, fmt.Errorf("%w: listing must be constructed", ErrInvalidListing)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := newProviderSymbolKey(listing.Provider(), listing.Symbol())
+	if existing := findByVenue(r.bySymbol[key], listing.Venue()); existing != nil {
+		if existing.InstrumentID().Equal(listing.InstrumentID()) {
+			return *existing, nil
+		}
+		return Listing{}, fmt.Errorf("%w: provider %q venue %q symbol %q is registered to a different instrument",
+			ErrDuplicateListing, listing.Provider(), listing.Venue(), listing.Symbol())
+	}
+
+	r.bySymbol[key] = append(r.bySymbol[key], listing)
+	r.byInstrument[listing.InstrumentID()] = append(r.byInstrument[listing.InstrumentID()], listing)
+	return listing, nil
+}
+
 // RegisterAlias registers an additional provider/venue/symbol lookup key —
 // aliasProvider, aliasVenue, aliasSymbol — that resolves to the Listing
 // already registered under canonicalProvider/canonicalVenue/

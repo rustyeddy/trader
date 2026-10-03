@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/logging"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -124,23 +125,17 @@ func equityIdentityListing(provider string, id InstrumentIdentity) (instrument.L
 	return equityLikeListing(reg, inst)
 }
 
-// registerListing registers listing in resolver idempotently: if its
-// provider, venue, and symbol are already registered to the same
-// instrument, the existing Listing is returned. A different instrument
-// under the same key fails with ErrListingConflict.
+// registerListing registers listing in resolver idempotently through
+// MemoryResolver.RegisterOrGet: if its exact provider, venue, and symbol
+// are already registered to the same instrument, the existing Listing is
+// returned. A different instrument under the same key fails with
+// ErrListingConflict.
 func registerListing(resolver *instrument.MemoryResolver, listing instrument.Listing) (instrument.Listing, error) {
-	err := resolver.Register(listing)
-	if err == nil {
-		return listing, nil
+	registered, err := resolver.RegisterOrGet(listing)
+	if errors.Is(err, instrument.ErrDuplicateListing) {
+		return instrument.Listing{}, fmt.Errorf("%w: %w", ErrListingConflict, err)
 	}
-	if !errors.Is(err, instrument.ErrDuplicateListing) {
-		return instrument.Listing{}, err
-	}
-	existing, resolveErr := resolver.ResolveSymbol(listing.Provider(), listing.Venue(), listing.Symbol())
-	if resolveErr == nil && existing.InstrumentID().Equal(listing.InstrumentID()) {
-		return existing, nil
-	}
-	return instrument.Listing{}, fmt.Errorf("%w: %w", ErrListingConflict, err)
+	return registered, err
 }
 
 // InstrumentResponse is one resolved instrument.
@@ -153,8 +148,26 @@ type InstrumentResponse struct {
 // ResolveInstrument resolves req under the Service's provider and
 // registers it in the Service's resolver, so the Service's other
 // operations can then act on Instrument. Calling it again for the same
-// instrument succeeds.
-func (s *Service) ResolveInstrument(ctx context.Context, req InstrumentRequest) (InstrumentResponse, error) {
+// instrument succeeds. Once the symbol is non-empty, it logs exactly one
+// outcome record.
+func (s *Service) ResolveInstrument(ctx context.Context, req InstrumentRequest) (resp InstrumentResponse, err error) {
+	if strings.TrimSpace(req.Symbol) == "" {
+		return InstrumentResponse{}, fmt.Errorf("%w: symbol is required", ErrInvalidRequest)
+	}
+	defer func() {
+		attrs := []any{"provider", s.provider, "symbol", req.Symbol}
+		if err != nil {
+			s.logger.ErrorContext(ctx, "instrument resolution failed", append(attrs, "error", err)...)
+			return
+		}
+		s.logger.DebugContext(ctx, "instrument resolved", append(attrs, logging.InstrumentID, resp.Instrument.String())...)
+	}()
+	return s.resolveInstrument(ctx, req)
+}
+
+// resolveInstrument is ResolveInstrument without its outcome log, so
+// ResolveInstruments can log once for the whole request.
+func (s *Service) resolveInstrument(ctx context.Context, req InstrumentRequest) (InstrumentResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return InstrumentResponse{}, err
 	}
@@ -195,26 +208,34 @@ type ResolveInstrumentsResponse struct {
 // symbol never hides the others: a failure is recorded on its own
 // result. Repeated symbols resolve to the same instrument. The call
 // itself fails only for an empty request, a missing resolver, or ctx.
-func (s *Service) ResolveInstruments(ctx context.Context, req ResolveInstrumentsRequest) (ResolveInstrumentsResponse, error) {
+// After the empty-request check it logs exactly one aggregate record,
+// whichever way it exits.
+func (s *Service) ResolveInstruments(ctx context.Context, req ResolveInstrumentsRequest) (resp ResolveInstrumentsResponse, err error) {
 	if len(req.Instruments) == 0 {
 		return ResolveInstrumentsResponse{}, fmt.Errorf("%w: at least one instrument is required", ErrInvalidRequest)
 	}
+	failed := 0
+	defer func() {
+		attrs := []any{"provider", s.provider, "requested", len(req.Instruments), "failed", failed}
+		if err != nil {
+			s.logger.ErrorContext(ctx, "instrument resolution failed", append(attrs, "error", err)...)
+			return
+		}
+		s.logger.DebugContext(ctx, "instruments resolved", attrs...)
+	}()
 	if s.resolver == nil {
 		return ResolveInstrumentsResponse{}, ErrResolverNotConfigured
 	}
-	resp := ResolveInstrumentsResponse{Results: make([]InstrumentResult, 0, len(req.Instruments))}
-	failed := 0
+	resp = ResolveInstrumentsResponse{Results: make([]InstrumentResult, 0, len(req.Instruments))}
 	for _, r := range req.Instruments {
 		if err := ctx.Err(); err != nil {
 			return ResolveInstrumentsResponse{}, err
 		}
-		out, err := s.ResolveInstrument(ctx, r)
+		out, err := s.resolveInstrument(ctx, r)
 		if err != nil {
 			failed++
 		}
 		resp.Results = append(resp.Results, InstrumentResult{Request: r, InstrumentResponse: out, Err: err})
 	}
-	s.logger.DebugContext(ctx, "instruments resolved",
-		"provider", s.provider, "requested", len(req.Instruments), "failed", failed)
 	return resp, nil
 }

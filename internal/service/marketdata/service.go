@@ -18,12 +18,16 @@ var ErrNilManager = errors.New("service/marketdata: manager is nil")
 // spans several Manager calls (see Update, issue #107) is implemented
 // once and reused by every transport.
 //
-// Service holds no transport, formatting, or presentation state, and no
-// mutable state of its own beyond the *marketdata.Manager it wraps and
-// the *slog.Logger New scoped: its own concurrency properties are
-// therefore exactly whatever the wrapped Manager's are, whatever those
-// turn out to be documented as — logging a record adds no additional
-// mutable state or synchronization of Service's own.
+// Service holds no transport, formatting, or presentation state. Its
+// collaborators are the *marketdata.Manager it wraps, the *slog.Logger
+// New scoped, and, when configured, the instrument resolver
+// (WithResolver) and archive root (WithArchiveRoot); the Service's own
+// fields never change after New. The resolver is the one mutable
+// collaborator: ResolveInstrument registers listings into it, so it must
+// be safe for concurrent use — instrument.MemoryResolver is, and
+// registration through it is atomic (RegisterOrGet). Beyond that, the
+// Service's concurrency properties are exactly the wrapped Manager's;
+// logging adds no mutable state or synchronization of its own.
 type Service struct {
 	manager     *marketruntime.Manager
 	logger      *slog.Logger

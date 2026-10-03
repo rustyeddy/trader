@@ -122,6 +122,23 @@ func TestRegisterIdentity(t *testing.T) {
 		require.ErrorIs(t, err, svc.ErrListingConflict, "SPY as an equity is a different instrument from SPY the ETF")
 		assert.ErrorIs(t, err, instrument.ErrDuplicateListing)
 	})
+	t.Run("fx re-registration with the same symbol on another venue", func(t *testing.T) {
+		// PR #449 review: an empty venue is a wildcard to ResolveSymbol,
+		// so a lookup-based fallback reported this as a conflict.
+		resolver := instrument.NewMemoryResolver()
+		fx := svc.InstrumentIdentity{Symbol: "EURUSD", Kind: svc.KindFX}
+		first, err := svc.RegisterIdentity(resolver, "oanda", fx)
+		require.NoError(t, err)
+		_, err = svc.RegisterETFInstrument(resolver, svc.EquityRegistration{
+			Provider: "oanda", Exchange: "ARCA", Ticker: "EURUSD", Currency: num.MustParseCurrency("USD"),
+		})
+		require.NoError(t, err)
+
+		again, err := svc.RegisterIdentity(resolver, "oanda", fx)
+		require.NoError(t, err)
+		assert.True(t, again.InstrumentID().Equal(first.InstrumentID()))
+		assert.Equal(t, "", again.Venue())
+	})
 	t.Run("nil resolver", func(t *testing.T) {
 		_, err := svc.RegisterIdentity(nil, "oanda", svc.InstrumentIdentity{Symbol: "EURUSD", Kind: svc.KindFX})
 		assert.ErrorIs(t, err, svc.ErrResolverNotConfigured)
@@ -243,4 +260,85 @@ func TestConvertStooqArchive_DefaultsToServiceArchiveRoot(t *testing.T) {
 	})
 	require.NoError(t, err, "no archive path or root in the request: the service's root is searched")
 	assert.Equal(t, 2, out.Import.RowsImported)
+}
+
+func TestService_ResolveInstrumentLogsOnce(t *testing.T) {
+	ctx := context.Background()
+	logger, rec := logging.Capture()
+	resolver := instrument.NewMemoryResolver()
+	manager, err := marketruntime.New(marketruntime.Config{
+		Clock: clock.NewSimulated(time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC)), StoreRoot: t.TempDir(),
+		RawRoot: t.TempDir(), Resolver: resolver, ProviderName: "oanda",
+	})
+	require.NoError(t, err)
+	s, err := svc.New(manager, logger, svc.WithResolver(resolver))
+	require.NoError(t, err)
+
+	resp, err := s.ResolveInstrument(ctx, svc.InstrumentRequest{Symbol: "EURUSD"})
+	require.NoError(t, err)
+	records := rec.Records()
+	require.Len(t, records, 1)
+	assert.Equal(t, "instrument resolved", records[0].Message)
+	assert.Equal(t, resp.Instrument.String(), records[0].Attrs[logging.InstrumentID])
+	assert.Equal(t, "oanda", records[0].Attrs["provider"])
+	assert.NotContains(t, records[0].Attrs, "error")
+
+	rec.Reset()
+	_, err = s.ResolveInstrument(ctx, svc.InstrumentRequest{Symbol: "BAD"})
+	require.Error(t, err)
+	records = rec.Records()
+	require.Len(t, records, 1)
+	assert.Equal(t, "instrument resolution failed", records[0].Message)
+	assert.Contains(t, records[0].Attrs, "error")
+
+	rec.Reset()
+	_, err = s.ResolveInstrument(ctx, svc.InstrumentRequest{Symbol: " "})
+	require.ErrorIs(t, err, svc.ErrInvalidRequest)
+	assert.Empty(t, rec.Records(), "an invalid request is not logged")
+}
+
+func TestService_ResolveInstrumentsLogsEveryExitAfterValidation(t *testing.T) {
+	ctx := context.Background()
+	newService := func(t *testing.T, withResolver bool) (*svc.Service, *logging.Recorder) {
+		logger, rec := logging.Capture()
+		resolver := instrument.NewMemoryResolver()
+		manager, err := marketruntime.New(marketruntime.Config{
+			Clock: clock.NewSimulated(time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC)), StoreRoot: t.TempDir(),
+			RawRoot: t.TempDir(), Resolver: resolver, ProviderName: "oanda",
+		})
+		require.NoError(t, err)
+		var opts []svc.Option
+		if withResolver {
+			opts = append(opts, svc.WithResolver(resolver))
+		}
+		s, err := svc.New(manager, logger, opts...)
+		require.NoError(t, err)
+		return s, rec
+	}
+	one := svc.ResolveInstrumentsRequest{Instruments: []svc.InstrumentRequest{{Symbol: "EURUSD"}}}
+
+	t.Run("missing resolver", func(t *testing.T) {
+		s, rec := newService(t, false)
+		_, err := s.ResolveInstruments(ctx, one)
+		require.ErrorIs(t, err, svc.ErrResolverNotConfigured)
+		records := rec.Records()
+		require.Len(t, records, 1)
+		assert.Equal(t, "instrument resolution failed", records[0].Message)
+	})
+	t.Run("canceled", func(t *testing.T) {
+		s, rec := newService(t, true)
+		canceled, cancel := context.WithCancel(ctx)
+		cancel()
+		_, err := s.ResolveInstruments(canceled, one)
+		require.ErrorIs(t, err, context.Canceled)
+		records := rec.Records()
+		require.Len(t, records, 1)
+		assert.Equal(t, "instrument resolution failed", records[0].Message)
+	})
+	t.Run("empty request is not logged", func(t *testing.T) {
+		s, rec := newService(t, true)
+		_, err := s.ResolveInstruments(ctx, svc.ResolveInstrumentsRequest{})
+		require.ErrorIs(t, err, svc.ErrInvalidRequest)
+		assert.Empty(t, rec.Records())
+	})
 }

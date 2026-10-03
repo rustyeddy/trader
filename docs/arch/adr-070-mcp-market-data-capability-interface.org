@@ -75,21 +75,41 @@ request names none.
 - =RegisterIdentity(resolver, provider, identity)= registers it under any
   provider, so a backtest can register the same identity under its data
   provider and its simulated broker.
+- =RegisterInstrument(resolver, provider, req)= is the two combined.
 - =Service.ResolveInstrument= and =Service.ResolveInstruments= (per-symbol
-  results, so one bad symbol never hides the others) are the transport
-  entry points.
+  results, so one bad symbol never hides the others) wrap the same
+  primitives for a transport holding only a Service, against the
+  Service's own resolver and provider.
 
-The data CLI, the backtest CLI, and MCP all go through these. The CLIs keep
-only flag parsing and their flag-specific error messages.
+Each transport calls the level that fits it, and all of them run the same
+identification and registration code:
+
+- MCP holds only the capability interface, so it calls
+  =Service.ResolveInstruments=.
+- The data CLI is a composition root holding its own resolver and
+  provider, so it calls =RegisterInstrument= directly.
+- The backtest CLI registers one identity under two providers (its data
+  provider and the simulated broker), so it calls =IdentifyInstrument=
+  once and =RegisterIdentity= twice. The Service methods, bound to one
+  provider, cannot express that.
+
+The CLIs keep only flag parsing and their flag-specific error messages.
 
 ** 4. Registration is idempotent
 
 Registering a listing whose provider, venue, and symbol are already
 registered to the same instrument returns the existing listing. A
 different instrument under the same key fails with =ErrListingConflict=.
-=MemoryResolver.Register= itself is unchanged: ADR-016's duplicate
-rejection still holds at the resolver; idempotency is a service-layer
-policy on top of it.
+
+The check is exact and atomic, so it lives at the resolver:
+=MemoryResolver= gains =RegisterOrGet=, which compares the exact
+provider/venue/symbol key under the resolver's lock. An empty venue (spot
+FX) matches only an empty venue. A service-side fallback through
+=ResolveSymbol= cannot do this, because =ResolveSymbol= treats an empty
+venue as a wildcard: an FX listing re-registered while the same
+provider/symbol also exists on a named venue would look ambiguous (PR #449
+review). =RegisterOrGet= is additive to ADR-016; =Register= is unchanged
+and still rejects every duplicate.
 
 * Consequences
 
@@ -115,7 +135,14 @@ policy on top of it.
   for every handler test, and nothing would stop a handler reaching past
   the use cases.
 - *Make =MemoryResolver.Register= itself idempotent.* Rejected: it would
-  rewrite ADR-016's accepted resolver contract for a service-layer need.
+  rewrite ADR-016's accepted resolver contract. =RegisterOrGet= adds the
+  idempotent operation alongside it instead.
+- *Detect duplicates in the service by looking the listing up with
+  =ResolveSymbol=.* Rejected: the empty-venue wildcard makes the lookup
+  inexact, and the lookup and registration would not be atomic.
+- *Route both CLIs through the Service methods.* Rejected: the backtest
+  must register one identity under two providers, which a Service bound
+  to one provider cannot do.
 - *Keep the CLI resolution copies and add a third for MCP.* Rejected by
   ADR-069 Decision 1.
 
