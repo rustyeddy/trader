@@ -3,7 +3,6 @@ package data
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,41 +12,12 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 )
 
-// intervalsByName is the CLI's own string vocabulary for
-// marketdata.Interval, deliberately separate from Interval.String()
-// (documented one-directional, never parsed in core code — ADR-012).
-// Parsing a fixed set of predefined values at the CLI boundary is
-// exactly where that parsing is supposed to happen.
-var intervalsByName = map[string]marketdata.Interval{
-	"M1": marketdata.M1,
-	"H1": marketdata.H1,
-	"H4": marketdata.H4,
-	"D1": marketdata.D1,
-	"W1": marketdata.W1,
-}
+// parseInterval and parseDate read the CLI's interval names and dates
+// through the service layer's shared parsers (ADR-069), so the CLI and
+// MCP accept exactly the same values.
+func parseInterval(s string) (marketdata.Interval, error) { return svc.ParseInterval(s) }
 
-func parseInterval(s string) (marketdata.Interval, error) {
-	iv, ok := intervalsByName[strings.ToUpper(strings.TrimSpace(s))]
-	if !ok {
-		return marketdata.Interval{}, fmt.Errorf(
-			"invalid interval %q: expected one of M1, H1, H4, D1, W1", s)
-	}
-	return iv, nil
-}
-
-// parseDate accepts a bare date (assumed UTC midnight) or a full
-// RFC3339 timestamp, covering both the "--from 2026-01-01" style
-// ADR-022's own CLI sketch uses and a caller that needs sub-day
-// precision.
-func parseDate(s string) (time.Time, error) {
-	if t, err := time.Parse("2006-01-02", s); err == nil {
-		return t.UTC(), nil
-	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.UTC(), nil
-	}
-	return time.Time{}, fmt.Errorf("invalid date %q: expected YYYY-MM-DD or RFC3339", s)
-}
+func parseDate(s string) (time.Time, error) { return svc.ParseDate(s) }
 
 // datasetArgFlags holds the --from/--to/--format/--exchange/--kind
 // flag values every dataset command (bars, coverage, plan, sync,

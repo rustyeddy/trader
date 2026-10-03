@@ -25,9 +25,12 @@ func TestVersionToolThroughMCP(t *testing.T) {
 
 	tools, err := session.ListTools(ctx, &mcp.ListToolsParams{})
 	require.NoError(t, err)
-	require.Len(t, tools.Tools, 1)
-	require.Equal(t, "trader_version", tools.Tools[0].Name)
-	require.NotNil(t, tools.Tools[0].InputSchema)
+	names := make([]string, len(tools.Tools))
+	for i, tool := range tools.Tools {
+		names[i] = tool.Name
+		require.NotNil(t, tool.InputSchema, tool.Name)
+	}
+	require.ElementsMatch(t, []string{"trader_version", "trader_instruments", "trader_marketdata_coverage"}, names)
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "trader_version", Arguments: map[string]any{}})
 	require.NoError(t, err)

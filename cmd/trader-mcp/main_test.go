@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,4 +179,44 @@ func TestRun_BuildErrorReturned(t *testing.T) {
 	_, serverT := mcp.NewInMemoryTransports()
 	err := run(context.Background(), []string{"--log-output", "stdout"}, env, serverT, &bytes.Buffer{})
 	assert.ErrorIs(t, err, errLogToStdout)
+}
+
+// TestBuild_ServesMarketDataTools exercises the read-only market-data
+// tools (#436) through the real composition root: the configured raw
+// root holds the committed EURUSD fixture, and both tools resolve and
+// report on it through the factory-built Service.
+func TestBuild_ServesMarketDataTools(t *testing.T) {
+	env, _ := baseEnv(t)
+	rawRoot := filepath.Join(t.TempDir(), "raw")
+	require.NoError(t, os.CopyFS(rawRoot, os.DirFS(filepath.Join("..", "..", "internal", "service", "marketdata", "testdata", "raw", "oanda"))))
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "TRADER_RAW_ROOT=") {
+			env[i] = "TRADER_RAW_ROOT=" + rawRoot
+		}
+	}
+	srv, closer, err := build(nil, env, &bytes.Buffer{})
+	require.NoError(t, err)
+	defer func() { _ = closer.Close() }()
+
+	ctx := context.Background()
+	clientT, serverT := mcp.NewInMemoryTransports()
+	ss, err := srv.Connect(ctx, serverT, nil)
+	require.NoError(t, err)
+	defer func() { _ = ss.Close() }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil).Connect(ctx, clientT, nil)
+	require.NoError(t, err)
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "trader_instruments", Arguments: map[string]any{"symbols": []string{"EURUSD"}}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	assert.Contains(t, res.StructuredContent, "instruments")
+
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "trader_marketdata_coverage", Arguments: map[string]any{"symbols": []string{"EURUSD"}, "interval": "H1"}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	results := res.StructuredContent.(map[string]any)["results"].([]any)
+	require.Len(t, results, 1)
+	raw := results[0].(map[string]any)["raw"].(map[string]any)
+	assert.Equal(t, "2024-01-07T22:00:00Z", raw["first"], "the configured raw root is the one inspected")
 }

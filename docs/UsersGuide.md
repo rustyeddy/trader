@@ -674,6 +674,23 @@ It resolves configuration exactly as `trader data` does: the same
 - **stdout is the protocol stream.** `--log-output stdout` is rejected,
   and logs default to stderr.
 
+### Tools
+
+| Tool | Access | What it does |
+|---|---|---|
+| `trader_version` | read | the Trader build serving the session |
+| `trader_instruments` | read | resolve `symbols` for a `provider`: instrument ID, kind (`fx`, `equity`, `etf`), exchange, and the provider's symbol |
+| `trader_marketdata_coverage` | read | for `symbols` at an `interval` (`M1`, `H1`, `H4`, `D1`, `W1`): monthly partitions and their status, gaps, and the raw and canonical data held. `from`/`to` are optional; omit both to cover each symbol's existing canonical data |
+
+Every market-data tool takes a list of symbols and returns one result per
+symbol, so an unknown symbol is reported on its own entry without hiding
+the others. A bad interval, date, or provider, or an empty symbol list,
+fails the whole call. `provider` defaults to the server's. FX providers
+take 6-letter pairs (`EURUSD`); equity providers currently take the
+reference symbols `SPY`, `QQQ`, and `AAPL`. Results are the same as
+`trader data coverage` reports for the same data, and no tool returns
+bars.
+
 ---
 
 ## Environment Variables
