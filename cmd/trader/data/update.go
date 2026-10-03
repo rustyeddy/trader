@@ -5,11 +5,11 @@ import (
 )
 
 // newUpdateCmd implements "trader data update INSTRUMENT INTERVAL
-// --from --to [--format]" (issue #110, formatting added by #111): the
-// higher-level Update use case. Update calls Service.Update directly
-// -- it does not, and must not, reimplement Plan -> Sync -> Build
-// orchestration itself; that composition already lives entirely in
-// service/marketdata's own Update (issue #107).
+// [--from --to] [--format]" (issue #110, formatting added by #111): the
+// update use case, through the same service operation MCP uses
+// (UpdateDatasets, issue #439) for one symbol. It does not, and must
+// not, reimplement Plan -> Sync -> Build orchestration itself; that
+// composition lives entirely in service/marketdata.
 func newUpdateCmd() *cobra.Command {
 	var flags datasetArgFlags
 

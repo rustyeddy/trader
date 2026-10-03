@@ -9,8 +9,9 @@ import (
 )
 
 // newCoverageCmd implements "trader data coverage INSTRUMENT INTERVAL
-// --from --to [--format]" (issue #109, formatting added by #111): the
-// read-only Coverage use case.
+// [--from --to] [--format]" (issue #109, formatting added by #111): the
+// read-only coverage use case, through the same service operation MCP
+// uses (DatasetsCoverage, issue #439) for one symbol.
 func newCoverageCmd() *cobra.Command {
 	var flags datasetArgFlags
 

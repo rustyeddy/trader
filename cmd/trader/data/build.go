@@ -6,11 +6,12 @@ import (
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
-// newBuildCmd implements "trader data build INSTRUMENT INTERVAL --from
-// --to [--format]" (issue #110, formatting added by #111): the
-// mutating Build use case. Build publishes canonical data from
-// whatever raw data already exists; it never acquires raw data itself
-// (Sync's job).
+// newBuildCmd implements "trader data build INSTRUMENT INTERVAL
+// [--from --to] [--format]" (issue #110, formatting added by #111): the
+// canonicalize use case, through the same service operation MCP uses
+// (CanonicalizeDatasets, issue #439) for one symbol. It publishes
+// canonical data from the provider's native data already present; it
+// never acquires data itself (Sync's job).
 func newBuildCmd() *cobra.Command {
 	var flags datasetArgFlags
 
