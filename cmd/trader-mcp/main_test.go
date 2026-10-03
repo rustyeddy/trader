@@ -220,3 +220,30 @@ func TestBuild_ServesMarketDataTools(t *testing.T) {
 	raw := results[0].(map[string]any)["raw"].(map[string]any)
 	assert.Equal(t, "2024-01-07T22:00:00Z", raw["first"], "the configured raw root is the one inspected")
 }
+
+// TestBuild_UnknownProviderIsShownToClient: the composition root marks
+// marketdatacfg's unknown-provider error safe for clients, so the
+// actionable message (with the supported list) gets through mcpserver's
+// error sanitization rather than collapsing to a generic failure.
+func TestBuild_UnknownProviderIsShownToClient(t *testing.T) {
+	env, _ := baseEnv(t)
+	srv, closer, err := build(nil, env, &bytes.Buffer{})
+	require.NoError(t, err)
+	defer func() { _ = closer.Close() }()
+
+	ctx := context.Background()
+	clientT, serverT := mcp.NewInMemoryTransports()
+	ss, err := srv.Connect(ctx, serverT, nil)
+	require.NoError(t, err)
+	defer func() { _ = ss.Close() }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil).Connect(ctx, clientT, nil)
+	require.NoError(t, err)
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "trader_instruments", Arguments: map[string]any{"symbols": []string{"SPY"}, "provider": "bloomberg"}})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	text := res.Content[0].(*mcp.TextContent).Text
+	assert.Contains(t, text, "unknown market-data provider")
+	assert.Contains(t, text, "alpaca, oanda, stooq")
+}

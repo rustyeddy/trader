@@ -691,6 +691,12 @@ reference symbols `SPY`, `QQQ`, and `AAPL`. Results are the same as
 `trader data coverage` reports for the same data, and no tool returns
 bars.
 
+Error messages a client sees describe only what it sent (a bad symbol,
+interval, date, or provider). Any other failure, such as a storage or I/O
+error, is reported as "... failed; see the trader-mcp server log", with the
+details logged on the server, so tool results never reveal file paths or
+configuration.
+
 ---
 
 ## Environment Variables

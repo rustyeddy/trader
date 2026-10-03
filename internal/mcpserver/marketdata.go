@@ -16,7 +16,8 @@ import (
 // MarketData operation, and translates the per-symbol results. A bad
 // interval, range, provider, or empty symbol list fails the whole call;
 // a bad symbol fails only its own entry. Neither tool converts,
-// downloads, or writes, and neither returns bars.
+// downloads, or writes, and neither returns bars. Every error a client
+// sees passes through publicMessage (errors.go).
 
 // InstrumentsInput is trader_instruments' request.
 type InstrumentsInput struct {
@@ -117,19 +118,20 @@ func (s *server) registerMarketData(srv *mcp.Server) {
 }
 
 func (s *server) instruments(ctx context.Context, _ *mcp.CallToolRequest, in InstrumentsInput) (*mcp.CallToolResult, InstrumentsOutput, error) {
+	const tool, what = "trader_instruments", "instrument resolution"
 	md, err := s.marketData(in.Provider)
 	if err != nil {
-		return nil, InstrumentsOutput{}, err
+		return nil, InstrumentsOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	resp, err := md.ResolveInstruments(ctx, svcmarketdata.ResolveInstrumentsRequest{Instruments: instrumentRequests(in.Symbols)})
 	if err != nil {
-		return nil, InstrumentsOutput{}, err
+		return nil, InstrumentsOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	out := InstrumentsOutput{Provider: md.Provider(), Instruments: make([]InstrumentOutput, len(resp.Results))}
 	for i, r := range resp.Results {
 		o := InstrumentOutput{Symbol: r.Request.Symbol}
 		if r.Err != nil {
-			o.Error = r.Err.Error()
+			o.Error = s.publicMessage(ctx, tool, r.Request.Symbol, what, r.Err)
 		} else {
 			o.InstrumentID = r.Instrument.String()
 			o.Kind = r.Identity.Kind
@@ -142,27 +144,28 @@ func (s *server) instruments(ctx context.Context, _ *mcp.CallToolRequest, in Ins
 }
 
 func (s *server) coverage(ctx context.Context, _ *mcp.CallToolRequest, in CoverageInput) (*mcp.CallToolResult, CoverageOutput, error) {
+	const tool, what = "trader_marketdata_coverage", "market data coverage"
 	interval, err := svcmarketdata.ParseInterval(in.Interval)
 	if err != nil {
-		return nil, CoverageOutput{}, err
+		return nil, CoverageOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	rng, err := svcmarketdata.ParseRange(in.From, in.To)
 	if err != nil {
-		return nil, CoverageOutput{}, err
+		return nil, CoverageOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	md, err := s.marketData(in.Provider)
 	if err != nil {
-		return nil, CoverageOutput{}, err
+		return nil, CoverageOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	resp, err := md.DatasetsCoverage(ctx, svcmarketdata.DatasetsRequest{
 		Instruments: instrumentRequests(in.Symbols), Interval: interval, Range: rng,
 	})
 	if err != nil {
-		return nil, CoverageOutput{}, err
+		return nil, CoverageOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	out := CoverageOutput{Provider: md.Provider(), Interval: interval.String(), Results: make([]SymbolCoverage, len(resp.Results))}
 	for i, r := range resp.Results {
-		out.Results[i] = symbolCoverage(r)
+		out.Results[i] = s.symbolCoverage(ctx, r)
 	}
 	return nil, out, nil
 }
@@ -175,13 +178,13 @@ func instrumentRequests(symbols []string) []svcmarketdata.InstrumentRequest {
 	return out
 }
 
-func symbolCoverage(r svcmarketdata.CoverageResult) SymbolCoverage {
+func (s *server) symbolCoverage(ctx context.Context, r svcmarketdata.CoverageResult) SymbolCoverage {
 	out := SymbolCoverage{Symbol: r.Request.Symbol}
 	if !r.Instrument.IsZero() {
 		out.InstrumentID = r.Instrument.String()
 	}
 	if r.Err != nil {
-		out.Error = r.Err.Error()
+		out.Error = s.publicMessage(ctx, "trader_marketdata_coverage", r.Request.Symbol, "market data coverage", r.Err)
 		return out
 	}
 	cov := r.Coverage

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,7 +65,7 @@ func (f serviceFactory) ForProvider(provider string) (MarketData, error) {
 	}
 	s, ok := f[provider]
 	if !ok {
-		return nil, fmt.Errorf("unknown provider %q", provider)
+		return nil, fmt.Errorf("%w: %q", ErrUnknownProvider, provider)
 	}
 	return s, nil
 }
@@ -174,8 +175,9 @@ func TestCoverageTool(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, direct.Results, 2)
-	assert.Equal(t, symbolCoverage(direct.Results[0]), after.Results[0])
-	assert.Equal(t, symbolCoverage(direct.Results[1]), after.Results[1])
+	translate := &server{deps: Deps{Logger: slog.New(slog.DiscardHandler)}}
+	assert.Equal(t, translate.symbolCoverage(ctx, direct.Results[0]), after.Results[0])
+	assert.Equal(t, translate.symbolCoverage(ctx, direct.Results[1]), after.Results[1])
 
 	var ranged CoverageOutput
 	require.False(t, call(t, session, "trader_marketdata_coverage", map[string]any{
@@ -197,7 +199,7 @@ func TestCoverageTool_CallFailures(t *testing.T) {
 		"invalid interval": {map[string]any{"symbols": []string{"EURUSD"}, "interval": "H99"}, "invalid interval"},
 		"one range end":    {map[string]any{"symbols": []string{"EURUSD"}, "interval": "H1", "from": "2024-01-01"}, "from and to"},
 		"invalid date":     {map[string]any{"symbols": []string{"EURUSD"}, "interval": "H1", "from": "jan", "to": "feb"}, "invalid date"},
-		"unknown provider": {map[string]any{"symbols": []string{"EURUSD"}, "interval": "H1", "provider": "bloomberg"}, "unknown provider"},
+		"unknown provider": {map[string]any{"symbols": []string{"EURUSD"}, "interval": "H1", "provider": "bloomberg"}, "unknown market-data provider"},
 		"no symbols":       {map[string]any{"symbols": []string{}, "interval": "H1"}, "at least one instrument"},
 	}
 	for name, tc := range tests {
