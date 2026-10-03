@@ -162,6 +162,10 @@ func (m marketDataFactory) DefaultProvider() string { return m.f.DefaultProvider
 
 func (m marketDataFactory) ForProvider(provider string) (mcpserver.MarketData, error) {
 	s, err := m.f.ForProvider(provider)
+	if errors.Is(err, marketdatacfg.ErrUnknownProvider) {
+		// Tell mcpserver this one is safe to show the client.
+		return nil, fmt.Errorf("%w: %w", mcpserver.ErrUnknownProvider, err)
+	}
 	if err != nil {
 		return nil, err
 	}

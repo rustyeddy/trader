@@ -58,22 +58,22 @@ func fxListing(provider, symbol string) (instrument.Listing, error) {
 	symbol = strings.ToUpper(strings.TrimSpace(symbol))
 	if len(symbol) != 6 {
 		return instrument.Listing{}, fmt.Errorf(
-			"invalid instrument %q: expected a 6-letter FX pair symbol, e.g. EURUSD", symbol)
+			"%w %q: expected a 6-letter FX pair symbol, e.g. EURUSD", ErrInvalidSymbol, symbol)
 	}
 	base, quote := symbol[:3], symbol[3:]
 
 	baseCur, err := num.ParseCurrency(base)
 	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("%w %q: %w", ErrInvalidSymbol, symbol, err)
 	}
 	quoteCur, err := num.ParseCurrency(quote)
 	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("%w %q: %w", ErrInvalidSymbol, symbol, err)
 	}
 
 	inst, err := instrument.NewCurrencyPair(baseCur, quoteCur)
 	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("%w %q: %w", ErrInvalidSymbol, symbol, err)
 	}
 
 	tick := "0.00001"
@@ -87,7 +87,7 @@ func fxListing(provider, symbol string) (instrument.Listing, error) {
 		quoteCur,
 	)
 	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("%w %q: %w", ErrInvalidSymbol, symbol, err)
 	}
 
 	listing, err := instrument.NewListing(instrument.ListingParams{
@@ -98,7 +98,7 @@ func fxListing(provider, symbol string) (instrument.Listing, error) {
 		Tradable:   true,
 	})
 	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
+		return instrument.Listing{}, fmt.Errorf("%w %q: %w", ErrInvalidSymbol, symbol, err)
 	}
 	return listing, nil
 }

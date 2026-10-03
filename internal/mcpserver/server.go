@@ -20,6 +20,13 @@
 // read/research posture (#405) the default, and makes data mutation an
 // explicit operator decision (#433).
 //
+// # Tools
+//
+// trader_version reports the build. trader_instruments and
+// trader_marketdata_coverage (#436) are read-only market-data tools over
+// the MarketData capability: each takes a symbol list and returns one
+// result per symbol (see marketdata.go).
+//
 // # Output
 //
 // On the stdio transport, stdout carries the MCP protocol. Logs go to
@@ -111,6 +118,7 @@ func (s *server) register(srv *mcp.Server) {
 		Name:        "trader_version",
 		Description: "Return the Trader build identity serving this MCP session.",
 	}, traderVersion)
+	s.registerMarketData(srv)
 }
 
 // requireWrites returns ErrWritesDisabled unless the server allows

@@ -18,6 +18,10 @@ var (
 	// ErrResolverNotConfigured reports instrument resolution on a
 	// Service constructed without WithResolver.
 	ErrResolverNotConfigured = errors.New("service/marketdata: instrument resolver is not configured")
+	// ErrInvalidSymbol reports a symbol that cannot name an instrument,
+	// such as an FX symbol that is not a 6-letter currency pair. Its
+	// message describes only the symbol given.
+	ErrInvalidSymbol = errors.New("invalid instrument")
 	// ErrListingConflict reports a registration whose provider, venue,
 	// and symbol are already registered to a different instrument.
 	ErrListingConflict = errors.New("service/marketdata: a different listing is already registered")
