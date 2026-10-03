@@ -35,6 +35,10 @@ func (m *Manager) ImportStooqArchive(ctx context.Context, path string, id instru
 	if err != nil {
 		return StooqImportResult{}, fmt.Errorf("marketdata: Stooq archive import: resolve listing: %w", err)
 	}
+	if err := m.writeLock.acquire(ctx); err != nil {
+		return StooqImportResult{}, err
+	}
+	defer m.writeLock.release()
 	result, err := stooq.ImportArchive(ctx, path, m.rawRoot, listing.Symbol())
 	return StooqImportResult{MonthsWritten: result.MonthsWritten, RowsImported: result.RowsImported, FirstDate: result.FirstDate, LastDate: result.LastDate}, err
 }

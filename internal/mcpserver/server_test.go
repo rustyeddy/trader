@@ -30,7 +30,7 @@ func TestVersionToolThroughMCP(t *testing.T) {
 		names[i] = tool.Name
 		require.NotNil(t, tool.InputSchema, tool.Name)
 	}
-	require.ElementsMatch(t, []string{"trader_version", "trader_instruments", "trader_marketdata_coverage"}, names)
+	require.ElementsMatch(t, []string{"trader_version", "trader_instruments", "trader_marketdata_coverage", "trader_marketdata_canonicalize", "trader_marketdata_update"}, names)
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "trader_version", Arguments: map[string]any{}})
 	require.NoError(t, err)

@@ -247,3 +247,48 @@ func TestBuild_UnknownProviderIsShownToClient(t *testing.T) {
 	assert.Contains(t, text, "unknown market-data provider")
 	assert.Contains(t, text, "alpaca, oanda, stooq")
 }
+
+// TestBuild_WriteToolsHonorAllowWrites: through the real composition
+// root, canonicalize is refused by default and builds from the configured
+// raw root once --allow-writes is given.
+func TestBuild_WriteToolsHonorAllowWrites(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		env, _ := baseEnv(t)
+		rawRoot := filepath.Join(t.TempDir(), "raw")
+		require.NoError(t, os.CopyFS(rawRoot, os.DirFS(filepath.Join("..", "..", "internal", "service", "marketdata", "testdata", "raw", "oanda"))))
+		for i, kv := range env {
+			if strings.HasPrefix(kv, "TRADER_RAW_ROOT=") {
+				env[i] = "TRADER_RAW_ROOT=" + rawRoot
+			}
+		}
+		var args []string
+		if allow {
+			args = []string{"--allow-writes"}
+		}
+		srv, closer, err := build(args, env, &bytes.Buffer{})
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		clientT, serverT := mcp.NewInMemoryTransports()
+		ss, err := srv.Connect(ctx, serverT, nil)
+		require.NoError(t, err)
+		cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil).Connect(ctx, clientT, nil)
+		require.NoError(t, err)
+
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "trader_marketdata_canonicalize", Arguments: map[string]any{
+			"symbols": []string{"EURUSD"}, "interval": "H1", "from": "2024-01-07T22:00:00Z", "to": "2024-01-19T22:00:00Z",
+		}})
+		require.NoError(t, err)
+		if allow {
+			require.False(t, res.IsError)
+			summary := res.StructuredContent.(map[string]any)["summary"].(map[string]any)
+			assert.Equal(t, float64(1), summary["built"])
+		} else {
+			require.True(t, res.IsError)
+			assert.Contains(t, res.Content[0].(*mcp.TextContent).Text, "--allow-writes")
+		}
+		_ = cs.Close()
+		_ = ss.Close()
+		_ = closer.Close()
+	}
+}

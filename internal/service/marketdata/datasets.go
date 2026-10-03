@@ -30,6 +30,11 @@ type DatasetsRequest struct {
 	// Range, when given, applies to every instrument. Give both ends or
 	// neither.
 	Range marketdata.TimeRange
+	// OnResult, if set, is called with each instrument's result as soon
+	// as it is recorded, in request order and on the calling goroutine,
+	// so a transport can report progress on a long call. CanonicalizeDatasets
+	// and UpdateDatasets call it; DatasetsCoverage does not.
+	OnResult func(DatasetResult)
 }
 
 // Validate reports whether r is well-formed, returning a wrapped
@@ -386,6 +391,9 @@ func (s *Service) eachDataset(ctx context.Context, op string, req DatasetsReques
 		}
 		published += res.PublishedPartitions
 		resp.Results = append(resp.Results, res)
+		if req.OnResult != nil {
+			req.OnResult(res)
+		}
 	}
 	return resp, ctx.Err()
 }

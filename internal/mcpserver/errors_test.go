@@ -107,6 +107,21 @@ func TestPublicMessage(t *testing.T) {
 
 	assert.Equal(t, "a different instrument is already registered under this symbol",
 		msg(fmt.Errorf("%w: %w", svcmarketdata.ErrListingConflict, errors.New("provider \"x\" venue \"\" symbol \"S\""))))
+	for sentinel, want := range map[error]string{
+		svcmarketdata.ErrArchiveNotFound:          "no archive for this symbol under the server's archive root",
+		svcmarketdata.ErrAmbiguousArchive:         "several archives under the server's archive root match this symbol",
+		svcmarketdata.ErrArchiveRootNotConfigured: "the server has no archive root configured",
+		svcmarketdata.ErrArchiveMemberNotFound:    "the archive holds no data for this symbol",
+	} {
+		assert.Equal(t, want, msg(fmt.Errorf("%w: SPY under %q", sentinel, secretPath)), "archive errors name the root, so they get fixed text")
+	}
+	for _, err := range []error{
+		fmt.Errorf("%w in [2024-03-01T00:00:00Z, 2024-04-01T00:00:00Z)", svcmarketdata.ErrNoRawData),
+		svcmarketdata.ErrNoCanonicalData,
+		fmt.Errorf("%w: 1 action(s) remain, first: download-raw 2024-02 (extend)", svcmarketdata.ErrUpdateIncomplete),
+	} {
+		assert.Equal(t, err.Error(), msg(err))
+	}
 	assert.Equal(t, "request canceled", msg(fmt.Errorf("search %q: %w", secretPath, context.Canceled)))
 	assert.Equal(t, "request timed out", msg(context.DeadlineExceeded))
 

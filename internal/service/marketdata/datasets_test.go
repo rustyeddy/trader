@@ -481,3 +481,21 @@ func TestCanonicalizeDatasets_CancelDuringOnlySymbol(t *testing.T) {
 	require.Len(t, resp.Results, 1, "the interrupted symbol's result is kept")
 	assert.Equal(t, 1, resp.Results[0].PublishedPartitions, "its build finished before the cancellation")
 }
+
+func TestDatasetsOperations_OnResultReportsEachInstrument(t *testing.T) {
+	s := datasetsService(t, "oanda", d(2024, 2, 1), copyFixtureRaw(t))
+	var seen []string
+	req := svc.DatasetsRequest{
+		Instruments: symbols("EURUSD", "BAD", "USDJPY"), Interval: marketdata.H1, Range: fixtureSpan(t),
+		OnResult: func(res svc.DatasetResult) { seen = append(seen, res.Request.Symbol+":"+string(res.Status)) },
+	}
+	resp, err := s.CanonicalizeDatasets(context.Background(), req, svc.CanonicalizeOptions{})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 3)
+	assert.Equal(t, []string{"EURUSD:built", "BAD:failed", "USDJPY:failed"}, seen, "in request order, failures included")
+
+	seen = nil
+	_, err = s.UpdateDatasets(context.Background(), req)
+	require.NoError(t, err)
+	assert.Len(t, seen, 3)
+}
