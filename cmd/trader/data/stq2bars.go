@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
@@ -27,7 +28,7 @@ func newStq2BarsCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("data service is not configured on this command's context")
 			}
-			if dc.Provider != "stooq" {
+			if dc.Service.ProviderInfo().Archive != marketruntime.ArchiveStooqZIP {
 				return fmt.Errorf("stq2bars requires provider stooq, got %q", dc.Provider)
 			}
 

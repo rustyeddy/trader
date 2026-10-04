@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
@@ -30,7 +31,7 @@ func newConvertCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("data service is not configured on this command's context")
 			}
-			if strings.ToLower(dc.Provider) != "stooq" {
+			if dc.Service.ProviderInfo().Archive != marketruntime.ArchiveStooqZIP {
 				return fmt.Errorf("convert currently supports only provider stooq")
 			}
 			req, err := parseDatasetsRequest(args, flags, false)

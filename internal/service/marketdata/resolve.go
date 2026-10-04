@@ -8,6 +8,7 @@ import (
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/logging"
+	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -26,12 +27,6 @@ var (
 	// and symbol are already registered to a different instrument.
 	ErrListingConflict = errors.New("service/marketdata: a different listing is already registered")
 )
-
-// IsFXProvider reports whether provider's instruments are FX pairs.
-// OANDA is the one FX provider; every other provider (stooq, alpaca, or
-// an unrecognized one) is treated as equity/ETF, since guessing FX for
-// an unknown provider would be the more surprising default.
-func IsFXProvider(provider string) bool { return provider == "oanda" }
 
 // InstrumentRequest names an instrument by symbol. Exchange and Kind
 // (KindEquity or KindETF) apply only to equity/ETF providers: given
@@ -52,25 +47,36 @@ type InstrumentIdentity struct {
 	Exchange string
 }
 
-// IdentifyInstrument decides what req names for a data provider: an FX
-// pair for an FX provider, otherwise an equity or ETF from req's
-// explicit exchange and kind or the symbol's DefaultListing. It fails
-// with ErrInvalidRequest for an empty symbol, an incomplete identity
+// IdentifyInstrument decides what req names for a data provider, from
+// the provider's registered asset class (marketdata.LookupProvider,
+// issue #441): an FX pair for an FX provider; an equity or ETF, from
+// req's explicit exchange and kind or the symbol's DefaultListing, for a
+// US-equity provider. It fails with marketdata.ErrUnknownProvider for an
+// unregistered provider — never guessing its asset class — with
+// ErrInvalidRequest for an empty symbol, an incomplete identity
 // (ErrIncompleteListingIdentity), or an unsupported kind, and with
 // ErrNoListingDefault for an equity symbol with neither.
 func IdentifyInstrument(provider string, req InstrumentRequest) (InstrumentIdentity, error) {
+	info, err := marketruntime.LookupProvider(provider)
+	if err != nil {
+		return InstrumentIdentity{}, err
+	}
 	symbol := strings.ToUpper(strings.TrimSpace(req.Symbol))
 	if symbol == "" {
 		return InstrumentIdentity{}, fmt.Errorf("%w: symbol is required", ErrInvalidRequest)
 	}
-	if IsFXProvider(provider) {
+	switch info.AssetClass {
+	case marketruntime.AssetClassFX:
 		return InstrumentIdentity{Symbol: symbol, Kind: KindFX}, nil
+	case marketruntime.AssetClassUSEquity:
+		ld, err := ResolveListingIdentity(symbol, req.Exchange, req.Kind)
+		if err != nil {
+			return InstrumentIdentity{}, err
+		}
+		return InstrumentIdentity{Symbol: symbol, Kind: ld.Kind, Exchange: ld.Exchange}, nil
+	default:
+		return InstrumentIdentity{}, fmt.Errorf("provider %q: no instrument identification for asset class %s", provider, info.AssetClass)
 	}
-	ld, err := ResolveListingIdentity(symbol, req.Exchange, req.Kind)
-	if err != nil {
-		return InstrumentIdentity{}, err
-	}
-	return InstrumentIdentity{Symbol: symbol, Kind: ld.Kind, Exchange: ld.Exchange}, nil
 }
 
 // RegisterIdentity registers id's Listing under provider in resolver and

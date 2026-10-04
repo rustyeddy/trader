@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 func discard() *slog.Logger { return slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)) }
@@ -37,10 +38,25 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Empty(t, cfg.StoreRoot, "roots are resolved later by ApplyDefaultRoots")
 }
 
-func TestIsFXProvider(t *testing.T) {
-	assert.True(t, IsFXProvider("oanda"))
-	assert.False(t, IsFXProvider("alpaca"))
-	assert.False(t, IsFXProvider("stooq"))
+func TestCalendarForProviderFollowsRegistry(t *testing.T) {
+	for _, info := range marketruntime.Providers() {
+		cal, err := calendarForProvider(info)
+		require.NoError(t, err, info.Name)
+		switch info.Calendar {
+		case marketruntime.CalendarFX:
+			assert.Nil(t, cal, "%s: Manager applies its FX default", info.Name)
+		case marketruntime.CalendarUSEquity:
+			assert.IsType(t, &marketdata.USEquityCalendar{}, cal, info.Name)
+		}
+	}
+	_, err := calendarForProvider(marketruntime.ProviderInfo{Name: "x"})
+	assert.Error(t, err, "an unregistered calendar kind fails")
+}
+
+func TestNew_RejectsUnknownProvider(t *testing.T) {
+	_, err := New(Config{StoreRoot: t.TempDir(), RawRoot: t.TempDir(), Provider: "bloomberg"}, discard())
+	require.ErrorIs(t, err, ErrUnknownProvider)
+	assert.ErrorContains(t, err, "alpaca, oanda, stooq")
 }
 
 func TestNew_BuildsServiceForResolvedRoots(t *testing.T) {

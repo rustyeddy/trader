@@ -1,36 +1,17 @@
 package marketdatacfg
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	marketruntime "github.com/rustyeddy/trader/internal/marketdata"
 	svc "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
-// ErrUnknownProvider reports a provider name the Factory has no
-// market-data integration for.
-var ErrUnknownProvider = errors.New("marketdatacfg: unknown provider")
-
-// knownProviders is every provider internal/marketdata integrates.
-// marketdata.Manager treats a provider name as opaque, so a Factory
-// serving untrusted requests validates it up front instead of failing
-// later, mid-operation.
-var knownProviders = map[string]bool{"oanda": true, "alpaca": true, "stooq": true}
-
-// KnownProviders returns the supported provider names, sorted.
-func KnownProviders() []string {
-	out := make([]string, 0, len(knownProviders))
-	for p := range knownProviders {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
-}
+// KnownProviders returns the supported provider names, sorted: the
+// registered providers (marketdata.ProviderNames).
+func KnownProviders() []string { return marketruntime.ProviderNames() }
 
 // Factory builds a market-data Service for any provider from one base
 // configuration (issue #433). A Manager is bound to one provider, so a
@@ -60,8 +41,8 @@ type Factory struct {
 // returns it. It builds the base provider's Bundle once to fail fast on
 // invalid configuration (for example a one-sided Alpaca credential).
 func NewFactory(base Config, logger *slog.Logger) (*Factory, error) {
-	f := &Factory{base: base, logger: logger, locks: make(map[string]*marketruntime.WriteLock, len(knownProviders))}
-	for p := range knownProviders {
+	f := &Factory{base: base, logger: logger, locks: map[string]*marketruntime.WriteLock{}}
+	for _, p := range marketruntime.ProviderNames() {
 		f.locks[p] = marketruntime.NewWriteLock()
 	}
 	if _, err := f.Bundle(base.Provider); err != nil {
@@ -91,8 +72,8 @@ func (f *Factory) Bundle(provider string) (Bundle, error) {
 	if provider == "" {
 		provider = f.base.Provider
 	}
-	if !knownProviders[provider] {
-		return Bundle{}, fmt.Errorf("%w: %q (supported: %s)", ErrUnknownProvider, provider, strings.Join(KnownProviders(), ", "))
+	if _, err := marketruntime.LookupProvider(provider); err != nil {
+		return Bundle{}, err
 	}
 	cfg := f.base
 	if provider != f.base.Provider {

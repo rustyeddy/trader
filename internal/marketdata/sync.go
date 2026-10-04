@@ -158,19 +158,19 @@ func (m *Manager) Sync(ctx context.Context, plan Plan) (SyncResult, error) {
 // previously checked m.oandaClient unconditionally regardless of
 // provider. OANDA's own error text and behavior are unchanged.
 func (m *Manager) requireSyncClient() error {
+	if !m.providerInfo.LiveAcquisition {
+		// A provider with no live acquisition (stooq: a one-shot offline
+		// import) has nothing Sync could call to execute an
+		// ActionDownloadRaw entry, so Sync fails clearly here rather than
+		// misreporting a missing credential that was never relevant.
+		return fmt.Errorf("marketdata: sync: %w: provider %q has no live acquisition client; import its native archive to add raw history", ErrInvalidConfig, m.providerName)
+	}
 	switch m.providerName {
 	case "alpaca":
 		if m.alpacaClient == nil {
 			return fmt.Errorf("marketdata: sync: %w: Alpaca credential/base URL is not configured", ErrInvalidConfig)
 		}
-	case "stooq":
-		// Stooq is a one-shot offline import (stooq.Import) with no live
-		// acquisition client at all — the same fact allowsLiveExtend
-		// already records for Plan. Sync has nothing it could call to
-		// execute an ActionDownloadRaw entry for this provider, so it
-		// fails clearly here rather than misreporting a missing OANDA/
-		// Alpaca credential that was never relevant.
-		return fmt.Errorf("marketdata: sync: %w: provider \"stooq\" has no live acquisition client; use stooq.Import to add raw history", ErrInvalidConfig)
+
 	default:
 		if m.oandaClient == nil {
 			return fmt.Errorf("marketdata: sync: %w: OANDA credential/base URL is not configured", ErrInvalidConfig)

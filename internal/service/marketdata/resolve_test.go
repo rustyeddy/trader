@@ -27,7 +27,7 @@ func newResolvingService(t *testing.T, provider string, opts ...svc.Option) (*sv
 		Clock: clock.NewSimulated(time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC)), StoreRoot: t.TempDir(),
 		RawRoot: t.TempDir(), Resolver: resolver, ProviderName: provider,
 	}
-	if !svc.IsFXProvider(provider) {
+	if info, err := marketruntime.LookupProvider(provider); err == nil && info.Calendar == marketruntime.CalendarUSEquity {
 		cfg.Calendar = marketdata.NewUSEquityCalendar(marketdata.StandardUSEquityHolidays(2020))
 	}
 	manager, err := marketruntime.New(cfg)
@@ -37,10 +37,20 @@ func newResolvingService(t *testing.T, provider string, opts ...svc.Option) (*sv
 	return s, resolver
 }
 
-func TestIsFXProvider(t *testing.T) {
-	assert.True(t, svc.IsFXProvider("oanda"))
-	for _, p := range []string{"stooq", "alpaca", "", "bloomberg"} {
-		assert.False(t, svc.IsFXProvider(p), p)
+func TestIdentifyInstrument_RejectsUnknownProvider(t *testing.T) {
+	for _, provider := range []string{"", "bloomberg"} {
+		_, err := svc.IdentifyInstrument(provider, svc.InstrumentRequest{Symbol: "SPY"})
+		assert.ErrorIs(t, err, marketruntime.ErrUnknownProvider, "never guessing an asset class for %q", provider)
+	}
+	// Each registered provider identifies by its registered asset class.
+	for _, info := range marketruntime.Providers() {
+		symbol, kind := "SPY", svc.KindETF
+		if info.AssetClass == marketruntime.AssetClassFX {
+			symbol, kind = "EURUSD", svc.KindFX
+		}
+		id, err := svc.IdentifyInstrument(info.Name, svc.InstrumentRequest{Symbol: symbol})
+		require.NoError(t, err, info.Name)
+		assert.Equal(t, kind, id.Kind, info.Name)
 	}
 }
 
