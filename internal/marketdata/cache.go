@@ -16,6 +16,10 @@ type cacheEntry struct {
 	key      partitionKey
 	manifest marketdata.Manifest
 	bars     marketdata.BarSet
+	// version is the partition file's version when it was loaded
+	// (partitionVersion); the zero value matches no file, so an entry
+	// stored without one is always reloaded.
+	version partitionVersion
 }
 
 // barCache is Manager's own bounded, FIFO-evicted memory cache of
@@ -67,18 +71,25 @@ func newBarCache(capacity int) *barCache {
 // example through its Parent pointer) can never poison what a later get
 // for the same key returns.
 func (c *barCache) get(key partitionKey) (marketdata.Manifest, marketdata.BarSet, bool) {
+	m, bs, _, ok := c.getVersioned(key)
+	return m, bs, ok
+}
+
+// getVersioned is get, also returning the version the entry was loaded
+// at.
+func (c *barCache) getVersioned(key partitionKey) (marketdata.Manifest, marketdata.BarSet, partitionVersion, bool) {
 	if c == nil {
-		return marketdata.Manifest{}, marketdata.BarSet{}, false
+		return marketdata.Manifest{}, marketdata.BarSet{}, partitionVersion{}, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	el, ok := c.entries[key]
 	if !ok {
-		return marketdata.Manifest{}, marketdata.BarSet{}, false
+		return marketdata.Manifest{}, marketdata.BarSet{}, partitionVersion{}, false
 	}
 	e := el.Value.(*cacheEntry)
-	return cloneManifest(e.manifest), e.bars, true
+	return cloneManifest(e.manifest), e.bars, e.version, true
 }
 
 // put caches (m, bs) under key, refreshing an existing entry in place
@@ -93,6 +104,11 @@ func (c *barCache) get(key partitionKey) (marketdata.Manifest, marketdata.BarSet
 // goes on to mutate the Manifest value it passed in — through its Parent
 // pointer — cannot reach back into the cache.
 func (c *barCache) put(key partitionKey, m marketdata.Manifest, bs marketdata.BarSet) {
+	c.putVersioned(key, m, bs, partitionVersion{})
+}
+
+// putVersioned is put, recording the partition file's version.
+func (c *barCache) putVersioned(key partitionKey, m marketdata.Manifest, bs marketdata.BarSet, version partitionVersion) {
 	if c == nil {
 		return
 	}
@@ -107,9 +123,10 @@ func (c *barCache) put(key partitionKey, m marketdata.Manifest, bs marketdata.Ba
 		e := el.Value.(*cacheEntry)
 		e.manifest = m
 		e.bars = bs
+		e.version = version
 		return
 	}
-	el := c.order.PushBack(&cacheEntry{key: key, manifest: m, bars: bs})
+	el := c.order.PushBack(&cacheEntry{key: key, manifest: m, bars: bs, version: version})
 	c.entries[key] = el
 	for c.order.Len() > c.capacity {
 		oldest := c.order.Front()

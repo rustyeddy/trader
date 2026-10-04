@@ -32,6 +32,9 @@ func (f fakeStore) load(context.Context, partitionKey) (marketdata.Manifest, mar
 func (f fakeStore) months(context.Context, string, string, marketdata.Interval) ([]yearMonth, error) {
 	return nil, errors.New("fakeStore: months not implemented")
 }
+func (f fakeStore) version(context.Context, partitionKey) (partitionVersion, error) {
+	return partitionVersion{}, errors.New("fakeStore: version not implemented")
+}
 
 // testClock returns a deterministic clock for construction tests; no test
 // here depends on wall-clock time.

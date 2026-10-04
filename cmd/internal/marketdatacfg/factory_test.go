@@ -3,6 +3,7 @@ package marketdatacfg
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,12 +36,16 @@ func TestFactory_PerProviderRoots(t *testing.T) {
 		assert.Equal(t, filepath.Join("/xdg", "trader", "archive", "stooq"), b.ArchiveRoot,
 			"an explicit oanda archive root never applies to stooq")
 	})
-	t.Run("fresh resolver per call", func(t *testing.T) {
+	t.Run("one bundle per provider, reused", func(t *testing.T) {
 		a, err := f.Bundle("stooq")
 		require.NoError(t, err)
 		b, err := f.Bundle("stooq")
 		require.NoError(t, err)
-		assert.NotSame(t, a.Resolver, b.Resolver)
+		assert.Same(t, a.Manager, b.Manager, "issue #442: reused, not rebuilt")
+		assert.Same(t, a.Resolver, b.Resolver)
+		o, err := f.Bundle("")
+		require.NoError(t, err)
+		assert.NotSame(t, a.Manager, o.Manager, "providers have their own")
 	})
 	t.Run("ForProvider returns a Service that resolves instruments", func(t *testing.T) {
 		s, err := f.ForProvider("stooq")
@@ -52,7 +57,7 @@ func TestFactory_PerProviderRoots(t *testing.T) {
 
 		other, err := f.ForProvider("stooq")
 		require.NoError(t, err)
-		assert.NotSame(t, s, other)
+		assert.Same(t, s, other, "the provider's Service is reused")
 	})
 }
 
@@ -109,4 +114,44 @@ func TestFactory_SharesWriteLockPerProvider(t *testing.T) {
 	cli, err := New(Config{StoreRoot: t.TempDir(), RawRoot: t.TempDir(), Provider: "oanda"}, discard())
 	require.NoError(t, err)
 	assert.Nil(t, cli.writeLock, "a standalone Bundle gets its Manager's own lock")
+}
+
+// TestFactory_FailedBuildIsNotCached: a provider whose bundle fails to
+// build reports the error on every attempt, not once.
+func TestFactory_FailedBuildIsNotCached(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f, err := NewFactory(Config{StoreRoot: t.TempDir(), Provider: "oanda"}, discard())
+	require.NoError(t, err)
+	f.base.AlpacaKeyID = "only-half" // a one-sided Alpaca credential: alpaca's build fails
+
+	for i := 0; i < 2; i++ {
+		_, err := f.Bundle("alpaca")
+		require.Error(t, err, "attempt %d", i+1)
+	}
+	assert.NotContains(t, f.bundles, "alpaca")
+}
+
+// TestFactory_ConcurrentFirstUseBuildsOnce: concurrent first requests for
+// a provider share one bundle.
+func TestFactory_ConcurrentFirstUseBuildsOnce(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f, err := NewFactory(Config{StoreRoot: t.TempDir(), Provider: "oanda"}, discard())
+	require.NoError(t, err)
+
+	const n = 16
+	managers := make([]any, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b, err := f.Bundle("stooq")
+			assert.NoError(t, err)
+			managers[i] = b.Manager
+		}()
+	}
+	wg.Wait()
+	for _, m := range managers[1:] {
+		assert.Same(t, managers[0], m)
+	}
 }

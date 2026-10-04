@@ -837,3 +837,29 @@ func (s *canonicalCSVStore) months(ctx context.Context, provider, symbol string,
 	}
 	return out, nil
 }
+
+// partitionVersion identifies one published state of a partition file:
+// its modification time and size. publish replaces the file by rename,
+// so any republish — by this Manager, another Manager over the same
+// store, or another process — changes it. The zero value matches no
+// file.
+type partitionVersion struct {
+	modTime time.Time
+	size    int64
+}
+
+// version stats key's partition file.
+func (s *canonicalCSVStore) version(ctx context.Context, key partitionKey) (partitionVersion, error) {
+	if err := ctx.Err(); err != nil {
+		return partitionVersion{}, err
+	}
+	path, err := key.path(s.rootDir)
+	if err != nil {
+		return partitionVersion{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return partitionVersion{}, err
+	}
+	return partitionVersion{modTime: info.ModTime(), size: info.Size()}, nil
+}

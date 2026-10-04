@@ -272,6 +272,10 @@ type barStore interface {
 	// published partition file for provider/symbol/interval. It is a
 	// pure read: a partition it lists may still fail to load.
 	months(ctx context.Context, provider, symbol string, interval marketdata.Interval) ([]yearMonth, error)
+	// version reports key's partition file version (modification time
+	// and size), so a cached partition can be checked against the file
+	// before it is served. A missing file reports fs.ErrNotExist.
+	version(ctx context.Context, key partitionKey) (partitionVersion, error)
 }
 
 var ErrInvalidConfig = errors.New("marketdata: invalid manager config")
