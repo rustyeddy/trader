@@ -64,7 +64,7 @@ func NewFactory(base Config, logger *slog.Logger) (*Factory, error) {
 	for p := range knownProviders {
 		f.locks[p] = marketruntime.NewWriteLock()
 	}
-	if _, err := f.bundle(base.Provider); err != nil {
+	if _, err := f.Bundle(base.Provider); err != nil {
 		return nil, err
 	}
 	return f, nil
@@ -76,15 +76,18 @@ func (f *Factory) DefaultProvider() string { return f.base.Provider }
 // ForProvider builds the Service for provider; empty means
 // DefaultProvider. An unsupported provider reports ErrUnknownProvider.
 func (f *Factory) ForProvider(provider string) (*svc.Service, error) {
-	b, err := f.bundle(provider)
+	b, err := f.Bundle(provider)
 	if err != nil {
 		return nil, err
 	}
 	return b.Service, nil
 }
 
-// bundle builds the Bundle for provider, resolving its roots.
-func (f *Factory) bundle(provider string) (Bundle, error) {
+// Bundle builds the Bundle for provider (empty means DefaultProvider),
+// resolving its roots and sharing the provider's write lock. It is for
+// composition that needs more than the Service — a backtest reads bars
+// through the Manager — and is never handed to a transport (ADR-068).
+func (f *Factory) Bundle(provider string) (Bundle, error) {
 	if provider == "" {
 		provider = f.base.Provider
 	}

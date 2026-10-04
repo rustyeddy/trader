@@ -23,22 +23,22 @@ func TestFactory_PerProviderRoots(t *testing.T) {
 	assert.Equal(t, "oanda", f.DefaultProvider())
 
 	t.Run("base provider keeps explicit roots", func(t *testing.T) {
-		b, err := f.bundle("")
+		b, err := f.Bundle("")
 		require.NoError(t, err)
 		assert.Equal(t, "oanda", b.Provider)
 		assert.Equal(t, "/my/archive/oanda", b.ArchiveRoot)
 	})
 	t.Run("other providers get their own defaults", func(t *testing.T) {
-		b, err := f.bundle("stooq")
+		b, err := f.Bundle("stooq")
 		require.NoError(t, err)
 		assert.Equal(t, "stooq", b.Provider)
 		assert.Equal(t, filepath.Join("/xdg", "trader", "archive", "stooq"), b.ArchiveRoot,
 			"an explicit oanda archive root never applies to stooq")
 	})
 	t.Run("fresh resolver per call", func(t *testing.T) {
-		a, err := f.bundle("stooq")
+		a, err := f.Bundle("stooq")
 		require.NoError(t, err)
-		b, err := f.bundle("stooq")
+		b, err := f.Bundle("stooq")
 		require.NoError(t, err)
 		assert.NotSame(t, a.Resolver, b.Resolver)
 	})
@@ -60,7 +60,7 @@ func TestFactory_DefaultRootsWhenNothingConfigured(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "/xdg")
 	f, err := NewFactory(Config{Provider: "oanda"}, discard())
 	require.NoError(t, err)
-	b, err := f.bundle("alpaca")
+	b, err := f.Bundle("alpaca")
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/xdg", "trader", "archive", "alpaca"), b.ArchiveRoot)
 }
@@ -95,14 +95,14 @@ func TestFactory_SharesWriteLockPerProvider(t *testing.T) {
 	f, err := NewFactory(Config{StoreRoot: t.TempDir(), Provider: "oanda"}, discard())
 	require.NoError(t, err)
 
-	a, err := f.bundle("stooq")
+	a, err := f.Bundle("stooq")
 	require.NoError(t, err)
-	b, err := f.bundle("stooq")
+	b, err := f.Bundle("stooq")
 	require.NoError(t, err)
 	require.NotNil(t, a.writeLock)
 	assert.Same(t, a.writeLock, b.writeLock, "same provider, same lock")
 
-	o, err := f.bundle("")
+	o, err := f.Bundle("")
 	require.NoError(t, err)
 	assert.NotSame(t, a.writeLock, o.writeLock, "providers lock independently")
 

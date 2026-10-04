@@ -668,6 +668,7 @@ It resolves configuration exactly as `trader data` does: the same
 | `--oanda-base-url`, `--alpaca-base-url` | `TRADER_OANDA_BASE_URL`, `TRADER_ALPACA_BASE_URL` | provider endpoints |
 | — | `TRADER_OANDA_TOKEN`, `TRADER_ALPACA_KEY_ID`, `TRADER_ALPACA_SECRET_KEY` | credentials (environment only; never logged or returned) |
 | `--allow-writes` | `TRADER_MCP_ALLOW_WRITES` | enable data-mutating tools (default off) |
+| `--backtest-output-dir` | `TRADER_BACKTEST_OUTPUT_DIR` | where backtest runs are saved and read (default `./backtest-runs`, shared with `trader backtest run`/`show`) |
 | `--log-level`, `--log-format`, `--log-output` | `TRADER_LEVEL`, `TRADER_FORMAT`, `TRADER_OUTPUT` | logging; output is stderr or a file, never stdout |
 
 - **Write access is off by default.** Tools that change data, by
@@ -689,6 +690,8 @@ It resolves configuration exactly as `trader data` does: the same
 | `trader_instruments` | read | resolve `symbols` for a `provider`: instrument ID, kind (`fx`, `equity`, `etf`), exchange, and the provider's symbol |
 | `trader_marketdata_coverage` | read | for `symbols` at an `interval` (`M1`, `H1`, `H4`, `D1`, `W1`): monthly partitions and their status, gaps, and the raw and canonical data held. `from`/`to` are optional; omit both to cover each symbol's existing canonical data |
 | `trader_marketdata_canonicalize` | write | build canonical data for `symbols` at an `interval` from data already held: a stooq archive under the archive root, or raw data in the raw store. Never downloads. Omit `from`/`to` for each symbol's whole source; `force` rebuilds current partitions. Same operation as `trader data build` |
+| `trader_run_backtest` | read* | run a backtest with an in-process strategy (`buy-and-hold` or `ema-cross`), as `trader backtest run` does with the same inputs and defaults, and return its run ID, config digest, and a summary (run, dataset, performance, trade statistics, margin, account, trade counts). The run is saved to the backtest output directory |
+| `trader_backtest_result` | read | a saved run's full report by run ID — the record `trader backtest show` reads, so either can read the other's runs |
 | `trader_marketdata_update` | write | bring canonical data forward: oanda and alpaca download new raw data; stooq has no live feed and re-reads its archive. Omit `from`/`to` to update from each symbol's last canonical bar through now (canonicalize first). Same operation as `trader data update` |
 
 The write tools return a result per symbol (`built`, `updated`, `current`, or
@@ -699,10 +702,20 @@ progress notification as each symbol finishes. Writes for one provider run one
 at a time, even across concurrent tool calls, so two overlapping updates can
 never lose each other's data; a call simply waits its turn. A typical workflow:
 
+\* `trader_run_backtest` always saves its report, but builds canonical market
+data first only with `--allow-writes`; without it, the run's data must already
+be current or the call fails saying so (run `trader_marketdata_canonicalize`).
+External strategy executables and journal files are not available over MCP.
+A backtest runs synchronously: the call returns when the run finishes, sending
+a progress notification per stage (preparing market data, running, saved) to a
+client that supplies a progress token. A client may cancel a run it no longer
+wants; set the client's tool timeout to cover your longest expected run.
+
 ```text
 trader_marketdata_coverage   → what exists
 trader_marketdata_update     → bring it current (or canonicalize for a new archive)
 trader_marketdata_coverage   → confirm
+trader_run_backtest          → run it; trader_backtest_result for the full report
 ```
 
 Every market-data tool takes a list of symbols and returns one result per

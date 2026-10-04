@@ -2,6 +2,7 @@ package backtestcfg
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,6 +70,7 @@ func TestRun_PrepareDataModes(t *testing.T) {
 
 	_, err := Run(ctx, runRequest(t, store, false))
 	require.ErrorIs(t, err, ErrDataNotReady, "without PrepareData, missing canonical data is not built")
+	assert.NotErrorIs(t, err, ErrInvalidRun, "data readiness is not an input error")
 	assert.ErrorContains(t, err, "EURUSD H1 2024-01 is missing")
 	entries, err := os.ReadDir(store)
 	require.NoError(t, err)
@@ -96,7 +98,9 @@ func TestRun_ValidatesItsConfig(t *testing.T) {
 	req.Config.Strategy.Name = "typo"
 	_, err := Run(context.Background(), req)
 	require.Error(t, err, "an unregistered strategy must fail, not run the default")
+	assert.ErrorIs(t, err, ErrInvalidRun, "an input error is marked")
 	assert.ErrorContains(t, err, `strategy.name "typo" is not registered`)
+	assert.NotContains(t, err.Error(), ErrInvalidRun.Error(), "the marker leaves the message unchanged")
 
 	req = runRequest(t, t.TempDir(), true)
 	req.Config.Backtest.InitialMarginRatio = num.MustParseRate("0")
@@ -120,9 +124,43 @@ func TestRun_SingleInstrumentStrategiesRejectSeveralSymbols(t *testing.T) {
 			mutate(&req)
 			_, err := Run(context.Background(), req)
 			assert.ErrorContains(t, err, "exactly one instrument")
+			assert.ErrorIs(t, err, ErrInvalidRun)
 			entries, err := os.ReadDir(store)
 			require.NoError(t, err)
 			assert.Empty(t, entries, "rejected before any data is prepared")
 		})
 	}
+}
+
+func TestRun_ReportsProgressStages(t *testing.T) {
+	var stages []string
+	req := runRequest(t, t.TempDir(), true)
+	req.Progress = func(stage string) { stages = append(stages, stage) }
+	_, err := Run(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, []string{StagePreparingData, StageRunning}, stages)
+}
+
+func TestRun_InvalidSymbolsAreInputErrors(t *testing.T) {
+	for name, symbols := range map[string][]string{
+		"none":      nil,
+		"duplicate": {"EURUSD", "eurusd"},
+		"bad fx":    {"EUR"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := runRequest(t, t.TempDir(), true)
+			req.Symbols = symbols
+			_, err := Run(context.Background(), req)
+			assert.ErrorIs(t, err, ErrInvalidRun)
+		})
+	}
+}
+
+func TestInputErrorUnwraps(t *testing.T) {
+	base := errors.New("base")
+	err := invalid(base)
+	assert.ErrorIs(t, err, base)
+	assert.ErrorIs(t, err, ErrInvalidRun)
+	assert.EqualError(t, err, "base")
+	assert.NoError(t, invalid(nil))
 }

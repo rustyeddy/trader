@@ -27,6 +27,32 @@ import (
 // all current.
 var ErrDataNotReady = errors.New("canonical market data is not ready for this backtest")
 
+// ErrInvalidRun marks a run rejected for its input: an invalid
+// configuration, symbol set, or value. Errors carrying it keep their own
+// message (errors.Is matches; the text is unchanged), so a transport can
+// show them to its caller as describing only what was asked for.
+var ErrInvalidRun = errors.New("invalid backtest request")
+
+// inputError marks err with ErrInvalidRun without changing its message.
+type inputError struct{ err error }
+
+func (e inputError) Error() string        { return e.err.Error() }
+func (e inputError) Unwrap() error        { return e.err }
+func (e inputError) Is(target error) bool { return target == ErrInvalidRun }
+
+func invalid(err error) error {
+	if err == nil {
+		return nil
+	}
+	return inputError{err: err}
+}
+
+// Run stages reported through Request.Progress.
+const (
+	StagePreparingData = "preparing market data"
+	StageRunning       = "running backtest"
+)
+
 // Request is one backtest run, as any transport describes it.
 type Request struct {
 	// Config is the run configuration. Run validates it
@@ -50,6 +76,10 @@ type Request struct {
 	Journal journal.Recorder
 	// Logger receives the run's logs; nil discards them.
 	Logger *slog.Logger
+	// Progress, if set, is called as the run enters each stage
+	// (StagePreparingData, StageRunning), so a transport can report
+	// progress on a long run.
+	Progress func(stage string)
 }
 
 // Run composes and runs one backtest — resolve instruments, ensure
@@ -72,7 +102,11 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 	// to have validated: an unregistered strategy name must fail here,
 	// never fall through to the default strategy.
 	if err := cfg.Validate(); err != nil {
-		return svcbacktest.RunResponse{}, err
+		return svcbacktest.RunResponse{}, invalid(err)
+	}
+	progress := req.Progress
+	if progress == nil {
+		progress = func(string) {}
 	}
 	logger := req.Logger
 	if logger == nil {
@@ -84,43 +118,44 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 
 	interval, err := svcmarketdata.ParseInterval(cfg.Backtest.Interval)
 	if err != nil {
-		return svcbacktest.RunResponse{}, err
+		return svcbacktest.RunResponse{}, invalid(err)
 	}
 	span, err := svcmarketdata.ParseRange(cfg.Backtest.From, cfg.Backtest.To)
 	if err != nil {
-		return svcbacktest.RunResponse{}, fmt.Errorf("invalid backtest.from/backtest.to range: %w", err)
+		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("invalid backtest.from/backtest.to range: %w", err))
 	}
 	currency, err := num.ParseCurrency(cfg.Backtest.Currency)
 	if err != nil {
-		return svcbacktest.RunResponse{}, fmt.Errorf("invalid backtest.currency: %w", err)
+		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("invalid backtest.currency: %w", err))
 	}
 	startingCash, err := num.ParseMoney(cfg.Backtest.StartingCapital, currency)
 	if err != nil {
-		return svcbacktest.RunResponse{}, fmt.Errorf("invalid backtest.starting_capital: %w", err)
+		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("invalid backtest.starting_capital: %w", err))
 	}
 
 	// ema-cross and quantity mode each trade exactly one instrument;
 	// reject more before any data is prepared rather than silently
 	// running only the first.
 	if req.External == nil && cfg.Strategy.Name == emacross.Name && len(req.Symbols) != 1 {
-		return svcbacktest.RunResponse{}, fmt.Errorf("%s trades exactly one instrument; got %d symbols", emacross.Name, len(req.Symbols))
+		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("%s trades exactly one instrument; got %d symbols", emacross.Name, len(req.Symbols)))
 	}
 	if cfg.Strategy.quantityMode() {
 		if req.External != nil {
-			return svcbacktest.RunResponse{}, fmt.Errorf("--quantity applies to the in-process buy-and-hold strategy, not --strategy-exec")
+			return svcbacktest.RunResponse{}, invalid(fmt.Errorf("--quantity applies to the in-process buy-and-hold strategy, not --strategy-exec"))
 		}
 		if len(req.Symbols) != 1 {
-			return svcbacktest.RunResponse{}, fmt.Errorf("buy-and-hold quantity mode trades exactly one instrument; got %d symbols", len(req.Symbols))
+			return svcbacktest.RunResponse{}, invalid(fmt.Errorf("buy-and-hold quantity mode trades exactly one instrument; got %d symbols", len(req.Symbols)))
 		}
 	}
 
 	simResolver := newSimResolver()
 	instruments, err := resolveInstrumentSet(req.Symbols, req.Data.Provider, req.Data.Resolver, simResolver)
 	if err != nil {
-		return svcbacktest.RunResponse{}, err
+		return svcbacktest.RunResponse{}, invalid(err)
 	}
 	manager := req.Data.Manager
 
+	progress(StagePreparingData)
 	if err := ensureCanonicalData(ctx, req.Data.Service, instruments, interval, span, req.PrepareData); err != nil {
 		return svcbacktest.RunResponse{}, err
 	}
@@ -142,6 +177,7 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 		return svcbacktest.RunResponse{}, err
 	}
 
+	progress(StageRunning)
 	// A nil *external.Process assigned to the interface would be a
 	// non-nil interface wrapping nil; keep monitor a true nil instead.
 	var monitor processMonitor
