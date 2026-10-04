@@ -48,6 +48,8 @@ func TestNew_BuildsServiceForResolvedRoots(t *testing.T) {
 	b, err := New(Config{StoreRoot: filepath.Join(dir, "store"), RawRoot: filepath.Join(dir, "raw"), ArchiveRoot: "/arch", Provider: "stooq"}, discard())
 	require.NoError(t, err)
 	assert.NotNil(t, b.Service)
+	assert.NotNil(t, b.Manager)
+	assert.Equal(t, "stooq", b.Manager.ProviderName(), "the Service's own Manager")
 	assert.NotNil(t, b.Resolver)
 	assert.Equal(t, "stooq", b.Provider)
 	assert.Equal(t, "/arch", b.ArchiveRoot)

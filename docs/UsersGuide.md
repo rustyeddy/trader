@@ -331,7 +331,7 @@ There are three strategy paths:
 | `--strategy-args`    | —                               | extra argument passed to `--strategy-exec`'s own executable, unmodified; repeatable    |
 | `--strategy-config`  | —                               | path to a config file for `--strategy-exec`'s own executable (see below)               |
 | `--journal`          | —                               | optional path to write a durable JSONL audit trail; path must not already exist        |
-| `--output-dir`       | `./backtest-runs`               | where run snapshots are written / `show` reads from                                    |
+| `--output-dir`       | `./backtest-runs`               | where run snapshots are written / `show` reads from; also `TRADER_BACKTEST_OUTPUT_DIR` or `backtest.output_dir` in `--config` (the flag wins, then the environment, then the file). `trader-mcp` resolves the same setting, so either can read the other's runs |
 | `--format`           | `table`                         | `table`, `json`, or `org`                                                              |
 
 \* The `/srv/trading/data/canonical` default is this repository's own local
@@ -380,9 +380,16 @@ Precedence for each of the fields shown above (the ones with a `config:`
 tag backing them — see [Environment Variables](#environment-variables))
 is: explicit CLI flag > `--config` file value > `TRADER_BACKTEST_*`/
 `TRADER_STRATEGY_*` environment variable > the default shown above.
-`--journal`, `--output-dir`, `--format`,
-and `--warmup-bars` are plain CLI flags with no `--config`/environment-
-variable backing at all — see the flag table above for which is which.
+`--journal`, `--format`, and `--warmup-bars` are plain CLI flags with no
+`--config`/environment-variable backing at all — see the flag table above
+for which is which. `--output-dir` is shared with `show` and `trader-mcp`:
+see its row in the flag table.
+
+`strategy.name` (or `--strategy-name`, or `TRADER_STRATEGY_NAME`) selects the
+strategy however it is supplied; `--config` is not required to choose
+`ema-cross`. The market data a run builds and reads uses the provider's own
+trading calendar (for example the US equity calendar for `stooq` and
+`alpaca`), as `trader data` does.
 
 #### Initial margin (`initial_margin_ratio`)
 
@@ -635,7 +642,7 @@ recomputation, byte-identical to what `run` itself rendered.
 
 | Flag           | Default           | Meaning                                     |
 |----------------|-------------------|---------------------------------------------|
-| `--output-dir` | `./backtest-runs` | directory the run's snapshot was written to |
+| `--output-dir` | `./backtest-runs` | directory the run's snapshot was written to; also `TRADER_BACKTEST_OUTPUT_DIR` |
 | `--format`     | `table`           | `table`, `json`, or `org`                   |
 
 ```sh
@@ -734,7 +741,9 @@ Concretely, per command:
   `_INTERVAL`, `_FROM`, `_TO`, `_CURRENCY`, `_STARTING_CAPITAL`,
   `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_INITIAL_MARGIN_RATIO`, `_DATA_STORE_ROOT`, `_DATA_RAW_ROOT`, and
   `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
-  `_ALLOWED_SIDE`, `_QUANTITY`, `_BUY_DATE`, `_SELL_DATE`. `--provider`, `--journal`, `--output-dir`, `--format`, and `--warmup-bars` are **not**
+  `_ALLOWED_SIDE`, `_QUANTITY`, `_BUY_DATE`, `_SELL_DATE`, plus
+  `TRADER_BACKTEST_OUTPUT_DIR` (shared with `show` and `trader-mcp`).
+  `--provider`, `--journal`, `--format`, and `--warmup-bars` are **not**
   env-backed — flag only.
 - **`trader data`** (all subcommands) — only the parent command's
   persistent flags are env-backed: `TRADER_STORE_ROOT`,

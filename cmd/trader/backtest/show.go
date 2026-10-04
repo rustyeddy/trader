@@ -2,10 +2,13 @@ package backtest
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/cmd/internal/backtestcfg"
 	"github.com/rustyeddy/trader/internal/id"
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
 )
 
 // showFlags holds "trader backtest show"'s own flag values.
@@ -30,7 +33,7 @@ func newShowCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "./backtest-runs", "directory the run's snapshot was written to")
+	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "", "directory the run's snapshot was written to (default: TRADER_BACKTEST_OUTPUT_DIR, or "+backtestcfg.DefaultOutputDir+")")
 	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg)
 
 	return cmd
@@ -42,10 +45,13 @@ func showBacktest(cmd *cobra.Command, runIDArg string, flags showFlags) error {
 		return fmt.Errorf("invalid run id %q: %w", runIDArg, err)
 	}
 
-	snap, err := loadSnapshot(flags.outputDir, runID)
+	outputDir, err := backtestcfg.LoadOutputDir(os.Environ(), "", changedFlag(cmd, "output-dir", flags.outputDir))
 	if err != nil {
 		return err
 	}
-
-	return render(cmd.OutOrStdout(), flags.format, snap.Report)
+	rep, err := svcbacktest.NewRunStore(outputDir).Load(runID)
+	if err != nil {
+		return err
+	}
+	return render(cmd.OutOrStdout(), flags.format, rep)
 }

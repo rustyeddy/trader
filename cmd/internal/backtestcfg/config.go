@@ -1,19 +1,14 @@
-package backtest
+package backtestcfg
 
 import (
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/spf13/cobra"
-
-	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
-	"github.com/rustyeddy/trader/internal/config"
 	"github.com/rustyeddy/trader/internal/strategy/emacross"
 	"github.com/rustyeddy/trader/num"
 )
 
-// runConfig is the typed configuration "trader backtest run" resolves
+// RunConfig is the typed configuration "trader backtest run" resolves
 // via --config: the backtest composition inputs this command already
 // accepts as individual flags, plus a generic strategy selector.
 // config.Load applies its own defaults-then-file-then-environment-then-overrides
@@ -28,17 +23,17 @@ import (
 // Strategy is parsed and validated against the registered in-process
 // strategies. An unsupported or misspelled name fails loudly rather than
 // silently selecting a different implementation.
-type runConfig struct {
-	Backtest backtestSection
-	Strategy strategySection
+type RunConfig struct {
+	Backtest BacktestSection
+	Strategy StrategySection
 }
 
-// backtestSection mirrors runFlags' own scalar backtest inputs.
+// BacktestSection mirrors runFlags' own scalar backtest inputs.
 // StartingCapital stays a plain string, combined with Currency via
 // num.ParseMoney in runBacktest — num.Money's own TextUnmarshaler
 // expects its single-field "<amount> <currency>" form (num/encoding.go),
 // not the two separate YAML keys #247's own candidate config uses.
-type backtestSection struct {
+type BacktestSection struct {
 	// Symbol is deliberately not required:"true" here: it is validated
 	// in code (buildInstrumentSymbols in run.go), not by config.Load,
 	// because a multi-instrument run (repeated --symbol, issue #224)
@@ -79,13 +74,13 @@ type backtestSection struct {
 	Provider      string `config:"provider" flag:"provider" default:"oanda"`
 }
 
-// strategySection is the EMA crossover strategy's own configuration —
+// StrategySection is the EMA crossover strategy's own configuration —
 // Strategy-specific fields live under this generic selector. EMA fields are
 // decoded here for the registered ema-cross strategy and ignored by the
 // buy-and-hold baseline; future registered strategies can add their own
 // construction and validation without changing the top-level config shape.
 // JSON tags keep strategy parameters stable in manifests and reports.
-type strategySection struct {
+type StrategySection struct {
 	Name       string `config:"name" flag:"strategy-name" default:"buy-and-hold" json:"name"`
 	FastPeriod int    `config:"fast_period" flag:"fast-period" default:"20" json:"fast_period"`
 	SlowPeriod int    `config:"slow_period" flag:"slow-period" default:"50" json:"slow_period"`
@@ -115,7 +110,7 @@ type strategySection struct {
 // quantityMode reports whether buy-and-hold runs in quantity mode:
 // quantity was supplied, whatever its value (validateBuyHold rejects a
 // non-positive one).
-func (s strategySection) quantityMode() bool {
+func (s StrategySection) quantityMode() bool {
 	return s.Name == demoStrategyName && s.Quantity != ""
 }
 
@@ -128,7 +123,7 @@ type buyHoldSettings struct {
 
 // parseBuyHold parses and validates quantity mode's settings. from is
 // the run's start, the effective buy date when buy_date is omitted.
-func (s strategySection) parseBuyHold(from time.Time) (buyHoldSettings, error) {
+func (s StrategySection) parseBuyHold(from time.Time) (buyHoldSettings, error) {
 	var out buyHoldSettings
 	q, err := num.ParseQuantity(s.Quantity)
 	if err != nil {
@@ -163,7 +158,7 @@ func (s strategySection) parseBuyHold(from time.Time) (buyHoldSettings, error) {
 // source has been applied and every required field is present
 // (config/load.go's validateDestination). It covers exactly what plain
 // field decoding cannot: relationships between fields.
-func (c runConfig) Validate() error {
+func (c RunConfig) Validate() error {
 	switch c.Strategy.Name {
 	case demoStrategyName:
 		if err := c.Strategy.validateBuyHold(c.Backtest.From); err != nil {
@@ -205,95 +200,10 @@ func (c runConfig) Validate() error {
 	return nil
 }
 
-// buildRunConfig resolves a runConfig from any flags actually Changed
-// on cmd, layered under flags.config (if set) and the TRADER_BACKTEST_*/
-// TRADER_STRATEGY_* environment variables, via the same config.Load
-// every Trader composition root uses (cmd/trader/data/service.go's
-// buildDatasetConfig is the identical pattern this mirrors, including
-// why only Changed flags are ever placed in Overrides).
-//
-// --symbol is repeatable (multi-instrument, issue #224) but runConfig's
-// own Symbol field is a single string: a config file describes one
-// experiment's one instrument, matching #247's own candidate YAML.
-// Combining --config with more than one --symbol is rejected outright
-// here rather than silently using only the first one.
-func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
-	if flags.config != "" && len(flags.symbols) > 1 {
-		return runConfig{}, fmt.Errorf("--config describes a single-instrument experiment; " +
-			"repeat --symbol without --config for a multi-instrument run")
-	}
-
-	overrides := map[string]string{}
-	if cmd.Flags().Changed("symbol") && len(flags.symbols) == 1 {
-		overrides["symbol"] = flags.symbols[0]
-	}
-	if cmd.Flags().Changed("interval") {
-		overrides["interval"] = flags.interval
-	}
-	if cmd.Flags().Changed("from") {
-		overrides["from"] = flags.from
-	}
-	if cmd.Flags().Changed("to") {
-		overrides["to"] = flags.to
-	}
-	if cmd.Flags().Changed("currency") {
-		overrides["currency"] = flags.currency
-	}
-	if cmd.Flags().Changed("starting-cash") {
-		overrides["starting-cash"] = flags.startingCash
-	}
-	if cmd.Flags().Changed("risk-fraction") {
-		overrides["risk-fraction"] = flags.riskFraction
-	}
-	if cmd.Flags().Changed("adverse-distance") {
-		overrides["adverse-distance"] = flags.adverse
-	}
-	if cmd.Flags().Changed("initial-margin-ratio") {
-		overrides["initial-margin-ratio"] = flags.initialMarginRatio
-	}
-	if cmd.Flags().Changed("strategy-name") {
-		overrides["strategy-name"] = flags.strategyName
-	}
-	if cmd.Flags().Changed("fast-period") {
-		overrides["fast-period"] = fmt.Sprintf("%d", flags.fastPeriod)
-	}
-	if cmd.Flags().Changed("slow-period") {
-		overrides["slow-period"] = fmt.Sprintf("%d", flags.slowPeriod)
-	}
-	if cmd.Flags().Changed("allowed-side") {
-		overrides["allowed-side"] = flags.allowedSide
-	}
-	if cmd.Flags().Changed("quantity") {
-		overrides["quantity"] = flags.quantity
-	}
-	if cmd.Flags().Changed("buy-date") {
-		overrides["buy-date"] = flags.buyDate
-	}
-	if cmd.Flags().Changed("sell-date") {
-		overrides["sell-date"] = flags.sellDate
-	}
-	if cmd.Flags().Changed("data-store-root") {
-		overrides["data-store-root"] = flags.dataStoreRoot
-	}
-	if cmd.Flags().Changed("data-raw-root") {
-		overrides["data-raw-root"] = flags.dataRawRoot
-	}
-	if cmd.Flags().Changed("provider") {
-		overrides["provider"] = flags.provider
-	}
-
-	return config.Load[runConfig](config.Options{
-		EnvPrefix: clictx.EnvPrefix,
-		Environ:   os.Environ(),
-		FilePath:  flags.config,
-		Overrides: overrides,
-	})
-}
-
 // validateBuyHold checks buy-and-hold's quantity-mode parameters:
 // buy_date and sell_date require quantity, and quantity mode's settings
 // must parse (see parseBuyHold). from is backtest.from.
-func (s strategySection) validateBuyHold(from string) error {
+func (s StrategySection) validateBuyHold(from string) error {
 	if s.Quantity == "" {
 		if s.BuyDate != "" || s.SellDate != "" {
 			return fmt.Errorf("strategy.buy_date and strategy.sell_date require strategy.quantity")

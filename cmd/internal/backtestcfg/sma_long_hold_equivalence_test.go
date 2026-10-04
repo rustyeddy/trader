@@ -1,4 +1,4 @@
-package backtest
+package backtestcfg
 
 // This file is intentionally package backtest (internal), not
 // backtest_test: it needs direct access to this package's own
@@ -822,7 +822,7 @@ func TestSMALongHold_EquivalentToInTreeSMATrendDefaultConfig(t *testing.T) {
 	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.Real{},
 		StoreRoot:    t.TempDir(),
-		RawRoot:      "testdata/raw/oanda",
+		RawRoot:      cliTestdataRaw,
 		Resolver:     oandaResolver,
 		ProviderName: "oanda",
 	})

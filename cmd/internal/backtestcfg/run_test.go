@@ -1,4 +1,4 @@
-package backtest
+package backtestcfg
 
 import (
 	"context"
@@ -116,7 +116,7 @@ func newGappedFixtureManager(t *testing.T) (*marketruntime.Manager, instrument.I
 	manager, err := marketruntime.New(marketruntime.Config{
 		Clock:        clock.NewSimulated(time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC)),
 		StoreRoot:    t.TempDir(),
-		RawRoot:      "testdata/raw/oanda",
+		RawRoot:      cliTestdataRaw,
 		Resolver:     resolver,
 		ProviderName: "oanda",
 	})
@@ -148,10 +148,11 @@ func newGappedFixtureManager(t *testing.T) (*marketruntime.Manager, instrument.I
 func TestBuildExternalLaunchConfig_InheritsEnvironAndAppendsConfigPath(t *testing.T) {
 	environ := []string{"PATH=/usr/bin:/bin", "HOME=/home/op"}
 
-	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(runFlags{
-		strategyExec:   "/bin/true",
-		strategyConfig: "strategy.yaml",
-	}, environ, nil)
+	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(ExternalStrategy{
+		Exec:    "/bin/true",
+		Config:  "strategy.yaml",
+		Environ: environ,
+	}, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "/bin/true", resolvedExec)
@@ -171,10 +172,11 @@ func TestBuildExternalLaunchConfig_InheritsEnvironAndAppendsConfigPath(t *testin
 func TestBuildExternalLaunchConfig_ReplacesPreexistingConfigEnvEntry(t *testing.T) {
 	environ := []string{"PATH=/usr/bin", strategyConfigPathEnv + "=/stale/path.yaml"}
 
-	cfg, _, abs, err := buildExternalLaunchConfig(runFlags{
-		strategyExec:   "/bin/true",
-		strategyConfig: "strategy.yaml",
-	}, environ, nil)
+	cfg, _, abs, err := buildExternalLaunchConfig(ExternalStrategy{
+		Exec:    "/bin/true",
+		Config:  "strategy.yaml",
+		Environ: environ,
+	}, nil)
 	require.NoError(t, err)
 
 	var matches int
@@ -193,7 +195,7 @@ func TestBuildExternalLaunchConfig_ReplacesPreexistingConfigEnvEntry(t *testing.
 func TestBuildExternalLaunchConfig_NoConfigLeavesEnvironUntouched(t *testing.T) {
 	environ := []string{"PATH=/usr/bin", "HOME=/home/op"}
 
-	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(runFlags{strategyExec: "/bin/true"}, environ, nil)
+	cfg, resolvedExec, abs, err := buildExternalLaunchConfig(ExternalStrategy{Exec: "/bin/true", Environ: environ}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "/bin/true", resolvedExec)
 	require.Empty(t, abs)
@@ -337,3 +339,8 @@ func TestFileContentDigest_CanceledContextFailsFast(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+// cliTestdataRaw is the backtest CLI's committed raw fixture archive,
+// shared by these tests (which moved here from cmd/trader/backtest with
+// the code they test, issue #453) rather than copied.
+const cliTestdataRaw = "../../trader/backtest/testdata/raw/oanda"

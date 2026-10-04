@@ -1,4 +1,4 @@
-package backtest
+package backtestcfg
 
 import (
 	"testing"
