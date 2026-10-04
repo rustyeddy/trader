@@ -197,6 +197,11 @@ func TestRunBacktest_InvalidRequests(t *testing.T) {
 		"unknown provider":  {with(map[string]any{"provider": "bloomberg"}), "unknown market-data provider"},
 		"bad margin ratio":  {with(map[string]any{"initial_margin_ratio": "0"}), "initial_margin_ratio must be positive"},
 		"duplicate symbols": {with(map[string]any{"symbols": []string{"EURUSD", "eurusd"}}), "duplicate"},
+		"negative warmup":   {with(map[string]any{"warmup_bars": -1}), "warmup bars must not be negative"},
+		"zero capital":      {with(map[string]any{"starting_capital": "0"}), "starting_capital must be positive"},
+		"negative capital":  {with(map[string]any{"starting_capital": "-100"}), "starting_capital must be positive"},
+		"zero fast period":  {with(map[string]any{"strategy": map[string]any{"name": "ema-cross", "fast_period": 0}}), "fast_period must be positive"},
+		"zero slow period":  {with(map[string]any{"strategy": map[string]any{"name": "ema-cross", "slow_period": 0}}), "slow_period (0) must be greater"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res, _ := callTool(t, cs, "trader_run_backtest", tc.args)
@@ -236,4 +241,52 @@ func TestBacktestResult_Failures(t *testing.T) {
 	res, _ = callTool(t, cs, "trader_backtest_result", map[string]any{"run_id": runID})
 	require.True(t, res.IsError)
 	assert.Contains(t, toolText(res), "no stored run with this id")
+}
+
+// TestRunBacktest_OmittedPeriodsTakeDefaults: omission, unlike an
+// explicit 0, means the CLI's defaults (20/50).
+func TestRunBacktest_OmittedPeriodsTakeDefaults(t *testing.T) {
+	storeRoot, outputDir := t.TempDir(), t.TempDir()
+	runCLI(t, storeRoot, outputDir)
+	cs := backtestServer(t, storeRoot, outputDir)
+	args := map[string]any{}
+	for k, v := range demoRun {
+		args[k] = v
+	}
+	args["strategy"] = map[string]any{"name": "ema-cross"}
+	res, out := callTool(t, cs, "trader_run_backtest", args)
+	require.False(t, res.IsError, toolText(res))
+	params := out["summary"].(map[string]any)["run"].(map[string]any)["strategy_parameters"].(map[string]any)
+	assert.Equal(t, float64(20), params["fast_period"])
+	assert.Equal(t, float64(50), params["slow_period"])
+}
+
+// TestBacktestResult_ExternalRunOmitsLaunchDetails: a run the CLI made
+// with --strategy-exec sits in the same store; MCP returns it without its
+// machine-local executable/config paths and arguments (ADR-068).
+func TestBacktestResult_ExternalRunOmitsLaunchDetails(t *testing.T) {
+	storeRoot, outputDir := t.TempDir(), t.TempDir()
+	runID := runCLI(t, storeRoot, outputDir)["run"].(map[string]any)["run_id"].(string)
+
+	// Rewrite the stored run's parameters into what an external run records.
+	path := filepath.Join(outputDir, runID+".json")
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var snap map[string]any
+	require.NoError(t, json.Unmarshal(raw, &snap))
+	snap["report"].(map[string]any)["run"].(map[string]any)["strategy_parameters"] = map[string]any{
+		"mode": "external", "strategy_name": "guest", "exec": "/home/op/bin/guest", "exec_digest": "sha256:e1",
+		"args": []string{"--token", "s3cret"}, "config": "/home/op/guest.yaml", "config_digest": "sha256:c1",
+	}
+	raw, err = json.Marshal(snap)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, raw, 0o644))
+
+	cs := backtestServer(t, storeRoot, outputDir)
+	res, out := callTool(t, cs, "trader_backtest_result", map[string]any{"run_id": runID})
+	require.False(t, res.IsError, toolText(res))
+	params := out["report"].(map[string]any)["run"].(map[string]any)["strategy_parameters"].(map[string]any)
+	assert.Equal(t, map[string]any{"mode": "external", "strategy_name": "guest", "exec_digest": "sha256:e1", "config_digest": "sha256:c1"}, params)
+	assert.NotContains(t, toolText(res), "/home/op")
+	assert.NotContains(t, toolText(res), "s3cret")
 }

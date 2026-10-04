@@ -98,11 +98,11 @@ func runConfig(in mcpserver.BacktestInput, provider string) (backtestcfg.RunConf
 	set("quantity", in.Strategy.Quantity)
 	set("buy-date", in.Strategy.BuyDate)
 	set("sell-date", in.Strategy.SellDate)
-	if in.Strategy.FastPeriod != 0 {
-		overrides["fast-period"] = strconv.Itoa(in.Strategy.FastPeriod)
+	if in.Strategy.FastPeriod != nil {
+		overrides["fast-period"] = strconv.Itoa(*in.Strategy.FastPeriod)
 	}
-	if in.Strategy.SlowPeriod != 0 {
-		overrides["slow-period"] = strconv.Itoa(in.Strategy.SlowPeriod)
+	if in.Strategy.SlowPeriod != nil {
+		overrides["slow-period"] = strconv.Itoa(*in.Strategy.SlowPeriod)
 	}
 	return config.Load[backtestcfg.RunConfig](config.Options{
 		EnvPrefix: marketdatacfg.EnvPrefix,

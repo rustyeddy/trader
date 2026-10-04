@@ -132,6 +132,12 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 	if err != nil {
 		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("invalid backtest.starting_capital: %w", err))
 	}
+	if sign, err := startingCash.Cmp(num.MustParseMoney("0", currency)); err != nil || sign <= 0 {
+		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("backtest.starting_capital must be positive, got %s", cfg.Backtest.StartingCapital))
+	}
+	if req.WarmupBars < 0 {
+		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("warmup bars must not be negative, got %d", req.WarmupBars))
+	}
 
 	// ema-cross and quantity mode each trade exactly one instrument;
 	// reject more before any data is prepared rather than silently
@@ -192,6 +198,10 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 		RiskFraction:       cfg.Backtest.RiskFraction,
 		AdverseDistance:    cfg.Backtest.AdverseDistance,
 	}, monitor)
+	if errors.Is(err, svcbacktest.ErrInvalidRequest) {
+		// The service's own request validation: still the caller's input.
+		return svcbacktest.RunResponse{}, invalid(err)
+	}
 	if err != nil {
 		return svcbacktest.RunResponse{}, err
 	}

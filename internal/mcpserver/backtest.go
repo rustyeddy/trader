@@ -65,8 +65,11 @@ type BacktestInput struct {
 // BacktestStrategy selects and configures the in-process strategy.
 type BacktestStrategy struct {
 	Name        string `json:"name,omitempty" jsonschema:"buy-and-hold (default) or ema-cross"`
-	FastPeriod  int    `json:"fast_period,omitempty" jsonschema:"ema-cross fast period (default 20)"`
-	SlowPeriod  int    `json:"slow_period,omitempty" jsonschema:"ema-cross slow period (default 50)"`
+	// FastPeriod and SlowPeriod are pointers so an explicit 0 (which
+	// fails validation, as the CLI's --fast-period 0 does) stays distinct
+	// from omission (the default).
+	FastPeriod  *int   `json:"fast_period,omitempty" jsonschema:"ema-cross fast period (default 20)"`
+	SlowPeriod  *int   `json:"slow_period,omitempty" jsonschema:"ema-cross slow period (default 50)"`
 	AllowedSide string `json:"allowed_side,omitempty" jsonschema:"ema-cross direction: both (default), long-only, or short-only"`
 	Quantity    string `json:"quantity,omitempty" jsonschema:"buy-and-hold quantity mode: buy exactly this quantity of the single symbol"`
 	BuyDate     string `json:"buy_date,omitempty" jsonschema:"quantity mode: buy on the first bar at or after this date"`
@@ -89,14 +92,33 @@ type BacktestResultInput struct {
 }
 
 // BacktestResultOutput is trader_backtest_result's result: the stored
-// report, exactly as `trader backtest show --format json` renders it.
+// report, as `trader backtest show --format json` renders it — except
+// that a run made with an external strategy executable (the CLI's
+// --strategy-exec) has its launch details removed from
+// run.strategy_parameters: the executable and config paths and the
+// argument list, which are machine-local (ADR-068). The strategy's
+// identity and the executable and config content digests remain.
 type BacktestResultOutput struct {
 	RunID  string         `json:"run_id"`
 	Report map[string]any `json:"report"`
 }
 
-// summarySections are the report sections trader_run_backtest returns.
-var summarySections = []string{"run", "dataset", "performance", "trade_stats", "margin", "account"}
+// summary is the projection trader_run_backtest returns: the report's
+// summary sections only, so a long run's equity curve and trade lists are
+// never encoded for it.
+type summary struct {
+	Run         report.RunInfo         `json:"run"`
+	Dataset     []report.DatasetReport `json:"dataset"`
+	Performance report.Performance     `json:"performance"`
+	TradeStats  report.TradeStats      `json:"trade_stats"`
+	Margin      report.MarginReport    `json:"margin"`
+	Account     report.AccountReport   `json:"account"`
+}
+
+// externalLaunchDetails are the machine-local keys an external
+// strategy's recorded parameters carry (backtestcfg's
+// externalStrategyParams); MCP never returns them.
+var externalLaunchDetails = []string{"exec", "config", "args"}
 
 func (s *server) registerBacktests(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
@@ -124,7 +146,11 @@ func (s *server) runBacktest(ctx context.Context, req *mcp.CallToolRequest, in B
 	}
 	notify("saved")
 	out := RunBacktestOutput{RunID: rep.Run.RunID, ConfigDigest: rep.Run.ConfigDigest}
-	if out.Summary, err = reportSections(rep, summarySections...); err != nil {
+	rep.Run = withoutLaunchDetails(rep.Run)
+	if out.Summary, err = asObject(summary{
+		Run: rep.Run, Dataset: rep.Dataset, Performance: rep.Performance,
+		TradeStats: rep.TradeStats, Margin: rep.Margin, Account: rep.Account,
+	}); err != nil {
 		return nil, RunBacktestOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	out.Summary["closed_trade_count"] = len(rep.ClosedTrades)
@@ -141,36 +167,47 @@ func (s *server) backtestResult(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, BacktestResultOutput{}, s.publicError(ctx, tool, what, err)
 	}
-	full, err := reportSections(rep)
+	rep.Run = withoutLaunchDetails(rep.Run)
+	full, err := asObject(rep)
 	if err != nil {
 		return nil, BacktestResultOutput{}, s.publicError(ctx, tool, what, err)
 	}
 	return nil, BacktestResultOutput{RunID: rep.Run.RunID, Report: full}, nil
 }
 
-// reportSections returns rep as its JSON object, limited to keys when
-// any are given. Going through the report's own JSON keeps the tool
-// output identical to `trader backtest show --format json`, exact
-// numeric values included.
-func reportSections(rep report.BacktestReport, keys ...string) (map[string]any, error) {
-	b, err := json.Marshal(rep)
+// asObject returns v as its JSON object. Going through the report's own
+// JSON encoding keeps tool output identical to `trader backtest show
+// --format json`, exact numeric values included.
+func asObject(v any) (map[string]any, error) {
+	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("encoding report: %w", err)
 	}
-	var all map[string]any
-	if err := json.Unmarshal(b, &all); err != nil {
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
 		return nil, fmt.Errorf("decoding report: %w", err)
 	}
-	if len(keys) == 0 {
-		return all, nil
-	}
-	out := make(map[string]any, len(keys))
-	for _, k := range keys {
-		if v, ok := all[k]; ok {
-			out[k] = v
-		}
-	}
 	return out, nil
+}
+
+// withoutLaunchDetails removes an external strategy's machine-local
+// launch details (externalLaunchDetails) from run's recorded strategy
+// parameters. Any other strategy's parameters are returned unchanged.
+func withoutLaunchDetails(run report.RunInfo) report.RunInfo {
+	var params map[string]any
+	if len(run.StrategyParameters) == 0 || json.Unmarshal(run.StrategyParameters, &params) != nil || params["mode"] != "external" {
+		return run
+	}
+	for _, k := range externalLaunchDetails {
+		delete(params, k)
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		run.StrategyParameters = nil
+		return run
+	}
+	run.StrategyParameters = b
+	return run
 }
 
 // stageProgress returns a callback that sends a progress notification per

@@ -164,3 +164,26 @@ func TestInputErrorUnwraps(t *testing.T) {
 	assert.EqualError(t, err, "base")
 	assert.NoError(t, invalid(nil))
 }
+
+func TestRun_RejectsInvalidValuesBeforePreparingData(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mutate func(*Request)
+		want   string
+	}{
+		"negative warmup":       {func(r *Request) { r.WarmupBars = -1 }, "warmup bars must not be negative"},
+		"zero starting capital": {func(r *Request) { r.Config.Backtest.StartingCapital = "0" }, "starting_capital must be positive"},
+		"negative capital":      {func(r *Request) { r.Config.Backtest.StartingCapital = "-100" }, "starting_capital must be positive"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := t.TempDir()
+			req := runRequest(t, store, true)
+			tc.mutate(&req)
+			_, err := Run(context.Background(), req)
+			require.ErrorIs(t, err, ErrInvalidRun)
+			assert.ErrorContains(t, err, tc.want)
+			entries, err := os.ReadDir(store)
+			require.NoError(t, err)
+			assert.Empty(t, entries, "rejected before any data is prepared")
+		})
+	}
+}

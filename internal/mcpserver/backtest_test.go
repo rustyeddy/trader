@@ -80,7 +80,9 @@ func TestRunBacktestTool(t *testing.T) {
 	assert.NotContains(t, out.Summary, "closed_trades")
 	assert.Equal(t, float64(2), out.Summary["closed_trade_count"])
 	assert.Equal(t, float64(1), out.Summary["open_trade_count"])
-	assert.Equal(t, BacktestStrategy{Name: "ema-cross", FastPeriod: 3}, fake.gotReq.Strategy, "the request reaches the capability as sent")
+	three := 3
+	assert.Equal(t, BacktestStrategy{Name: "ema-cross", FastPeriod: &three}, fake.gotReq.Strategy, "the request reaches the capability as sent")
+	assert.Nil(t, fake.gotReq.Strategy.SlowPeriod, "an omitted period stays omitted")
 }
 
 func TestBacktestResultTool(t *testing.T) {
@@ -167,4 +169,45 @@ func TestRunBacktestTool_ProgressPerStage(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, []string{"preparing market data 1/3", "running backtest 2/3", "saved 3/3"}, stages)
+}
+
+// externalParams is what backtestcfg records for a CLI --strategy-exec run.
+const externalParams = `{"mode":"external","strategy_name":"guest","strategy_version":"v1","protocol_version":"1","transport":"unix",` +
+	`"exec":"/home/op/bin/guest","exec_digest":"sha256:e1","args":["--token","s3cret"],"config":"/home/op/guest.yaml","config_digest":"sha256:c1"}`
+
+func TestBacktestTools_RedactExternalLaunchDetails(t *testing.T) {
+	rep := sampleReport()
+	rep.Run.StrategyParameters = json.RawMessage(externalParams)
+	session := connect(t, Deps{Backtests: &fakeBacktests{rep: rep}})
+
+	var result BacktestResultOutput
+	require.False(t, call(t, session, "trader_backtest_result", map[string]any{"run_id": rep.Run.RunID}, &result).IsError)
+	var run RunBacktestOutput
+	require.False(t, call(t, session, "trader_run_backtest", map[string]any{
+		"symbols": []string{"EURUSD"}, "from": "2024-01-01", "to": "2024-02-01", "adverse_distance": "0.01",
+	}, &run).IsError)
+
+	for name, params := range map[string]any{
+		"result":  result.Report["run"].(map[string]any)["strategy_parameters"],
+		"summary": run.Summary["run"].(map[string]any)["strategy_parameters"],
+	} {
+		p := params.(map[string]any)
+		for _, local := range []string{"exec", "config", "args"} {
+			assert.NotContains(t, p, local, "%s: %s is machine-local", name, local)
+		}
+		assert.Equal(t, "sha256:e1", p["exec_digest"], "%s: the content digests remain", name)
+		assert.Equal(t, "sha256:c1", p["config_digest"], name)
+		assert.Equal(t, "guest", p["strategy_name"], name)
+	}
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "/home/op")
+	assert.NotContains(t, string(encoded), "s3cret")
+}
+
+func TestWithoutLaunchDetails_LeavesOtherStrategiesAlone(t *testing.T) {
+	for _, params := range []string{``, `{"fast_period":3,"slow_period":5}`, `not json`} {
+		run := report.RunInfo{StrategyParameters: json.RawMessage(params)}
+		assert.Equal(t, run, withoutLaunchDetails(run), params)
+	}
 }
