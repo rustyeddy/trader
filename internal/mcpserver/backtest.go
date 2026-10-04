@@ -64,7 +64,7 @@ type BacktestInput struct {
 
 // BacktestStrategy selects and configures the in-process strategy.
 type BacktestStrategy struct {
-	Name        string `json:"name,omitempty" jsonschema:"buy-and-hold (default) or ema-cross"`
+	Name string `json:"name,omitempty" jsonschema:"buy-and-hold (default) or ema-cross"`
 	// FastPeriod and SlowPeriod are pointers so an explicit 0 (which
 	// fails validation, as the CLI's --fast-period 0 does) stays distinct
 	// from omission (the default).
