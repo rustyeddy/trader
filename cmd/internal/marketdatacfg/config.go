@@ -105,11 +105,6 @@ func Load(environ []string, overrides map[string]string) (Config, error) {
 	})
 }
 
-// IsFXProvider reports whether provider's instruments are FX pairs. The
-// service layer owns the answer (svc.IsFXProvider), so composition and
-// instrument resolution never disagree.
-func IsFXProvider(provider string) bool { return svc.IsFXProvider(provider) }
-
 // oandaTokenCredential satisfies marketdata.Config.OANDACredential's
 // oanda.CredentialProvider interface structurally
 // (Token(ctx) (string, error)) without importing marketdata/internal —
@@ -153,20 +148,21 @@ func alpacaCalendarYears() []int {
 	return years
 }
 
-// calendarForProvider selects the marketdata.Calendar implementation
-// syncOneAlpaca/syncOneOANDA each actually require (issue #331):
-// leaving it nil for an FX provider lets Manager apply its own correct
-// default (NewFXCalendar(FXCalendarParams{})), but "alpaca" (and any
-// future non-FX provider — see IsFXProvider's two-way split) needs a *USEquityCalendar specifically, or Sync fails with
-// Manager's own "requires Config.Calendar to be a *USEquityCalendar"
-// ErrInvalidConfig every time (a real gap found and fixed while
-// developing this issue: buildDataContext never set Calendar at all
-// before).
-func calendarForProvider(provider string) marketdata.Calendar {
-	if IsFXProvider(provider) {
-		return nil
+// calendarForProvider builds the marketdata.Calendar the provider's
+// registered CalendarKind names (marketdata.LookupProvider, issue #441).
+// An FX calendar is left nil so Manager applies its own default
+// (NewFXCalendar(FXCalendarParams{})); a US-equity provider needs a
+// *USEquityCalendar, or Sync and normalization reject its bars (issue
+// #331).
+func calendarForProvider(info marketruntime.ProviderInfo) (marketdata.Calendar, error) {
+	switch info.Calendar {
+	case marketruntime.CalendarFX:
+		return nil, nil
+	case marketruntime.CalendarUSEquity:
+		return marketdata.NewUSEquityCalendar(marketdata.StandardUSEquityHolidays(alpacaCalendarYears()...)), nil
+	default:
+		return nil, fmt.Errorf("provider %q: no calendar for %s", info.Name, info.Calendar)
 	}
-	return marketdata.NewUSEquityCalendar(marketdata.StandardUSEquityHolidays(alpacaCalendarYears()...))
 }
 
 // Bundle is one constructed market-data service: the application
@@ -197,10 +193,22 @@ func New(cfg Config, logger *slog.Logger) (Bundle, error) {
 	return newBundle(cfg, logger, nil)
 }
 
+// ErrUnknownProvider reports a provider with no registered metadata
+// (marketdata.LookupProvider); it is marketdata.ErrUnknownProvider.
+var ErrUnknownProvider = marketruntime.ErrUnknownProvider
+
 // newBundle is New with the write lock the Manager shares with others
 // over the same stores; nil gives the Manager its own (one Manager per
 // process, as in the CLI).
 func newBundle(cfg Config, logger *slog.Logger, writeLock *marketruntime.WriteLock) (Bundle, error) {
+	info, err := marketruntime.LookupProvider(cfg.Provider)
+	if err != nil {
+		return Bundle{}, err
+	}
+	calendar, err := calendarForProvider(info)
+	if err != nil {
+		return Bundle{}, err
+	}
 	resolver := instrument.NewMemoryResolver()
 	managerCfg := marketruntime.Config{
 		Clock:        clock.Real{},
@@ -208,7 +216,7 @@ func newBundle(cfg Config, logger *slog.Logger, writeLock *marketruntime.WriteLo
 		RawRoot:      cfg.RawRoot,
 		Resolver:     resolver,
 		ProviderName: cfg.Provider,
-		Calendar:     calendarForProvider(cfg.Provider),
+		Calendar:     calendar,
 		WriteLock:    writeLock,
 	}
 	// OANDACredential must stay a genuinely nil interface when no token

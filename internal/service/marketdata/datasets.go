@@ -196,7 +196,9 @@ type CanonicalizeOptions struct {
 // CanonicalizeDatasets builds canonical data from each instrument's
 // provider-native data through the existing Plan/Build path:
 //
-//   - for stooq, by converting the instrument's native archive
+//   - for a provider whose data arrives as a native archive
+//     (ProviderInfo.NativeArchive: stooq), by converting the
+//     instrument's native archive
 //     (ConvertStooqArchive: opts.ArchivePath, or discovery under the
 //     Service's archive root), or, when no archive is found, from raw
 //     data already imported;
@@ -219,7 +221,7 @@ func (s *Service) CanonicalizeDatasets(ctx context.Context, req DatasetsRequest,
 
 func (s *Service) canonicalizeOne(ctx context.Context, req DatasetsRequest, opts CanonicalizeOptions, res *DatasetResult, symbol string, before marketruntime.Inventory) error {
 	dataset := DatasetRequest{Instrument: res.Instrument, Interval: req.Interval, Range: req.Range}
-	if s.provider == "stooq" {
+	if s.manager.Provider().NativeArchive {
 		done, err := s.stooqConvert(ctx, res, dataset, symbol, opts.ArchivePath, opts.Force, before, DatasetBuilt)
 		if done || err != nil {
 			return err
@@ -295,7 +297,8 @@ func missingEverywhere(plan marketruntime.Plan, rng marketdata.TimeRange) bool {
 // ErrNoCanonicalData. The last canonical bar's month is included, so a
 // partially built month is completed.
 //
-//   - stooq has no live feed: its update re-converts the instrument's
+//   - a native-archive provider (stooq) has no live feed: its update
+//     re-converts the instrument's
 //     native archive over that range, picking up whatever newer data the
 //     archive now holds; with no archive it rebuilds from imported raw
 //     data, as CanonicalizeDatasets does.
@@ -328,7 +331,7 @@ func (s *Service) updateOne(ctx context.Context, req DatasetsRequest, res *Datas
 		dataset.Range = rng
 	}
 	res.Range = dataset.Range
-	if s.provider == "stooq" {
+	if s.manager.Provider().NativeArchive {
 		done, err := s.stooqConvert(ctx, res, dataset, symbol, "", false, before, DatasetUpdated)
 		if done || err != nil {
 			return err

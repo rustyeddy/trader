@@ -30,7 +30,7 @@ func newConvertCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("data service is not configured on this command's context")
 			}
-			if strings.ToLower(dc.Provider) != "stooq" {
+			if !dc.Service.ProviderInfo().NativeArchive {
 				return fmt.Errorf("convert currently supports only provider stooq")
 			}
 			req, err := parseDatasetsRequest(args, flags, false)

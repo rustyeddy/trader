@@ -27,7 +27,7 @@ func newStq2BarsCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("data service is not configured on this command's context")
 			}
-			if dc.Provider != "stooq" {
+			if !dc.Service.ProviderInfo().NativeArchive {
 				return fmt.Errorf("stq2bars requires provider stooq, got %q", dc.Provider)
 			}
 

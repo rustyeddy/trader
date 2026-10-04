@@ -88,3 +88,7 @@ func New(manager *marketruntime.Manager, logger *slog.Logger, opts ...Option) (*
 
 // Provider is the market-data provider this Service serves.
 func (s *Service) Provider() string { return s.provider }
+
+// ProviderInfo is the registered metadata for the provider this Service
+// serves (marketdata.LookupProvider, issue #441).
+func (s *Service) ProviderInfo() marketruntime.ProviderInfo { return s.manager.Provider() }

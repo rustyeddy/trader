@@ -73,6 +73,7 @@ type Manager struct {
 	rawRoot      string
 	resolver     instrument.Resolver
 	providerName string
+	providerInfo ProviderInfo
 	writeLock    *WriteLock
 	calendar     marketdata.Calendar
 
@@ -298,6 +299,10 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.ProviderName == "" {
 		return nil, fmt.Errorf("marketdata: new manager: %w: provider name is required", ErrInvalidConfig)
 	}
+	info, err := LookupProvider(cfg.ProviderName)
+	if err != nil {
+		return nil, fmt.Errorf("marketdata: new manager: %w: %w", ErrInvalidConfig, err)
+	}
 	if (cfg.OANDACredential == nil) != (cfg.OANDABaseURL == "") {
 		return nil, fmt.Errorf("marketdata: new manager: %w: OANDA credential and base URL must be supplied together", ErrInvalidConfig)
 	}
@@ -348,6 +353,7 @@ func New(cfg Config) (*Manager, error) {
 		rawRoot:      cfg.RawRoot,
 		resolver:     cfg.Resolver,
 		providerName: cfg.ProviderName,
+		providerInfo: info,
 		writeLock:    writeLock,
 		calendar:     cal,
 		oandaClient:  oandaClient,
@@ -360,6 +366,10 @@ func New(cfg Config) (*Manager, error) {
 
 // ProviderName is the provider this Manager serves (Config.ProviderName).
 func (m *Manager) ProviderName() string { return m.providerName }
+
+// Provider is the registered ProviderInfo for the provider this Manager
+// serves.
+func (m *Manager) Provider() ProviderInfo { return m.providerInfo }
 
 // Now is the current time from the Manager's clock, so callers defaulting
 // a range to "through now" stay deterministic under a simulated clock.

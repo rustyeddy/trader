@@ -121,9 +121,10 @@ func alpacaStatusToRaw(s alpaca.PartitionStatus) rawPartitionStatus {
 // fetch — there is no live feed to check at all — so it always reports
 // false (ADR-047's explicit decision on this point, made precisely to
 // avoid Plan generating an "extend" action that Sync could never
-// execute for a provider with no acquisition client).
+// execute for a provider with no acquisition client). The registered
+// ProviderInfo.LiveAcquisition records it (issue #441).
 func (m *Manager) allowsLiveExtend() bool {
-	return m.providerName != "stooq"
+	return m.providerInfo.LiveAcquisition
 }
 
 // rawInventoryLookup returns a lookup map of every raw partition found

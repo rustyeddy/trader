@@ -1,0 +1,82 @@
+#+TITLE: ADR-071: One market-data provider registry
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #441.
+
+* Context
+
+Facts about each market-data provider were spread across composition,
+services, and the Manager, each derived from the provider's name:
+
+- =marketdatacfg= kept its own supported-provider set (=knownProviders=).
+- FX versus equity classification was =IsFXProvider(p) = p == "oanda"=, so
+  every other name, including an unknown one, was treated as a US equity
+  provider.
+- Calendar selection followed that same rule: not FX meant
+  =USEquityCalendar=.
+- "Stooq has no live feed" (=allowsLiveExtend=, =Sync=) and "stooq data
+  arrives as an archive" (=CanonicalizeDatasets=, =UpdateDatasets=, the
+  CLI's =stq2bars= and =convert=) were each a separate name check.
+- The Manager's provider dispatch fell back to OANDA's raw layout for any
+  name it did not recognize.
+
+With three providers this worked, but adding a provider or asset class
+would have meant finding every one of those checks, and an unknown or
+misspelled provider silently got another provider's behavior.
+
+* Decision
+
+=internal/marketdata= — the subsystem that already owns the providers
+(ADR-020) — holds one registry of =ProviderInfo=: name, asset class,
+calendar kind, whether live acquisition is supported, the credential kind,
+and whether raw data arrives as a native archive. Only what current callers
+need is recorded; this is not a plugin framework.
+
+- =LookupProvider= returns a provider's =ProviderInfo= or
+  =ErrUnknownProvider=. =Manager.New=, =marketdatacfg= (=New= and the
+  Factory), and instrument identification all reject an unknown provider
+  instead of guessing.
+- Classification and capability decisions read the registry: instrument
+  identification switches on =AssetClass=, calendar construction on
+  =Calendar=, live extend and =Sync= on =LiveAcquisition=, and archive
+  conversion (service and CLI) on =NativeArchive=. =KnownProviders= and the
+  Factory's per-provider write locks come from the registry's names.
+- The Manager's dispatch to each provider's adapter (raw inventory,
+  normalization, acquisition client) stays name-based. That is the adapter
+  seam itself, not a classification, and it now only ever sees registered
+  names.
+
+Adding a provider is one registry entry plus its adapter implementation.
+
+The reference listing defaults (SPY, QQQ, AAPL; #434) stay in
+=service/marketdata=. They describe instruments, not providers — the same
+SPY listing serves Alpaca and Stooq — and apply wherever a provider's asset
+class is US equity.
+
+* Consequences
+
+- One place answers "what does this provider support?", and the answer is
+  tested.
+- A misspelled or unsupported provider fails at configuration time, naming
+  the supported ones, instead of behaving like OANDA or a US equity
+  provider.
+- Existing OANDA, Alpaca, and Stooq behavior is unchanged. The one message
+  that changed is Sync's error for a provider without live acquisition,
+  which now names the provider rather than assuming stooq.
+
+* Alternatives Considered
+
+- *Keep per-call-site name checks.* Rejected: it is the duplication this
+  issue exists to remove, and it silently mishandles unknown providers.
+- *A provider plugin interface with runtime registration.* Rejected as
+  speculative (the issue's non-goal): a static registry plus name dispatch
+  covers every current need.
+- *Put the registry in =marketdatacfg=.* Rejected: the Manager and services
+  need it too, and =cmd/internal= is not importable from =internal/=.
+
+* Related
+
+- ADR-020 (market data subsystem), ADR-047 (internal provider seam),
+  ADR-049 (US equity calendar), ADR-069, #434, #441.
