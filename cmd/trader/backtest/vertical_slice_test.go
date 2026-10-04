@@ -244,8 +244,8 @@ func TestVerticalSlice_ShowRejectsUnknownRunID(t *testing.T) {
 
 // TestVerticalSlice_OutputDirFromEnvironment: with no --output-dir, run
 // and show both use TRADER_BACKTEST_OUTPUT_DIR — the setting trader-mcp
-// resolves the same way (issue #453) — so a run either writes is
-// readable by the other.
+// resolves the same way (issue #453) — so a run written by either the
+// CLI or trader-mcp is readable by the other.
 func TestVerticalSlice_OutputDirFromEnvironment(t *testing.T) {
 	outputDir := t.TempDir()
 	t.Setenv("TRADER_BACKTEST_OUTPUT_DIR", outputDir)

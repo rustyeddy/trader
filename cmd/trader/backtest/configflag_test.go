@@ -410,3 +410,19 @@ func TestRunCLI_StrategyNameFlagSelectsStrategyWithoutConfig(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out.Bytes(), &doc))
 	assert.Equal(t, "ema-cross", doc.Run.StrategyName)
 }
+
+// TestRunCLI_EMACrossRejectsSeveralSymbols: ema-cross is single-
+// instrument, so repeating --symbol with it fails instead of silently
+// running only the first symbol (PR #454 review).
+func TestRunCLI_EMACrossRejectsSeveralSymbols(t *testing.T) {
+	runCmd := cmdbacktest.New()
+	runCmd.SetOut(&bytes.Buffer{})
+	runCmd.SetErr(&bytes.Buffer{})
+	runCmd.SetArgs([]string{
+		"run", "--symbol", "EURUSD", "--symbol", "GBPUSD", "--interval", "H1",
+		"--from", "2024-01-08T00:00:00Z", "--to", "2024-01-08T04:00:00Z",
+		"--adverse-distance", "0.01000", "--strategy-name", "ema-cross", "--fast-period", "3", "--slow-period", "5",
+		"--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+	})
+	assert.ErrorContains(t, runCmd.Execute(), "ema-cross trades exactly one instrument; got 2 symbols")
+}

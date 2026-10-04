@@ -29,7 +29,8 @@ var ErrDataNotReady = errors.New("canonical market data is not ready for this ba
 
 // Request is one backtest run, as any transport describes it.
 type Request struct {
-	// Config is the validated run configuration (RunConfig.Validate).
+	// Config is the run configuration. Run validates it
+	// (RunConfig.Validate) before doing any work.
 	Config RunConfig
 	// Symbols is the run's instrument universe: at least one symbol,
 	// with no duplicates.
@@ -67,6 +68,12 @@ func Run(ctx context.Context, req Request) (report.BacktestReport, error) {
 
 func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 	cfg := req.Config
+	// Run owns its input contract rather than trusting every transport
+	// to have validated: an unregistered strategy name must fail here,
+	// never fall through to the default strategy.
+	if err := cfg.Validate(); err != nil {
+		return svcbacktest.RunResponse{}, err
+	}
 	logger := req.Logger
 	if logger == nil {
 		logger = logging.Discard()
@@ -92,6 +99,12 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 		return svcbacktest.RunResponse{}, fmt.Errorf("invalid backtest.starting_capital: %w", err)
 	}
 
+	// ema-cross and quantity mode each trade exactly one instrument;
+	// reject more before any data is prepared rather than silently
+	// running only the first.
+	if req.External == nil && cfg.Strategy.Name == emacross.Name && len(req.Symbols) != 1 {
+		return svcbacktest.RunResponse{}, fmt.Errorf("%s trades exactly one instrument; got %d symbols", emacross.Name, len(req.Symbols))
+	}
 	if cfg.Strategy.quantityMode() {
 		if req.External != nil {
 			return svcbacktest.RunResponse{}, fmt.Errorf("--quantity applies to the in-process buy-and-hold strategy, not --strategy-exec")

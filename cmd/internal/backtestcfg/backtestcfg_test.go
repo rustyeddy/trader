@@ -90,3 +90,39 @@ func TestRun_RequiresMarketData(t *testing.T) {
 	_, err := Run(context.Background(), req)
 	assert.ErrorContains(t, err, "market data is not configured")
 }
+
+func TestRun_ValidatesItsConfig(t *testing.T) {
+	req := runRequest(t, t.TempDir(), true)
+	req.Config.Strategy.Name = "typo"
+	_, err := Run(context.Background(), req)
+	require.Error(t, err, "an unregistered strategy must fail, not run the default")
+	assert.ErrorContains(t, err, `strategy.name "typo" is not registered`)
+
+	req = runRequest(t, t.TempDir(), true)
+	req.Config.Backtest.InitialMarginRatio = num.MustParseRate("0")
+	_, err = Run(context.Background(), req)
+	assert.ErrorContains(t, err, "initial_margin_ratio must be positive")
+}
+
+func TestRun_SingleInstrumentStrategiesRejectSeveralSymbols(t *testing.T) {
+	store := t.TempDir()
+	for name, mutate := range map[string]func(*Request){
+		"ema-cross": func(r *Request) {
+			r.Config.Strategy = StrategySection{Name: "ema-cross", FastPeriod: 3, SlowPeriod: 5}
+		},
+		"quantity mode": func(r *Request) {
+			r.Config.Strategy = StrategySection{Name: demoStrategyName, Quantity: "1"}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := runRequest(t, store, true)
+			req.Symbols = []string{"EURUSD", "GBPUSD"}
+			mutate(&req)
+			_, err := Run(context.Background(), req)
+			assert.ErrorContains(t, err, "exactly one instrument")
+			entries, err := os.ReadDir(store)
+			require.NoError(t, err)
+			assert.Empty(t, entries, "rejected before any data is prepared")
+		})
+	}
+}
