@@ -28,6 +28,10 @@
 // result per symbol (see marketdata.go). trader_marketdata_canonicalize
 // and trader_marketdata_update (#432) are their data-mutating
 // counterparts, available only with write access (marketdata_write.go).
+// trader_run_backtest and trader_backtest_result (#437) run backtests and
+// read back their stored reports over the Backtests capability
+// (backtest.go). A run writes its report to the run store whatever the
+// write policy; it builds canonical market data only with write access.
 //
 // # Output
 //
@@ -93,6 +97,9 @@ type Deps struct {
 	// MarketData builds per-provider market-data services. Nil leaves
 	// market-data tools reporting ErrMarketDataUnavailable.
 	MarketData MarketDataFactory
+	// Backtests runs and reads back backtests. Nil leaves the backtest
+	// tools reporting ErrBacktestsUnavailable.
+	Backtests Backtests
 	// AllowWrites enables data-mutating tools (see the package doc).
 	AllowWrites bool
 }
@@ -122,6 +129,7 @@ func (s *server) register(srv *mcp.Server) {
 	}, traderVersion)
 	s.registerMarketData(srv)
 	s.registerMarketDataWrites(srv)
+	s.registerBacktests(srv)
 }
 
 // requireWrites returns ErrWritesDisabled unless the server allows

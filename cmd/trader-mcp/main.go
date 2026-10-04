@@ -12,6 +12,9 @@
 //	--store-root, --raw-root, --archive-root, --provider,
 //	--oanda-base-url, --alpaca-base-url   as for "trader data"
 //	--allow-writes                        enable data-mutating tools
+//	--backtest-output-dir                 where backtest runs are saved and read
+//	                                      (TRADER_BACKTEST_OUTPUT_DIR; default
+//	                                      ./backtest-runs, as for trader backtest)
 //	--log-level, --log-format, --log-output
 //
 // Credentials come from the environment only (TRADER_OANDA_TOKEN,
@@ -33,10 +36,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rustyeddy/trader/cmd/internal/backtestcfg"
 	"github.com/rustyeddy/trader/cmd/internal/marketdatacfg"
 	"github.com/rustyeddy/trader/internal/config"
 	"github.com/rustyeddy/trader/internal/logging"
 	"github.com/rustyeddy/trader/internal/mcpserver"
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
 	"github.com/rustyeddy/trader/version"
 )
 
@@ -85,6 +90,7 @@ func build(args, environ []string, stderr io.Writer) (*mcp.Server, io.Closer, er
 	fs.String("oanda-base-url", "", "OANDA API base URL")
 	fs.String("alpaca-base-url", "", "Alpaca data API base URL")
 	fs.Bool("allow-writes", false, "enable data-mutating tools")
+	fs.String("backtest-output-dir", "", "directory backtest runs are saved to and read from (default: TRADER_BACKTEST_OUTPUT_DIR, or "+backtestcfg.DefaultOutputDir+")")
 	fs.String("log-level", "", "log level: DEBUG, INFO, WARN, or ERROR (default INFO)")
 	fs.String("log-format", "", "log format: text or json (default text)")
 	fs.String("log-output", "", "log output: stderr or a file path (default stderr)")
@@ -98,6 +104,7 @@ func build(args, environ []string, stderr io.Writer) (*mcp.Server, io.Closer, er
 	// Only flags actually given override environment and defaults, as in
 	// the trader CLI.
 	data, logs, server := map[string]string{}, map[string]string{}, map[string]string{}
+	var outputDir string
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "log-level":
@@ -108,6 +115,8 @@ func build(args, environ []string, stderr io.Writer) (*mcp.Server, io.Closer, er
 			logs["output"] = f.Value.String()
 		case "allow-writes":
 			server["allow-writes"] = f.Value.String()
+		case "backtest-output-dir":
+			outputDir = f.Value.String()
 		default:
 			data[f.Name] = f.Value.String()
 		}
@@ -140,15 +149,24 @@ func build(args, environ []string, stderr io.Writer) (*mcp.Server, io.Closer, er
 		_ = closer.Close()
 		return nil, nil, err
 	}
+	if outputDir, err = backtestcfg.LoadOutputDir(environ, "", outputDir); err != nil {
+		_ = closer.Close()
+		return nil, nil, err
+	}
 
 	logger.Info("trader-mcp starting",
 		slog.String("version", version.Current().Version),
 		slog.String("default_provider", factory.DefaultProvider()),
-		slog.Bool("writes_enabled", srvCfg.AllowWrites))
+		slog.Bool("writes_enabled", srvCfg.AllowWrites),
+		slog.String("backtest_output_dir", outputDir))
 
 	srv := mcpserver.New(mcpserver.Deps{
-		Logger:      logger,
-		MarketData:  marketDataFactory{factory},
+		Logger:     logger,
+		MarketData: marketDataFactory{factory},
+		Backtests: backtests{
+			factory: factory, store: svcbacktest.NewRunStore(outputDir),
+			prepareData: srvCfg.AllowWrites, logger: logger,
+		},
 		AllowWrites: srvCfg.AllowWrites,
 	})
 	return srv, closer, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	svcbacktest "github.com/rustyeddy/trader/internal/service/backtest"
 	svcmarketdata "github.com/rustyeddy/trader/internal/service/marketdata"
 )
 
@@ -27,6 +28,12 @@ var echoesInput = []error{
 	ErrUnknownProvider,
 	ErrMarketDataUnavailable,
 	ErrWritesDisabled,
+	ErrBacktestsUnavailable,
+	ErrInvalidBacktest,      // the composition root marks only input errors
+	ErrBacktestDataNotReady, // names only the symbol, interval, and month
+	svcbacktest.ErrRunNotFound,
+	svcbacktest.ErrSnapshotVersionMismatch, // names only the versions
+	svcbacktest.ErrSnapshotRunIDMismatch,   // names only the run IDs
 }
 
 // publicMessage is the single policy for what a client sees of an error
