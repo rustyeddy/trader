@@ -21,6 +21,9 @@ var echoesInput = []error{
 	svcmarketdata.ErrInvalidDate,
 	svcmarketdata.ErrInvalidSymbol,
 	svcmarketdata.ErrNoListingDefault,
+	svcmarketdata.ErrNoRawData,        // names only the requested range
+	svcmarketdata.ErrNoCanonicalData,  // fixed text
+	svcmarketdata.ErrUpdateIncomplete, // names only months and plan reasons
 	ErrUnknownProvider,
 	ErrMarketDataUnavailable,
 	ErrWritesDisabled,
@@ -29,7 +32,8 @@ var echoesInput = []error{
 // publicMessage is the single policy for what a client sees of an error
 // (ADR-068: MCP never exposes filesystem layout or composition
 // internals). Errors built from the caller's input pass through; listing
-// conflicts and cancellation get fixed messages; anything else —
+// conflicts, archive lookups (whose own messages name the archive root),
+// and cancellation get fixed messages; anything else —
 // storage, I/O, configuration, internal failures, whose messages may
 // name paths — collapses to "<what> failed" while the full error is
 // logged server-side.
@@ -42,6 +46,14 @@ func (s *server) publicMessage(ctx context.Context, tool, symbol, what string, e
 	switch {
 	case errors.Is(err, svcmarketdata.ErrListingConflict):
 		return "a different instrument is already registered under this symbol"
+	case errors.Is(err, svcmarketdata.ErrArchiveNotFound):
+		return "no archive for this symbol under the server's archive root"
+	case errors.Is(err, svcmarketdata.ErrAmbiguousArchive):
+		return "several archives under the server's archive root match this symbol"
+	case errors.Is(err, svcmarketdata.ErrArchiveRootNotConfigured):
+		return "the server has no archive root configured"
+	case errors.Is(err, svcmarketdata.ErrArchiveMemberNotFound):
+		return "the archive holds no data for this symbol"
 	case errors.Is(err, context.Canceled):
 		return "request canceled"
 	case errors.Is(err, context.DeadlineExceeded):

@@ -73,6 +73,7 @@ type Manager struct {
 	rawRoot      string
 	resolver     instrument.Resolver
 	providerName string
+	writeLock    *WriteLock
 	calendar     marketdata.Calendar
 
 	// oandaClient is Manager's own OANDA synchronization client (issue
@@ -161,6 +162,12 @@ type Config struct {
 	// supply this explicitly to select non-default holiday rules or a
 	// future non-FX Calendar implementation.
 	Calendar marketdata.Calendar
+
+	// WriteLock serializes Sync, Build, and ImportStooqArchive (see
+	// WriteLock). Managers that share storage must share one. Nil gives
+	// this Manager its own, which still serializes its own concurrent
+	// calls.
+	WriteLock *WriteLock
 
 	// CacheCapacity bounds the number of canonical partitions Manager's
 	// internal memory cache retains before evicting the oldest one (FIFO;
@@ -298,6 +305,10 @@ func New(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("marketdata: new manager: %w: Alpaca credential and base URL must be supplied together", ErrInvalidConfig)
 	}
 
+	writeLock := cfg.WriteLock
+	if writeLock == nil {
+		writeLock = NewWriteLock()
+	}
 	store := cfg.store
 	if store == nil {
 		store = newCanonicalCSVStore(cfg.StoreRoot)
@@ -337,6 +348,7 @@ func New(cfg Config) (*Manager, error) {
 		rawRoot:      cfg.RawRoot,
 		resolver:     cfg.Resolver,
 		providerName: cfg.ProviderName,
+		writeLock:    writeLock,
 		calendar:     cal,
 		oandaClient:  oandaClient,
 		alpacaClient: alpacaClient,

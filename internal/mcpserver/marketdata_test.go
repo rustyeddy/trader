@@ -33,7 +33,7 @@ type fixtureService struct {
 // newFixtureService builds provider's Service. For oanda, its raw root
 // holds a copy of service/marketdata's committed EURUSD fixture (January
 // and February 2024 H1).
-func newFixtureService(t *testing.T, provider string) fixtureService {
+func newFixtureService(t *testing.T, provider string, opts ...svcmarketdata.Option) fixtureService {
 	t.Helper()
 	rawRoot, storeRoot := t.TempDir(), t.TempDir()
 	cfg := marketruntime.Config{
@@ -49,7 +49,7 @@ func newFixtureService(t *testing.T, provider string) fixtureService {
 	cfg.Resolver = resolver
 	manager, err := marketruntime.New(cfg)
 	require.NoError(t, err)
-	s, err := svcmarketdata.New(manager, nil, svcmarketdata.WithResolver(resolver))
+	s, err := svcmarketdata.New(manager, nil, append([]svcmarketdata.Option{svcmarketdata.WithResolver(resolver)}, opts...)...)
 	require.NoError(t, err)
 	return fixtureService{Service: s, rawRoot: rawRoot, storeRoot: storeRoot}
 }

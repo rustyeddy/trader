@@ -95,6 +95,10 @@ func (m *Manager) Build(ctx context.Context, plan Plan) (BuildResult, error) {
 	if err := ctx.Err(); err != nil {
 		return BuildResult{}, err
 	}
+	if err := m.writeLock.acquire(ctx); err != nil {
+		return BuildResult{}, err
+	}
+	defer m.writeLock.release()
 
 	var result BuildResult
 	for _, action := range plan.Actions {

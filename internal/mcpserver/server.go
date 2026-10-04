@@ -25,7 +25,9 @@
 // trader_version reports the build. trader_instruments and
 // trader_marketdata_coverage (#436) are read-only market-data tools over
 // the MarketData capability: each takes a symbol list and returns one
-// result per symbol (see marketdata.go).
+// result per symbol (see marketdata.go). trader_marketdata_canonicalize
+// and trader_marketdata_update (#432) are their data-mutating
+// counterparts, available only with write access (marketdata_write.go).
 //
 // # Output
 //
@@ -119,6 +121,7 @@ func (s *server) register(srv *mcp.Server) {
 		Description: "Return the Trader build identity serving this MCP session.",
 	}, traderVersion)
 	s.registerMarketData(srv)
+	s.registerMarketDataWrites(srv)
 }
 
 // requireWrites returns ErrWritesDisabled unless the server allows
