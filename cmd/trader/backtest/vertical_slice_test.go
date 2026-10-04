@@ -241,3 +241,45 @@ func TestVerticalSlice_ShowRejectsUnknownRunID(t *testing.T) {
 	})
 	require.Error(t, showCmd.Execute())
 }
+
+// TestVerticalSlice_OutputDirFromEnvironment: with no --output-dir, run
+// and show both use TRADER_BACKTEST_OUTPUT_DIR — the setting trader-mcp
+// resolves the same way (issue #453) — so a run written by either the
+// CLI or trader-mcp is readable by the other.
+func TestVerticalSlice_OutputDirFromEnvironment(t *testing.T) {
+	outputDir := t.TempDir()
+	t.Setenv("TRADER_BACKTEST_OUTPUT_DIR", outputDir)
+
+	runCmd := cmdbacktest.New()
+	var runOut bytes.Buffer
+	runCmd.SetOut(&runOut)
+	runCmd.SetArgs([]string{
+		"run", "--symbol", "EURUSD", "--interval", "H1",
+		"--from", "2024-01-08T00:00:00Z", "--to", "2024-01-08T04:00:00Z",
+		"--adverse-distance", "0.01000", "--initial-margin-ratio", "0.25",
+		"--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(),
+		"--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+	runID := extractRunID(t, runOut.String())
+	assert.FileExists(t, outputDir+"/"+runID+".json")
+
+	showCmd := cmdbacktest.New()
+	var showOut bytes.Buffer
+	showCmd.SetOut(&showOut)
+	showCmd.SetArgs([]string{"show", runID, "--format", "json"})
+	require.NoError(t, showCmd.Execute())
+	assert.Equal(t, runOut.String(), showOut.String())
+
+	missing := cmdbacktest.New()
+	other := []byte(runID)
+	if other[len(other)-1] == 'A' {
+		other[len(other)-1] = 'B'
+	} else {
+		other[len(other)-1] = 'A'
+	}
+	missing.SetArgs([]string{"show", string(other)})
+	missing.SetOut(&bytes.Buffer{})
+	missing.SetErr(&bytes.Buffer{})
+	assert.ErrorContains(t, missing.Execute(), "no stored run with this id")
+}

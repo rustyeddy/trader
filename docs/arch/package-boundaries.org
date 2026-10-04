@@ -62,6 +62,7 @@ external guest executable
 
 cmd/trader -> internal/service -> internal/backtest / internal/pipeline
 cmd/trader, cmd/trader-mcp -> cmd/internal/marketdatacfg -> internal/service/marketdata
+cmd/trader, cmd/trader-mcp -> cmd/internal/backtestcfg -> internal/service/backtest, cmd/internal/marketdatacfg
 cmd/trader-mcp -> internal/mcpserver -> internal/service/*
 internal/backtest -> internal/strategy, broker, journal, public values
 internal/pipeline -> internal/execution, risk, broker

@@ -382,3 +382,47 @@ strategy:
 	require.Len(t, doc.OpenTrades, 1, "the bar-12 bearish cross must still open the allowed short")
 	assert.Equal(t, "short", doc.OpenTrades[0].Side)
 }
+
+// TestRunCLI_StrategyNameFlagSelectsStrategyWithoutConfig: strategy
+// selection is shared with trader-mcp (backtestcfg, issue #453), so the
+// configured strategy.name decides the strategy however it was supplied.
+// Before, --strategy-name ema-cross without --config passed validation as
+// ema-cross but silently ran the buy-and-hold demo.
+func TestRunCLI_StrategyNameFlagSelectsStrategyWithoutConfig(t *testing.T) {
+	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
+	runCmd.SetArgs([]string{
+		"run", "--symbol", "EURUSD", "--interval", "H1",
+		"--from", "2024-03-04T00:00:00Z", "--to", "2024-03-04T14:00:00Z",
+		"--adverse-distance", "0.01000", "--initial-margin-ratio", "0.25",
+		"--strategy-name", "ema-cross", "--fast-period", "3", "--slow-period", "5",
+		"--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(),
+		"--output-dir", t.TempDir(), "--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+
+	var doc struct {
+		Run struct {
+			StrategyName string `json:"strategy_name"`
+		} `json:"run"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &doc))
+	assert.Equal(t, "ema-cross", doc.Run.StrategyName)
+}
+
+// TestRunCLI_EMACrossRejectsSeveralSymbols: ema-cross is single-
+// instrument, so repeating --symbol with it fails instead of silently
+// running only the first symbol (PR #454 review).
+func TestRunCLI_EMACrossRejectsSeveralSymbols(t *testing.T) {
+	runCmd := cmdbacktest.New()
+	runCmd.SetOut(&bytes.Buffer{})
+	runCmd.SetErr(&bytes.Buffer{})
+	runCmd.SetArgs([]string{
+		"run", "--symbol", "EURUSD", "--symbol", "GBPUSD", "--interval", "H1",
+		"--from", "2024-01-08T00:00:00Z", "--to", "2024-01-08T04:00:00Z",
+		"--adverse-distance", "0.01000", "--strategy-name", "ema-cross", "--fast-period", "3", "--slow-period", "5",
+		"--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+	})
+	assert.ErrorContains(t, runCmd.Execute(), "ema-cross trades exactly one instrument; got 2 symbols")
+}

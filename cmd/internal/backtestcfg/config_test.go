@@ -1,4 +1,4 @@
-package backtest
+package backtestcfg
 
 import (
 	"maps"
@@ -28,9 +28,9 @@ strategy:
   slow_period: 50
 `
 
-func loadRunConfig(t *testing.T, yaml string, overrides map[string]string) (runConfig, error) {
+func loadRunConfig(t *testing.T, yaml string, overrides map[string]string) (RunConfig, error) {
 	t.Helper()
-	return config.Load[runConfig](config.Options{
+	return config.Load[RunConfig](config.Options{
 		Environ:     []string{},
 		FileContent: []byte(yaml),
 		Overrides:   overrides,
@@ -81,7 +81,7 @@ backtest:
 
 // TestRunConfig_DataStoreRootExplicitEmptyOverridesDefault proves an
 // explicit empty --data-store-root (what every hermetic test in this
-// package relies on) actually reaches runConfig as "", not the
+// package relies on) actually reaches RunConfig as "", not the
 // default: config.Load's override lookup is a map "found" check, not
 // an emptiness check, so an explicitly-supplied empty string must
 // still count as an override rather than falling through to
@@ -153,7 +153,7 @@ func TestRunConfig_ValidateRejectsInvalidRelationships(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := config.Load[runConfig](config.Options{
+			_, err := config.Load[RunConfig](config.Options{
 				Environ:   []string{},
 				Overrides: tc.overrides,
 			})
@@ -167,7 +167,7 @@ func TestRunConfig_ValidateRejectsInvalidRelationships(t *testing.T) {
 // over a conflicting config-file value (CONTRIBUTING.org's "explicit
 // CLI override > config file > documented defaults" precedence,
 // already implemented generically by config.Load — this test exists
-// to prove runConfig's own tags wire into that precedence correctly).
+// to prove RunConfig's own tags wire into that precedence correctly).
 func TestRunConfig_OverrideBeatsFile(t *testing.T) {
 	cfg, err := loadRunConfig(t, issue247CandidateYAML, map[string]string{
 		"fast-period": "10",
@@ -181,7 +181,7 @@ func TestRunConfig_OverrideBeatsFile(t *testing.T) {
 // TestRunConfig_EquivalentEffectiveConfigFromEitherSource proves
 // #247's own acceptance criterion directly: a config sourced entirely
 // from a YAML file and an equivalent one sourced entirely from
-// overrides produce an identical effective runConfig — and therefore
+// overrides produce an identical effective RunConfig — and therefore
 // an identical Manifest/ConfigDigest downstream, since run.go passes
 // these same fields straight through to backtest.NewManifest without
 // further transformation.
@@ -189,7 +189,7 @@ func TestRunConfig_EquivalentEffectiveConfigFromEitherSource(t *testing.T) {
 	fromFile, err := loadRunConfig(t, issue247CandidateYAML, nil)
 	require.NoError(t, err)
 
-	fromOverrides, err := config.Load[runConfig](config.Options{
+	fromOverrides, err := config.Load[RunConfig](config.Options{
 		Environ: []string{},
 		Overrides: map[string]string{
 			"symbol":           "EURUSD",

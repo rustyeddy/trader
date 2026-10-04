@@ -174,7 +174,11 @@ func calendarForProvider(provider string) marketdata.Calendar {
 // instruments through, and the provider and archive root it was built
 // for. Instruments are registered into Resolver per request.
 type Bundle struct {
-	Service     *svc.Service
+	Service *svc.Service
+	// Manager is the Service's Manager, for composition that needs it
+	// directly (a backtest reads bars through it; service/backtest takes
+	// it). Transports never receive it (ADR-068).
+	Manager     *marketruntime.Manager
 	Resolver    *instrument.MemoryResolver
 	Provider    string
 	ArchiveRoot string
@@ -261,5 +265,5 @@ func newBundle(cfg Config, logger *slog.Logger, writeLock *marketruntime.WriteLo
 		return Bundle{}, err
 	}
 
-	return Bundle{Service: service, Resolver: resolver, Provider: cfg.Provider, ArchiveRoot: cfg.ArchiveRoot, writeLock: writeLock}, nil
+	return Bundle{Service: service, Manager: manager, Resolver: resolver, Provider: cfg.Provider, ArchiveRoot: cfg.ArchiveRoot, writeLock: writeLock}, nil
 }

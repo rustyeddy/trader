@@ -1,65 +1,24 @@
 // Package backtest is the "trader backtest" command group (issue
-// #222, M5-14): a thin CLI transport over service/backtest's own
-// application service (ADR-022). Every leaf command parses its own
-// flags into a service/backtest.RunRequest (or reads back a
-// previously persisted report.BacktestReport), delegates the complete
-// use case to service/backtest.Service, and renders the result via
-// the report package's own Org/text/JSON renderers (issue #220) — this
-// package contains no strategy, execution, risk, or metric business
-// logic of its own, and never calls backtest.NewRunner/NewScheduler/
-// NewReplay directly (boundary_test.go enforces this mechanically).
-//
-// # Strategy selection paths
-//
-// "trader backtest run" selects between exactly three strategies by
-// which of --config/--strategy-exec is given (mutually exclusive with
-// each other). --config selects a registered in-process strategy by
-// the YAML file's strategy.name:
-//
-//   - Neither flag: an unexported demoStrategy (demo_strategy.go)
-//     that enters long once per requested instrument, on that
-//     instrument's own first bar, and never trades that instrument
-//     again. --symbol may be repeated (issue #224, M5-16) to run a
-//     multi-instrument portfolio backtest with it — one Scheduler and
-//     one shared account/pipeline still replay every requested
-//     instrument, never a per-symbol engine. demoStrategy exists
-//     solely so this command is genuinely executable end to end
-//     without any real strategy configured; it is not a real trading
-//     strategy.
-//   - With --config: an in-process strategy selected by strategy.name.
-//     The built-in buy-and-hold baseline and strategy/emacross are
-//     currently registered; strategy-specific fields are interpreted
-//     only by the selected strategy. Its FillPriceSource (nextBarOpenPriceSource,
-//     service.go) is a general per-bar-lookup implementation, unlike
-//     demoStrategy's precomputed single-fill price, because a
-//     crossover strategy enters, exits, and re-enters at run-dependent
-//     bars.
-//   - With --strategy-exec (issue #382): an out-of-tree strategy
-//     executable, launched via adapters/strategy/external.Launch
-//     (ADR-063) and driven over Strategy Protocol v1 (ADR-062) exactly
-//     like any other strategy.Strategy from here on — run.go's own
-//     strategy-selection branch is the composition root that owns
-//     Process construction and its Stop-on-return lifecycle; Scheduler
-//     and the rest of the M5 pipeline never know the strategy they are
-//     driving is out-of-process. Its own Descriptor (received at
-//     Handshake), not --symbol, determines the replay universe;
-//     --symbol/--interval still control what canonical data this
-//     command publishes beforehand, and must cover whatever the
-//     executable will actually request. Like nextBarOpenPriceSource
-//     above, it gets a general per-bar-lookup FillPriceSource, since an
-//     external strategy's entry/exit timing is exactly as
-//     run-dependent as EMA crossover's.
-//
-// service/backtest.RunRequest.Strategy remains the real application
-// contract either way; this command constructs a concrete value for
-// it, never a second orchestration path.
+// #222, M5-14): a thin CLI transport (ADR-022). "run" parses its flags,
+// --config file, and environment into a backtestcfg.RunConfig, opens the
+// market data and optional --journal for this invocation, and runs the
+// backtest through backtestcfg.Run — the shared composition trader-mcp
+// also uses (issue #453, ADR-069) — then persists the report through
+// service/backtest.RunStore and renders it with the report package's
+// Org/text/JSON renderers (issue #220). "show" reads a persisted report
+// back and renders it. This package contains no strategy, execution,
+// risk, or metric business logic of its own, and never calls
+// backtest.NewRunner/NewScheduler/NewReplay directly (boundary_test.go
+// enforces this mechanically). See backtestcfg's package doc for how a
+// strategy is selected.
 //
 // # Persisted run snapshots, not journal replay
 //
 // "run" computes a report.BacktestReport exactly once (via
-// report.NewBacktestReport) and persists that same projection as a
-// small, schema-versioned JSON artifact under --output-dir
-// (store.go). "show <run-id>" reads that artifact back and renders it
+// service/backtest.NewReport) and persists that same projection as a
+// small, schema-versioned JSON artifact under the output directory
+// (--output-dir, backtest.output_dir, or TRADER_BACKTEST_OUTPUT_DIR;
+// default ./backtest-runs) through service/backtest.RunStore. "show <run-id>" reads that artifact back and renders it
 // — zero backtest orchestration, zero metric recomputation. An
 // optional durable journal (adapters/journal/jsonl, --journal) may
 // additionally be written during "run" as a lower-level audit trail,
@@ -78,8 +37,8 @@
 // placeholder — so canonical market data built from --data-raw-root
 // survives across invocations instead of being rebuilt from the raw
 // archive into a fresh temporary directory every run. This default is
-// resolved through the same runConfig/backtestSection config-loading
-// path (experimentconfig.go) as every other backtest setting, so an
+// resolved through the same backtestcfg.RunConfig config-loading
+// path (config.go) as every other backtest setting, so an
 // explicit --data-store-root flag, a --config file value, or a
 // TRADER_BACKTEST_DATA_STORE_ROOT environment variable all still take
 // precedence over it in that order. An explicit empty value at any of
