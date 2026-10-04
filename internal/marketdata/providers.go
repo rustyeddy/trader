@@ -65,6 +65,32 @@ const (
 	CredentialsKeyPair
 )
 
+// ArchiveKind names the native archive format a provider's raw data
+// arrives in, and so which converter imports it. It is a kind, not a
+// yes/no capability: each archive format has its own converter, and a
+// provider registered with a kind Trader has no converter for fails
+// rather than being run through another provider's.
+type ArchiveKind uint8
+
+const (
+	// ArchiveNone: the provider's raw data does not arrive as an archive.
+	ArchiveNone ArchiveKind = iota
+	// ArchiveStooqZIP is Stooq's daily ZIP of <symbol>.us.txt members,
+	// converted by ImportStooqArchive (service: ConvertStooqArchive).
+	ArchiveStooqZIP
+)
+
+func (a ArchiveKind) String() string {
+	switch a {
+	case ArchiveNone:
+		return "none"
+	case ArchiveStooqZIP:
+		return "stooq-zip"
+	default:
+		return fmt.Sprintf("ArchiveKind(%d)", uint8(a))
+	}
+}
+
 // ProviderInfo is everything Trader knows about a market-data provider
 // beyond its adapter implementation (issue #441): the one authoritative
 // place composition and services read provider facts from, instead of
@@ -88,17 +114,16 @@ type ProviderInfo struct {
 	LiveAcquisition bool
 	// Credentials is what live acquisition authenticates with.
 	Credentials Credentials
-	// NativeArchive reports that raw data arrives by converting the
-	// provider's downloaded native archive (ImportStooqArchive) rather
-	// than by live acquisition.
-	NativeArchive bool
+	// Archive is the native archive format the provider's raw data
+	// arrives in (ArchiveNone if it does not), selecting its converter.
+	Archive ArchiveKind
 }
 
 // providers is the registry, sorted by Name.
 var providers = []ProviderInfo{
 	{Name: "alpaca", AssetClass: AssetClassUSEquity, Calendar: CalendarUSEquity, LiveAcquisition: true, Credentials: CredentialsKeyPair},
 	{Name: "oanda", AssetClass: AssetClassFX, Calendar: CalendarFX, LiveAcquisition: true, Credentials: CredentialsToken},
-	{Name: "stooq", AssetClass: AssetClassUSEquity, Calendar: CalendarUSEquity, Credentials: CredentialsNone, NativeArchive: true},
+	{Name: "stooq", AssetClass: AssetClassUSEquity, Calendar: CalendarUSEquity, Credentials: CredentialsNone, Archive: ArchiveStooqZIP},
 }
 
 // LookupProvider returns name's ProviderInfo, or ErrUnknownProvider.

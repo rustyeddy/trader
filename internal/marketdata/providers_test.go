@@ -21,7 +21,7 @@ func TestProviderRegistry(t *testing.T) {
 
 	stooq, err := LookupProvider("stooq")
 	require.NoError(t, err)
-	assert.Equal(t, ProviderInfo{Name: "stooq", AssetClass: AssetClassUSEquity, Calendar: CalendarUSEquity, NativeArchive: true}, stooq)
+	assert.Equal(t, ProviderInfo{Name: "stooq", AssetClass: AssetClassUSEquity, Calendar: CalendarUSEquity, Archive: ArchiveStooqZIP}, stooq)
 
 	for _, name := range []string{"", "OANDA", "bloomberg"} {
 		_, err := LookupProvider(name)
@@ -43,6 +43,9 @@ func TestProviderEnumStrings(t *testing.T) {
 	assert.Equal(t, "fx", CalendarFX.String())
 	assert.Equal(t, "us-equity", CalendarUSEquity.String())
 	assert.Equal(t, "CalendarKind(9)", CalendarKind(9).String())
+	assert.Equal(t, "none", ArchiveNone.String())
+	assert.Equal(t, "stooq-zip", ArchiveStooqZIP.String())
+	assert.Equal(t, "ArchiveKind(9)", ArchiveKind(9).String())
 }
 
 func TestNew_RejectsUnknownProvider(t *testing.T) {

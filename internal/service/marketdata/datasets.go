@@ -196,8 +196,8 @@ type CanonicalizeOptions struct {
 // CanonicalizeDatasets builds canonical data from each instrument's
 // provider-native data through the existing Plan/Build path:
 //
-//   - for a provider whose data arrives as a native archive
-//     (ProviderInfo.NativeArchive: stooq), by converting the
+//   - for a provider whose data arrives as a Stooq ZIP archive
+//     (ProviderInfo.Archive: ArchiveStooqZIP), by converting the
 //     instrument's native archive
 //     (ConvertStooqArchive: opts.ArchivePath, or discovery under the
 //     Service's archive root), or, when no archive is found, from raw
@@ -221,7 +221,11 @@ func (s *Service) CanonicalizeDatasets(ctx context.Context, req DatasetsRequest,
 
 func (s *Service) canonicalizeOne(ctx context.Context, req DatasetsRequest, opts CanonicalizeOptions, res *DatasetResult, symbol string, before marketruntime.Inventory) error {
 	dataset := DatasetRequest{Instrument: res.Instrument, Interval: req.Interval, Range: req.Range}
-	if s.manager.Provider().NativeArchive {
+	stooqZIP, err := archiveConversion(s.manager.Provider())
+	if err != nil {
+		return err
+	}
+	if stooqZIP {
 		done, err := s.stooqConvert(ctx, res, dataset, symbol, opts.ArchivePath, opts.Force, before, DatasetBuilt)
 		if done || err != nil {
 			return err
@@ -331,7 +335,11 @@ func (s *Service) updateOne(ctx context.Context, req DatasetsRequest, res *Datas
 		dataset.Range = rng
 	}
 	res.Range = dataset.Range
-	if s.manager.Provider().NativeArchive {
+	stooqZIP, err := archiveConversion(s.manager.Provider())
+	if err != nil {
+		return err
+	}
+	if stooqZIP {
 		done, err := s.stooqConvert(ctx, res, dataset, symbol, "", false, before, DatasetUpdated)
 		if done || err != nil {
 			return err
@@ -345,6 +353,21 @@ func (s *Service) updateOne(ctx context.Context, req DatasetsRequest, res *Datas
 	res.Update = &upd
 	res.recordPublished(upd.Build.Result, DatasetUpdated)
 	return err
+}
+
+// archiveConversion reports whether info's raw data arrives as a Stooq
+// ZIP, the one archive kind with a converter here (stooqConvert). A
+// provider registered with any other archive kind fails, rather than
+// being run through the Stooq converter (ADR-071).
+func archiveConversion(info marketruntime.ProviderInfo) (stooqZIP bool, err error) {
+	switch info.Archive {
+	case marketruntime.ArchiveNone:
+		return false, nil
+	case marketruntime.ArchiveStooqZIP:
+		return true, nil
+	default:
+		return false, fmt.Errorf("provider %q: no converter for archive kind %s", info.Name, info.Archive)
+	}
 }
 
 // recordPublished counts build's publications and sets the status: done
