@@ -34,7 +34,10 @@ func KnownProviders() []string { return marketruntime.ProviderNames() }
 // The default provider is built eagerly by NewFactory, so configuration
 // errors surface at startup; any other provider is built on first use,
 // and a failed build is not cached, so its error is reported on each
-// attempt. A Bundle holds no closable resources.
+// attempt. Construction is coordinated per provider (providerSlot):
+// concurrent first uses of one provider build it once, and no provider's
+// build ever delays another provider's lookup or build. A Bundle holds
+// no closable resources.
 //
 // The Service owns its resolver and archive root (issue #448), so a
 // transport never sees either.
@@ -51,20 +54,51 @@ func KnownProviders() []string { return marketruntime.ProviderNames() }
 type Factory struct {
 	base   Config
 	logger *slog.Logger
-	locks  map[string]*marketruntime.WriteLock // per provider; fixed at construction
+	// slots holds one entry per registered provider. The map is filled
+	// by NewFactory and never written again, so reading it needs no
+	// lock; each slot coordinates its own provider only.
+	slots map[string]*providerSlot
+	// build constructs a provider's Bundle; it is f.buildBundle except
+	// in tests, which substitute it to observe coordination.
+	build func(provider string) (Bundle, error)
+}
 
-	mu      sync.Mutex
-	bundles map[string]Bundle // built so far, by provider
+// providerSlot is one provider's construction state. Its mutex makes
+// concurrent first uses of the provider build once and share the result,
+// while other providers' slots — cached lookups and first builds alike —
+// are never held up by it. A failed build stores nothing, so the next
+// call retries.
+type providerSlot struct {
+	writeLock *marketruntime.WriteLock // the provider's, shared by its Manager
+
+	mu     sync.Mutex
+	bundle *Bundle // nil until built
+}
+
+// get returns the slot's Bundle, building it with build on first use.
+func (s *providerSlot) get(build func() (Bundle, error)) (Bundle, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.bundle != nil {
+		return *s.bundle, nil
+	}
+	b, err := build()
+	if err != nil {
+		return Bundle{}, err
+	}
+	s.bundle = &b
+	return b, nil
 }
 
 // NewFactory returns a Factory over base, an unresolved Config as Load
 // returns it. It builds the base provider's Bundle eagerly, to fail fast
 // on invalid configuration (for example a one-sided Alpaca credential).
 func NewFactory(base Config, logger *slog.Logger) (*Factory, error) {
-	f := &Factory{base: base, logger: logger, locks: map[string]*marketruntime.WriteLock{}, bundles: map[string]Bundle{}}
+	f := &Factory{base: base, logger: logger, slots: map[string]*providerSlot{}}
 	for _, p := range marketruntime.ProviderNames() {
-		f.locks[p] = marketruntime.NewWriteLock()
+		f.slots[p] = &providerSlot{writeLock: marketruntime.NewWriteLock()}
 	}
+	f.build = f.buildBundle
 	if _, err := f.Bundle(base.Provider); err != nil {
 		return nil, err
 	}
@@ -93,24 +127,16 @@ func (f *Factory) Bundle(provider string) (Bundle, error) {
 	if provider == "" {
 		provider = f.base.Provider
 	}
-	if _, err := marketruntime.LookupProvider(provider); err != nil {
+	slot, ok := f.slots[provider]
+	if !ok {
+		_, err := marketruntime.LookupProvider(provider)
 		return Bundle{}, err
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if b, ok := f.bundles[provider]; ok {
-		return b, nil
-	}
-	b, err := f.build(provider)
-	if err != nil {
-		return Bundle{}, err
-	}
-	f.bundles[provider] = b
-	return b, nil
+	return slot.get(func() (Bundle, error) { return f.build(provider) })
 }
 
-// build constructs provider's Bundle, resolving its roots.
-func (f *Factory) build(provider string) (Bundle, error) {
+// buildBundle constructs provider's Bundle, resolving its roots.
+func (f *Factory) buildBundle(provider string) (Bundle, error) {
 	cfg := f.base
 	if provider != f.base.Provider {
 		cfg.Provider = provider
@@ -127,7 +153,7 @@ func (f *Factory) build(provider string) (Bundle, error) {
 		}
 		cfg.ArchiveRoot = filepath.Join(dir, "archive", cfg.Provider)
 	}
-	b, err := newBundle(cfg, f.logger, f.locks[cfg.Provider])
+	b, err := newBundle(cfg, f.logger, f.slots[cfg.Provider].writeLock)
 	if err != nil {
 		return Bundle{}, fmt.Errorf("market data for provider %q: %w", cfg.Provider, err)
 	}

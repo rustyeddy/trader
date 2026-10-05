@@ -2,9 +2,11 @@ package marketdatacfg
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,7 +130,7 @@ func TestFactory_FailedBuildIsNotCached(t *testing.T) {
 		_, err := f.Bundle("alpaca")
 		require.Error(t, err, "attempt %d", i+1)
 	}
-	assert.NotContains(t, f.bundles, "alpaca")
+	assert.Nil(t, f.slots["alpaca"].bundle, "nothing stored, so the next call retries")
 }
 
 // TestFactory_ConcurrentFirstUseBuildsOnce: concurrent first requests for
@@ -154,4 +156,107 @@ func TestFactory_ConcurrentFirstUseBuildsOnce(t *testing.T) {
 	for _, m := range managers[1:] {
 		assert.Same(t, managers[0], m)
 	}
+}
+
+// slowBuilds wraps f's build: the named provider's build blocks until
+// release is closed, after signaling started; every build is counted.
+type slowBuilds struct {
+	mu       sync.Mutex
+	counts   map[string]int
+	started  chan struct{}
+	release  chan struct{}
+	provider string
+	next     func(string) (Bundle, error)
+}
+
+func blockBuild(f *Factory, provider string) *slowBuilds {
+	s := &slowBuilds{counts: map[string]int{}, started: make(chan struct{}, 64), release: make(chan struct{}), provider: provider, next: f.build}
+	f.build = func(p string) (Bundle, error) {
+		s.mu.Lock()
+		s.counts[p]++
+		s.mu.Unlock()
+		if p == s.provider {
+			s.started <- struct{}{}
+			<-s.release
+		}
+		return s.next(p)
+	}
+	return s
+}
+
+func (s *slowBuilds) count(p string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.counts[p]
+}
+
+// TestFactory_ProvidersBuildIndependently: while one provider's first
+// build is in progress, other providers' lookups — cached or first-use —
+// are not held up, and concurrent first uses of the slow provider wait for
+// its one build instead of starting their own (PR #458 review).
+func TestFactory_ProvidersBuildIndependently(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f, err := NewFactory(Config{StoreRoot: t.TempDir(), Provider: "oanda"}, discard()) // oanda built
+	require.NoError(t, err)
+	slow := blockBuild(f, "alpaca")
+
+	const waiters = 8
+	alpaca := make(chan Bundle, waiters)
+	for i := 0; i < waiters; i++ {
+		go func() {
+			b, err := f.Bundle("alpaca")
+			assert.NoError(t, err)
+			alpaca <- b
+		}()
+	}
+	<-slow.started // alpaca's build is now blocked, holding only its own slot
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := f.Bundle("") // cached oanda
+		assert.NoError(t, err)
+		_, err = f.Bundle("stooq") // first-use stooq
+		assert.NoError(t, err)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("other providers were blocked by alpaca's in-progress build")
+	}
+	assert.Empty(t, alpaca, "alpaca callers are still waiting on its one build")
+
+	close(slow.release)
+	first := <-alpaca
+	for i := 1; i < waiters; i++ {
+		assert.Same(t, first.Manager, (<-alpaca).Manager, "every waiter shares the one build")
+	}
+	assert.Equal(t, 1, slow.count("alpaca"), "concurrent first uses coalesce")
+	assert.Equal(t, 1, slow.count("stooq"))
+	assert.Equal(t, 0, slow.count("oanda"), "a cached provider is not rebuilt")
+}
+
+// TestFactory_FailedBuildRetriesThenCaches: after a failed build the next
+// call builds again; once a build succeeds it is reused.
+func TestFactory_FailedBuildRetriesThenCaches(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f, err := NewFactory(Config{StoreRoot: t.TempDir(), Provider: "oanda"}, discard())
+	require.NoError(t, err)
+	builds, next := 0, f.build
+	f.build = func(p string) (Bundle, error) {
+		builds++
+		if builds == 1 {
+			return Bundle{}, errors.New("transient")
+		}
+		return next(p)
+	}
+
+	_, err = f.Bundle("stooq")
+	require.Error(t, err)
+	a, err := f.Bundle("stooq")
+	require.NoError(t, err, "retried after the failure")
+	b, err := f.Bundle("stooq")
+	require.NoError(t, err)
+	assert.Same(t, a.Manager, b.Manager)
+	assert.Equal(t, 2, builds, "one failure, one success, then reuse")
 }
