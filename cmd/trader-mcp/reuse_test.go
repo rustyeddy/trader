@@ -61,10 +61,22 @@ func TestConcurrentCallsShareProviderServices(t *testing.T) {
 					if !assert.False(t, res.IsError, "%s: %s", c.tool, toolText(res)) {
 						return
 					}
-					if c.tool != "trader_instruments" {
+					out := res.StructuredContent.(map[string]any)
+					switch c.tool {
+					case "trader_marketdata_canonicalize":
+						// A per-symbol failure is reported in the result,
+						// not as a call error.
+						assert.Equal(t, true, out["ok"], "canonicalize: %v", out["results"])
+						return
+					case "trader_marketdata_coverage":
+						for _, item := range out["results"].([]any) {
+							assert.Empty(t, item.(map[string]any)["error"], "coverage: %v", item)
+						}
+						return
+					case "trader_run_backtest":
 						return
 					}
-					for _, item := range res.StructuredContent.(map[string]any)["instruments"].([]any) {
+					for _, item := range out["instruments"].([]any) {
 						inst := item.(map[string]any)
 						assert.Empty(t, inst["error"], inst["symbol"])
 						mu.Lock()

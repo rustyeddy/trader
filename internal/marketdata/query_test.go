@@ -506,19 +506,26 @@ func TestManagerBars_CacheNeverOutlivesTheFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, mgr.cache.len())
 
-	// Republished by "someone else": a store the Manager does not own.
-	other := newCanonicalCSVStore(mgr.storeRoot)
+	// Republished by "someone else" (a store the Manager does not own),
+	// with the same size and modification time as the cached file: only
+	// the contents differ, so neither size nor timestamps can tell.
+	path, err := key.path(mgr.storeRoot)
+	require.NoError(t, err)
+	before, err := os.Stat(path)
+	require.NoError(t, err)
 	m2 := m
-	m2.BuilderVersion = "builder-v2"
-	time.Sleep(10 * time.Millisecond) // a distinct modification time on coarse filesystems
-	require.NoError(t, other.publish(context.Background(), key, m2, bs))
+	m2.BuilderVersion = "builder-v9" // the same length as builder-v1
+	require.NoError(t, newCanonicalCSVStore(mgr.storeRoot).publish(context.Background(), key, m2, bs))
+	require.NoError(t, os.Chtimes(path, before.ModTime(), before.ModTime()))
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, before.Size(), after.Size(), "same size")
+	require.True(t, before.ModTime().Equal(after.ModTime()), "same modification time")
 	reader, err := mgr.Bars(context.Background(), query)
 	require.NoError(t, err)
 	require.Len(t, reader.Manifests(), 1)
-	assert.Equal(t, "builder-v2", reader.Manifests()[0].BuilderVersion, "the republished partition, not the cached one")
+	assert.Equal(t, "builder-v9", reader.Manifests()[0].BuilderVersion, "the republished partition, not the cached one")
 
-	path, err := key.path(mgr.storeRoot)
-	require.NoError(t, err)
 	require.NoError(t, os.Remove(path))
 	_, err = mgr.Bars(context.Background(), query)
 	require.Error(t, err, "a removed partition is not served from the cache")

@@ -297,8 +297,8 @@ func (m *Manager) readAllBars(ctx context.Context, query BarQuery) ([]marketdata
 // only path Bars uses to reach the store, so caching is transparent to
 // every caller of Bars.
 //
-// A cached partition is served only while its file is unchanged
-// (partitionVersion): a long-lived Manager (trader-mcp keeps one per
+// A cached partition is served only while its file's contents are
+// unchanged (partitionVersion, a digest of the bytes): a long-lived Manager (trader-mcp keeps one per
 // provider, issue #442) must see a partition another Manager or process
 // republished, exactly as a freshly built one would. If the file changes
 // between the version check and the load, the entry is stored under the
