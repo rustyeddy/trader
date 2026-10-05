@@ -296,15 +296,26 @@ func (m *Manager) readAllBars(ctx context.Context, query BarQuery) ([]marketdata
 // m.cache when present and populating the cache on a miss. It is the
 // only path Bars uses to reach the store, so caching is transparent to
 // every caller of Bars.
+//
+// A cached partition is served only while its file's contents are
+// unchanged (partitionVersion, a digest of the bytes): a long-lived Manager (trader-mcp keeps one per
+// provider, issue #442) must see a partition another Manager or process
+// republished, exactly as a freshly built one would. If the file changes
+// between the version check and the load, the entry is stored under the
+// older version and simply reloaded on the next read.
 func (m *Manager) loadPartition(ctx context.Context, key partitionKey) (marketdata.Manifest, marketdata.BarSet, error) {
-	if man, bs, ok := m.cache.get(key); ok {
-		return man, bs, nil
+	version, verErr := m.store.version(ctx, key)
+	if verErr == nil {
+		if man, bs, cached, ok := m.cache.getVersioned(key); ok && cached == version {
+			return man, bs, nil
+		}
 	}
 	man, bs, err := m.store.load(ctx, key)
 	if err != nil {
+		m.cache.invalidate(key)
 		return marketdata.Manifest{}, marketdata.BarSet{}, err
 	}
-	m.cache.put(key, man, bs)
+	m.cache.putVersioned(key, man, bs, version)
 	return man, bs, nil
 }
 

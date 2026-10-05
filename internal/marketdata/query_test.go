@@ -445,27 +445,91 @@ func TestManagerBars_NotConfiguredReportsError(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidConfig)
 }
 
-func TestManagerBars_ServedFromCacheAfterFileRemoved(t *testing.T) {
+// countingStore counts canonical loads per partition, to tell a cache
+// hit from a reload.
+type countingStore struct {
+	*canonicalCSVStore
+	mu    sync.Mutex
+	loads map[partitionKey]int
+}
+
+func (c *countingStore) load(ctx context.Context, key partitionKey) (marketdata.Manifest, marketdata.BarSet, error) {
+	c.mu.Lock()
+	c.loads[key]++
+	c.mu.Unlock()
+	return c.canonicalCSVStore.load(ctx, key)
+}
+
+func (c *countingStore) loadCount(key partitionKey) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.loads[key]
+}
+
+func newCountingManager(t *testing.T) (*Manager, *countingStore) {
+	t.Helper()
+	root := t.TempDir()
+	store := &countingStore{canonicalCSVStore: newCanonicalCSVStore(root), loads: map[partitionKey]int{}}
+	m, err := New(Config{Clock: testClock(), StoreRoot: root, Resolver: testResolver(t), ProviderName: "oanda", store: store})
+	require.NoError(t, err)
+	return m, store
+}
+
+// TestManagerBars_CacheServesUnchangedFile: an unchanged partition file
+// is served from the cache without reloading it.
+func TestManagerBars_CacheServesUnchangedFile(t *testing.T) {
+	mgr, store := newCountingManager(t)
+	m, bs := validManifest(t), validBarSet(t)
+	publishTestPartition(t, mgr, validPartitionKey(t), m, bs)
+	query := BarQuery{Instrument: eurusd(), Interval: marketdata.H1, Range: m.Span}
+
+	key := validPartitionKey(t)
+	_, err := mgr.Bars(context.Background(), query)
+	require.NoError(t, err)
+	require.Equal(t, 1, store.loadCount(key))
+	_, err = mgr.Bars(context.Background(), query)
+	require.NoError(t, err)
+	assert.Equal(t, 1, store.loadCount(key), "the second read of the unchanged partition is a cache hit")
+}
+
+// TestManagerBars_CacheNeverOutlivesTheFile is the issue #442 contract:
+// a long-lived Manager sees the store as a freshly built one would. A
+// partition removed or republished behind its back (by another Manager
+// or process) is not served from the cache.
+func TestManagerBars_CacheNeverOutlivesTheFile(t *testing.T) {
 	mgr := newTestManager(t)
 	key := validPartitionKey(t)
-	m := validManifest(t)
-	bs := validBarSet(t)
+	m, bs := validManifest(t), validBarSet(t)
 	publishTestPartition(t, mgr, key, m, bs)
-
-	// Prime the cache.
-	_, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: marketdata.H1, Range: m.Span})
+	query := BarQuery{Instrument: eurusd(), Interval: marketdata.H1, Range: m.Span}
+	_, err := mgr.Bars(context.Background(), query)
 	require.NoError(t, err)
-	assert.Equal(t, 1, mgr.cache.len())
+	require.Equal(t, 1, mgr.cache.len())
 
+	// Republished by "someone else" (a store the Manager does not own),
+	// with the same size and modification time as the cached file: only
+	// the contents differ, so neither size nor timestamps can tell.
 	path, err := key.path(mgr.storeRoot)
 	require.NoError(t, err)
-	require.NoError(t, os.Remove(path))
-
-	// Second query must still succeed: it should be served from cache,
-	// not re-read the now-missing file.
-	reader, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: marketdata.H1, Range: m.Span})
+	before, err := os.Stat(path)
 	require.NoError(t, err)
-	assert.Len(t, reader.Manifests(), 1)
+	m2 := m
+	m2.BuilderVersion = "builder-v9" // the same length as builder-v1
+	require.NoError(t, newCanonicalCSVStore(mgr.storeRoot).publish(context.Background(), key, m2, bs))
+	require.NoError(t, os.Chtimes(path, before.ModTime(), before.ModTime()))
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, before.Size(), after.Size(), "same size")
+	require.True(t, before.ModTime().Equal(after.ModTime()), "same modification time")
+	reader, err := mgr.Bars(context.Background(), query)
+	require.NoError(t, err)
+	require.Len(t, reader.Manifests(), 1)
+	assert.Equal(t, "builder-v9", reader.Manifests()[0].BuilderVersion, "the republished partition, not the cached one")
+
+	require.NoError(t, os.Remove(path))
+	_, err = mgr.Bars(context.Background(), query)
+	require.Error(t, err, "a removed partition is not served from the cache")
+	assert.Equal(t, 0, mgr.cache.len(), "and is evicted")
 }
 
 func TestManagerBars_InvalidateForcesReload(t *testing.T) {

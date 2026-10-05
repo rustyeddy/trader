@@ -3,9 +3,11 @@ package marketdata
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -836,4 +838,38 @@ func (s *canonicalCSVStore) months(ctx context.Context, provider, symbol string,
 		}
 	}
 	return out, nil
+}
+
+// partitionVersion identifies the exact contents of a partition file: a
+// SHA-256 digest of its bytes. Any change to the file — a republish by
+// this or another Manager or process, or an out-of-band replacement,
+// whatever its size or modification time — changes it. The zero value
+// matches no file.
+type partitionVersion struct {
+	digest [sha256.Size]byte
+}
+
+// version digests key's partition file. Reading the bytes is the cost of
+// an exact answer; the expensive part of a load — parsing and validating
+// every row — is what the cache still saves.
+func (s *canonicalCSVStore) version(ctx context.Context, key partitionKey) (partitionVersion, error) {
+	if err := ctx.Err(); err != nil {
+		return partitionVersion{}, err
+	}
+	path, err := key.path(s.rootDir)
+	if err != nil {
+		return partitionVersion{}, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return partitionVersion{}, err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return partitionVersion{}, err
+	}
+	var v partitionVersion
+	copy(v.digest[:], h.Sum(nil))
+	return v, nil
 }
