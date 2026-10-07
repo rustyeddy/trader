@@ -179,6 +179,7 @@ the original decided, use full supersession instead.
 | 069 | Shared transport application behavior and repeatable service operations (in adr-069-shared-transport-application-behavior.org) | Accepted, partial amendment of 039, 040, 068 |
 | 070 | Consumer-defined MCP market-data capability and service-owned resolution (in adr-070-mcp-market-data-capability-interface.org) | Accepted, partial amendment of 068 |
 | 071 | One market-data provider registry (in adr-071-market-data-provider-registry.org) | Accepted |
+| 072 | Incremental Stooq raw import (in adr-072-stooq-incremental-import.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

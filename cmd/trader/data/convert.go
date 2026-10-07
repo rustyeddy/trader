@@ -53,11 +53,13 @@ func newConvertCmd() *cobra.Command {
 			}
 			imported := 0
 			months := 0
+			note := ""
 			if res.Convert != nil {
-				imported, months = res.Convert.Import.RowsImported, res.Convert.Import.MonthsWritten
+				imported, months = res.Convert.Import.RowsAdded, res.Convert.Import.MonthsWritten
+				note = fullReimportNote(res.Convert.Import.FullReimport)
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "imported %d rows across %d raw months; published %d canonical partitions\n",
-				imported, months, res.PublishedPartitions)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "imported %d rows across %d raw months%s; published %d canonical partitions\n",
+				imported, months, note, res.PublishedPartitions)
 			return err
 		},
 	}

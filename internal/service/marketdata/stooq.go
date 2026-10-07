@@ -113,7 +113,9 @@ type ConvertStooqArchiveRequest struct {
 	// ArchiveRoot is searched when ArchivePath is empty. When it is empty
 	// too, the Service's own archive root (WithArchiveRoot) is used.
 	ArchiveRoot string
-	// Force rebuilds canonical partitions even when they are current.
+	// Force rebuilds canonical partitions even when they are current and
+	// re-imports the whole export instead of merging only the rows after
+	// the last raw date.
 	Force bool
 }
 
@@ -135,7 +137,7 @@ func (s *Service) ConvertStooqArchive(ctx context.Context, req ConvertStooqArchi
 	}
 	defer func() {
 		s.logOutcome(ctx, slog.LevelInfo, "stooq archive convert completed", "stooq archive convert failed", req.DatasetRequest, err,
-			"symbol", symbol, "rows_imported", resp.Import.RowsImported, "published_partitions", len(resp.Build.Result.Published))
+			"symbol", symbol, "rows_imported", resp.Import.RowsImported, "rows_added", resp.Import.RowsAdded, "full_reimport", resp.Import.FullReimport, "published_partitions", len(resp.Build.Result.Published))
 	}()
 	archivePath := req.ArchivePath
 	if archivePath == "" {

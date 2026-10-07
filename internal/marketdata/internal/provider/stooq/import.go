@@ -34,6 +34,14 @@ type ImportResult struct {
 	// FirstDate and LastDate are the earliest and latest record dates
 	// imported.
 	FirstDate, LastDate time.Time
+	// RowsAdded is the number of rows that were new to the raw archive.
+	// ImportArchive reports every row; MergeArchive reports only rows
+	// after the archive's previous last date.
+	RowsAdded int
+	// FullReimport is set by MergeArchive when it fell back to a full
+	// re-import because the export disagreed with the existing raw
+	// archive (see MergeArchive).
+	FullReimport bool
 }
 
 // Import reads csvPath — Stooq's own native daily-history CSV export
@@ -49,9 +57,9 @@ type ImportResult struct {
 // caller-supplied local file). Running Import again over an updated
 // Stooq export is how the raw archive for symbol is brought current;
 // Import always overwrites whatever monthly partitions it touches
-// (WritePartition's mustNotExist=false), since it has no partial/
-// incremental mode — it is intended to be re-run over the full export
-// each time, not diffed against the existing archive.
+// (WritePartition's mustNotExist=false) and has no incremental mode.
+// MergeArchive (ADR-072) is the incremental form, for the archive-format
+// files ImportArchive reads.
 //
 // # Validation layering
 //
@@ -156,31 +164,43 @@ func Import(ctx context.Context, csvPath, rawRoot, symbol string) (ImportResult,
 // Only daily rows (period D) are supported in this first slice.
 func ImportArchive(ctx context.Context, csvPath, rawRoot, symbol string) (ImportResult, error) {
 	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	records, err := readArchive(ctx, csvPath, symbol)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	return writeImportedRecords(ctx, rawRoot, symbol, records)
+}
+
+// readArchive parses every row of one native Stooq archive file for
+// symbol (already upper-cased) in source order, without touching any
+// raw partition. ImportArchive and MergeArchive share it so both reject
+// malformed input identically, before either writes anything.
+func readArchive(ctx context.Context, csvPath, symbol string) ([]Record, error) {
 	if symbol == "" {
-		return ImportResult{}, fmt.Errorf("%w: symbol is required", ErrMalformedData)
+		return nil, fmt.Errorf("%w: symbol is required", ErrMalformedData)
 	}
 	f, err := os.Open(csvPath)
 	if err != nil {
-		return ImportResult{}, fmt.Errorf("stooq: archive import: %w", err)
+		return nil, fmt.Errorf("stooq: archive import: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			return ImportResult{}, fmt.Errorf("stooq: archive import: %w", err)
+			return nil, fmt.Errorf("stooq: archive import: %w", err)
 		}
-		return ImportResult{}, fmt.Errorf("%w: %s: empty file", ErrMalformedData, csvPath)
+		return nil, fmt.Errorf("%w: %s: empty file", ErrMalformedData, csvPath)
 	}
 	if strings.TrimSpace(scanner.Text()) != archiveHeader {
-		return ImportResult{}, fmt.Errorf("%w: %s: unexpected header %q, want %q", ErrMalformedData, csvPath, scanner.Text(), archiveHeader)
+		return nil, fmt.Errorf("%w: %s: unexpected header %q, want %q", ErrMalformedData, csvPath, scanner.Text(), archiveHeader)
 	}
 	var records []Record
 	line := 1
 	for scanner.Scan() {
 		line++
 		if err := ctx.Err(); err != nil {
-			return ImportResult{}, err
+			return nil, err
 		}
 		row := strings.TrimSpace(scanner.Text())
 		if row == "" {
@@ -188,14 +208,14 @@ func ImportArchive(ctx context.Context, csvPath, rawRoot, symbol string) (Import
 		}
 		rec, err := parseArchiveRow(csvPath, line, row, symbol)
 		if err != nil {
-			return ImportResult{}, err
+			return nil, err
 		}
 		records = append(records, rec)
 	}
 	if err := scanner.Err(); err != nil {
-		return ImportResult{}, fmt.Errorf("stooq: archive import: %w", err)
+		return nil, fmt.Errorf("stooq: archive import: %w", err)
 	}
-	return writeImportedRecords(ctx, rawRoot, symbol, records)
+	return records, nil
 }
 
 func parseArchiveRow(path string, line int, row, symbol string) (Record, error) {
@@ -260,6 +280,7 @@ func writeImportedRecords(ctx context.Context, rawRoot, symbol string, records [
 		}
 		byMonth[key] = append(byMonth[key], rec)
 		result.RowsImported++
+		result.RowsAdded++
 		if result.FirstDate.IsZero() || rec.Time.Before(result.FirstDate) {
 			result.FirstDate = rec.Time
 		}

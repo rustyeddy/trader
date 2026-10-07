@@ -1,0 +1,74 @@
+#+TITLE: ADR-072: Incremental Stooq raw import
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #459. Phase 2 (fetching from Stooq over HTTP) is issue #460
+and is not decided here.
+
+* Context
+
+Stooq has no live acquisition client (issue #303, ADR-071): the raw archive
+is brought current by importing a newer native export. =stooq.ImportArchive=
+parsed the whole export and overwrote every monthly raw partition in it. The
+range given to =trader data update= only clipped the later canonical Build.
+Each update therefore rewrote years of raw history for one symbol, and an
+export covering a shorter span than the stored history replaced the months
+it touched with fewer rows.
+
+Stooq history is split-adjusted (ADR-048), so a corporate action rewrites
+older rows in a newer export. Appending only the new rows would then mix
+adjusted and unadjusted data without any error.
+
+* Decision
+
+=stooq.MergeArchive= (surfaced as =Manager.MergeStooqArchive=) is the
+default import for =Convert=, =ConvertStooqArchive=, =CanonicalizeDatasets=
+and =UpdateDatasets=. =Force= keeps the full =ImportArchive= behavior.
+
+- No raw history yet: same as a full import.
+- Export ends before the last raw date: write nothing. An older or shorter
+  export never deletes existing rows.
+- Export holds the last raw date and its Close equals the stored Close:
+  write only rows after that date. The last existing month is rewritten
+  with its existing rows followed by the new ones; later months are
+  created; earlier partitions are not touched. If the export ends on the
+  last raw date, nothing is written.
+- Export disagrees on that Close, or lacks the last raw date so it cannot
+  be compared: history may have been re-adjusted. If the export reaches
+  back to the first raw date, re-import the symbol in full and report
+  =FullReimport=. Otherwise fail with =ErrAdjustmentMismatch= and write
+  nothing, because neither appending nor overwriting would be correct.
+- The comparison is on Close only. A last day captured before the session
+  finished also triggers the full re-import, which is safe but not
+  minimal.
+- Malformed input aborts before any write, as before.
+
+"Up to the last recorded close" means the newest row in the export; nothing
+is invented beyond it. Results report =RowsAdded=, =MonthsWritten= and
+=FullReimport=; =RowsImported=, =FirstDate= and =LastDate= still describe
+the whole export, so the Build range logic is unchanged.
+
+* Consequences
+
+- Updating from a newer export touches the last raw month and later ones,
+  and Build rebuilds only the partitions whose raw fingerprint changed.
+- A repeat run with the same export changes nothing.
+- Raw partitions before the last raw date are not repaired by the
+  incremental path. =Force= re-imports the whole export for that.
+- An operator who supplies a short export after a split gets an explicit
+  error instead of silently mixed history.
+- The CLI summary line now reports rows added, not rows in the export.
+
+* Alternatives Considered
+
+- *Append without comparing.* Rejected: silently mixes adjusted and
+  unadjusted history after any split or dividend-style revision.
+- *Always full re-import (status quo).* Rejected: rewrites all history per
+  update and truncates a month when the export is shorter than what is on
+  disk.
+- *Compare every overlapping row.* Rejected for now: cost grows with
+  history, and a split changes the most recent stored row as well as older
+  ones, so the last row is a sufficient detector.
+- *Add the HTTP fetcher at the same time.* Deferred to #460: it reverses
+  the offline-only decision from #303 and needs its own ADR.
