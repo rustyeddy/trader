@@ -173,6 +173,74 @@ func TestFindStooqArchive(t *testing.T) {
 		_, err := svc.FindStooqArchive(context.Background(), root, "SPY")
 		require.ErrorIs(t, err, svc.ErrAmbiguousArchive)
 	})
+	t.Run("finds the symbol inside a multi-symbol bundle", func(t *testing.T) {
+		root := t.TempDir()
+		bundle := filepath.Join(root, "d_us_txt.zip")
+		writeZIP(t, bundle, map[string]string{
+			"data/daily/us/nyse etfs/2/spy.us.txt": spyTwoMonths,
+			"data/daily/us/nasdaq etfs/qqq.us.txt": spyTwoMonths,
+		})
+		got, err := svc.FindStooqArchive(context.Background(), root, "spy")
+		require.NoError(t, err)
+		assert.Equal(t, bundle, got)
+	})
+	t.Run("a name match wins over a bundle", func(t *testing.T) {
+		root := t.TempDir()
+		named := filepath.Join(root, "spy_us_d.zip")
+		writeZIP(t, named, nil)
+		writeZIP(t, filepath.Join(root, "d_us_txt.zip"), map[string]string{"data/daily/us/nyse etfs/2/spy.us.txt": spyTwoMonths})
+		got, err := svc.FindStooqArchive(context.Background(), root, "SPY")
+		require.NoError(t, err)
+		assert.Equal(t, named, got)
+	})
+	t.Run("an hourly bundle is not selected and does not shadow the daily one", func(t *testing.T) {
+		root := t.TempDir()
+		daily := filepath.Join(root, "d_us_txt.zip")
+		writeZIP(t, daily, map[string]string{"data/daily/us/nyse etfs/2/spy.us.txt": spyTwoMonths})
+		writeZIP(t, filepath.Join(root, "h_us_txt.zip"), map[string]string{"data/hourly/us/nyse etfs/2/spy.us.txt": spyTwoMonths})
+		got, err := svc.FindStooqArchive(context.Background(), root, "SPY")
+		require.NoError(t, err)
+		assert.Equal(t, daily, got)
+
+		only := t.TempDir()
+		writeZIP(t, filepath.Join(only, "h_us_txt.zip"), map[string]string{
+			"data/hourly/us/nyse etfs/2/spy.us.txt": spyTwoMonths,
+			"data/5 min/us/nyse etfs/2/spy.us.txt":  spyTwoMonths,
+		})
+		_, err = svc.FindStooqArchive(context.Background(), only, "SPY")
+		require.ErrorIs(t, err, svc.ErrArchiveNotFound)
+	})
+	t.Run("symbol absent from every bundle", func(t *testing.T) {
+		root := t.TempDir()
+		writeZIP(t, filepath.Join(root, "d_us_txt.zip"), map[string]string{"data/daily/us/nasdaq etfs/qqq.us.txt": spyTwoMonths})
+		_, err := svc.FindStooqArchive(context.Background(), root, "SPY")
+		require.ErrorIs(t, err, svc.ErrArchiveNotFound)
+	})
+	t.Run("two bundles holding the symbol are ambiguous", func(t *testing.T) {
+		root := t.TempDir()
+		for _, name := range []string{"d_us_txt.zip", "d_us_txt_old.zip"} {
+			writeZIP(t, filepath.Join(root, name), map[string]string{"data/daily/us/nyse etfs/2/spy.us.txt": spyTwoMonths})
+		}
+		_, err := svc.FindStooqArchive(context.Background(), root, "SPY")
+		require.ErrorIs(t, err, svc.ErrAmbiguousArchive)
+	})
+	t.Run("unreadable zip files are skipped", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "broken.zip"), []byte("not a zip"), 0o644))
+		bundle := filepath.Join(root, "d_us_txt.zip")
+		writeZIP(t, bundle, map[string]string{"data/daily/us/nyse etfs/2/spy.us.txt": spyTwoMonths})
+		got, err := svc.FindStooqArchive(context.Background(), root, "SPY")
+		require.NoError(t, err)
+		assert.Equal(t, bundle, got)
+	})
+	t.Run("canceled context stops the bundle scan", func(t *testing.T) {
+		root := t.TempDir()
+		writeZIP(t, filepath.Join(root, "d_us_txt.zip"), map[string]string{"data/daily/us/nyse etfs/2/spy.us.txt": spyTwoMonths})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := svc.FindStooqArchive(ctx, root, "SPY")
+		require.ErrorIs(t, err, context.Canceled)
+	})
 	t.Run("root not configured", func(t *testing.T) {
 		_, err := svc.FindStooqArchive(context.Background(), "", "SPY")
 		require.ErrorIs(t, err, svc.ErrArchiveRootNotConfigured)
@@ -384,4 +452,30 @@ func TestConvertStooqArchive_LogsOneOutcomeRecord(t *testing.T) {
 		require.ErrorIs(t, err, svc.ErrInvalidRequest)
 		assert.Empty(t, operationRecords(rec))
 	})
+}
+
+func TestConvertStooqArchive_DiscoversSymbolInsideBundle(t *testing.T) {
+	f := newStooqFixture(t)
+	root := t.TempDir()
+	writeZIP(t, filepath.Join(root, "d_us_txt.zip"), map[string]string{
+		"data/daily/us/nyse etfs/2/spy.us.txt": spyTwoMonths,
+		"data/daily/us/nasdaq etfs/qqq.us.txt": stooqHeader + "QQQ.US,D,20200131,000000,1,1,1,1,1,0\n",
+	})
+	writeZIP(t, filepath.Join(root, "h_us_txt.zip"), map[string]string{
+		"data/hourly/us/nyse etfs/2/spy.us.txt": stooqHeader + "SPY.US,60,20200131,180000,1,1,1,1,1,0\n",
+	})
+
+	resp, err := f.service.ConvertStooqArchive(context.Background(), f.request("", root))
+	require.NoError(t, err)
+	assert.Equal(t, 2, resp.Import.RowsImported, "the daily SPY member, not QQQ or the hourly one")
+}
+
+func TestExtractionIgnoresIntradayMembers(t *testing.T) {
+	f := newStooqFixture(t)
+	archive := filepath.Join(t.TempDir(), "mixed.zip")
+	writeZIP(t, archive, map[string]string{
+		"data/hourly/us/nyse etfs/2/spy.us.txt": stooqHeader + "SPY.US,60,20200131,180000,1,1,1,1,1,0\n",
+	})
+	_, err := f.service.ConvertStooqArchive(context.Background(), f.request(archive, ""))
+	require.ErrorIs(t, err, svc.ErrArchiveMemberNotFound)
 }

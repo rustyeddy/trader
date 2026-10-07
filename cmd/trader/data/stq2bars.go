@@ -67,7 +67,7 @@ func newStq2BarsCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&from, "from", "", "range start (YYYY-MM-DD or RFC3339; defaults to earliest source data)")
 	cmd.Flags().StringVar(&to, "to", "", "range end (YYYY-MM-DD or RFC3339; defaults to latest source data)")
-	cmd.Flags().StringVar(&archive, "archive", "", "native Stooq ZIP archive path (otherwise discover it under --archive-root)")
+	cmd.Flags().StringVar(&archive, "archive", "", "native Stooq ZIP archive path (otherwise found under --archive-root: a ZIP named for the symbol, else a bundle such as d_us_txt.zip holding it)")
 	cmd.Flags().StringVar(&exchange, "exchange", "", "listing exchange for an unregistered symbol (for example ARCA or NASDAQ)")
 	cmd.Flags().StringVar(&kind, "kind", "", `instrument kind for an unregistered symbol: "equity" or "etf"`)
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "rebuild canonical partitions even when they already exist")

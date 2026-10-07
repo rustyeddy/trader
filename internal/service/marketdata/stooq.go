@@ -107,8 +107,10 @@ type ConvertStooqArchiveRequest struct {
 	// <symbol>.us.txt member and, when ArchivePath is empty, the archive
 	// itself.
 	Symbol string
-	// ArchivePath is the native Stooq ZIP. When empty, the one archive
-	// under ArchiveRoot whose name contains Symbol is used.
+	// ArchivePath is the native Stooq ZIP. When empty, the archive under
+	// ArchiveRoot is found by FindStooqArchive: the one whose name
+	// contains Symbol, else the one multi-symbol bundle (d_us_txt.zip)
+	// holding Symbol's daily member.
 	ArchivePath string
 	// ArchiveRoot is searched when ArchivePath is empty. When it is empty
 	// too, the Service's own archive root (WithArchiveRoot) is used.
@@ -167,15 +169,25 @@ func (req ConvertStooqArchiveRequest) ConvertRequest() ConvertRequest {
 	return ConvertRequest{DatasetRequest: req.DatasetRequest, Force: req.Force}
 }
 
-// FindStooqArchive returns the one ZIP under root whose file name contains
-// symbol as a '_', '.', or '-' separated token (case-insensitive), such as
-// spy_us_d.zip for SPY. The walk stops with ctx's error once ctx is done.
+// FindStooqArchive returns the ZIP under root that holds symbol's daily
+// data, searching in this order:
+//
+//  1. The one ZIP whose file name contains symbol as a '_', '.', or '-'
+//     separated token (case-insensitive), such as spy_us_d.zip for SPY.
+//  2. When no name matches, the one other ZIP under root with a daily
+//     <symbol>.us.txt member, such as Stooq's multi-symbol bundle
+//     d_us_txt.zip (data/daily/us/nyse etfs/2/spy.us.txt). Members under
+//     an intraday directory (h_us_txt.zip's data/hourly/...) never match.
+//     A file that cannot be read as a ZIP is skipped.
+//
+// More than one match at either step is ErrAmbiguousArchive; none is
+// ErrArchiveNotFound. The walk stops with ctx's error once ctx is done.
 func FindStooqArchive(ctx context.Context, root, symbol string) (string, error) {
 	if root == "" {
 		return "", ErrArchiveRootNotConfigured
 	}
 	symbol = strings.ToLower(strings.TrimSpace(symbol))
-	var matches []string
+	var named, others []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -187,8 +199,12 @@ func FindStooqArchive(ctx context.Context, root, symbol string) (string, error) 
 			return nil
 		}
 		name := strings.ToLower(entry.Name())
-		if strings.HasSuffix(name, ".zip") && archiveNameHasSymbol(name, symbol) {
-			matches = append(matches, path)
+		switch {
+		case !strings.HasSuffix(name, ".zip"):
+		case archiveNameHasSymbol(name, symbol):
+			named = append(named, path)
+		default:
+			others = append(others, path)
 		}
 		return nil
 	})
@@ -198,6 +214,18 @@ func FindStooqArchive(ctx context.Context, root, symbol string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("search Stooq archive root %q: %w", root, err)
 	}
+	matches := named
+	if len(matches) == 0 {
+		for _, path := range others {
+			has, err := zipHasDailyMember(ctx, path, symbol)
+			if err != nil {
+				return "", err
+			}
+			if has {
+				matches = append(matches, path)
+			}
+		}
+	}
 	switch len(matches) {
 	case 0:
 		return "", fmt.Errorf("%w: %s under %q", ErrArchiveNotFound, strings.ToUpper(symbol), root)
@@ -206,6 +234,48 @@ func FindStooqArchive(ctx context.Context, root, symbol string) (string, error) 
 	default:
 		return "", fmt.Errorf("%w: %s under %q", ErrAmbiguousArchive, strings.ToUpper(symbol), root)
 	}
+}
+
+// zipHasDailyMember reports whether the ZIP at path holds a daily member
+// for symbol. A file that is not a readable ZIP reports false.
+func zipHasDailyMember(ctx context.Context, path, symbol string) (bool, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return false, ctx.Err()
+	}
+	defer func() { _ = zr.Close() }()
+	for _, entry := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if isStooqDailyMember(entry, symbol) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// intradayDirs are the directory names Stooq's bundles use for non-daily
+// periods; a member below one of them holds rows ConvertStooqArchive
+// cannot import.
+var intradayDirs = map[string]bool{"hourly": true, "5 min": true}
+
+// isStooqDailyMember reports whether entry is symbol's <symbol>.us.txt
+// file and does not sit below an intraday directory.
+func isStooqDailyMember(entry *zip.File, symbol string) bool {
+	if entry.FileInfo().IsDir() {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(entry.Name), "/")
+	if parts[len(parts)-1] != strings.ToLower(strings.TrimSpace(symbol))+".us.txt" {
+		return false
+	}
+	for _, dir := range parts[:len(parts)-1] {
+		if intradayDirs[dir] {
+			return false
+		}
+	}
+	return true
 }
 
 func archiveNameHasSymbol(name, symbol string) bool {
@@ -227,10 +297,7 @@ func extractStooqMember(ctx context.Context, archivePath, symbol, destination st
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		if strings.ToLower(filepath.Base(entry.Name)) != want {
-			continue
-		}
-		if entry.FileInfo().IsDir() {
+		if !isStooqDailyMember(entry, symbol) {
 			continue
 		}
 		in, err := entry.Open()
