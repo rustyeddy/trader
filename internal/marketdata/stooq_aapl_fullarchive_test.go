@@ -49,7 +49,7 @@ var aaplSplitDates = []struct {
 // TestStooqAAPLFullArchive imports fullArchiveAAPLCSVPath, runs it
 // through Plan -> Build -> Bars against a real marketdata.Manager, and
 // confirms two things issue #298 requires: every published Manifest
-// records AdjustmentSplitAdjusted, and close-to-close price movement
+// records AdjustmentTotalReturn (ADR-073), and close-to-close price movement
 // across both of AAPL's real historical split dates is small (no
 // discontinuous ~7x or ~4x jump), which is what confirms Stooq's data
 // is already split-adjusted rather than raw.
@@ -90,10 +90,10 @@ func TestStooqAAPLFullArchive(t *testing.T) {
 		t.Fatal("expected at least one published canonical month")
 	}
 	for _, pr := range buildResult.Published {
-		if pr.Manifest.AdjustmentPolicy != marketdata.AdjustmentSplitAdjusted {
+		if pr.Manifest.AdjustmentPolicy != marketdata.AdjustmentTotalReturn {
 			t.Errorf("month %04d-%02d: AdjustmentPolicy = %s, want %s",
 				pr.Manifest.Span.Start().Year(), pr.Manifest.Span.Start().Month(),
-				pr.Manifest.AdjustmentPolicy, marketdata.AdjustmentSplitAdjusted)
+				pr.Manifest.AdjustmentPolicy, marketdata.AdjustmentTotalReturn)
 		}
 	}
 

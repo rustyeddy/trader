@@ -72,7 +72,7 @@ func TestStooqArchiveShape_SPYD1(t *testing.T) {
 	require.Len(t, result.Published, 2)
 	for _, partition := range result.Published {
 		require.Equal(t, "stooq", partition.Manifest.Provider)
-		require.Equal(t, marketdata.AdjustmentSplitAdjusted, partition.Manifest.AdjustmentPolicy)
+		require.Equal(t, marketdata.AdjustmentTotalReturn, partition.Manifest.AdjustmentPolicy)
 	}
 	reader, err := mgr.Bars(ctx, BarQuery{Instrument: spyID(t), Interval: marketdata.D1, Range: span})
 	require.NoError(t, err)
@@ -393,17 +393,17 @@ func TestStooqEndToEnd_RejectsOutOfOrderRawData(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDataUnavailable)
 }
 
-// TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy is issue #298
+// TestStooqEndToEnd_AAPLRecordsTotalReturnPolicy is issue #298
 // (EQ-05)'s real-data demonstration in miniature: a small excerpt of
 // AAPL's actual real Stooq daily history spanning its real 2020-08-31
 // 4-for-1 split (2020-08-28 through 2020-09-01) shows continuous
 // pricing across the split date — no ~4x jump — and the resulting
-// canonical Manifest records AdjustmentSplitAdjusted, not
-// AdjustmentUnadjusted. TestStooqAAPLFullArchive (gated, real local
+// canonical Manifest records AdjustmentTotalReturn (Stooq is also
+// dividend-adjusted, ADR-073), not AdjustmentUnadjusted. TestStooqAAPLFullArchive (gated, real local
 // archive) is the full-history version of this same proof; this test
 // keeps a deterministic, CI-committed regression for it using a real
 // (not synthetic) 3-row excerpt.
-func TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy(t *testing.T) {
+func TestStooqEndToEnd_AAPLRecordsTotalReturnPolicy(t *testing.T) {
 	ctx := context.Background()
 	rawRoot := t.TempDir()
 
@@ -424,7 +424,7 @@ func TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, buildResult.Published)
 	for _, pr := range buildResult.Published {
-		assert.Equal(t, marketdata.AdjustmentSplitAdjusted, pr.Manifest.AdjustmentPolicy)
+		assert.Equal(t, marketdata.AdjustmentTotalReturn, pr.Manifest.AdjustmentPolicy)
 	}
 
 	reader, err := mgr.Bars(ctx, query)
@@ -593,4 +593,65 @@ func TestStooqCoverage_HalfDayDoesNotStraddleError(t *testing.T) {
 	cov, err := mgr.Coverage(ctx, query)
 	require.NoError(t, err, "a half day must never trip ErrIntervalStraddlesBoundary")
 	assert.Empty(t, cov.Gaps, "Thanksgiving (2020-11-26) is a calendar closure, not a gap; every other queried day has a real bar")
+}
+
+// TestStooqLegacyAdjustmentLabelIsStaleAndRebuilt is issue #465's
+// rollout guarantee: a canonical Stooq partition built before ADR-073
+// (labelled AdjustmentSplitAdjusted) is planned for a rebuild, with the
+// raw input unchanged, and the rebuild relabels it AdjustmentTotalReturn.
+func TestStooqLegacyAdjustmentLabelIsStaleAndRebuilt(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+	source := filepath.Join(t.TempDir(), "spy.us.txt")
+	require.NoError(t, os.WriteFile(source, []byte(stooqArchiveHeaderForTest()+"\n"+
+		"SPY.US,D,20200501,000000,282.80,283.19,278.85,282.79,74424000,0\n"), 0o644))
+	_, err := stooq.ImportArchive(ctx, source, rawRoot, "SPY")
+	require.NoError(t, err)
+
+	mgr := newStooqTestManager(t, rawRoot)
+	span, err := marketdata.NewTimeRange(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	query := BarQuery{Instrument: spyID(t), Interval: marketdata.D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	_, err = mgr.Build(ctx, plan)
+	require.NoError(t, err)
+	plan, err = mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	require.Empty(t, plan.Actions, "freshly built data is current")
+
+	// Rewrite the partition the way a pre-ADR-073 build labelled it.
+	key := partitionKey{provider: "stooq", symbol: "SPY", instrument: spyID(t), interval: marketdata.D1, year: 2020, month: time.May}
+	man, bs, err := mgr.loadPartition(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, marketdata.AdjustmentTotalReturn, man.AdjustmentPolicy)
+	man.AdjustmentPolicy = marketdata.AdjustmentSplitAdjusted
+	publishTestPartition(t, mgr, key, man, bs)
+
+	plan, err = mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	require.Len(t, plan.Actions, 1)
+	assert.Equal(t, ActionNormalizeCanonical, plan.Actions[0].Kind)
+	assert.Contains(t, plan.Actions[0].Reason, "adjustment policy")
+
+	result, err := mgr.Build(ctx, plan)
+	require.NoError(t, err)
+	require.Len(t, result.Published, 1)
+	assert.Equal(t, marketdata.AdjustmentTotalReturn, result.Published[0].Manifest.AdjustmentPolicy)
+	plan, err = mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	assert.Empty(t, plan.Actions, "relabelled partition is current again")
+}
+
+func TestAdjustmentPolicyFor(t *testing.T) {
+	for provider, want := range map[string]marketdata.AdjustmentPolicy{
+		"stooq":   marketdata.AdjustmentTotalReturn,
+		"alpaca":  marketdata.AdjustmentSplitAdjusted,
+		"oanda":   marketdata.AdjustmentNotApplicable,
+		"unknown": marketdata.AdjustmentNotApplicable,
+	} {
+		assert.Equal(t, want, adjustmentPolicyFor(provider), provider)
+	}
+	assert.NotEqual(t, adjustmentPolicyFor("stooq"), adjustmentPolicyFor("alpaca"), "Stooq and Alpaca price levels are not comparable (ADR-073)")
 }

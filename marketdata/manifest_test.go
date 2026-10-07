@@ -412,6 +412,7 @@ func TestManifestRevision_ChangesPerField(t *testing.T) {
 		}},
 		{"basis", func(m *Manifest) { m.Basis = BasisAsk }},
 		{"feed", func(m *Manifest) { m.Feed = "sip" }},
+		{"adjustmentPolicy", func(m *Manifest) { m.AdjustmentPolicy = AdjustmentSplitAdjusted }},
 		{"schemaVersion", func(m *Manifest) { m.SchemaVersion = 2 }},
 		{"rawFingerprint", func(m *Manifest) {
 			m.RawFingerprint = "sha256:" + "0000000000000000000000000000000000000000000000000000000000000"
@@ -435,6 +436,16 @@ func TestManifestRevision_ChangesPerField(t *testing.T) {
 			assert.NotEqual(t, baseRev, m.Revision(), "changing %s should change Revision", tc.name)
 		})
 	}
+}
+
+// Two equity datasets that differ only in adjustment convention (Alpaca
+// split-adjusted vs Stooq total-return, ADR-073) must not share a Revision.
+func TestManifestRevision_SplitAdjustedAndTotalReturnDiffer(t *testing.T) {
+	split, total := validManifest(t), validManifest(t)
+	split.AdjustmentPolicy = AdjustmentSplitAdjusted
+	total.AdjustmentPolicy = AdjustmentTotalReturn
+	assert.NotEqual(t, split.Revision(), total.Revision())
+	assert.Equal(t, split.Revision(), split.Revision())
 }
 
 func TestManifestRevision_ParentRevisionAffectsHash(t *testing.T) {

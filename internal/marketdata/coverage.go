@@ -31,7 +31,8 @@ const (
 	// PartitionCoverageStale means the canonical partition loads and
 	// validates, but disagrees with its current input: its
 	// Manifest.RawFingerprint no longer matches the current raw
-	// partition's fingerprint (raw-built intervals), or its
+	// partition's fingerprint or its Manifest.AdjustmentPolicy differs
+	// from the provider's current one (raw-built intervals), or its
 	// Manifest.Parent.Revision no longer matches the underlying D1
 	// partition's current Revision (the derived W1 interval).
 	PartitionCoverageStale
@@ -307,6 +308,13 @@ func (m *Manager) isStale(ctx context.Context, key partitionKey, man marketdata.
 	p, found := rawByKey[rawPartitionKey{symbol, rawInterval, key.year, key.month}]
 	if !found || p.status != rawPartitionOK {
 		return false, nil
+	}
+	// A partition built under a different adjustment convention than its
+	// provider's current one (ADR-073: Stooq moved from split-adjusted to
+	// total-return) carries a wrong label even though its raw input is
+	// unchanged, so it is stale and a Build refreshes it.
+	if man.AdjustmentPolicy != adjustmentPolicyFor(m.providerName) {
+		return true, nil
 	}
 	return man.RawFingerprint != p.fingerprint, nil
 }

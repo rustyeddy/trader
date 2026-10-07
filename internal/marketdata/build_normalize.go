@@ -162,6 +162,23 @@ const calendarVersionUSEquityV1 = "usequitycalendar-v1"
 // oanda's own bid-basis, FXCalendar-aligned build is entirely unchanged
 // from before this seam existed; stooq is the second, natively-written
 // implementation.
+// adjustmentPolicyFor is the corporate-action adjustment convention the
+// named provider's prices follow: the single source for what a build
+// records in Manifest.AdjustmentPolicy and what planning expects to find
+// in an existing canonical partition (see isStale). An unlisted provider
+// gets AdjustmentNotApplicable, the FX default readAndNormalizeRaw's
+// default branch has always used.
+func adjustmentPolicyFor(provider string) marketdata.AdjustmentPolicy {
+	switch provider {
+	case "stooq":
+		return marketdata.AdjustmentTotalReturn
+	case "alpaca":
+		return marketdata.AdjustmentSplitAdjusted
+	default:
+		return marketdata.AdjustmentNotApplicable
+	}
+}
+
 func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol string, action Action) ([]normalizedRecord, string, marketdata.PriceBasis, marketdata.AdjustmentPolicy, string, string, error) {
 	switch m.providerName {
 	case "stooq":
@@ -195,13 +212,14 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		if err != nil {
 			return nil, "", marketdata.BasisUnknown, marketdata.AdjustmentUnknown, "", "", fmt.Errorf("normalize: %w", err)
 		}
-		// AdjustmentSplitAdjusted: Stooq's own daily equity history is
-		// split-adjusted (confirmed empirically against AAPL's real
-		// splits, issue #298) but not dividend-adjusted — see
-		// AdjustmentSplitAdjusted's own doc comment. Stooq has no feed
-		// concept (issue #324, EQ-11): Manifest.Feed is empty for a
-		// Stooq-sourced dataset.
-		return normalized, snapshot.Fingerprint, marketdata.BasisTrade, marketdata.AdjustmentSplitAdjusted, "", calendarVersionUSEquityV1, nil
+		// AdjustmentTotalReturn: Stooq's daily equity history is
+		// back-adjusted for splits (issue #298, AAPL's real splits) and
+		// for dividends (ADR-073, issue #464: non-payers match Alpaca,
+		// payers are lower in the past by the dividends paid since), so
+		// its price levels differ from a split-adjusted-only source such
+		// as Alpaca. Stooq has no feed concept (issue #324, EQ-11):
+		// Manifest.Feed is empty for a Stooq-sourced dataset.
+		return normalized, snapshot.Fingerprint, marketdata.BasisTrade, adjustmentPolicyFor(m.providerName), "", calendarVersionUSEquityV1, nil
 
 	case "alpaca":
 		if rawInterval != string(alpaca.RawD1) {
@@ -229,13 +247,12 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		if err != nil {
 			return nil, "", marketdata.BasisUnknown, marketdata.AdjustmentUnknown, "", "", fmt.Errorf("normalize: %w", err)
 		}
-		// AdjustmentSplitAdjusted, matching Stooq's own choice above, for
-		// cross-provider comparability of the same instrument: Alpaca's
-		// bars endpoint is requested with adjustment=split (see
-		// alpaca.Client.fetchAllPages, issue #323's SDK migration), which
-		// is Alpaca's own split-adjusted-but-not-dividend-adjusted
-		// convention — the same shape AdjustmentSplitAdjusted's own doc
-		// comment already describes for Stooq. calendarVersionUSEquityV1
+		// AdjustmentSplitAdjusted: Alpaca's bars endpoint is requested
+		// with adjustment=split (see alpaca.Client.fetchAllPages, issue
+		// #323's SDK migration), which is split-adjusted but not
+		// dividend-adjusted. This deliberately differs from Stooq's
+		// AdjustmentTotalReturn (ADR-073): the two price levels are not
+		// comparable, and the policy says so. calendarVersionUSEquityV1
 		// is reused unchanged: both providers validate against the exact
 		// same USEquityCalendar D1 boundary (midnight UTC), so there is no
 		// reason to mint a second, functionally-identical calendar
@@ -249,7 +266,7 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		// feeds' data into one partition, but does not prevent an
 		// operator from later reading an older partition with a
 		// differently-configured Manager).
-		return normalized, snapshot.Fingerprint, marketdata.BasisTrade, marketdata.AdjustmentSplitAdjusted, string(snapshot.Feed), calendarVersionUSEquityV1, nil
+		return normalized, snapshot.Fingerprint, marketdata.BasisTrade, adjustmentPolicyFor(m.providerName), string(snapshot.Feed), calendarVersionUSEquityV1, nil
 
 	default:
 		// ReadPartitionSnapshot, not separate ReadPartitionRecords/
@@ -272,6 +289,6 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		if err != nil {
 			return nil, "", marketdata.BasisUnknown, marketdata.AdjustmentUnknown, "", "", fmt.Errorf("normalize: %w", err)
 		}
-		return normalized, snapshot.Fingerprint, marketdata.BasisBid, marketdata.AdjustmentNotApplicable, "", calendarVersionCurrent, nil
+		return normalized, snapshot.Fingerprint, marketdata.BasisBid, adjustmentPolicyFor(m.providerName), "", calendarVersionCurrent, nil
 	}
 }

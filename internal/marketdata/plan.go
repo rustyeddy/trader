@@ -217,7 +217,7 @@ func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol str
 		case PartitionCoverageInvalid:
 			normalizeReason = "invalid: rebuild"
 		case PartitionCoverageStale:
-			normalizeReason = "stale: raw fingerprint changed"
+			normalizeReason = "stale: raw fingerprint or adjustment policy changed"
 		}
 		if normalizeReason != "" {
 			normalizes = append(normalizes, Action{
