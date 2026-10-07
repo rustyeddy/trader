@@ -9,6 +9,9 @@ resolving the open question ADR-047 explicitly left unverified:
 whether Stooq's own SPY/AAPL/QQQ daily closes are already
 split-adjusted or raw.
 
+Amended by ADR-073: the policy recorded for Stooq (=AdjustmentSplitAdjusted=)
+is corrected; Stooq daily history is also dividend-adjusted.
+
 * Context
 
 ADR-047 (Equities Phase 1 scope) decided Phase 1 would "record

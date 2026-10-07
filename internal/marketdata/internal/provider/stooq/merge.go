@@ -15,8 +15,9 @@ import (
 
 // ErrAdjustmentMismatch marks a MergeArchive call whose export
 // disagrees with the existing raw archive on the last date both hold
-// (Stooq history is split-adjusted, so a corporate action rewrites older
-// rows) and which cannot safely be repaired by a full re-import because
+// (Stooq history is back-adjusted for splits and dividends, ADR-073, so
+// every split or ex-dividend date rewrites older rows) and which cannot
+// safely be repaired by a full re-import because
 // the export does not reach back to the first date already on disk.
 // Overwriting would silently truncate history; appending would mix
 // adjusted and unadjusted rows. The operator must supply a fuller export
@@ -38,7 +39,9 @@ var ErrAdjustmentMismatch = errors.New("stooq: export disagrees with existing ra
 //     and every earlier partition is left untouched. If the export ends
 //     on the last raw date, nothing is written.
 //   - When the closes disagree, or the export lacks the last raw date so
-//     the comparison is impossible, history may have been re-adjusted. If
+//     the comparison is impossible, history has been or may have been
+//     re-adjusted (for a dividend payer, any ex-dividend date since the
+//     last download does this, so this is the usual case for them). If
 //     the export reaches back to the first raw date, the symbol is fully
 //     re-imported (ImportResult.FullReimport). If it does not, the call
 //     fails with ErrAdjustmentMismatch and writes nothing.
