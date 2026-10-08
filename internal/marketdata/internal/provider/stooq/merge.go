@@ -17,11 +17,11 @@ import (
 // disagrees with the existing raw archive on the last date both hold
 // (Stooq history is back-adjusted for splits and dividends, ADR-073, so
 // every split or ex-dividend date rewrites older rows) and which cannot
-// safely be repaired by a full re-import because
-// the export does not reach back to the first date already on disk.
-// Overwriting would silently truncate history; appending would mix
-// adjusted and unadjusted rows. The operator must supply a fuller export
-// (or force a full import).
+// safely be repaired by a full re-import because the export lacks a date
+// already on disk. Overwriting would drop that row or leave its month on
+// the old price basis; appending would mix adjusted and unadjusted
+// rows. The operator must supply a complete export (or force a full
+// import).
 var ErrAdjustmentMismatch = errors.New("stooq: export disagrees with existing raw history")
 
 // MergeArchive is the incremental counterpart of ImportArchive (issue
@@ -42,9 +42,13 @@ var ErrAdjustmentMismatch = errors.New("stooq: export disagrees with existing ra
 //     the comparison is impossible, history has been or may have been
 //     re-adjusted (for a dividend payer, any ex-dividend date since the
 //     last download does this, so this is the usual case for them). If
-//     the export reaches back to the first raw date, the symbol is fully
-//     re-imported (ImportResult.FullReimport). If it does not, the call
-//     fails with ErrAdjustmentMismatch and writes nothing.
+//     the export holds every date already in raw, the symbol is fully
+//     re-imported (ImportResult.FullReimport), oldest month first so an
+//     interrupted rewrite leaves the last month on the old basis and the
+//     next run detects the mismatch again. If the export lacks any
+//     existing raw date, the call fails with ErrAdjustmentMismatch and
+//     writes nothing: replacing only part of the history would leave
+//     months on two price bases, or drop rows.
 //
 // The comparison is on Close only. A last day captured before the
 // session finished therefore also triggers the full re-import, which is
@@ -74,32 +78,21 @@ func MergeArchive(ctx context.Context, csvPath, rawRoot, symbol string) (ImportR
 		return ImportResult{}, err
 	}
 	if len(months) == 0 {
-		return writeImportedRecords(ctx, rawRoot, symbol, records)
+		return writeImportedRecords(ctx, rawRoot, symbol, records, nil)
 	}
 	if len(records) == 0 {
 		return result, nil
 	}
 
-	lastKey, firstKey := months[len(months)-1], months[0]
+	lastKey := months[len(months)-1]
 	lastRecs, err := readPartitionRecords(ctx, partitionPath(rawRoot, symbol, lastKey.year, lastKey.month))
 	if err != nil {
 		return ImportResult{}, err
 	}
-	firstRecs := lastRecs
-	if firstKey != lastKey {
-		if firstRecs, err = readPartitionRecords(ctx, partitionPath(rawRoot, symbol, firstKey.year, firstKey.month)); err != nil {
-			return ImportResult{}, err
-		}
-	}
-	rawLast, rawFirst := lastRecs[0], firstRecs[0]
+	rawLast := lastRecs[0]
 	for _, r := range lastRecs {
 		if r.Time.After(rawLast.Time) {
 			rawLast = r
-		}
-	}
-	for _, r := range firstRecs {
-		if r.Time.Before(rawFirst.Time) {
-			rawFirst = r
 		}
 	}
 
@@ -114,11 +107,19 @@ func MergeArchive(ctx context.Context, csvPath, rawRoot, symbol string) (ImportR
 		}
 	}
 	if overlap == nil || !overlap.Close.Equal(rawLast.Close) {
-		if result.FirstDate.After(rawFirst.Time) {
-			return ImportResult{}, fmt.Errorf("%w: %s on %s (export starts %s, raw starts %s)", ErrAdjustmentMismatch,
-				symbol, rawLast.Time.Format("2006-01-02"), result.FirstDate.Format("2006-01-02"), rawFirst.Time.Format("2006-01-02"))
+		// History has been, or may have been, re-adjusted. Replacing it is
+		// only coherent if the export holds every date already in raw:
+		// otherwise a month the export omits, or a date it lacks inside a
+		// month it rewrites, would stay on the old price basis or be lost.
+		known, err := rawDates(ctx, rawRoot, symbol, months, true)
+		if err != nil {
+			return ImportResult{}, err
 		}
-		full, err := writeImportedRecords(ctx, rawRoot, symbol, records)
+		if missing, ok := firstMissingDate(known, records); ok {
+			return ImportResult{}, fmt.Errorf("%w: %s: export lacks raw date %s (last raw date %s): supply a complete export or force a full import",
+				ErrAdjustmentMismatch, symbol, missing.Format("2006-01-02"), rawLast.Time.Format("2006-01-02"))
+		}
+		full, err := writeImportedRecords(ctx, rawRoot, symbol, records, known)
 		full.FullReimport = true
 		return full, err
 	}
@@ -212,4 +213,49 @@ func readPartitionRecords(ctx context.Context, path string) ([]Record, error) {
 		return nil, fmt.Errorf("%w: %s: existing partition has no rows", ErrMalformedData, path)
 	}
 	return recs, nil
+}
+
+// rawDates returns every trading date already stored for symbol across
+// months. With strict, an unreadable or empty partition is an error (a
+// full-reimport decision cannot be made around data it cannot see);
+// without it such a partition is skipped, so a forced import can still
+// repair a damaged one.
+func rawDates(ctx context.Context, root, symbol string, months []monthKey, strict bool) (map[time.Time]struct{}, error) {
+	known := make(map[time.Time]struct{})
+	for _, key := range months {
+		recs, err := readPartitionRecords(ctx, partitionPath(root, symbol, key.year, key.month))
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if strict {
+				return nil, err
+			}
+			continue
+		}
+		for _, r := range recs {
+			known[r.Time] = struct{}{}
+		}
+	}
+	return known, nil
+}
+
+// firstMissingDate returns the earliest date in known that records does
+// not contain.
+func firstMissingDate(known map[time.Time]struct{}, records []Record) (time.Time, bool) {
+	have := make(map[time.Time]struct{}, len(records))
+	for _, r := range records {
+		have[r.Time] = struct{}{}
+	}
+	var missing []time.Time
+	for d := range known {
+		if _, ok := have[d]; !ok {
+			missing = append(missing, d)
+		}
+	}
+	if len(missing) == 0 {
+		return time.Time{}, false
+	}
+	sort.Slice(missing, func(i, j int) bool { return missing[i].Before(missing[j]) })
+	return missing[0], true
 }

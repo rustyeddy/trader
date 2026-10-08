@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,9 +35,11 @@ type ImportResult struct {
 	// FirstDate and LastDate are the earliest and latest record dates
 	// imported.
 	FirstDate, LastDate time.Time
-	// RowsAdded is the number of rows that were new to the raw archive.
-	// ImportArchive reports every row; MergeArchive reports only rows
-	// after the archive's previous last date.
+	// RowsAdded is the number of rows whose date was not already in the
+	// raw archive. A re-import of an unchanged archive adds none, however
+	// many rows it rewrites; MergeArchive adds only rows after the
+	// archive's previous last date, except in a full re-import, which adds
+	// any dates it newly holds.
 	RowsAdded int
 	// FullReimport is set by MergeArchive when it fell back to a full
 	// re-import because the export disagreed with the existing raw
@@ -168,7 +171,17 @@ func ImportArchive(ctx context.Context, csvPath, rawRoot, symbol string) (Import
 	if err != nil {
 		return ImportResult{}, err
 	}
-	return writeImportedRecords(ctx, rawRoot, symbol, records)
+	months, err := rawMonths(rawRoot, symbol)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	// Non-strict: a forced import is also how a damaged partition is
+	// repaired, so one that cannot be read must not block it.
+	known, err := rawDates(ctx, rawRoot, symbol, months, false)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	return writeImportedRecords(ctx, rawRoot, symbol, records, known)
 }
 
 // readArchive parses every row of one native Stooq archive file for
@@ -269,7 +282,13 @@ func parseArchiveRow(path string, line int, row, symbol string) (Record, error) 
 	return Record{Time: date.UTC(), Open: open, High: high, Low: low, Close: closePrice, Volume: volume}, nil
 }
 
-func writeImportedRecords(ctx context.Context, rawRoot, symbol string, records []Record) (ImportResult, error) {
+// writeImportedRecords writes records as monthly raw partitions, oldest
+// month first, so a rewrite interrupted part way leaves the newest month
+// on its old contents and MergeArchive's last-date check still sees the
+// mismatch on the next run. known holds the dates already on disk (nil
+// when none): RowsAdded counts only records whose date is not in it, so a
+// full re-import of an unchanged archive reports zero rows added.
+func writeImportedRecords(ctx context.Context, rawRoot, symbol string, records []Record, known map[time.Time]struct{}) (ImportResult, error) {
 	result := ImportResult{}
 	byMonth := make(map[monthKey][]Record)
 	var order []monthKey
@@ -280,7 +299,9 @@ func writeImportedRecords(ctx context.Context, rawRoot, symbol string, records [
 		}
 		byMonth[key] = append(byMonth[key], rec)
 		result.RowsImported++
-		result.RowsAdded++
+		if _, had := known[rec.Time]; !had {
+			result.RowsAdded++
+		}
 		if result.FirstDate.IsZero() || rec.Time.Before(result.FirstDate) {
 			result.FirstDate = rec.Time
 		}
@@ -288,6 +309,12 @@ func writeImportedRecords(ctx context.Context, rawRoot, symbol string, records [
 			result.LastDate = rec.Time
 		}
 	}
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].year != order[j].year {
+			return order[i].year < order[j].year
+		}
+		return order[i].month < order[j].month
+	})
 	for _, key := range order {
 		if err := WritePartition(ctx, rawRoot, symbol, key.year, key.month, byMonth[key], false); err != nil {
 			return ImportResult{}, fmt.Errorf("stooq: import: write %04d-%02d: %w", key.year, int(key.month), err)

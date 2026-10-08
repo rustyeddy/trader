@@ -136,8 +136,9 @@ func TestConvertForceReimportsWholeStooqExport(t *testing.T) {
 
 	forced, err := f.convert(t, path, true)
 	require.NoError(t, err)
-	require.Equal(t, 3, forced.Import.RowsAdded, "Force writes every row again")
-	require.Equal(t, 2, forced.Import.MonthsWritten)
+	require.Equal(t, 3, forced.Import.RowsImported)
+	require.Zero(t, forced.Import.RowsAdded, "Force rewrites every row but none is new")
+	require.Equal(t, 2, forced.Import.MonthsWritten, "Force rewrites every month, unlike the incremental import")
 }
 
 func TestConvertReportsStooqAdjustmentMismatch(t *testing.T) {
@@ -149,7 +150,8 @@ func TestConvertReportsStooqAdjustmentMismatch(t *testing.T) {
 		resp, err := f.convert(t, f.archive(t, "b.txt", [2]string{"20200130", "50"}, [2]string{"20200131", "50.5"}, [2]string{"20200203", "51"}), false)
 		require.NoError(t, err)
 		require.True(t, resp.Import.FullReimport)
-		require.Equal(t, 3, resp.Import.RowsAdded)
+		require.Equal(t, 3, resp.Import.RowsImported)
+		require.Zero(t, resp.Import.RowsAdded, "every date was already on disk")
 	})
 	t.Run("partial export is refused", func(t *testing.T) {
 		_, err := f.convert(t, f.archive(t, "c.txt", [2]string{"20200203", "25"}, [2]string{"20200204", "26"}), false)

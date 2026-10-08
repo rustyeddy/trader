@@ -36,17 +36,25 @@ and =UpdateDatasets=. =Force= keeps the full =ImportArchive= behavior.
   created; earlier partitions are not touched. If the export ends on the
   last raw date, nothing is written.
 - Export disagrees on that Close, or lacks the last raw date so it cannot
-  be compared: history has been, or may have been, re-adjusted. If the export reaches
-  back to the first raw date, re-import the symbol in full and report
-  =FullReimport=. Otherwise fail with =ErrAdjustmentMismatch= and write
-  nothing, because neither appending nor overwriting would be correct.
+  be compared: history has been, or may have been, re-adjusted. Replacing
+  it is coherent only if the export holds *every date already in raw*:
+  reaching back to the first raw date is not enough, because an export that
+  omits an interior month or a date inside a month it rewrites would leave
+  that month on the old price basis or drop its rows. If the export holds
+  every existing date, re-import the symbol in full and report
+  =FullReimport=, writing months oldest first so an interrupted rewrite
+  leaves the newest month on its old contents and the next run detects the
+  mismatch again. Otherwise fail with =ErrAdjustmentMismatch= and write
+  nothing; =Force= is the explicit way to replace history from a partial
+  export.
 - The comparison is on Close only. A last day captured before the session
   finished also triggers the full re-import, which is safe but not
   minimal.
 - Malformed input aborts before any write, as before.
 
 "Up to the last recorded close" means the newest row in the export; nothing
-is invented beyond it. Results report =RowsAdded=, =MonthsWritten= and
+is invented beyond it. Results report =RowsAdded= (dates not already on
+disk, so a re-import of an unchanged archive adds none), =MonthsWritten= and
 =FullReimport=; =RowsImported=, =FirstDate= and =LastDate= still describe
 the whole export, so the Build range logic is unchanged.
 

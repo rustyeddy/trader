@@ -148,7 +148,8 @@ func TestMergeArchive_AdjustedHistoryTriggersFullReimport(t *testing.T) {
 		archiveRow("20200205", "52")), root, "SPY")
 	require.NoError(t, err)
 	assert.True(t, r.FullReimport)
-	assert.Equal(t, 5, r.RowsAdded)
+	assert.Equal(t, 5, r.RowsImported)
+	assert.Equal(t, 1, r.RowsAdded, "four of the five dates were already on disk; only 2020-02-05 is new")
 	assert.Equal(t, 2, r.MonthsWritten)
 	assert.Equal(t, []string{"2020-01-30=50", "2020-01-31=50.5"}, partDates(t, root, 2020, time.January))
 	assert.Equal(t, []string{"2020-02-03=51", "2020-02-04=51.5", "2020-02-05=52"}, partDates(t, root, 2020, time.February))
@@ -175,21 +176,106 @@ func TestMergeArchive_MismatchWithPartialExportFailsWithoutWriting(t *testing.T)
 	assert.Equal(t, febBefore, partHash(t, root, 2020, time.February))
 }
 
-func TestMergeArchive_ExportMissingLastRawDate(t *testing.T) {
+func TestMergeArchive_ExportMissingARawDateIsRefused(t *testing.T) {
 	ctx := context.Background()
-	t.Run("covering all history falls back to full re-import", func(t *testing.T) {
-		root := seed(t)
-		r, err := MergeArchive(ctx, writeArchive(t,
-			archiveRow("20200130", "100"), archiveRow("20200131", "101"),
-			archiveRow("20200203", "102"), archiveRow("20200205", "104")), root, "SPY")
-		require.NoError(t, err)
-		assert.True(t, r.FullReimport)
-	})
-	t.Run("not covering all history fails", func(t *testing.T) {
-		root := seed(t)
-		_, err := MergeArchive(ctx, writeArchive(t, archiveRow("20200203", "102"), archiveRow("20200205", "104")), root, "SPY")
-		require.ErrorIs(t, err, ErrAdjustmentMismatch)
-	})
+	cases := map[string][][2]string{
+		"missing the last raw date":                         {{"20200130", "100"}, {"20200131", "101"}, {"20200203", "102"}, {"20200205", "104"}},
+		"missing an interior date inside a rewritten month": {{"20200130", "50"}, {"20200203", "51"}, {"20200204", "51.5"}, {"20200205", "52"}},
+	}
+	for name, rows := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := seed(t)
+			janBefore, febBefore := partHash(t, root, 2020, time.January), partHash(t, root, 2020, time.February)
+			var lines []string
+			for _, r := range rows {
+				lines = append(lines, archiveRow(r[0], r[1]))
+			}
+			_, err := MergeArchive(ctx, writeArchive(t, lines...), root, "SPY")
+			require.ErrorIs(t, err, ErrAdjustmentMismatch)
+			assert.Equal(t, janBefore, partHash(t, root, 2020, time.January))
+			assert.Equal(t, febBefore, partHash(t, root, 2020, time.February))
+		})
+	}
+}
+
+// Review finding: an export that reaches back to the first raw date but omits
+// an interior month must not replace the other months and leave that one on
+// the old price basis.
+func TestMergeArchive_ExportOmittingAnInteriorMonthIsRefused(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "raw")
+	_, err := MergeArchive(ctx, writeArchive(t,
+		archiveRow("20200130", "100"), archiveRow("20200228", "101"), archiveRow("20200302", "102")), root, "SPY")
+	require.NoError(t, err)
+	before := [3][32]byte{partHash(t, root, 2020, time.January), partHash(t, root, 2020, time.February), partHash(t, root, 2020, time.March)}
+
+	// Re-adjusted closes, spanning Jan through Mar, but February is missing.
+	_, err = MergeArchive(ctx, writeArchive(t,
+		archiveRow("20200130", "50"), archiveRow("20200302", "51"), archiveRow("20200303", "51.5")), root, "SPY")
+	require.ErrorIs(t, err, ErrAdjustmentMismatch)
+	assert.ErrorContains(t, err, "2020-02-28")
+	after := [3][32]byte{partHash(t, root, 2020, time.January), partHash(t, root, 2020, time.February), partHash(t, root, 2020, time.March)}
+	assert.Equal(t, before, after, "nothing is written when the export cannot replace every month")
+}
+
+// A complete export replaces history even when its rows arrive newest first.
+func TestMergeArchive_FullReimportAcceptsUnorderedCompleteExport(t *testing.T) {
+	root := seed(t)
+	r, err := MergeArchive(context.Background(), writeArchive(t,
+		archiveRow("20200204", "51.5"), archiveRow("20200203", "51"),
+		archiveRow("20200131", "50.5"), archiveRow("20200130", "50")), root, "SPY")
+	require.NoError(t, err)
+	assert.True(t, r.FullReimport)
+	assert.Zero(t, r.RowsAdded)
+}
+
+// Months are written oldest first, so an interrupted rewrite leaves the newest
+// month on its old contents and the next run still detects the mismatch. The
+// newest month's partition is made unwritable (a non-empty directory) and the
+// records arrive newest first: if February were written first, January would
+// never be reached.
+func TestWriteImportedRecords_WritesNewestMonthLast(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "raw")
+	febPath := partitionPath(root, "SPY", 2020, time.February)
+	require.NoError(t, os.MkdirAll(filepath.Join(febPath, "obstruction"), 0o755))
+
+	_, err := writeImportedRecords(ctx, root, "SPY", []Record{
+		mustRecord(t, "2020-02-04", "51.5"), mustRecord(t, "2020-02-03", "51"),
+		mustRecord(t, "2020-01-31", "50.5"), mustRecord(t, "2020-01-30", "50"),
+	}, nil)
+	require.Error(t, err, "the newest month cannot be written")
+	assert.Equal(t, []string{"2020-01-31=50.5", "2020-01-30=50"}, partDates(t, root, 2020, time.January),
+		"the older month was written before the failing newest one")
+}
+
+func TestImportArchive_RowsAddedCountsOnlyNewDates(t *testing.T) {
+	ctx := context.Background()
+	root := seed(t)
+	same := writeArchive(t, archiveRow("20200130", "100"), archiveRow("20200131", "101"),
+		archiveRow("20200203", "102"), archiveRow("20200204", "103"))
+
+	r, err := ImportArchive(ctx, same, root, "SPY")
+	require.NoError(t, err)
+	assert.Equal(t, 4, r.RowsImported)
+	assert.Zero(t, r.RowsAdded, "re-importing an unchanged archive adds nothing")
+	assert.Equal(t, 2, r.MonthsWritten)
+
+	grown := writeArchive(t, archiveRow("20200130", "100"), archiveRow("20200131", "101"),
+		archiveRow("20200203", "102"), archiveRow("20200204", "103"), archiveRow("20200205", "104"))
+	r, err = ImportArchive(ctx, grown, root, "SPY")
+	require.NoError(t, err)
+	assert.Equal(t, 1, r.RowsAdded)
+}
+
+func TestImportArchive_RepairsDamagedPartition(t *testing.T) {
+	ctx := context.Background()
+	root := seed(t)
+	require.NoError(t, os.WriteFile(partitionPath(root, "SPY", 2020, time.January), []byte("garbage\n"), 0o644))
+	r, err := ImportArchive(ctx, writeArchive(t, archiveRow("20200130", "100"), archiveRow("20200131", "101")), root, "SPY")
+	require.NoError(t, err)
+	assert.Equal(t, 2, r.RowsAdded, "dates in an unreadable partition are not known, so they count as added")
+	assert.Equal(t, []string{"2020-01-30=100", "2020-01-31=101"}, partDates(t, root, 2020, time.January))
 }
 
 func TestMergeArchive_UnorderedExportPicksLatestRawRow(t *testing.T) {

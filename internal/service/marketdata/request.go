@@ -129,7 +129,16 @@ type UpdateRequest struct {
 type ConvertRequest struct {
 	DatasetRequest
 	ArchivePath string
-	// Force rebuilds canonical partitions even when their fingerprints are unchanged.
+	// Force rebuilds canonical partitions even when their fingerprints are
+	// unchanged, and imports the whole archive instead of merging only the
+	// rows after the symbol's last raw date: it rewrites every raw monthly
+	// partition the archive holds, and repairs a damaged one. Without
+	// Force the raw archive is extended incrementally and rows already on
+	// disk are never rewritten, except when the archive shows the history
+	// was re-adjusted (a split or ex-dividend date), in which case the
+	// symbol is fully re-imported if the archive holds every existing
+	// date and the call fails with ErrStooqAdjustmentMismatch if it does
+	// not.
 	Force bool
 }
 
