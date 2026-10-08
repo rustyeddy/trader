@@ -644,6 +644,58 @@ func TestStooqLegacyAdjustmentLabelIsStaleAndRebuilt(t *testing.T) {
 	assert.Empty(t, plan.Actions, "relabelled partition is current again")
 }
 
+// Review finding (PR #466): a mislabelled partition is stale even when its raw
+// input is missing or damaged. Coverage reports the label honestly; Plan still
+// fetches or repairs raw first and schedules no rebuild until raw is usable.
+func TestStooqLegacyAdjustmentLabelIsStaleWhenRawIsUnusable(t *testing.T) {
+	for name, damage := range map[string]func(t *testing.T, rawPath string){
+		"raw partition missing": func(t *testing.T, rawPath string) { require.NoError(t, os.Remove(rawPath)) },
+		"raw partition corrupt": func(t *testing.T, rawPath string) {
+			require.NoError(t, os.WriteFile(rawPath, []byte("# schema=raw-v1\nnot,a,header\ngarbage\n"), 0o644))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			rawRoot := t.TempDir()
+			source := filepath.Join(t.TempDir(), "spy.us.txt")
+			require.NoError(t, os.WriteFile(source, []byte(stooqArchiveHeaderForTest()+"\n"+
+				"SPY.US,D,20200501,000000,282.80,283.19,278.85,282.79,74424000,0\n"), 0o644))
+			_, err := stooq.ImportArchive(ctx, source, rawRoot, "SPY")
+			require.NoError(t, err)
+
+			mgr := newStooqTestManager(t, rawRoot)
+			span, err := marketdata.NewTimeRange(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC))
+			require.NoError(t, err)
+			query := BarQuery{Instrument: spyID(t), Interval: marketdata.D1, Range: span}
+			plan, err := mgr.Plan(ctx, query)
+			require.NoError(t, err)
+			_, err = mgr.Build(ctx, plan)
+			require.NoError(t, err)
+
+			key := partitionKey{provider: "stooq", symbol: "SPY", instrument: spyID(t), interval: marketdata.D1, year: 2020, month: time.May}
+			man, bs, err := mgr.loadPartition(ctx, key)
+			require.NoError(t, err)
+			man.AdjustmentPolicy = marketdata.AdjustmentSplitAdjusted
+			publishTestPartition(t, mgr, key, man, bs)
+
+			damage(t, filepath.Join(rawRoot, "SPY", "2020", "05", "SPY-2020-05-d1.csv"))
+
+			cov, err := mgr.Coverage(ctx, query)
+			require.NoError(t, err)
+			require.Len(t, cov.Partitions, 1)
+			assert.Equal(t, PartitionCoverageStale, cov.Partitions[0].Status,
+				"the wrong label is known from the manifest alone, whatever state raw is in")
+
+			plan, err = mgr.Plan(ctx, query)
+			require.NoError(t, err)
+			require.NotEmpty(t, plan.Actions)
+			for _, a := range plan.Actions {
+				assert.NotEqual(t, ActionNormalizeCanonical, a.Kind, "no rebuild is scheduled without usable raw: %s %s", a.Kind, a.Reason)
+			}
+		})
+	}
+}
+
 func TestAdjustmentPolicyFor(t *testing.T) {
 	for provider, want := range map[string]marketdata.AdjustmentPolicy{
 		"stooq":   marketdata.AdjustmentTotalReturn,

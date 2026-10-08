@@ -75,7 +75,10 @@ this ADR so the data-model change gets its own review.
   partition whose stored policy differs from its provider's current one is
   reported stale (=Plan= schedules a rebuild, with the raw input unchanged),
   so datasets built before this ADR are relabelled on the next update
-  instead of keeping a wrong label until someone forces a rebuild.
+  instead of keeping a wrong label until someone forces a rebuild. The
+  label is known from the manifest alone, so Coverage reports it stale
+  even when the raw partition is missing or damaged; Plan then acquires or
+  repairs raw first and schedules no rebuild until raw is usable.
 - No =manifestRevisionVersion= bump: the hashed encoding is unchanged, only
   the policy value for Stooq data is. Stooq datasets get a new =Revision=
   and =ConfigDigest= when rebuilt, which is the intended identity change.
