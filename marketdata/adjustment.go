@@ -38,19 +38,21 @@ const (
 	// AdjustmentSplitAdjusted means historical prices have been
 	// retroactively adjusted for stock splits (so a share count/price
 	// series stays continuous across a split date) but not for
-	// dividends. Stooq's own daily equity history uses this
-	// convention — confirmed empirically against AAPL's real 2014
-	// (7-for-1) and 2020 (4-for-1) splits, both of which show
-	// continuous pricing with no discontinuity on the split date,
-	// and 1984-era prices far below AAPL's actual IPO price,
-	// consistent with the cumulative effect of every later split
-	// already being applied (issue #298).
+	// dividends. Alpaca's historical bars use this convention (its
+	// requests ask for split adjustment only). Stooq's history is
+	// split-adjusted too, but also dividend-adjusted, so it records
+	// AdjustmentTotalReturn instead (ADR-073). The split evidence is
+	// AAPL's real 2014 (7-for-1) and 2020 (4-for-1) splits, both of
+	// which show continuous pricing with no discontinuity on the split
+	// date (issue #298).
 	AdjustmentSplitAdjusted
 	// AdjustmentTotalReturn means historical prices are adjusted for
-	// both splits and dividends (a total-return series). No provider
-	// Trader ingests today delivers this; the value is reserved so a
-	// future provider that does can record itself honestly without an
-	// AdjustmentPolicy redesign.
+	// both splits and dividends (a total-return series): every split and
+	// every ex-dividend date rewrites all older prices. Stooq's daily
+	// equity history uses this convention (ADR-073, issue #464), which
+	// is why its price levels are lower than a split-adjusted-only
+	// source's by roughly the dividends paid since, and why the two must
+	// not be spliced into one series.
 	AdjustmentTotalReturn
 )
 

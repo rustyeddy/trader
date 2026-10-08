@@ -222,6 +222,25 @@ func TestManifest_ConfigDigestChangesWithConfiguration(t *testing.T) {
 	assert.NotEqual(t, m1.ConfigDigest(), m2.ConfigDigest())
 }
 
+// TestManifest_ConfigDigestChangesWithDatasetAdjustmentPolicy proves two
+// runs over datasets that differ only in adjustment convention (Alpaca
+// split-adjusted vs Stooq total-return, ADR-073) cannot share a
+// ConfigDigest.
+func TestManifest_ConfigDigestChangesWithDatasetAdjustmentPolicy(t *testing.T) {
+	digestFor := func(policy marketdata.AdjustmentPolicy) string {
+		ds := mustDatasetManifest(t)
+		ds.AdjustmentPolicy = policy
+		p := baseManifestParams(t)
+		p.RunID = baseManifestParams(t).RunID
+		p.Dataset = []marketdata.Manifest{ds}
+		m, err := backtest.NewManifest(p)
+		require.NoError(t, err)
+		return m.ConfigDigest()
+	}
+	assert.NotEqual(t, digestFor(marketdata.AdjustmentSplitAdjusted), digestFor(marketdata.AdjustmentTotalReturn))
+	assert.Equal(t, digestFor(marketdata.AdjustmentTotalReturn), digestFor(marketdata.AdjustmentTotalReturn))
+}
+
 // TestManifest_MarshalJSONIsDeterministic proves serialization is
 // byte-for-byte identical across independently constructed Manifests
 // describing the same logical inputs.

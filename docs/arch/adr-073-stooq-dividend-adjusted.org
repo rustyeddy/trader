@@ -56,8 +56,8 @@ ADR-048's other decisions stand unchanged: the =AdjustmentPolicy= type,
 recording it in =Manifest=, the identity wiring (=Revision= version tag and
 =ConfigDigest=), the volume position, and the AAPL split evidence.
 
-Changing the value in code is a separate issue (#465) because it changes
-=Manifest.Revision= and regenerates fixtures.
+Changing the value in code is a separate issue (#465), implemented after
+this ADR so the data-model change gets its own review.
 
 * Consequences
 
@@ -70,8 +70,22 @@ Changing the value in code is a separate issue (#465) because it changes
   downloaded archive is therefore stale for level-based use after any
   ex-dividend date, and ADR-072's incremental import falls back to a full
   re-import in that case.
-- Until #465 lands, Stooq manifests still read =AdjustmentSplitAdjusted=;
-  ADR-048's recorded value is knowingly behind the data.
+- Issue #465 records =AdjustmentTotalReturn= for Stooq through one function,
+  =adjustmentPolicyFor=, shared by the build and by planning. A canonical
+  partition whose stored policy differs from its provider's current one is
+  reported stale (=Plan= schedules a rebuild, with the raw input unchanged),
+  so datasets built before this ADR are relabelled on the next update
+  instead of keeping a wrong label until someone forces a rebuild. The
+  label is known from the manifest alone, so Coverage reports it stale
+  even when the raw partition is missing or damaged; Plan then acquires or
+  repairs raw first and schedules no rebuild until raw is usable.
+- No =manifestRevisionVersion= bump: the hashed encoding is unchanged, only
+  the policy value for Stooq data is. Stooq datasets get a new =Revision=
+  and =ConfigDigest= when rebuilt, which is the intended identity change.
+  No checked-in fixture or golden contains a Stooq manifest.
+- =TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy= (named in ADR-048) is
+  renamed =TestStooqEndToEnd_AAPLRecordsTotalReturnPolicy=; it still proves
+  continuity across the AAPL split.
 - Absolute-price rules (dollar thresholds, price-level screens) evaluated
   on Stooq history use adjusted, not historical traded, prices.
 
