@@ -1,0 +1,87 @@
+#+TITLE: ADR-073: Stooq daily history is dividend-adjusted
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #464. Partial amendment of ADR-048 (see the Partial Amendment
+Rules in =adr-decisions.org=); ADR-048 stays Accepted for everything else.
+The code change this implies is issue #465.
+
+* Context
+
+ADR-048 decided that Stooq's daily equity bars are split-adjusted and so
+record =AdjustmentSplitAdjusted=. It reached that from AAPL's two real
+splits, and stated that dividend/total-return adjustment "was not separately
+investigated" and "remains genuinely unverified and is not claimed either
+way; if a future issue needs to know, it requires its own investigation (for
+example checking price behavior around a known large ex-dividend date)".
+
+The sub-decision amended here is the Stooq branch of ADR-048's Decision: "the
+=stooq= branch returns =AdjustmentSplitAdjusted=, per the empirical finding
+above", together with the Context sentence "Stooq's daily equity history is
+therefore /split-adjusted/, not raw."
+
+Two later pieces of work needed the answer: comparing Stooq with Alpaca
+(=feed=iex=, split-adjusted only) for an out-of-sample holdout, and the
+mismatch rule of ADR-072 (#459). Closes on the same trading days, Stooq
+(=d_us_txt.zip=, downloaded 2026-09-10) against Alpaca:
+
+| Symbol | Dividend | 2020-07-27 | 2023-06-15 | 2026-08-03 |
+|--------+----------+------------+------------+------------|
+| GLD    | none     | 0.00%      | 0.00%      | +0.01%     |
+| TSLA   | none     | -0.19%     | -0.05%     | 0.00%      |
+| NVDA   | tiny     | -0.29%     | -0.06%     | -0.04%     |
+| SPY    | yes      | -9.18% (2018-11-01) | -2.66% | -0.01%    |
+| QQQ    | yes      | -2.87%     | -1.21%     | 0.00%      |
+| MSFT   | yes      | -3.83%     | -1.16%     | +0.02%     |
+| XOM    | yes      | -13.28%    | -0.01%     | -0.01%     |
+| TLT    | yes      | -15.70%    | -10.69%    | -0.01%     |
+
+Symbols that pay no dividend match. Dividend payers are lower in the past by
+roughly the dividends paid since and converge to zero at the present. SPY
+closed at 271.60 on 2018-11-01 (Alpaca, matching the actual close) and
+246.675 in all three Stooq copies on disk. Daily returns agree closely (SPY
+mean absolute difference 0.03%); price levels do not.
+
+* Decision
+
+Stooq daily bars are back-adjusted for dividends as well as splits: a
+total-return-style series. The adjustment convention recorded for provider
+=stooq= is =AdjustmentTotalReturn=, the value ADR-048 reserved for exactly
+this. Alpaca remains =AdjustmentSplitAdjusted=. Trader still only records the
+convention a provider delivers (ADR-047, ADR-048); it does not compute or
+select adjustments.
+
+ADR-048's other decisions stand unchanged: the =AdjustmentPolicy= type,
+recording it in =Manifest=, the identity wiring (=Revision= version tag and
+=ConfigDigest=), the volume position, and the AAPL split evidence.
+
+Changing the value in code is a separate issue (#465) because it changes
+=Manifest.Revision= and regenerates fixtures.
+
+* Consequences
+
+- Stooq and Alpaca price levels are not comparable and must not be spliced
+  into one series: the join would show a jump equal to the dividends paid
+  since the join date. Keep them as separate provider-scoped datasets.
+  Percentage returns, and indicators and stops defined on them, are
+  effectively unaffected.
+- Every ex-dividend date rewrites all older Stooq rows. A previously
+  downloaded archive is therefore stale for level-based use after any
+  ex-dividend date, and ADR-072's incremental import falls back to a full
+  re-import in that case.
+- Until #465 lands, Stooq manifests still read =AdjustmentSplitAdjusted=;
+  ADR-048's recorded value is knowingly behind the data.
+- Absolute-price rules (dollar thresholds, price-level screens) evaluated
+  on Stooq history use adjusted, not historical traded, prices.
+
+* Alternatives Considered
+
+- *Leave ADR-048 unchanged and note the finding elsewhere.* Rejected: the
+  recorded policy would stay wrong and the registry's rules forbid editing an
+  Accepted ADR in place.
+- *Supersede ADR-048 entirely.* Rejected: only one sub-decision changes; the
+  type, identity wiring and volume decisions remain correct.
+- *Change the policy value in the same step.* Rejected: it bumps
+  =manifestRevisionVersion= and regenerates goldens, which deserves its own
+  reviewable change (#465).

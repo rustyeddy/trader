@@ -21,10 +21,11 @@
 // own explicit constraint — "should not require network access to
 // Stooq"). There is no Sync-equivalent network fetch; Import (import.go)
 // is the one, explicit, operator-run acquisition step, reading a
-// caller-supplied Stooq archive export once and writing it out as raw
-// partitions. Running Import again over an updated Stooq export is how
-// a caller brings the raw archive current — there is no automatic
-// "extend" the way oanda.Client.FetchCandles provides.
+// caller-supplied Stooq archive export and writing it out as raw
+// partitions. MergeArchive (merge.go, ADR-072) brings the raw archive
+// current from a newer export by adding only the rows after the last raw
+// date; ImportArchive rewrites every partition the export holds. There is
+// no network "extend" the way oanda.Client.FetchCandles provides.
 //
 // # Archive shape
 //

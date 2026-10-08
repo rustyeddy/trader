@@ -60,8 +60,9 @@ func newStq2BarsCmd() *cobra.Command {
 					symbol, action, res.PublishedPartitions)
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "converted %s (%s): imported %d rows across %d raw months; published %d canonical partitions\n",
-				symbol, action, res.Convert.Import.RowsImported, res.Convert.Import.MonthsWritten, res.PublishedPartitions)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "converted %s (%s): imported %d rows across %d raw months%s; published %d canonical partitions\n",
+				symbol, action, res.Convert.Import.RowsAdded, res.Convert.Import.MonthsWritten,
+				fullReimportNote(res.Convert.Import.FullReimport), res.PublishedPartitions)
 			return err
 		},
 	}
@@ -101,4 +102,14 @@ func stooqArchiveError(err error, symbol, root string) error {
 		return fmt.Errorf("multiple Stooq archives for %s found under %q; provide --archive", symbol, root)
 	}
 	return err
+}
+
+// fullReimportNote flags, in the import summary line, that the incremental
+// Stooq import found the export disagreed with the stored history and
+// re-imported the symbol in full.
+func fullReimportNote(full bool) string {
+	if full {
+		return " (export disagreed with stored history: full re-import)"
+	}
+	return ""
 }

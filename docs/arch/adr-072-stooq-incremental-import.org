@@ -1,0 +1,90 @@
+#+TITLE: ADR-072: Incremental Stooq raw import
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #459. Phase 2 (fetching from Stooq over HTTP) is issue #460
+and is not decided here.
+
+* Context
+
+Stooq has no live acquisition client (issue #303, ADR-071): the raw archive
+is brought current by importing a newer native export. =stooq.ImportArchive=
+parsed the whole export and overwrote every monthly raw partition in it. The
+range given to =trader data update= only clipped the later canonical Build.
+Each update therefore rewrote years of raw history for one symbol, and an
+export covering a shorter span than the stored history replaced the months
+it touched with fewer rows.
+
+Stooq history is back-adjusted for splits and for dividends (ADR-048 as
+amended by ADR-073), so every split and every ex-dividend date rewrites all
+older rows in a newer export. Appending only the new rows would then mix
+adjusted and unadjusted data without any error.
+
+* Decision
+
+=stooq.MergeArchive= (surfaced as =Manager.MergeStooqArchive=) is the
+default import for =Convert=, =ConvertStooqArchive=, =CanonicalizeDatasets=
+and =UpdateDatasets=. =Force= keeps the full =ImportArchive= behavior.
+
+- No raw history yet: same as a full import.
+- Export ends before the last raw date: write nothing. An older or shorter
+  export never deletes existing rows.
+- Export holds the last raw date and its Close equals the stored Close:
+  write only rows after that date. The last existing month is rewritten
+  with its existing rows followed by the new ones; later months are
+  created; earlier partitions are not touched. If the export ends on the
+  last raw date, nothing is written.
+- Export disagrees on that Close, or lacks the last raw date so it cannot
+  be compared: history has been, or may have been, re-adjusted. Replacing
+  it is coherent only if the export holds *every date already in raw*:
+  reaching back to the first raw date is not enough, because an export that
+  omits an interior month or a date inside a month it rewrites would leave
+  that month on the old price basis or drop its rows. If the export holds
+  every existing date, re-import the symbol in full and report
+  =FullReimport=, writing months oldest first so an interrupted rewrite
+  leaves the newest month on its old contents and the next run detects the
+  mismatch again. Otherwise fail with =ErrAdjustmentMismatch= and write
+  nothing; =Force= is the explicit way to replace history from a partial
+  export.
+- The comparison is on Close only. A last day captured before the session
+  finished also triggers the full re-import, which is safe but not
+  minimal.
+- Malformed input aborts before any write, as before.
+
+"Up to the last recorded close" means the newest row in the export; nothing
+is invented beyond it. Results report =RowsAdded= (dates not already on
+disk, so a re-import of an unchanged archive adds none), =MonthsWritten= and
+=FullReimport=; =RowsImported=, =FirstDate= and =LastDate= still describe
+the whole export, so the Build range logic is unchanged.
+
+* Consequences
+
+- For a symbol that pays dividends (SPY pays quarterly), any ex-dividend
+  date between two downloads changes the stored last Close, so the full
+  re-import is the common outcome and the incremental append mainly
+  benefits non-payers and downloads made between ex-dividend dates. The
+  fallback is the correct behavior, not a defect: appending to dividend-
+  adjusted history that has been re-adjusted would mix two price bases.
+  =FullReimport= makes the case visible in the import summary.
+- Updating from a newer export touches the last raw month and later ones,
+  and Build rebuilds only the partitions whose raw fingerprint changed.
+- A repeat run with the same export changes nothing.
+- Raw partitions before the last raw date are not repaired by the
+  incremental path. =Force= re-imports the whole export for that.
+- An operator who supplies a short export after a split or an ex-dividend
+  date gets an explicit error instead of silently mixed history.
+- The CLI summary line now reports rows added, not rows in the export.
+
+* Alternatives Considered
+
+- *Append without comparing.* Rejected: silently mixes adjusted and
+  unadjusted history after any split or dividend-style revision.
+- *Always full re-import (status quo).* Rejected: rewrites all history per
+  update and truncates a month when the export is shorter than what is on
+  disk.
+- *Compare every overlapping row.* Rejected for now: cost grows with
+  history, and a split or dividend adjustment changes the most recent stored
+  row as well as older ones, so the last row is a sufficient detector.
+- *Add the HTTP fetcher at the same time.* Deferred to #460: it reverses
+  the offline-only decision from #303 and needs its own ADR.

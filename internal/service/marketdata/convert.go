@@ -22,7 +22,7 @@ func (s *Service) Convert(ctx context.Context, req ConvertRequest) (resp Convert
 	}
 	defer func() {
 		s.logOutcome(ctx, slog.LevelInfo, "convert completed", "convert failed", req.DatasetRequest, err,
-			"rows_imported", resp.Import.RowsImported, "published_partitions", len(resp.Build.Result.Published))
+			"rows_imported", resp.Import.RowsImported, "rows_added", resp.Import.RowsAdded, "full_reimport", resp.Import.FullReimport, "published_partitions", len(resp.Build.Result.Published))
 	}()
 	return s.convert(ctx, req)
 }
@@ -30,7 +30,14 @@ func (s *Service) Convert(ctx context.Context, req ConvertRequest) (resp Convert
 // convert is Convert without validation or its outcome log, so
 // ConvertStooqArchive can log one record for its whole operation.
 func (s *Service) convert(ctx context.Context, req ConvertRequest) (ConvertResponse, error) {
-	imported, err := s.manager.ImportStooqArchive(ctx, req.ArchivePath, req.Instrument)
+	// Incremental by default; Force re-imports the whole export, the way to
+	// repair raw history the incremental path cannot (it never rewrites
+	// months before the last raw date).
+	importArchive := s.manager.MergeStooqArchive
+	if req.Force {
+		importArchive = s.manager.ImportStooqArchive
+	}
+	imported, err := importArchive(ctx, req.ArchivePath, req.Instrument)
 	if err != nil {
 		return ConvertResponse{}, err
 	}

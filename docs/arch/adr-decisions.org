@@ -155,7 +155,7 @@ the original decided, use full supersession instead.
 | 045 | Direct Price-to-float64 analytical conversion boundary (in adr-045-analytical-float64-conversion-boundary.org) | Accepted |
 | 046 | Semantic versioning, version reporting, and release process (in adr-046-semantic-versioning-release-process.org) | Superseded, see note below |
 | 047 | Equities Phase 1 domain semantics and scope (in adr-047-equities-phase1-scope.org) | Accepted |
-| 048 | Canonical equity bar adjustment semantics (in adr-048-equity-bar-adjustment-semantics.org) | Accepted |
+| 048 | Canonical equity bar adjustment semantics (in adr-048-equity-bar-adjustment-semantics.org) | Accepted, amended by 073 |
 | 049 | US equity market calendar and trading-session semantics (in adr-049-us-equity-market-calendar.org) | Accepted |
 | 050 | Alpaca historical equity market-data provider (in adr-050-alpaca-historical-provider.org) | Accepted |
 | 051 | Alpaca paper broker adapter: REST-polling Account.Events for Phase 1 (in adr-051-alpaca-broker-events-polling.org) | Accepted |
@@ -179,6 +179,8 @@ the original decided, use full supersession instead.
 | 069 | Shared transport application behavior and repeatable service operations (in adr-069-shared-transport-application-behavior.org) | Accepted, partial amendment of 039, 040, 068 |
 | 070 | Consumer-defined MCP market-data capability and service-owned resolution (in adr-070-mcp-market-data-capability-interface.org) | Accepted, partial amendment of 068 |
 | 071 | One market-data provider registry (in adr-071-market-data-provider-registry.org) | Accepted |
+| 072 | Incremental Stooq raw import (in adr-072-stooq-incremental-import.org) | Accepted |
+| 073 | Stooq daily history is dividend-adjusted (in adr-073-stooq-dividend-adjusted.org) | Accepted, partial amendment of 048 |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
@@ -759,6 +761,19 @@ satisfies the intent (no position to exit, no position to protect,
 already at target) as =pipeline.ErrNoAction=. The scheduler journals
 them as a new =KindNoAction= record and continues. The reference
 external example now decides from its =View=.
+
+Note: ADR-073 is likewise maintained in its own file,
+=docs/arch/adr-073-stooq-dividend-adjusted.org=, rather than inline in this
+registry. Its own Status section is authoritative. Issue #464 resolves the
+question ADR-048 left open (whether Stooq's daily history is dividend
+adjusted): it is, so the =AdjustmentSplitAdjusted= policy ADR-048 records
+for Stooq is corrected to =AdjustmentTotalReturn=. This is a /partial
+amendment/ of ADR-048 (this registry's own mechanism): ADR-048 stays
+=Accepted= and gains one =Amended by= line; its type, identity wiring and
+volume decisions are unchanged. The code change is issue #465. ADR-072
+(incremental Stooq raw import, issue #459) depends on the finding: every
+ex-dividend date rewrites older rows, so its close comparison falls back to a
+full re-import for dividend payers.
 
 * ADR-001: Modular monolith before service decomposition
 

@@ -28,3 +28,8 @@ func TestStooqArchiveErrorAddsFlagGuidance(t *testing.T) {
 	other := errors.New("boom")
 	assert.Same(t, other, stooqArchiveError(other, "SPY", "/arch"))
 }
+
+func TestFullReimportNote(t *testing.T) {
+	assert.Empty(t, fullReimportNote(false))
+	assert.Contains(t, fullReimportNote(true), "full re-import")
+}
