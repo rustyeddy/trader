@@ -618,6 +618,12 @@ strategy:
   exec: ./my-scanner
 ```
 
+A model run does not print the backtest report (it trades nothing, so
+performance and trade statistics would be all zeros). It prints a short
+study summary (strategy, run id, span, interval, instrument count and the
+number of signals the strategy emitted); `--format json` prints the same
+fields as JSON. The signals themselves are journaled with `--journal PATH`.
+
 `backtest.adverse_distance` is rejected beside a `model:` section, and a
 model run has no sizing policy, so a strategy that emits an intent fails at
 sizing. Explicit command-line flags (`--from`, `--symbol`, ...) still

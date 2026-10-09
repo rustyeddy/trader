@@ -42,6 +42,10 @@ var flipFlopPath string
 // runWithExternalProcessMonitor asks for a regression test of.
 var fakeGuestPath string
 
+// studyScannerPath is testdata/studyscanner, a trading-free BarsConsumer
+// over EURUSD and GBPUSD at H1, for model (study) runs.
+var studyScannerPath string
+
 func TestMain(m *testing.M) {
 	os.Exit(runTestMain(m))
 }
@@ -57,6 +61,12 @@ func runTestMain(m *testing.M) int {
 	flipFlopPath = filepath.Join(dir, "flipflop")
 	if err := goBuild(flipFlopPath, "github.com/rustyeddy/trader/examples/sdk-minimal"); err != nil {
 		fmt.Fprintln(os.Stderr, "backtest: building sdk-minimal test fixture:", err)
+		return 1
+	}
+
+	studyScannerPath = filepath.Join(dir, "studyscanner")
+	if err := goBuild(studyScannerPath, "github.com/rustyeddy/trader/cmd/trader/backtest/testdata/studyscanner"); err != nil {
+		fmt.Fprintln(os.Stderr, "backtest: building studyscanner test fixture:", err)
 		return 1
 	}
 
@@ -470,4 +480,77 @@ strategy:
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "stop distance must be positive",
 		"the strategy must launch and reach sizing, proving the model span and universe were applied")
+}
+
+func studyConfig(t *testing.T) string {
+	t.Helper()
+	body := `model:
+  symbols: EURUSD,GBPUSD
+  interval: H1
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  currency: USD
+  starting_capital: 10000
+backtest:
+  data_raw_root: testdata/raw/oanda
+strategy:
+  exec: ` + studyScannerPath + "\n"
+	path := filepath.Join(t.TempDir(), "study.yml")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	return path
+}
+
+func runStudy(t *testing.T, extra ...string) string {
+	t.Helper()
+	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
+	runCmd.SetArgs(append([]string{
+		"run", "--config", studyConfig(t),
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+	}, extra...))
+	require.NoError(t, runCmd.Execute(), out.String())
+	return out.String()
+}
+
+// TestRun_ModelRunPrintsAStudySummaryNotABacktestReport covers the model
+// branch of runBacktest (issue #489): the summary reports the signals the
+// strategy emitted and none of the backtest report's trade fields appear.
+func TestRun_ModelRunPrintsAStudySummaryNotABacktestReport(t *testing.T) {
+	journalPath := filepath.Join(t.TempDir(), "signals.jsonl")
+	out := runStudy(t, "--journal", journalPath)
+
+	assert.Contains(t, out, "Study: study-scanner 0.1.0")
+	assert.Contains(t, out, "Instruments:  2")
+	assert.Contains(t, out, "2024-01-08T00:00:00Z to 2024-01-08T04:00:00Z")
+	assert.Contains(t, out, "journaled to "+journalPath)
+	for _, backtestOnly := range []string{"Trades", "Equity", "PnL", "Drawdown", "Win Rate", "Final Account State"} {
+		assert.NotContains(t, out, backtestOnly)
+	}
+
+	// The reported count equals the signals actually journaled.
+	data, err := os.ReadFile(journalPath)
+	require.NoError(t, err)
+	journaled := bytes.Count(data, []byte(`"kind":"signal"`))
+	require.Positive(t, journaled, "the scanner must have emitted signals")
+	assert.Contains(t, out, fmt.Sprintf("Signals:      %d (journaled", journaled))
+}
+
+func TestRun_ModelRunWithoutAJournalStillCountsSignals(t *testing.T) {
+	out := runStudy(t)
+	assert.Contains(t, out, "pass --journal PATH to keep them")
+	assert.NotContains(t, out, "Signals:      0 ")
+}
+
+func TestRun_ModelRunJSONAndOrg(t *testing.T) {
+	var doc struct {
+		Strategy string `json:"strategy"`
+		Signals  int    `json:"signals"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runStudy(t, "--format", "json")), &doc))
+	assert.Equal(t, "study-scanner", doc.Strategy)
+	assert.Positive(t, doc.Signals)
+
+	org := runStudy(t, "--format", "org")
+	assert.True(t, strings.HasPrefix(org, "#+TITLE: Study: study-scanner"), org)
 }

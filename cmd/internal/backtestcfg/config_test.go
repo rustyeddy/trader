@@ -349,3 +349,13 @@ func TestModelConfig(t *testing.T) {
 		assert.ErrorContains(t, err, "backtest.adverse_distance")
 	})
 }
+
+func TestIsModel(t *testing.T) {
+	cfg, err := loadModel(t, modelYAML, nil)
+	require.NoError(t, err)
+	assert.True(t, cfg.IsModel(), "Resolve keeps the model section, so a resolved config is still a model")
+
+	bt, err := loadRunConfig(t, issue247CandidateYAML, nil)
+	require.NoError(t, err)
+	assert.False(t, bt.IsModel())
+}

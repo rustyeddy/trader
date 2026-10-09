@@ -282,6 +282,14 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		jrnl = w
 	}
 
+	// A model (study) run trades nothing: count its signals so the summary
+	// printed in place of the backtest report can show them.
+	var counter *signalCounter
+	if cfg.IsModel() {
+		counter = &signalCounter{inner: jrnl}
+		jrnl = counter
+	}
+
 	rep, err := backtestcfg.Run(ctx, backtestcfg.Request{
 		Config:      cfg,
 		Symbols:     symbols,
@@ -303,6 +311,9 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 
 	if err := svcbacktest.NewRunStore(outputDir).Save(rep); err != nil {
 		return err
+	}
+	if counter != nil {
+		return renderStudy(cmd.OutOrStdout(), flags.format, newStudySummary(rep, counter.signals, flags.journal))
 	}
 	return render(cmd.OutOrStdout(), flags.format, rep)
 }
