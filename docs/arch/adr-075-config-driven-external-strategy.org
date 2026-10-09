@@ -1,0 +1,53 @@
+#+TITLE: ADR-075: Config-driven external strategy runs
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #469. Extends ADR-062 (Strategy Protocol v1) launch
+mechanics and the =backtest run --config= precedence rules; no protocol
+invariant changes.
+
+* Context
+
+An external strategy run needed =--strategy-exec= (and, for a universe,
+repeated =--symbol=) on the command line, and =--config= was mutually
+exclusive with =--strategy-exec=. A scanner that trades a ~21 pair universe
+therefore could not be described by a single config file.
+
+* Decision
+
+** New config keys
+
+- =backtest.symbols=: a comma-separated universe (the config loader is
+  scalar-only, so a sequence is not available). Mutually exclusive with
+  =backtest.symbol=.
+- =strategy.exec=: the external strategy executable.
+- =strategy.config=: a path forwarded to the child as
+  =TRADER_STRATEGY_CONFIG=; trader never parses it. It requires
+  =strategy.exec=.
+
+** Precedence
+
+The existing order is unchanged: defaults < file < environment < flags.
+=--strategy-exec= and =--strategy-config= override the keys above; an
+explicit =--symbol= overrides both =backtest.symbol= and =backtest.symbols=.
+=--config= and =--strategy-exec= are no longer mutually exclusive.
+
+** Validation
+
+- =--strategy-args= and =--strategy-config= require an executable from
+  =--strategy-exec= or =strategy.exec=; =strategy.config= without
+  =strategy.exec= is rejected.
+- The /effective/ universe (after precedence) may contain more than one
+  instrument with =--config= only for an external strategy, whose
+  Descriptor decides what it trades. An in-process strategy with =--config=
+  stays a single-instrument experiment, whether the extra symbols came
+  from repeated =--symbol= flags or from =backtest.symbols=.
+- Shared callers of =backtestcfg.Run= reject =strategy.exec= without an
+  =ExternalStrategy=, so a config can never silently fall back to an
+  in-process strategy.
+
+* Consequences
+
+A scanner or study is described by one file. The installed =trader= must
+include this change before such a config runs.

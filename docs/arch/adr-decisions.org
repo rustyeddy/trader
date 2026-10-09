@@ -182,6 +182,7 @@ the original decided, use full supersession instead.
 | 072 | Incremental Stooq raw import (in adr-072-stooq-incremental-import.org) | Accepted |
 | 073 | Stooq daily history is dividend-adjusted (in adr-073-stooq-dividend-adjusted.org) | Accepted, partial amendment of 048 |
 | 074 | Snapshot (multi-bar) delivery in Strategy Protocol v1 (in adr-074-multi-bar-delivery.org) | Accepted, additive extension of 062 |
+| 075 | Config-driven external strategy runs (in adr-075-config-driven-external-strategy.org) | Accepted, extends 062 launch mechanics |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
@@ -783,6 +784,11 @@ delivery to Strategy Protocol v1: =sdk.ConsumerBase= with separate =OnBar= and
 =OnBars= consumer shapes, a =CAPABILITY_BARS_DELIVERY= handshake capability,
 and =BarsEvent=/=OnBarsResponse= messages. It is an additive extension of
 ADR-062, not an amendment: no v1 invariant changes.
+
+Note: ADR-075 is likewise maintained in its own file,
+=docs/arch/adr-075-config-driven-external-strategy.org=. Its own Status
+section is authoritative. Issue #469 lets =trader backtest run --config=
+carry =backtest.symbols=, =strategy.exec= and =strategy.config=.
 
 * ADR-001: Modular monolith before service decomposition
 

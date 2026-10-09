@@ -104,6 +104,12 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 	if err := cfg.Validate(); err != nil {
 		return svcbacktest.RunResponse{}, invalid(err)
 	}
+	// strategy.exec names an executable, but launching it is the caller's
+	// job (it owns Environ and --strategy-args): without an ExternalStrategy
+	// the run would silently use an in-process strategy instead.
+	if cfg.Strategy.Exec != "" && req.External == nil {
+		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("strategy.exec is set but the request carries no ExternalStrategy"))
+	}
 	progress := req.Progress
 	if progress == nil {
 		progress = func(string) {}

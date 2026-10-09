@@ -3,6 +3,7 @@ package backtest
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -81,9 +82,11 @@ func newRunCmd() *cobra.Command {
 			"data for whatever it will actually request. --strategy-args\n" +
 			"passes extra arguments to the executable unmodified;\n" +
 			"--strategy-config forwards a config file path via the " + backtestcfg.StrategyConfigPathEnv + "\n" +
-			"environment variable, never parsed by trader itself. Mutually\n" +
-			"exclusive with --config: choose either an in-process or external\n" +
-			"strategy for a run.\n\n" +
+			"environment variable, never parsed by trader itself. With --config,\n" +
+			"strategy.exec and strategy.config set the same two values, and\n" +
+			"backtest.symbols (comma-separated) supplies a multi-instrument\n" +
+			"universe, so a config file alone can drive an external strategy\n" +
+			"(issue #469); explicit flags still override it.\n\n" +
 			"--journal optionally writes a durable JSONL audit trail of\n" +
 			"the run (adapters/journal/jsonl); off by default, and never\n" +
 			"read back by 'show' (see the package doc comment).",
@@ -113,9 +116,9 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.buyDate, "buy-date", "", "buy-and-hold quantity mode: buy on the first bar at or after this date (default: the first bar)")
 	cmd.Flags().StringVar(&flags.sellDate, "sell-date", "", "buy-and-hold quantity mode: exit on the first bar at or after this date (default: hold through the run's end)")
 
-	cmd.Flags().StringVar(&flags.strategyExec, "strategy-exec", "", "path to an out-of-tree strategy executable, launched and driven over Strategy Protocol v1 (ADR-062/ADR-063) instead of an in-tree strategy; mutually exclusive with --config")
-	cmd.Flags().StringArrayVar(&flags.strategyArgs, "strategy-args", nil, "extra argument passed to --strategy-exec's own executable, unmodified; repeatable, in order; requires --strategy-exec")
-	cmd.Flags().StringVar(&flags.strategyConfig, "strategy-config", "", "path to a config file for --strategy-exec's own executable; forwarded as the "+backtestcfg.StrategyConfigPathEnv+" environment variable, never parsed by trader itself; requires --strategy-exec")
+	cmd.Flags().StringVar(&flags.strategyExec, "strategy-exec", "", "path to an out-of-tree strategy executable, launched and driven over Strategy Protocol v1 (ADR-062/ADR-063) instead of an in-tree strategy; may also be set as strategy.exec in --config")
+	cmd.Flags().StringArrayVar(&flags.strategyArgs, "strategy-args", nil, "extra argument passed to the external strategy executable, unmodified; repeatable, in order; requires --strategy-exec or strategy.exec")
+	cmd.Flags().StringVar(&flags.strategyConfig, "strategy-config", "", "path to a config file for --strategy-exec's own executable; forwarded as the "+backtestcfg.StrategyConfigPathEnv+" environment variable, never parsed by trader itself; requires an executable from --strategy-exec or strategy.exec; the same path may instead be set as strategy.config in --config")
 
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required, or supplied by --config)")
@@ -134,45 +137,77 @@ func newRunCmd() *cobra.Command {
 	return cmd
 }
 
-// validateStrategySelection enforces --strategy-exec's own mutual-
-// exclusivity rules before runBacktest does anything else (issue
-// #382's own "invalid combinations fail before run starts" acceptance
-// criterion) — there is no strategy registry, so --strategy-exec and
-// --config can never both select a strategy for the same run, and
-// --strategy-args/--strategy-config are meaningless (and therefore
-// rejected, rather than silently ignored) without --strategy-exec
-// naming an executable for them to apply to.
-func validateStrategySelection(cmd *cobra.Command, flags runFlags) error {
-	if flags.strategyExec == "" {
-		if cmd.Flags().Changed("strategy-args") {
-			return fmt.Errorf("--strategy-args requires --strategy-exec")
-		}
-		if cmd.Flags().Changed("strategy-config") {
-			return fmt.Errorf("--strategy-config requires --strategy-exec")
-		}
+// validateStrategyFlags is the early, config-free half of the external-
+// strategy rules: with neither --strategy-exec nor a --config that could
+// supply strategy.exec, --strategy-args and --strategy-config have no
+// executable to apply to, and fail before anything else is read.
+func validateStrategyFlags(cmd *cobra.Command, flags runFlags) error {
+	if flags.strategyExec != "" || flags.config != "" {
 		return nil
 	}
-	if flags.config != "" {
-		return fmt.Errorf("--strategy-exec cannot be combined with --config: choose either an in-process or external strategy")
+	if cmd.Flags().Changed("strategy-args") {
+		return fmt.Errorf("--strategy-args requires --strategy-exec or strategy.exec")
+	}
+	if cmd.Flags().Changed("strategy-config") {
+		return fmt.Errorf("--strategy-config requires --strategy-exec or strategy.exec")
+	}
+	return nil
+}
+
+// validateStrategySelection enforces the external-strategy rules once
+// the effective config is known (issue #382's "invalid combinations fail
+// before run starts" criterion, and #469): the executable may now come
+// from --strategy-exec or strategy.exec, so --strategy-args and
+// --strategy-config are meaningless (and therefore rejected, rather than
+// silently ignored) only when neither names one. A config may also carry
+// a multi-instrument universe only for an external strategy, whose own
+// Descriptor determines what it trades; --config with more than one
+// --symbol or backtest.symbols remains rejected for in-process
+// strategies, whose config describes a single experiment; symbols is the
+// effective universe from effectiveSymbols, so a YAML-carried universe is
+// checked as well as repeated flags.
+func validateStrategySelection(cmd *cobra.Command, flags runFlags, cfg backtestcfg.RunConfig, symbols []string) error {
+	if cfg.Strategy.Exec == "" {
+		if cmd.Flags().Changed("strategy-args") {
+			return fmt.Errorf("--strategy-args requires --strategy-exec or strategy.exec")
+		}
+		if cmd.Flags().Changed("strategy-config") {
+			return fmt.Errorf("--strategy-config requires --strategy-exec or strategy.exec")
+		}
+		if flags.config != "" && len(symbols) > 1 {
+			return fmt.Errorf("--config describes a single-instrument experiment for an in-process strategy; " +
+				"a multi-instrument universe (repeated --symbol or backtest.symbols) needs strategy.exec, " +
+				"or repeat --symbol without --config")
+		}
 	}
 	return nil
 }
 
 // effectiveSymbols reconciles --symbol (repeatable, multi-instrument,
-// issue #224) with backtest.symbol from --config (single-instrument,
-// issue #247): explicit --symbol flags always win when present (a
-// --config combined with more than one --symbol was already rejected
-// by buildRunConfig before this point; --symbol without --config is
-// never restricted to one value), and configSymbol is used only as a
-// fallback when no --symbol flag was given at all.
-func effectiveSymbols(flagSymbols []string, configSymbol string) ([]string, error) {
+// issue #224) with backtest.symbol (single-instrument, issue #247) and
+// backtest.symbols (a comma-separated universe, issue #469) from
+// --config: explicit --symbol flags always win when present, and the
+// config values are only a fallback when no --symbol flag was given at
+// all. (Config validation already rejects setting both config keys.)
+func effectiveSymbols(flagSymbols []string, configSymbol, configSymbols string) ([]string, error) {
 	if len(flagSymbols) > 0 {
 		return flagSymbols, nil
+	}
+	if configSymbols != "" {
+		var out []string
+		for _, s := range strings.Split(configSymbols, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+		if len(out) > 0 {
+			return out, nil
+		}
 	}
 	if configSymbol != "" {
 		return []string{configSymbol}, nil
 	}
-	return nil, fmt.Errorf("at least one --symbol, or backtest.symbol in --config, is required")
+	return nil, fmt.Errorf("at least one --symbol, or backtest.symbol/backtest.symbols in --config, is required")
 }
 
 // runBacktest is newRunCmd's own RunE: resolve the effective
@@ -186,7 +221,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	ctx := cmd.Context()
 	logger := clictx.LoggerFromContext(ctx)
 
-	if err := validateStrategySelection(cmd, flags); err != nil {
+	if err := validateStrategyFlags(cmd, flags); err != nil {
 		return err
 	}
 	cfg, err := buildRunConfig(cmd, flags)
@@ -196,8 +231,11 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	if cfg.Backtest.DataRawRoot == "" {
 		return fmt.Errorf("backtest.data_raw_root is required (set it in --config or pass --data-raw-root)")
 	}
-	symbols, err := effectiveSymbols(flags.symbols, cfg.Backtest.Symbol)
+	symbols, err := effectiveSymbols(flags.symbols, cfg.Backtest.Symbol, cfg.Backtest.Symbols)
 	if err != nil {
+		return err
+	}
+	if err := validateStrategySelection(cmd, flags, cfg, symbols); err != nil {
 		return err
 	}
 	outputDir, err := backtestcfg.LoadOutputDir(os.Environ(), flags.config, changedFlag(cmd, "output-dir", flags.outputDir))
@@ -222,9 +260,9 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	}
 
 	var ext *backtestcfg.ExternalStrategy
-	if flags.strategyExec != "" {
+	if cfg.Strategy.Exec != "" {
 		ext = &backtestcfg.ExternalStrategy{
-			Exec: flags.strategyExec, Args: flags.strategyArgs, Config: flags.strategyConfig, Environ: os.Environ(),
+			Exec: cfg.Strategy.Exec, Args: flags.strategyArgs, Config: cfg.Strategy.Config, Environ: os.Environ(),
 		}
 	}
 
