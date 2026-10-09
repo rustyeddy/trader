@@ -111,6 +111,15 @@ type Inventory struct {
 // this package's own, private convention with no legacy corpus quirks
 // to diagnose, unlike oanda's preserved historical archive.
 func Inspect(ctx context.Context, root string) (Inventory, error) {
+	return InspectMatching(ctx, root, nil)
+}
+
+// InspectMatching is Inspect restricted to the symbols match accepts
+// (nil accepts all). match runs on the path-derived symbol before the
+// file is read, so a caller that needs one symbol out of a large archive
+// does not read, fingerprint and parse every other symbol's files.
+// Rejected files are omitted, exactly as an unparseable one is.
+func InspectMatching(ctx context.Context, root string, match func(symbol string) bool) (Inventory, error) {
 	inv := Inventory{Root: root}
 
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -124,7 +133,7 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 			return nil
 		}
 
-		partition, skip, fatalErr := inspectFile(ctx, root, path)
+		partition, skip, fatalErr := inspectFile(ctx, root, path, match)
 		if fatalErr != nil {
 			return fatalErr
 		}
@@ -151,9 +160,12 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 	return inv, nil
 }
 
-func inspectFile(ctx context.Context, root, path string) (Partition, bool, error) {
+func inspectFile(ctx context.Context, root, path string, match func(symbol string) bool) (Partition, bool, error) {
 	m, err := parsePathMeta(path)
 	if err != nil {
+		return Partition{}, true, nil
+	}
+	if match != nil && !match(m.Symbol) {
 		return Partition{}, true, nil
 	}
 	if err := verifyPathLayout(root, path, m); err != nil {

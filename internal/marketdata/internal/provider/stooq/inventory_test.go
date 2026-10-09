@@ -75,3 +75,38 @@ func TestInspect_ReportsMalformedPartitionWithoutAbortingWalk(t *testing.T) {
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
+
+// TestInspectMatching_RejectedSymbolsAreNeverRead proves the filter runs
+// before any file I/O: an unreadable file of a rejected symbol is simply
+// absent, while an unfiltered Inspect inventories it as unreadable.
+func TestInspectMatching_RejectedSymbolsAreNeverRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file permissions cannot make a file unreadable")
+	}
+	root := t.TempDir()
+	writePartitionFile(t, root, "SPY", 2020, time.May, "not a valid partition\n")
+	other := writePartitionFile(t, root, "QQQ", 2020, time.May, "not a valid partition\n")
+	require.NoError(t, os.Chmod(other, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(other, 0o644) })
+
+	ctx := context.Background()
+	got, err := InspectMatching(ctx, root, func(symbol string) bool { return symbol == "SPY" })
+	require.NoError(t, err)
+	require.Len(t, got.Partitions, 1)
+	assert.Equal(t, "SPY", got.Partitions[0].Symbol)
+
+	all, err := Inspect(ctx, root)
+	require.NoError(t, err)
+	require.Len(t, all.Partitions, 2)
+	assert.Equal(t, PartitionStatusUnreadable, all.Partitions[0].Status, "QQQ sorts first")
+}
+
+func TestInspectMatching_NilMatchesEverything(t *testing.T) {
+	root := t.TempDir()
+	writePartitionFile(t, root, "SPY", 2020, time.May, "not a valid partition\n")
+	a, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+	b, err := InspectMatching(context.Background(), root, nil)
+	require.NoError(t, err)
+	assert.Equal(t, a, b)
+}

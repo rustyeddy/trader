@@ -128,9 +128,8 @@ func (m *Manager) allowsLiveExtend() bool {
 }
 
 // rawInventoryLookup returns a lookup map of every raw partition found
-// under m.rawRoot for symbol at interval (the oanda provider reads only
-// those files; stooq and alpaca still inspect their whole, small, D1-only
-// archives), dispatched to the concrete provider
+// under m.rawRoot for symbol at interval (every provider reads only
+// those files, never the rest of the archive), dispatched to the concrete provider
 // implementation named by m.providerName (ADR-047's internal provider
 // seam — oanda and stooq are the two implementations today, oanda
 // unchanged in behavior from before this seam existed). It returns a
@@ -160,7 +159,7 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, symbol string, interva
 		if rawInterval != string(stooq.RawD1) {
 			return nil, fmt.Errorf("marketdata: stooq: only %s is supported, got %s", marketdata.D1, interval)
 		}
-		inv, err := stooq.Inspect(ctx, m.rawRoot)
+		inv, err := stooq.InspectMatching(ctx, m.rawRoot, func(s string) bool { return s == symbol })
 		if err != nil {
 			return nil, fmt.Errorf("inspect raw archive: %w", err)
 		}
@@ -177,7 +176,7 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, symbol string, interva
 		if rawInterval != string(alpaca.RawD1) {
 			return nil, fmt.Errorf("marketdata: alpaca: only %s is supported, got %s", marketdata.D1, interval)
 		}
-		inv, err := alpaca.Inspect(ctx, m.rawRoot)
+		inv, err := alpaca.InspectMatching(ctx, m.rawRoot, func(s string) bool { return s == symbol })
 		if err != nil {
 			return nil, fmt.Errorf("inspect raw archive: %w", err)
 		}
