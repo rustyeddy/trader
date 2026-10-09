@@ -87,7 +87,7 @@ func (m *Manager) rawSpan(ctx context.Context, symbol string, interval marketdat
 	if !ok {
 		return nil, nil
 	}
-	lookup, err := m.rawInventoryLookup(ctx, interval)
+	lookup, err := m.rawInventoryLookup(ctx, symbol, interval)
 	if err != nil {
 		return nil, err
 	}

@@ -95,6 +95,15 @@ type Inventory struct {
 // beneath it. Mirrors stooq.Inspect's identical walk/skip/error
 // discipline exactly.
 func Inspect(ctx context.Context, root string) (Inventory, error) {
+	return InspectMatching(ctx, root, nil)
+}
+
+// InspectMatching is Inspect restricted to the symbols match accepts
+// (nil accepts all). match runs on the path-derived symbol before the
+// file is read, so a caller that needs one symbol out of a large archive
+// does not read, fingerprint and parse every other symbol's files.
+// Rejected files are omitted, exactly as an unparseable one is.
+func InspectMatching(ctx context.Context, root string, match func(symbol string) bool) (Inventory, error) {
 	inv := Inventory{Root: root}
 
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -108,7 +117,7 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 			return nil
 		}
 
-		partition, skip, fatalErr := inspectFile(ctx, root, path)
+		partition, skip, fatalErr := inspectFile(ctx, root, path, match)
 		if fatalErr != nil {
 			return fatalErr
 		}
@@ -135,9 +144,17 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 	return inv, nil
 }
 
-func inspectFile(ctx context.Context, root, path string) (Partition, bool, error) {
+// readFile reads one candidate partition file. It is a variable only so a
+// test can observe which files an inspection opens (the filter must keep
+// rejected files from ever reaching it).
+var readFile = os.ReadFile
+
+func inspectFile(ctx context.Context, root, path string, match func(symbol string) bool) (Partition, bool, error) {
 	m, err := parsePathMeta(path)
 	if err != nil {
+		return Partition{}, true, nil
+	}
+	if match != nil && !match(m.Symbol) {
 		return Partition{}, true, nil
 	}
 	if err := verifyPathLayout(root, path, m); err != nil {
@@ -149,7 +166,7 @@ func inspectFile(ctx context.Context, root, path string) (Partition, bool, error
 	if err := ctx.Err(); err != nil {
 		return Partition{}, false, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return Partition{}, false, ctxErr

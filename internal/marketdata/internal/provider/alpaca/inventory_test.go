@@ -81,3 +81,49 @@ func TestInspect_ReportsMalformedPartitionWithoutAbortingWalk(t *testing.T) {
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
+
+// TestInspectMatching_RejectedSymbolsAreNeverRead proves the filter runs
+// before any file I/O: the read hook records every file read, and a
+// rejected symbol's file never appears in it.
+func TestInspectMatching_RejectedSymbolsAreNeverRead(t *testing.T) {
+	root := t.TempDir()
+	spy := writePartitionFile(t, root, "SPY", 2020, time.May, "not a valid partition\n")
+	qqq := writePartitionFile(t, root, "QQQ", 2020, time.May, "not a valid partition\n")
+	reads := recordReads(t)
+
+	ctx := context.Background()
+	got, err := InspectMatching(ctx, root, func(symbol string) bool { return symbol == "SPY" })
+	require.NoError(t, err)
+	require.Len(t, got.Partitions, 1)
+	assert.Equal(t, "SPY", got.Partitions[0].Symbol)
+	assert.Equal(t, []string{spy}, *reads, "only the accepted file is read")
+
+	*reads = nil
+	all, err := Inspect(ctx, root)
+	require.NoError(t, err)
+	require.Len(t, all.Partitions, 2)
+	assert.ElementsMatch(t, []string{spy, qqq}, *reads, "without a filter every file is read")
+}
+
+func TestInspectMatching_NilMatchesEverything(t *testing.T) {
+	root := t.TempDir()
+	writePartitionFile(t, root, "SPY", 2020, time.May, "not a valid partition\n")
+	a, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+	b, err := InspectMatching(context.Background(), root, nil)
+	require.NoError(t, err)
+	assert.Equal(t, a, b)
+}
+
+// recordReads replaces readFile for the test and returns the paths read.
+func recordReads(t *testing.T) *[]string {
+	t.Helper()
+	var reads []string
+	orig := readFile
+	readFile = func(path string) ([]byte, error) {
+		reads = append(reads, path)
+		return os.ReadFile(path)
+	}
+	t.Cleanup(func() { readFile = orig })
+	return &reads
+}

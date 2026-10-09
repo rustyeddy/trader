@@ -128,7 +128,8 @@ func (m *Manager) allowsLiveExtend() bool {
 }
 
 // rawInventoryLookup returns a lookup map of every raw partition found
-// under m.rawRoot for interval, dispatched to the concrete provider
+// under m.rawRoot for symbol at interval (every provider reads only
+// those files, never the rest of the archive), dispatched to the concrete provider
 // implementation named by m.providerName (ADR-047's internal provider
 // seam — oanda and stooq are the two implementations today, oanda
 // unchanged in behavior from before this seam existed). It returns a
@@ -141,7 +142,7 @@ func (m *Manager) allowsLiveExtend() bool {
 // propagating the provider's own ENOENT failure — see coverage.go's
 // original version of this function (before the seam) for the full
 // "why" of this rule, which applies identically to both providers.
-func (m *Manager) rawInventoryLookup(ctx context.Context, interval marketdata.Interval) (map[rawPartitionKey]rawPartitionInfo, error) {
+func (m *Manager) rawInventoryLookup(ctx context.Context, symbol string, interval marketdata.Interval) (map[rawPartitionKey]rawPartitionInfo, error) {
 	rawInterval, ok := intervalToRawInterval(interval)
 	if !ok {
 		return nil, nil
@@ -158,7 +159,7 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, interval marketdata.In
 		if rawInterval != string(stooq.RawD1) {
 			return nil, fmt.Errorf("marketdata: stooq: only %s is supported, got %s", marketdata.D1, interval)
 		}
-		inv, err := stooq.Inspect(ctx, m.rawRoot)
+		inv, err := stooq.InspectMatching(ctx, m.rawRoot, func(s string) bool { return s == symbol })
 		if err != nil {
 			return nil, fmt.Errorf("inspect raw archive: %w", err)
 		}
@@ -175,7 +176,7 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, interval marketdata.In
 		if rawInterval != string(alpaca.RawD1) {
 			return nil, fmt.Errorf("marketdata: alpaca: only %s is supported, got %s", marketdata.D1, interval)
 		}
-		inv, err := alpaca.Inspect(ctx, m.rawRoot)
+		inv, err := alpaca.InspectMatching(ctx, m.rawRoot, func(s string) bool { return s == symbol })
 		if err != nil {
 			return nil, fmt.Errorf("inspect raw archive: %w", err)
 		}
@@ -189,7 +190,12 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, interval marketdata.In
 		}
 		return lookup, nil
 	default:
-		inv, err := oanda.Inspect(ctx, m.rawRoot)
+		// Only symbol's partitions at this raw interval are ever looked
+		// up; reading the rest of a multi-instrument, multi-interval
+		// archive (M1 dominates it) is what made each call take minutes.
+		inv, err := oanda.InspectMatching(ctx, m.rawRoot, func(s string, i oanda.RawInterval) bool {
+			return s == symbol && string(i) == rawInterval
+		})
 		if err != nil {
 			return nil, fmt.Errorf("inspect raw archive: %w", err)
 		}

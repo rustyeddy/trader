@@ -189,6 +189,17 @@ type Inventory struct {
 // background work and starts no goroutines; it returns once the walk
 // completes, fails, or ctx is done.
 func Inspect(ctx context.Context, root string) (Inventory, error) {
+	return InspectMatching(ctx, root, nil)
+}
+
+// InspectMatching is Inspect restricted to the partitions match accepts
+// (nil accepts all). match sees only what the file path says (symbol and
+// raw interval), and runs before the file is read, so a caller that needs
+// one dataset out of a large archive does not pay to read, fingerprint and
+// parse every other instrument's and interval's files. Files match
+// rejects are omitted entirely (neither Partitions nor Skipped), and
+// Gaps reflects only the accepted partitions.
+func InspectMatching(ctx context.Context, root string, match func(symbol string, interval RawInterval) bool) (Inventory, error) {
 	inv := Inventory{Root: root}
 
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -202,7 +213,10 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 			return nil
 		}
 
-		partition, skipped, fatalErr := inspectFile(ctx, root, path)
+		partition, skipped, fatalErr := inspectFile(ctx, root, path, match)
+		if errors.Is(fatalErr, errNotMatched) {
+			return nil
+		}
 		if fatalErr != nil {
 			// Only ctx cancellation/deadline reaches here (see
 			// inspectFile): archive corruption is never fatal to the
@@ -226,6 +240,15 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 	return inv, nil
 }
 
+// readFile reads one candidate partition file. It is a variable only so a
+// test can observe which files an inspection opens (the filter must keep
+// rejected files from ever reaching it).
+var readFile = os.ReadFile
+
+// errNotMatched is inspectFile's internal signal that match rejected the
+// file; InspectMatching drops it without recording anything.
+var errNotMatched = errors.New("oanda: inspect: file not matched")
+
 // inspectFile inventories one candidate file. It returns either a
 // Partition (possibly with a non-OK Status), a non-nil *SkippedEntry, or
 // a non-nil fatal error — never more than one of the three.
@@ -239,7 +262,7 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 // PartitionStatusMalformed instead of stopping the walk — archive
 // corruption must never be fatal to Inspect, but the caller asking it to
 // stop must be.
-func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEntry, error) {
+func inspectFile(ctx context.Context, root, path string, match func(symbol string, interval RawInterval) bool) (Partition, *SkippedEntry, error) {
 	meta, _, err := parsePathMeta(path)
 	if err != nil {
 		// ErrInstrumentOutOfScope, ErrUnsupportedInterval, and a
@@ -247,6 +270,10 @@ func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEnt
 		// all) are all "this file is not a partition Inspect can
 		// inventory," distinguished from each other only by Reason.
 		return Partition{}, &SkippedEntry{Path: path, Reason: err}, nil
+	}
+	if match != nil && !match(meta.Symbol, meta.Interval) {
+		// Not the caller's dataset: omitted before any file I/O.
+		return Partition{}, nil, errNotMatched
 	}
 	if err := verifyPathLayout(root, path, meta); err != nil {
 		// A file name can resolve to a perfectly valid partition on its
@@ -276,7 +303,7 @@ func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEnt
 	// only ever surface here, as PartitionStatusUnreadable — there is no
 	// second filesystem access left that could instead misreport it as
 	// PartitionStatusMalformed.
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		p.Status = PartitionStatusUnreadable
 		p.Err = err

@@ -178,12 +178,13 @@ func (m *Manager) Coverage(ctx context.Context, query BarQuery) (Coverage, error
 		return Coverage{}, fmt.Errorf("marketdata: coverage: resolve listing: %w", err)
 	}
 
-	rawByKey, err := m.rawInventoryLookup(ctx, query.Interval)
+	symbol := listing.Symbol()
+	rawByKey, err := m.rawInventoryLookup(ctx, symbol, query.Interval)
 	if err != nil {
 		return Coverage{}, fmt.Errorf("marketdata: coverage: %w", err)
 	}
 
-	return m.coverage(ctx, query, listing.Symbol(), rawByKey)
+	return m.coverage(ctx, query, symbol, rawByKey)
 }
 
 // coverage is Coverage's implementation, factored out so Plan can reuse
