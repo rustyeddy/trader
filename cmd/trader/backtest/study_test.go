@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,7 +79,7 @@ func TestRenderStudy(t *testing.T) {
 		require.NoError(t, renderStudy(&out, formatTable, newStudySummary(studyReport(), 42, "signals.jsonl")))
 		got := out.String()
 		assert.Contains(t, got, "Study: forex-atr 0.3.0")
-		assert.Contains(t, got, "2020-01-01 to 2024-12-31")
+		assert.Contains(t, got, "2020-01-01T00:00:00Z to 2024-12-31T00:00:00Z", "the span keeps its time of day")
 		assert.Contains(t, got, "Instruments:  2")
 		assert.Contains(t, got, "42 (journaled to signals.jsonl)")
 		for _, backtestOnly := range []string{"Trades", "Equity", "PnL", "Drawdown", "Win Rate"} {
@@ -98,12 +100,37 @@ func TestRenderStudy(t *testing.T) {
 		assert.Equal(t, "run_1", got.RunID)
 		assert.NotContains(t, out.String(), "closed_trades")
 	})
-	t.Run("org renders as text", func(t *testing.T) {
+	t.Run("org has its own document shape", func(t *testing.T) {
 		var out bytes.Buffer
 		require.NoError(t, renderStudy(&out, formatOrg, newStudySummary(studyReport(), 1, "")))
-		assert.Contains(t, out.String(), "Study:")
+		got := out.String()
+		assert.True(t, strings.HasPrefix(got, "#+TITLE: Study: forex-atr 0.3.0\n:PROPERTIES:\n"), got)
+		assert.Contains(t, got, ":RUN_ID: run_1\n")
+		assert.Contains(t, got, ":SPAN_START: 2020-01-01T00:00:00Z\n")
+		assert.Contains(t, got, ":END:\n\n* Summary\n| Field | Value |")
+		assert.Contains(t, got, "| Instruments | 2 |")
+		assert.NotContains(t, got, "Run:  ", "not the terminal table")
+	})
+	t.Run("a sub-day span keeps its hours", func(t *testing.T) {
+		sum := newStudySummary(studyReport(), 1, "")
+		sum.SpanStart = time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC)
+		sum.SpanEnd = time.Date(2024, 1, 8, 4, 0, 0, 0, time.UTC)
+		var out bytes.Buffer
+		require.NoError(t, renderStudy(&out, formatTable, sum))
+		assert.Contains(t, out.String(), "2024-01-08T00:00:00Z to 2024-01-08T04:00:00Z")
+	})
+	t.Run("write errors are returned", func(t *testing.T) {
+		for _, f := range []string{formatTable, formatOrg, formatJSON} {
+			assert.ErrorIs(t, renderStudy(failingWriter{}, f, newStudySummary(studyReport(), 1, "")), errWrite, f)
+		}
 	})
 	t.Run("unknown format", func(t *testing.T) {
 		require.ErrorContains(t, renderStudy(&bytes.Buffer{}, "yaml", studySummary{}), "invalid --format")
 	})
 }
+
+var errWrite = errors.New("write failed")
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errWrite }

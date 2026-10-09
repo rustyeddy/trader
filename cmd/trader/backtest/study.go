@@ -1,11 +1,13 @@
 package backtest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/internal/journal"
@@ -83,28 +85,79 @@ func newStudySummary(rep report.BacktestReport, signals int, journalPath string)
 func renderStudy(w io.Writer, format string, sum studySummary) error {
 	switch format {
 	case formatJSON:
-		enc := json.NewEncoder(w)
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
 		enc.SetIndent("", "  ")
-		return enc.Encode(sum)
-	case formatTable, formatOrg, "":
-		name := sum.Strategy
-		if sum.Version != "" {
-			name += " " + sum.Version
+		if err := enc.Encode(sum); err != nil {
+			return err
 		}
-		fmt.Fprintf(w, "Study: %s\n", name)
-		fmt.Fprintf(w, "  Run:          %s\n", sum.RunID)
-		fmt.Fprintf(w, "  Span:         %s to %s\n", sum.SpanStart.UTC().Format("2006-01-02"), sum.SpanEnd.UTC().Format("2006-01-02"))
-		if sum.Interval != "" {
-			fmt.Fprintf(w, "  Interval:     %s\n", sum.Interval)
-		}
-		fmt.Fprintf(w, "  Instruments:  %d\n", sum.Instruments)
-		if sum.Journal != "" {
-			fmt.Fprintf(w, "  Signals:      %d (journaled to %s)\n", sum.Signals, sum.Journal)
-		} else {
-			fmt.Fprintf(w, "  Signals:      %d (not kept; pass --journal PATH to keep them)\n", sum.Signals)
-		}
-		return nil
+		_, err := w.Write(buf.Bytes())
+		return err
+	case formatTable, "":
+		return writeString(w, studyTable(sum))
+	case formatOrg:
+		return writeString(w, studyOrg(sum))
 	default:
 		return fmt.Errorf("invalid --format %q: expected one of %s, %s, %s", format, formatTable, formatJSON, formatOrg)
 	}
+}
+
+// writeString writes s with a single call so a failed write is reported
+// instead of leaving a silently truncated summary.
+func writeString(w io.Writer, s string) error {
+	_, err := io.WriteString(w, s)
+	return err
+}
+
+func (s studySummary) title() string {
+	name := s.Strategy
+	if s.Version != "" {
+		name += " " + s.Version
+	}
+	return name
+}
+
+func (s studySummary) signalsNote() string {
+	if s.Journal != "" {
+		return fmt.Sprintf("%d (journaled to %s)", s.Signals, s.Journal)
+	}
+	return fmt.Sprintf("%d (not kept; pass --journal PATH to keep them)", s.Signals)
+}
+
+func (s studySummary) span() (start, end string) {
+	return s.SpanStart.UTC().Format(time.RFC3339), s.SpanEnd.UTC().Format(time.RFC3339)
+}
+
+func studyTable(sum studySummary) string {
+	start, end := sum.span()
+	var b strings.Builder
+	fmt.Fprintf(&b, "Study: %s\n", sum.title())
+	fmt.Fprintf(&b, "  Run:          %s\n", sum.RunID)
+	fmt.Fprintf(&b, "  Span:         %s to %s\n", start, end)
+	if sum.Interval != "" {
+		fmt.Fprintf(&b, "  Interval:     %s\n", sum.Interval)
+	}
+	fmt.Fprintf(&b, "  Instruments:  %d\n", sum.Instruments)
+	fmt.Fprintf(&b, "  Signals:      %s\n", sum.signalsNote())
+	return b.String()
+}
+
+// studyOrg mirrors the structure of report.OrgRenderer: a title, a
+// properties drawer with the run identity, then the body as a table.
+func studyOrg(sum studySummary) string {
+	start, end := sum.span()
+	var b strings.Builder
+	fmt.Fprintf(&b, "#+TITLE: Study: %s\n", sum.title())
+	b.WriteString(":PROPERTIES:\n")
+	fmt.Fprintf(&b, ":RUN_ID: %s\n", sum.RunID)
+	fmt.Fprintf(&b, ":SPAN_START: %s\n", start)
+	fmt.Fprintf(&b, ":SPAN_END: %s\n", end)
+	b.WriteString(":END:\n\n* Summary\n")
+	b.WriteString("| Field | Value |\n|-------+-------|\n")
+	if sum.Interval != "" {
+		fmt.Fprintf(&b, "| Interval | %s |\n", sum.Interval)
+	}
+	fmt.Fprintf(&b, "| Instruments | %d |\n", sum.Instruments)
+	fmt.Fprintf(&b, "| Signals | %s |\n", sum.signalsNote())
+	return b.String()
 }
