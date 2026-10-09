@@ -47,6 +47,19 @@ explicit =--symbol= overrides both =backtest.symbol= and =backtest.symbols=.
   =ExternalStrategy=, so a config can never silently fall back to an
   in-process strategy.
 
+** Model configs (issue #471)
+
+A =model:= section (=symbols=, =interval=, =from=, =to=, =currency=,
+=starting_capital=, all required once any is set) is the alternative to the
+=backtest:= experiment keys for a study or scanner. It omits
+=risk_fraction= and =adverse_distance=, so it requires =strategy.exec= and
+rejects =backtest.adverse_distance=. =backtestcfg.RunConfig.Resolve= folds
+it into =Backtest=, so the run reads one shape; explicit =backtest= values
+(in practice flags) win over the model's. =backtest.from=, =to= and
+=adverse_distance= lose their =required= tag and are enforced in
+=Validate=/=LoadRunConfig= unless a model is present. Data locations stay
+under =backtest=.
+
 * Consequences
 
 A scanner or study is described by one file. The installed =trader= must

@@ -95,7 +95,7 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (backtestcfg.RunConfig, 
 		overrides["provider"] = flags.provider
 	}
 
-	return config.Load[backtestcfg.RunConfig](config.Options{
+	return backtestcfg.LoadRunConfig(config.Options{
 		EnvPrefix: clictx.EnvPrefix,
 		Environ:   os.Environ(),
 		FilePath:  flags.config,

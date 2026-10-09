@@ -437,3 +437,37 @@ func TestRun_StrategyConfigWithoutStrategyExecRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "--strategy-config")
 	assert.Contains(t, err.Error(), "--strategy-exec")
 }
+
+// TestRun_ModelConfigDrivesExternalStrategy is issue #471's vertical
+// slice: a config with only a model section (no risk_fraction or
+// adverse_distance) plus strategy.exec loads, launches the strategy and
+// replays the universe from the model's own span. The flip-flop fixture
+// trades, and a model carries no position-sizing policy, so the run ends
+// at sizing: a model is meant for a study that emits no intents.
+func TestRun_ModelConfigDrivesExternalStrategy(t *testing.T) {
+	body := `model:
+  symbols: EURUSD
+  interval: H1
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  currency: USD
+  starting_capital: 10000
+backtest:
+  data_raw_root: testdata/raw/oanda
+strategy:
+  exec: ` + flipFlopPath + "\n"
+	path := filepath.Join(t.TempDir(), "model.yml")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+
+	runCmd := cmdbacktest.New()
+	runCmd.SetOut(&bytes.Buffer{})
+	runCmd.SilenceUsage = true
+	runCmd.SetArgs([]string{
+		"run", "--config", path,
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(), "--format", "json",
+	})
+	err := runCmd.Execute()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "stop distance must be positive",
+		"the strategy must launch and reach sizing, proving the model span and universe were applied")
+}

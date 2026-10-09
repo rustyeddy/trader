@@ -572,6 +572,34 @@ strategy:
 trader backtest run --config run.yml
 ```
 
+#### Model (study/scanner) configs
+
+A study or scanner that never trades has no use for position sizing, yet a
+`backtest:` config must carry `adverse_distance`. For that case (issue
+#471) use a `model:` section instead; it needs only these keys, all
+required, and `strategy.exec` is required with it:
+
+```yaml
+model:
+  symbols: >-
+    EURUSD, GBPUSD, AUDUSD
+  interval: D1
+  from: 2020-01-01T00:00:00Z
+  to: 2024-12-31T00:00:00Z
+  currency: USD
+  starting_capital: 10000
+backtest:             # optional: data locations only
+  data_raw_root: /path/to/raw/oanda
+strategy:
+  exec: ./my-scanner
+```
+
+`backtest.adverse_distance` is rejected beside a `model:` section, and a
+model run has no sizing policy, so a strategy that emits an intent fails at
+sizing. Explicit command-line flags (`--from`, `--symbol`, ...) still
+override the model's values. A config without `model:` keeps requiring
+`backtest.from`, `backtest.to` and `backtest.adverse_distance`.
+
 Because `trader` forwards `strategy.config` as `TRADER_STRATEGY_CONFIG`, a
 strategy can often read the same file it was launched with and need no
 `--strategy-args` at all.

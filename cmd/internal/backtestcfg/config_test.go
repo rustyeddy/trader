@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,11 +34,12 @@ strategy:
 
 func loadRunConfig(t *testing.T, yaml string, overrides map[string]string) (RunConfig, error) {
 	t.Helper()
-	return config.Load[RunConfig](config.Options{
+	cfg, err := config.Load[RunConfig](config.Options{
 		Environ:     []string{},
 		FileContent: []byte(yaml),
 		Overrides:   overrides,
 	})
+	return cfg.Resolve(), err // defaults are applied by Resolve (LoadRunConfig does the same)
 }
 
 func TestRunConfig_ParsesIssue247CandidateYAML(t *testing.T) {
@@ -111,7 +113,11 @@ backtest:
 `
 	_, err := loadRunConfig(t, missingFrom, nil)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, config.ErrRequired)
+	// Checked in RunConfig.Validate (a model config legitimately omits
+	// from), so the sentinel is flattened into the validation message.
+	assert.ErrorIs(t, err, config.ErrValidation)
+	assert.ErrorContains(t, err, "backtest.from")
+	assert.ErrorContains(t, err, config.ErrRequired.Error())
 }
 
 func TestRunConfig_ValidateRejectsInvalidRelationships(t *testing.T) {
@@ -209,7 +215,7 @@ func TestRunConfig_EquivalentEffectiveConfigFromEitherSource(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, fromFile, fromOverrides)
+	assert.Equal(t, fromFile, fromOverrides.Resolve())
 }
 
 // TestRunConfig_ExternalStrategyKeys covers the issue #469 keys.
@@ -259,4 +265,87 @@ func TestRun_ExecWithoutExternalStrategyRejected(t *testing.T) {
 	_, err := run(context.Background(), Request{Config: cfg, Symbols: []string{"EURUSD"}})
 	require.ErrorIs(t, err, ErrInvalidRun)
 	require.ErrorContains(t, err, "no ExternalStrategy")
+}
+
+const modelYAML = `
+model:
+  symbols: >-
+    EURUSD, GBPUSD,
+    USDJPY
+  interval: D1
+  from: 2020-01-01T00:00:00Z
+  to: 2024-12-31T00:00:00Z
+  currency: USD
+  starting_capital: 10000
+strategy:
+  exec: ./scanner
+`
+
+func loadModel(t *testing.T, yaml string, overrides map[string]string) (RunConfig, error) {
+	t.Helper()
+	return LoadRunConfig(config.Options{Environ: []string{}, FileContent: []byte(yaml), Overrides: overrides})
+}
+
+// TestModelConfig covers issue #471: a model config needs only its six
+// keys (no risk_fraction/adverse_distance), and resolves onto Backtest.
+func TestModelConfig(t *testing.T) {
+	t.Run("minimal model resolves onto backtest", func(t *testing.T) {
+		cfg, err := loadModel(t, modelYAML, nil)
+		require.NoError(t, err)
+		assert.Contains(t, cfg.Backtest.Symbols, "GBPUSD")
+		assert.Equal(t, "D1", cfg.Backtest.Interval)
+		assert.Equal(t, "2020-01-01T00:00:00Z", cfg.Backtest.From)
+		assert.Equal(t, "2024-12-31T00:00:00Z", cfg.Backtest.To)
+		assert.Equal(t, "USD", cfg.Backtest.Currency)
+		assert.Equal(t, "10000", cfg.Backtest.StartingCapital)
+	})
+	t.Run("backtest flags still override model values", func(t *testing.T) {
+		cfg, err := loadModel(t, modelYAML, map[string]string{"from": "2021-01-01", "symbol": "EURUSD", "symbols": ""})
+		require.NoError(t, err)
+		assert.Equal(t, "2021-01-01", cfg.Backtest.From)
+		assert.Equal(t, "EURUSD", cfg.Backtest.Symbol)
+		assert.Empty(t, cfg.Backtest.Symbols)
+	})
+	t.Run("explicit interval, currency and starting-cash override the model, even when equal to a default", func(t *testing.T) {
+		cfg, err := loadModel(t, modelYAML, map[string]string{"interval": "H1", "currency": "EUR", "starting-cash": "500"})
+		require.NoError(t, err)
+		assert.Equal(t, "H1", cfg.Backtest.Interval)
+		assert.Equal(t, "EUR", cfg.Backtest.Currency)
+		assert.Equal(t, "500", cfg.Backtest.StartingCapital)
+	})
+	t.Run("an invalid explicit interval is not hidden by the model", func(t *testing.T) {
+		_, err := loadModel(t, modelYAML, map[string]string{"interval": "bogus"})
+		require.ErrorContains(t, err, "backtest.interval")
+	})
+	t.Run("every model key is required", func(t *testing.T) {
+		for _, key := range []string{"symbols", "interval", "from", "to", "currency", "starting_capital"} {
+			var kept []string
+			for _, line := range strings.Split(modelYAML, "\n") {
+				if strings.HasPrefix(line, "  "+key+":") {
+					continue
+				}
+				kept = append(kept, line)
+			}
+			yaml := strings.Join(kept, "\n")
+			if key == "symbols" { // the folded scalar's continuation lines
+				yaml = strings.ReplaceAll(yaml, "    EURUSD, GBPUSD,\n    USDJPY\n", "")
+			}
+			_, err := loadModel(t, yaml, nil)
+			require.Error(t, err, key)
+			assert.ErrorContains(t, err, "model."+key)
+		}
+	})
+	t.Run("model requires strategy.exec", func(t *testing.T) {
+		_, err := loadModel(t, strings.Replace(modelYAML, "strategy:\n  exec: ./scanner\n", "", 1), nil)
+		require.ErrorContains(t, err, "model requires strategy.exec")
+	})
+	t.Run("adverse_distance is rejected beside a model", func(t *testing.T) {
+		_, err := loadModel(t, modelYAML+"backtest:\n  adverse_distance: 0.01\n", nil)
+		require.ErrorContains(t, err, "adverse_distance does not apply")
+	})
+	t.Run("a backtest config still requires adverse_distance", func(t *testing.T) {
+		_, err := loadModel(t, "backtest:\n  symbol: EURUSD\n  from: 2024-01-01\n  to: 2024-02-01\n", nil)
+		require.ErrorIs(t, err, config.ErrRequired)
+		assert.ErrorContains(t, err, "backtest.adverse_distance")
+	})
 }

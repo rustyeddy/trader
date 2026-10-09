@@ -104,7 +104,7 @@ func runConfig(in mcpserver.BacktestInput, provider string) (backtestcfg.RunConf
 	if in.Strategy.SlowPeriod != nil {
 		overrides["slow-period"] = strconv.Itoa(*in.Strategy.SlowPeriod)
 	}
-	return config.Load[backtestcfg.RunConfig](config.Options{
+	return backtestcfg.LoadRunConfig(config.Options{
 		EnvPrefix: marketdatacfg.EnvPrefix,
 		Environ:   []string{},
 		Overrides: overrides,
