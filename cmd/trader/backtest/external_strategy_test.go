@@ -268,22 +268,110 @@ func TestVerticalSlice_RunWithStrategyExec_ProcessCrashReportedAsFailure(t *test
 	require.Error(t, err, "a crashed external strategy process must not let the run be reported as successful")
 }
 
-// TestRun_StrategyExecAndConfigMutuallyExclusive proves the invalid
-// combination fails before any process is launched or data published
-// (issue #382's own acceptance criterion), not partway through the run.
-func TestRun_StrategyExecAndConfigMutuallyExclusive(t *testing.T) {
+// writeExternalConfig writes a backtest YAML config for the flip-flop
+// fixture, with extra lines appended verbatim, and returns its path.
+func writeExternalConfig(t *testing.T, extra string) string {
+	t.Helper()
+	body := `backtest:
+  interval: H1
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  currency: USD
+  starting_capital: 10000
+  risk_fraction: 0.01
+  adverse_distance: 0.01000
+  initial_margin_ratio: 0.25
+  data_raw_root: testdata/raw/oanda
+` + extra
+	path := filepath.Join(t.TempDir(), "run.yml")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	return path
+}
+
+// TestRun_ExternalStrategyDrivenEntirelyFromConfig is issue #469's core
+// acceptance path: strategy.exec and backtest.symbols in --config alone
+// launch the external strategy and run it, with no other flag naming the
+// executable or the universe.
+func TestRun_ExternalStrategyDrivenEntirelyFromConfig(t *testing.T) {
+	cfgPath := writeExternalConfig(t, "  symbols: EURUSD\nstrategy:\n  exec: "+flipFlopPath+"\n")
+
 	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
 	runCmd.SetArgs([]string{
-		"run",
-		"--strategy-exec", "/does/not/matter",
-		"--config", "/does/not/matter/either.yaml",
-		"--symbol", "EURUSD",
-		"--data-raw-root", "testdata/raw/oanda",
+		"run", "--config", cfgPath,
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(), "--format", "json",
 	})
-	err := runCmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--strategy-exec")
-	assert.Contains(t, err.Error(), "--config")
+	require.NoError(t, runCmd.Execute())
+
+	var doc struct {
+		Run struct {
+			StrategyName string `json:"strategy_name"`
+		} `json:"run"`
+		ClosedTrades []json.RawMessage `json:"closed_trades"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &doc))
+	assert.Equal(t, "flipflop", doc.Run.StrategyName)
+	assert.NotEmpty(t, doc.ClosedTrades, "the config-launched strategy must trade:\n%s", out.String())
+}
+
+// TestRun_StrategyExecFlagOverridesConfig proves an explicit
+// --strategy-exec wins over strategy.exec, like every other flag.
+func TestRun_StrategyExecFlagOverridesConfig(t *testing.T) {
+	cfgPath := writeExternalConfig(t, "  symbols: EURUSD\nstrategy:\n  exec: /config/names/a/missing/executable\n")
+
+	runCmd := cmdbacktest.New()
+	runCmd.SetOut(&bytes.Buffer{})
+	runCmd.SetArgs([]string{
+		"run", "--config", cfgPath, "--strategy-exec", flipFlopPath,
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(), "--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+}
+
+// TestRun_ConfigSymbolsIsOverriddenBySymbolFlag proves explicit --symbol
+// flags win over backtest.symbols: the config names a pair with no
+// fixture data, the flag names one that has it.
+func TestRun_ConfigSymbolsIsOverriddenBySymbolFlag(t *testing.T) {
+	cfgPath := writeExternalConfig(t, "  symbols: NOSUCHPAIR\nstrategy:\n  exec: "+flipFlopPath+"\n")
+
+	runCmd := cmdbacktest.New()
+	runCmd.SetOut(&bytes.Buffer{})
+	runCmd.SetArgs([]string{
+		"run", "--config", cfgPath, "--symbol", "EURUSD",
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(), "--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+}
+
+// TestRun_ConfigInvalidCombinationsRejected covers the rules that still
+// hold once a config can carry an external strategy.
+func TestRun_ConfigInvalidCombinationsRejected(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		args  []string
+		want  string
+	}{
+		{"symbol and symbols together", "  symbol: EURUSD\n  symbols: EURUSD,GBPUSD\n", nil, "mutually exclusive"},
+		{"strategy.config without exec", "  symbols: EURUSD\nstrategy:\n  config: x.yml\n", nil, "strategy.config requires strategy.exec"},
+		{"strategy-args without any exec", "  symbols: EURUSD\n", []string{"--strategy-args", "--v"}, "--strategy-args requires"},
+		{"strategy-config flag without any exec", "  symbols: EURUSD\n", []string{"--strategy-config", "x.yml"}, "strategy.config requires strategy.exec"},
+		{"multi --symbol with an in-process config", "  symbol: EURUSD\n", []string{"--symbol", "EURUSD", "--symbol", "GBPUSD"}, "single-instrument experiment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runCmd := cmdbacktest.New()
+			runCmd.SetOut(&bytes.Buffer{})
+			runCmd.SetArgs(append([]string{
+				"run", "--config", writeExternalConfig(t, tt.extra),
+				"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+			}, tt.args...))
+			err := runCmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
 }
 
 // TestRun_StrategyArgsWithoutStrategyExecRejected and

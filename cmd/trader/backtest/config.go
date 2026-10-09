@@ -20,18 +20,19 @@ import (
 //
 // --symbol is repeatable (multi-instrument, issue #224) but backtestcfg.RunConfig's
 // own Symbol field is a single string: a config file describes one
-// experiment's one instrument, matching #247's own candidate YAML.
-// Combining --config with more than one --symbol is rejected outright
-// here rather than silently using only the first one.
+// instrument with backtest.symbol, or a comma-separated universe with
+// backtest.symbols (issue #469). Whether --config may be combined with
+// more than one --symbol depends on the resolved strategy, so that rule
+// lives in runBacktest, after this has loaded the config.
 func buildRunConfig(cmd *cobra.Command, flags runFlags) (backtestcfg.RunConfig, error) {
-	if flags.config != "" && len(flags.symbols) > 1 {
-		return backtestcfg.RunConfig{}, fmt.Errorf("--config describes a single-instrument experiment; " +
-			"repeat --symbol without --config for a multi-instrument run")
-	}
-
 	overrides := map[string]string{}
 	if cmd.Flags().Changed("symbol") && len(flags.symbols) == 1 {
 		overrides["symbol"] = flags.symbols[0]
+	}
+	if cmd.Flags().Changed("symbol") {
+		// Explicit --symbol flags replace the config's whole universe, so
+		// a config's backtest.symbols can never combine with them.
+		overrides["symbols"] = ""
 	}
 	if cmd.Flags().Changed("interval") {
 		overrides["interval"] = flags.interval
@@ -77,6 +78,12 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (backtestcfg.RunConfig, 
 	}
 	if cmd.Flags().Changed("sell-date") {
 		overrides["sell-date"] = flags.sellDate
+	}
+	if cmd.Flags().Changed("strategy-exec") {
+		overrides["strategy-exec"] = flags.strategyExec
+	}
+	if cmd.Flags().Changed("strategy-config") {
+		overrides["strategy-config"] = flags.strategyConfig
 	}
 	if cmd.Flags().Changed("data-store-root") {
 		overrides["data-store-root"] = flags.dataStoreRoot

@@ -299,10 +299,11 @@ There are three strategy paths:
 - **With `--config`:** an in-process strategy selected by `strategy.name` in
   the YAML file (see below). Any explicit flag still overrides its
   corresponding config-file value.
-- **With `--strategy-exec`:** an out-of-tree strategy executable, launched
-  and driven over Strategy Protocol v1 — see
-  [External strategies](#external-strategies) below. Mutually exclusive
-  with `--config`.
+- **With `--strategy-exec` (or `strategy.exec` in `--config`):** an
+  out-of-tree strategy executable, launched and driven over Strategy
+  Protocol v1 — see [External strategies](#external-strategies) below. A
+  `--config` can carry everything such a run needs, so
+  `trader backtest run --config run.yml` alone is enough.
 
 | Flag                 | Default                         | Meaning                                                                                |
 |----------------------|---------------------------------|----------------------------------------------------------------------------------------|
@@ -327,9 +328,9 @@ There are three strategy paths:
 | `--quantity`         | —                               | `buy-and-hold` quantity mode: buy exactly this quantity of the single `--symbol` (see below) |
 | `--buy-date`         | first bar                       | quantity mode: buy on the first bar at or after this date                             |
 | `--sell-date`        | —                               | quantity mode: exit on the first bar at or after this date; unset = hold to the run's end |
-| `--strategy-exec`    | —                               | path to an out-of-tree strategy executable; mutually exclusive with `--config`         |
+| `--strategy-exec`    | —                               | path to an out-of-tree strategy executable; or `strategy.exec` in `--config`           |
 | `--strategy-args`    | —                               | extra argument passed to `--strategy-exec`'s own executable, unmodified; repeatable    |
-| `--strategy-config`  | —                               | path to a config file for `--strategy-exec`'s own executable (see below)               |
+| `--strategy-config`  | —                               | path to a config file for the external executable (see below); or `strategy.config` in `--config` |
 | `--journal`          | —                               | optional path to write a durable JSONL audit trail; path must not already exist        |
 | `--output-dir`       | `./backtest-runs`               | where run snapshots are written / `show` reads from; also `TRADER_BACKTEST_OUTPUT_DIR` or `backtest.output_dir` in `--config` (the flag wins, then the environment, then the file). `trader-mcp` resolves the same setting, so either can read the other's runs |
 | `--format`           | `table`                         | `table`, `json`, or `org`                                                              |
@@ -541,7 +542,41 @@ strategy built on it, is architecturally barred from importing Trader's
 `strategy`, `backtest`, `service`, `cmd`, `adapters`, `broker`, `execution`,
 `risk`, or `pipeline` packages.
 
-#### Running it
+#### Running it from a config file
+
+`--config` may carry an external run in full (issue #469): `strategy.exec`
+names the executable, `strategy.config` the file forwarded to it, and
+`backtest.symbols` the universe as a comma-separated list (the config
+loader has no list type; a folded `>-` scalar keeps a long list readable).
+`backtest.symbol` and `backtest.symbols` are mutually exclusive, and an
+explicit `--symbol` replaces the config's universe. With `strategy.exec`
+set, `strategy.name` is not checked against the in-process registry.
+`--strategy-args` remains flag-only. Relative paths resolve against the
+working directory, not the config file.
+
+```yaml
+backtest:
+  interval: D1
+  from: 2020-01-01T00:00:00Z
+  to: 2024-12-31T00:00:00Z
+  adverse_distance: 0.01
+  data_raw_root: /path/to/raw/oanda
+  symbols: >-
+    EURUSD, GBPUSD, AUDUSD
+strategy:
+  exec: ./my-scanner
+  config: my-scanner.yml
+```
+
+```sh
+trader backtest run --config run.yml
+```
+
+Because `trader` forwards `strategy.config` as `TRADER_STRATEGY_CONFIG`, a
+strategy can often read the same file it was launched with and need no
+`--strategy-args` at all.
+
+#### Running it with flags
 
 ```sh
 go build -o /tmp/my-strategy ./cmd/my-strategy

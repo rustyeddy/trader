@@ -39,7 +39,12 @@ type BacktestSection struct {
 	// because a multi-instrument run (repeated --symbol, issue #224)
 	// supplies its instruments outside this single-string field
 	// entirely — see buildRunConfig's own doc comment.
-	Symbol          string    `config:"symbol" flag:"symbol"`
+	Symbol string `config:"symbol" flag:"symbol"`
+	// Symbols is a multi-instrument run's universe as a comma-separated
+	// list (issue #469), for example "EURUSD,GBPUSD". It is a scalar
+	// because the config loader has no list type; explicit --symbol flags
+	// override it, and setting it together with Symbol is an error.
+	Symbols         string    `config:"symbols" flag:"symbols"`
 	Interval        string    `config:"interval" flag:"interval" default:"H1"`
 	From            string    `config:"from" flag:"from" required:"true"`
 	To              string    `config:"to" flag:"to" required:"true"`
@@ -81,7 +86,16 @@ type BacktestSection struct {
 // construction and validation without changing the top-level config shape.
 // JSON tags keep strategy parameters stable in manifests and reports.
 type StrategySection struct {
-	Name       string `config:"name" flag:"strategy-name" default:"buy-and-hold" json:"name"`
+	Name string `config:"name" flag:"strategy-name" default:"buy-and-hold" json:"name"`
+	// Exec selects an out-of-tree strategy executable (issue #469),
+	// exactly as --strategy-exec does; when set, Name is not checked
+	// against the in-process registry. Config is the config-file path
+	// forwarded to that executable as StrategyConfigPathEnv, never parsed
+	// by Trader (--strategy-config). Neither is a strategy parameter, so
+	// neither appears in manifests; an external run records its own
+	// provenance in externalStrategyParams.
+	Exec       string `config:"exec" flag:"strategy-exec" json:"-"`
+	Config     string `config:"config" flag:"strategy-config" json:"-"`
 	FastPeriod int    `config:"fast_period" flag:"fast-period" default:"20" json:"fast_period"`
 	SlowPeriod int    `config:"slow_period" flag:"slow-period" default:"50" json:"slow_period"`
 	// AllowedSide restricts which position direction the strategy may
@@ -159,12 +173,21 @@ func (s StrategySection) parseBuyHold(from time.Time) (buyHoldSettings, error) {
 // (config/load.go's validateDestination). It covers exactly what plain
 // field decoding cannot: relationships between fields.
 func (c RunConfig) Validate() error {
-	switch c.Strategy.Name {
-	case demoStrategyName:
+	if c.Backtest.Symbol != "" && c.Backtest.Symbols != "" {
+		return fmt.Errorf("backtest.symbol and backtest.symbols are mutually exclusive; use symbols for a multi-instrument run")
+	}
+	if c.Strategy.Config != "" && c.Strategy.Exec == "" {
+		return fmt.Errorf("strategy.config requires strategy.exec")
+	}
+	switch {
+	case c.Strategy.Exec != "":
+		// An external executable supplies its own strategy; the
+		// in-process registry and its parameters do not apply.
+	case c.Strategy.Name == demoStrategyName:
 		if err := c.Strategy.validateBuyHold(c.Backtest.From); err != nil {
 			return err
 		}
-	case emacross.Name:
+	case c.Strategy.Name == emacross.Name:
 		if c.Strategy.FastPeriod <= 0 {
 			return fmt.Errorf("strategy.fast_period must be positive, got %d", c.Strategy.FastPeriod)
 		}

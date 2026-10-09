@@ -1,6 +1,8 @@
 package backtestcfg
 
 import (
+	"context"
+	"encoding/json"
 	"maps"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 
 	"github.com/rustyeddy/trader/internal/config"
 	"github.com/rustyeddy/trader/internal/strategy/emacross"
+	"github.com/rustyeddy/trader/num"
 )
 
 // issue247CandidateYAML is #247's own candidate YAML, verbatim.
@@ -207,4 +210,53 @@ func TestRunConfig_EquivalentEffectiveConfigFromEitherSource(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, fromFile, fromOverrides)
+}
+
+// TestRunConfig_ExternalStrategyKeys covers the issue #469 keys.
+func TestRunConfig_ExternalStrategyKeys(t *testing.T) {
+	load := func(overrides map[string]string) (RunConfig, error) {
+		m := map[string]string{
+			"from": "2015-01-01", "to": "2025-01-01", "adverse-distance": "0.0050",
+		}
+		maps.Copy(m, overrides)
+		return config.Load[RunConfig](config.Options{Environ: []string{}, Overrides: m})
+	}
+
+	t.Run("exec skips the in-process strategy registry", func(t *testing.T) {
+		cfg, err := load(map[string]string{"strategy-exec": "./scanner", "strategy-name": "some-external-name", "symbols": "EURUSD,GBPUSD"})
+		require.NoError(t, err)
+		assert.Equal(t, "./scanner", cfg.Strategy.Exec)
+		assert.Equal(t, "EURUSD,GBPUSD", cfg.Backtest.Symbols)
+	})
+	t.Run("an unregistered name still fails without exec", func(t *testing.T) {
+		_, err := load(map[string]string{"strategy-name": "some-external-name"})
+		require.ErrorContains(t, err, "not registered")
+	})
+	t.Run("symbol and symbols are mutually exclusive", func(t *testing.T) {
+		_, err := load(map[string]string{"symbol": "EURUSD", "symbols": "GBPUSD"})
+		require.ErrorContains(t, err, "mutually exclusive")
+	})
+	t.Run("strategy config requires exec", func(t *testing.T) {
+		_, err := load(map[string]string{"strategy-config": "x.yml"})
+		require.ErrorContains(t, err, "strategy.config requires strategy.exec")
+	})
+	t.Run("exec and config are not strategy parameters", func(t *testing.T) {
+		cfg, err := load(map[string]string{"strategy-exec": "./scanner", "strategy-config": "x.yml"})
+		require.NoError(t, err)
+		b, err := json.Marshal(cfg.Strategy)
+		require.NoError(t, err)
+		assert.NotContains(t, string(b), "scanner")
+		assert.NotContains(t, string(b), "x.yml")
+	})
+}
+
+func TestRun_ExecWithoutExternalStrategyRejected(t *testing.T) {
+	cfg := RunConfig{}
+	cfg.Backtest.From, cfg.Backtest.To = "2024-01-01", "2024-02-01"
+	cfg.Backtest.Interval = "D1"
+	cfg.Backtest.InitialMarginRatio = num.MustParseRate("1")
+	cfg.Strategy.Exec = "./scanner"
+	_, err := run(context.Background(), Request{Config: cfg, Symbols: []string{"EURUSD"}})
+	require.ErrorIs(t, err, ErrInvalidRun)
+	require.ErrorContains(t, err, "no ExternalStrategy")
 }
