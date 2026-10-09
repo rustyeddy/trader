@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/config"
 	"github.com/rustyeddy/trader/internal/strategy/emacross"
 	"github.com/rustyeddy/trader/num"
 )
@@ -23,9 +24,107 @@ import (
 // Strategy is parsed and validated against the registered in-process
 // strategies. An unsupported or misspelled name fails loudly rather than
 // silently selecting a different implementation.
+//
+// Model is the alternative to the backtest experiment inputs for a study
+// or scanner (issue #471): it names only the universe, span and account,
+// and omits the position-sizing policy (risk_fraction, adverse_distance)
+// a model that never trades has no use for. A config uses Model or the
+// backtest experiment keys, never needs both; Resolve folds Model into
+// Backtest so the rest of the run reads one shape.
 type RunConfig struct {
 	Backtest BacktestSection
 	Strategy StrategySection
+	Model    ModelSection
+}
+
+// ModelSection is the minimal config for a model (study/scanner) run
+// (issue #471). Every field is required once any is set. Symbols is a
+// comma-separated universe, like backtest.symbols. Data locations
+// (data_raw_root, data_store_root, provider) are infrastructure, not part
+// of the experiment, and stay under backtest.
+type ModelSection struct {
+	Symbols         string `config:"symbols" flag:"model-symbols"`
+	Interval        string `config:"interval" flag:"model-interval"`
+	From            string `config:"from" flag:"model-from"`
+	To              string `config:"to" flag:"model-to"`
+	Currency        string `config:"currency" flag:"model-currency"`
+	StartingCapital string `config:"starting_capital" flag:"model-starting-cash"`
+}
+
+// active reports whether any model key is set.
+func (m ModelSection) active() bool { return m != (ModelSection{}) }
+
+// Resolve returns c with a model section folded into Backtest, so
+// callers never branch on the config's kind. Explicit backtest.symbol(s),
+// interval, from, to, currency and starting_capital values (in practice
+// command-line flags, which only ever target backtest keys) win over the
+// model's, so `--from` still adjusts a model config. Without a model
+// section c is returned unchanged.
+func (c RunConfig) Resolve() RunConfig {
+	if !c.Model.active() {
+		return c
+	}
+	b := &c.Backtest
+	if b.Symbol == "" && b.Symbols == "" {
+		b.Symbols = c.Model.Symbols
+	}
+	if b.From == "" {
+		b.From = c.Model.From
+	}
+	if b.To == "" {
+		b.To = c.Model.To
+	}
+	// Interval, currency and starting capital carry backtest defaults, so
+	// "explicit" cannot be told from "default" here; the model's own
+	// (required) values apply.
+	b.Interval = c.Model.Interval
+	b.Currency = c.Model.Currency
+	b.StartingCapital = c.Model.StartingCapital
+	return c
+}
+
+// LoadRunConfig loads a RunConfig with config.Load and resolves a model
+// section, the one entry point every composition root should use.
+func LoadRunConfig(opts config.Options) (RunConfig, error) {
+	cfg, err := config.Load[RunConfig](opts)
+	if err != nil {
+		return cfg, err
+	}
+	if !cfg.Model.active() && cfg.Backtest.AdverseDistance.IsZero() {
+		// Not in Validate: programmatic callers (tests, the service
+		// layer) build RunConfigs without a sizing policy.
+		return cfg, &config.Error{Fields: []*config.FieldError{{Path: "backtest.adverse_distance", Err: config.ErrRequired}}}
+	}
+	return cfg.Resolve(), nil
+}
+
+// missing reports a required key absent from the active section, matching
+// the loader's own required-field error.
+func missing(key string) error {
+	return fmt.Errorf("%s: %w", key, config.ErrRequired)
+}
+
+// validateModel checks a model config: all six keys present, an external
+// strategy to run (an in-process strategy sizes positions from
+// risk_fraction/adverse_distance, which a model config does not carry),
+// and the sizing keys absent.
+func (c RunConfig) validateModel() error {
+	m := c.Model
+	for _, f := range []struct{ key, val string }{
+		{"model.symbols", m.Symbols}, {"model.interval", m.Interval}, {"model.from", m.From},
+		{"model.to", m.To}, {"model.currency", m.Currency}, {"model.starting_capital", m.StartingCapital},
+	} {
+		if f.val == "" {
+			return missing(f.key)
+		}
+	}
+	if c.Strategy.Exec == "" {
+		return fmt.Errorf("model requires strategy.exec: a model run has no position-sizing policy for an in-process strategy")
+	}
+	if !c.Backtest.AdverseDistance.IsZero() {
+		return fmt.Errorf("backtest.adverse_distance does not apply to a model run; remove it")
+	}
+	return nil
 }
 
 // BacktestSection mirrors runFlags' own scalar backtest inputs.
@@ -46,12 +145,12 @@ type BacktestSection struct {
 	// override it, and setting it together with Symbol is an error.
 	Symbols         string    `config:"symbols" flag:"symbols"`
 	Interval        string    `config:"interval" flag:"interval" default:"H1"`
-	From            string    `config:"from" flag:"from" required:"true"`
-	To              string    `config:"to" flag:"to" required:"true"`
+	From            string    `config:"from" flag:"from"`
+	To              string    `config:"to" flag:"to"`
 	Currency        string    `config:"currency" flag:"currency" default:"USD"`
 	StartingCapital string    `config:"starting_capital" flag:"starting-cash" default:"10000"`
 	RiskFraction    num.Rate  `config:"risk_fraction" flag:"risk-fraction" default:"0.01"`
-	AdverseDistance num.Price `config:"adverse_distance" flag:"adverse-distance" required:"true"`
+	AdverseDistance num.Price `config:"adverse_distance" flag:"adverse-distance"`
 
 	// InitialMarginRatio is the account's initial-margin ratio
 	// (ADR-066): the minimum equity required per unit of gross position
@@ -173,6 +272,22 @@ func (s StrategySection) parseBuyHold(from time.Time) (buyHoldSettings, error) {
 // (config/load.go's validateDestination). It covers exactly what plain
 // field decoding cannot: relationships between fields.
 func (c RunConfig) Validate() error {
+	if c.Model.active() {
+		if err := c.validateModel(); err != nil {
+			return err
+		}
+		c = c.Resolve()
+	} else {
+		// required:"true" cannot express "required unless a model section
+		// supplies them", so the backtest keys are checked here (and
+		// backtest.adverse_distance in LoadRunConfig).
+		if c.Backtest.From == "" {
+			return missing("backtest.from")
+		}
+		if c.Backtest.To == "" {
+			return missing("backtest.to")
+		}
+	}
 	if c.Backtest.Symbol != "" && c.Backtest.Symbols != "" {
 		return fmt.Errorf("backtest.symbol and backtest.symbols are mutually exclusive; use symbols for a multi-instrument run")
 	}
