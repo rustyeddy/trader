@@ -1,0 +1,34 @@
+#+TITLE: ADR-076: Default config file for market-data settings
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #480. Extends the configuration precedence of
+=internal/config= (defaults < file < environment < flags) to the
+market-data commands; no existing source changes meaning.
+
+* Context
+
+The OANDA token came only from =TRADER_OANDA_TOKEN= and the base URL from
+a flag or environment variable, so every shell and script had to carry
+per-machine values.
+
+* Decision
+
+=marketdatacfg.Load= reads =/etc/trader/config.yml= (or the file
+=TRADER_CONFIG= names) as the file source. A missing default file is
+ignored; a missing explicit file is an error. A new key, =oanda_token_file=,
+names a file holding the token (leading =~/= expanded, whitespace trimmed);
+the token itself is never kept in the config file, and =TRADER_OANDA_TOKEN=
+still wins. Errors name the path, never the contents. A credential key
+(=oanda_token=, =alpaca_key_id=, =alpaca_secret_key=) in the file is an error
+naming the key, never the value: the generic loader would otherwise read it.
+Alpaca credentials are unchanged (environment only).
+
+This covers the data commands and =trader-mcp=. =backtest run= keeps its
+own =--config= file; it is not layered over the default file.
+
+* Consequences
+
+Per-machine settings are written once. A deployment that must not use
+=/etc= can point =TRADER_CONFIG= at a file of its own.

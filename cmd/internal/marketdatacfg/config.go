@@ -14,8 +14,15 @@ package marketdatacfg
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/clock"
@@ -53,10 +60,9 @@ const EnvPrefix = "TRADER"
 // line (visible via ps, /proc/<pid>/cmdline, process monitors),
 // defeating the care config's own secret:"true" tag takes elsewhere.
 // TRADER_OANDA_TOKEN (the environment variable this field's
-// config/env naming convention derives) is the only way to supply it
-// today; a credential-file or keyring mechanism is a reasonable
-// future addition if that ever proves insufficient, but is not
-// invented speculatively here.
+// config/env naming convention derives) supplies it directly; or
+// oanda_token_file (issue #480) names a file holding it, so a default
+// config file can say where the secret lives without containing it.
 //
 // AlpacaKeyID/AlpacaSecretKey follow OANDAToken's identical reasoning
 // and pattern (issue #331): no CLI flag, secret:"true", supplied only
@@ -80,29 +86,141 @@ const EnvPrefix = "TRADER"
 // such restriction and uses the standard, already-established config
 // mechanism instead.)
 type Config struct {
-	StoreRoot       string `config:"store_root" flag:"store-root"`
-	RawRoot         string `config:"raw_root" flag:"raw-root"`
-	ArchiveRoot     string `config:"archive_root" flag:"archive-root"`
-	Provider        string `config:"provider" flag:"provider" default:"oanda"`
-	OANDAToken      string `config:"oanda_token" secret:"true"`
+	StoreRoot   string `config:"store_root" flag:"store-root"`
+	RawRoot     string `config:"raw_root" flag:"raw-root"`
+	ArchiveRoot string `config:"archive_root" flag:"archive-root"`
+	Provider    string `config:"provider" flag:"provider" default:"oanda"`
+	OANDAToken  string `config:"oanda_token" secret:"true"`
+	// OANDATokenFile names a file holding the OANDA token (a leading ~/ is
+	// expanded), for a default config file that must not contain the
+	// secret itself. TRADER_OANDA_TOKEN, when set, wins over it. Load
+	// reads the file into OANDAToken (issue #480).
+	OANDATokenFile  string `config:"oanda_token_file"`
 	OANDABaseURL    string `config:"oanda_base_url" flag:"oanda-base-url"`
 	AlpacaKeyID     string `config:"alpaca_key_id" secret:"true"`
 	AlpacaSecretKey string `config:"alpaca_secret_key" secret:"true"`
 	AlpacaBaseURL   string `config:"alpaca_base_url" flag:"alpaca-base-url" default:"https://data.alpaca.markets"`
 }
 
-// Load resolves a Config from environ (TRADER_* variables) layered under
-// overrides, keyed by flag name, via the same config.Load every Trader
-// composition root uses. A nil environ reads the real process
-// environment; tests pass an explicit, possibly empty, slice.
-// Credentials have no flag and come from the environment only (see
-// Config).
+// DefaultConfigPath is the default config file (issue #480): the
+// lowest-precedence source for every Config key, so per-machine values
+// (data roots, the OANDA base URL, the OANDA token file) are set once.
+// TRADER_CONFIG names a different file, which then must exist; a missing
+// default file is simply not used. It is a variable so tests can point it
+// somewhere hermetic.
+var DefaultConfigPath = "/etc/trader/config.yml"
+
+// ConfigPathEnv is the environment variable naming the config file.
+const ConfigPathEnv = EnvPrefix + "_CONFIG"
+
+// Load resolves a Config from the default config file, environ
+// (TRADER_* variables) and overrides, keyed by flag name, in increasing
+// precedence, via the same config.Load every Trader composition root
+// uses. A nil environ reads the real process environment; tests pass an
+// explicit, possibly empty, slice. Credentials have no flag and come from
+// the environment or, for the OANDA token, a token file (see Config).
 func Load(environ []string, overrides map[string]string) (Config, error) {
-	return config.Load[Config](config.Options{
+	if environ == nil {
+		environ = os.Environ()
+	}
+	path, err := configFile(environ)
+	if err != nil {
+		return Config{}, err
+	}
+	if path != "" {
+		if err := rejectCredentialsInFile(path); err != nil {
+			return Config{}, err
+		}
+	}
+	cfg, err := config.Load[Config](config.Options{
 		EnvPrefix: EnvPrefix,
 		Environ:   environ,
+		FilePath:  path,
 		Overrides: overrides,
 	})
+	if err != nil {
+		return cfg, err
+	}
+	if cfg.OANDAToken == "" && cfg.OANDATokenFile != "" {
+		token, err := readTokenFile(cfg.OANDATokenFile)
+		if err != nil {
+			return cfg, fmt.Errorf("oanda_token_file: %w", err)
+		}
+		cfg.OANDAToken = token
+	}
+	return cfg, nil
+}
+
+// configFile returns the config file to read, or "" for none: the file
+// TRADER_CONFIG names (an error if it does not exist), else
+// DefaultConfigPath when it exists.
+func configFile(environ []string) (string, error) {
+	prefix := ConfigPathEnv + "="
+	for i := len(environ) - 1; i >= 0; i-- {
+		if v, ok := strings.CutPrefix(environ[i], prefix); ok && v != "" {
+			if _, err := os.Stat(v); err != nil {
+				return "", fmt.Errorf("%s: %w", ConfigPathEnv, err)
+			}
+			return v, nil
+		}
+	}
+	if DefaultConfigPath == "" {
+		return "", nil
+	}
+	if _, err := os.Stat(DefaultConfigPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("default config %s: %w", DefaultConfigPath, err)
+	}
+	return DefaultConfigPath, nil
+}
+
+// fileForbiddenKeys are credentials the config file must never carry: the
+// generic loader would happily read them from YAML, so they are rejected
+// by name. The OANDA token reaches a run through oanda_token_file or
+// TRADER_OANDA_TOKEN, Alpaca's credentials through the environment only.
+var fileForbiddenKeys = []string{"oanda_token", "alpaca_key_id", "alpaca_secret_key"}
+
+// rejectCredentialsInFile errors if the top level of the YAML file at path
+// sets a forbidden credential key. The error names the key and the file,
+// never a value.
+func rejectCredentialsInFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", path, err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil // the generic loader reports malformed YAML itself
+	}
+	for _, key := range fileForbiddenKeys {
+		if _, ok := doc[key]; ok {
+			return fmt.Errorf("config %s: %s must not be set in a config file (use oanda_token_file or the environment)", path, key)
+		}
+	}
+	return nil
+}
+
+// readTokenFile reads a secret from path, expanding a leading ~/ . Errors
+// name the path, never the contents.
+func readTokenFile(path string) (string, error) {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expand %s: %w", path, err)
+		}
+		path = filepath.Join(home, rest)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("%s is empty", path)
+	}
+	return token, nil
 }
 
 // oandaTokenCredential satisfies marketdata.Config.OANDACredential's

@@ -183,6 +183,7 @@ the original decided, use full supersession instead.
 | 073 | Stooq daily history is dividend-adjusted (in adr-073-stooq-dividend-adjusted.org) | Accepted, partial amendment of 048 |
 | 074 | Snapshot (multi-bar) delivery in Strategy Protocol v1 (in adr-074-multi-bar-delivery.org) | Accepted, additive extension of 062 |
 | 075 | Config-driven external strategy runs (in adr-075-config-driven-external-strategy.org) | Accepted, extends 062 launch mechanics |
+| 076 | Default config file for market-data settings (in adr-076-default-config-file.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
