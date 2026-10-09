@@ -631,7 +631,7 @@ func TestInspectFile_ContextCancelledDuringParseIsFatal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	p, skipped, fatalErr := inspectFile(ctx, root, filepath.Join(dir, "EURUSD-2020-05-h1.csv"))
+	p, skipped, fatalErr := inspectFile(ctx, root, filepath.Join(dir, "EURUSD-2020-05-h1.csv"), nil)
 	require.ErrorIs(t, fatalErr, context.Canceled)
 	assert.Zero(t, p, "no partition result when inspectFile fails fatally")
 	assert.Nil(t, skipped, "cancellation is not a skip reason")
@@ -656,4 +656,65 @@ func TestInspect_ContextCancelledDuringParsePropagates(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, inv.Partitions)
 	assert.Empty(t, inv.Skipped)
+}
+
+func TestInspectMatching_OnlyAcceptedPartitionsAreInventoried(t *testing.T) {
+	root := t.TempDir()
+	buildArchive(t, root)
+
+	full, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+
+	got, err := InspectMatching(context.Background(), root, func(symbol string, interval RawInterval) bool {
+		return symbol == "EURUSD" && interval == RawH1
+	})
+	require.NoError(t, err)
+
+	require.NotEmpty(t, got.Partitions)
+	var want []Partition
+	for _, p := range full.Partitions {
+		if p.Symbol == "EURUSD" && p.Interval == RawH1 {
+			want = append(want, p)
+		}
+	}
+	assert.Equal(t, want, got.Partitions, "accepted partitions are identical to Inspect's")
+	// Files whose names cannot be parsed give match nothing to evaluate, so
+	// they are recorded as skipped exactly as Inspect records them; match
+	// never adds entries of its own.
+	assert.Equal(t, full.Skipped, got.Skipped)
+}
+
+// TestInspectMatching_RejectedFilesAreNeverRead is the point of the
+// filter: an unreadable file that match rejects must not even be opened.
+func TestInspectMatching_RejectedFilesAreNeverRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file permissions cannot make a file unreadable")
+	}
+	root := t.TempDir()
+	good := writeFile(t, root+"/EURUSD/2020/05", "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
+	other := writeFile(t, root+"/GBPUSD/2020/05", "GBPUSD-2020-05-h1.csv",
+		fmtHeader("GBPUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
+	require.NoError(t, os.Chmod(other, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(other, 0o644) })
+	_ = good
+
+	inv, err := InspectMatching(context.Background(), root, func(symbol string, _ RawInterval) bool { return symbol == "EURUSD" })
+	require.NoError(t, err)
+	require.Len(t, inv.Partitions, 1)
+	assert.Equal(t, PartitionStatusOK, inv.Partitions[0].Status)
+
+	all, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+	assert.Len(t, all.Partitions, 2, "without a filter the unreadable file is inventoried")
+}
+
+func TestInspectMatching_NilMatchesEverything(t *testing.T) {
+	root := t.TempDir()
+	buildArchive(t, root)
+	a, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+	b, err := InspectMatching(context.Background(), root, nil)
+	require.NoError(t, err)
+	assert.Equal(t, a, b)
 }

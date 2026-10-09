@@ -134,7 +134,7 @@ func (m *Manager) Plan(ctx context.Context, query BarQuery) (Plan, error) {
 	}
 	symbol := listing.Symbol()
 
-	rawByKey, err := m.rawInventoryLookup(ctx, query.Interval)
+	rawByKey, err := m.rawInventoryLookup(ctx, symbol, query.Interval)
 	if err != nil {
 		return Plan{}, fmt.Errorf("marketdata: plan: %w", err)
 	}
