@@ -342,7 +342,7 @@ func TestSync_UnsupportedRawInterval(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestSync_ClipsCandlesFromOutsideTheMonth: OANDA returns the candle that
+// TestSync_ClipsCandlesFromOutsideTheMonth (D1): OANDA returns the candle that
 // contains From, so a D1 request for April returns March 31's 21:00Z bar
 // (US daylight time). It belongs to March's partition only.
 func TestSync_ClipsCandlesFromOutsideTheMonth(t *testing.T) {
@@ -357,13 +357,23 @@ func TestSync_ClipsCandlesFromOutsideTheMonth(t *testing.T) {
 	}}
 	mgr := newTestManagerWithSync(t, rawRoot, doer)
 
-	result, err := mgr.Sync(context.Background(), Plan{Actions: []Action{downloadAction(2020, time.April)}})
+	action := downloadAction(2020, time.April)
+	action.Interval = marketdata.D1 // the affected path: daily bars
+	result, err := mgr.Sync(context.Background(), Plan{Actions: []Action{action}})
 	require.NoError(t, err)
 	require.Len(t, result.Downloaded, 1)
 	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
 
-	records, err := oanda.ReadPartitionRecords(context.Background(), rawRoot, "EURUSD", oanda.RawH1, 2020, time.April)
+	require.Equal(t, 1, doer.requestCount())
+	assert.Equal(t, "D", doer.requests[0].URL.Query().Get("granularity"), "the request went through the D1 path")
+
+	records, err := oanda.ReadPartitionRecords(context.Background(), rawRoot, "EURUSD", oanda.RawD1, 2020, time.April)
 	require.NoError(t, err)
 	require.Len(t, records, 2)
 	assert.Equal(t, time.Date(2020, 4, 1, 21, 0, 0, 0, time.UTC), records[0].Time)
+	assert.Equal(t, time.Date(2020, 4, 2, 21, 0, 0, 0, time.UTC), records[1].Time)
+	for _, r := range records {
+		assert.False(t, r.Time.Before(time.Date(2020, 4, 1, 0, 0, 0, 0, time.UTC)), "previous month's bar is absent")
+		assert.True(t, r.Time.Before(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC)), "next month's bar is absent")
+	}
 }
