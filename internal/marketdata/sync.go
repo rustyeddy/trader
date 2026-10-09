@@ -254,6 +254,12 @@ func (m *Manager) syncOneOANDA(ctx context.Context, action Action) (DownloadResu
 		if err != nil {
 			return DownloadResult{}, fmt.Errorf("fetch candles: %w", err)
 		}
+		// OANDA returns the candle that contains From, which can open in
+		// the previous month (D1 bars open at 21:00Z in US daylight time,
+		// so April's first request returns March 31's bar): keep only this
+		// partition's own month, or the bar lands in two partitions and
+		// the canonical build rejects it as outside its span.
+		fetched = clipRecordsToMonth(fetched, monthStart, monthEnd)
 		if len(fetched) > 0 || mustNotExist {
 			merged = mergeRecordsByTime(existing, fetched)
 			if err := oanda.WritePartition(ctx, m.rawRoot, symbol, rawInterval, action.Year, action.Month, merged, mustNotExist); err != nil {
@@ -263,6 +269,17 @@ func (m *Manager) syncOneOANDA(ctx context.Context, action Action) (DownloadResu
 	}
 
 	return DownloadResult{Action: action, RecordsWritten: len(merged)}, nil
+}
+
+// clipRecordsToMonth returns the records with Time in [start, end).
+func clipRecordsToMonth(records []oanda.Record, start, end time.Time) []oanda.Record {
+	out := make([]oanda.Record, 0, len(records))
+	for _, r := range records {
+		if !r.Time.Before(start) && r.Time.Before(end) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // mergeRecordsByTime combines existing and fetched into one set with at

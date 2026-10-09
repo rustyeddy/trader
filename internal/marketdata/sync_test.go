@@ -341,3 +341,29 @@ func TestSync_UnsupportedRawInterval(t *testing.T) {
 	}}})
 	assert.Error(t, err)
 }
+
+// TestSync_ClipsCandlesFromOutsideTheMonth: OANDA returns the candle that
+// contains From, so a D1 request for April returns March 31's 21:00Z bar
+// (US daylight time). It belongs to March's partition only.
+func TestSync_ClipsCandlesFromOutsideTheMonth(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeOandaDoer{responses: []fakeOandaResponse{
+		{status: 200, body: candlesJSONForTest([]time.Time{
+			time.Date(2020, 3, 31, 21, 0, 0, 0, time.UTC), // previous month's bar
+			time.Date(2020, 4, 1, 21, 0, 0, 0, time.UTC),
+			time.Date(2020, 4, 2, 21, 0, 0, 0, time.UTC),
+			time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), // next month: never ours
+		}, true)},
+	}}
+	mgr := newTestManagerWithSync(t, rawRoot, doer)
+
+	result, err := mgr.Sync(context.Background(), Plan{Actions: []Action{downloadAction(2020, time.April)}})
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
+
+	records, err := oanda.ReadPartitionRecords(context.Background(), rawRoot, "EURUSD", oanda.RawH1, 2020, time.April)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	assert.Equal(t, time.Date(2020, 4, 1, 21, 0, 0, 0, time.UTC), records[0].Time)
+}
