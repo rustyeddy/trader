@@ -121,12 +121,29 @@ func (l *fixedIntervalLimiter) Wait(ctx context.Context) error {
 	return nil
 }
 
+// normalizeBaseURL trims trailing slashes and one trailing "/v3" path
+// segment from base, since Client adds the version itself. It works on the
+// parsed URL's path, never the raw string, so a host that happens to end
+// in "v3" (https://v3, a proxy) is left alone.
+func normalizeBaseURL(base string) string {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(base, "/")
+	}
+	p := strings.TrimRight(u.Path, "/")
+	p = strings.TrimSuffix(p, "/v3")
+	u.Path, u.RawPath = strings.TrimRight(p, "/"), ""
+	return strings.TrimRight(u.String(), "/")
+}
+
 // ClientConfig holds Client's explicit dependencies. Configuration is a
 // composition-root concern, the same convention marketdata.Manager
 // follows: Client never reads environment variables or files itself.
 type ClientConfig struct {
 	// BaseURL is OANDA's API base, for example
-	// "https://api-fxpractice.oanda.com". Required. Deliberately a full
+	// "https://api-fxpractice.oanda.com", with or without OANDA's
+	// documented trailing "/v3" (Client adds the version itself and
+	// strips a duplicate). Required. Deliberately a full
 	// URL rather than a "practice"/"live" enum Client would parse
 	// itself — environment selection is the composition root's typed
 	// configuration decision, not domain-level string parsing.
@@ -221,7 +238,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		pageSize = candlePageSize
 	}
 	return &Client{
-		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		baseURL:     normalizeBaseURL(cfg.BaseURL),
 		credential:  cfg.Credential,
 		http:        httpClient,
 		clock:       cl,
