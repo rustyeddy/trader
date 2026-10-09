@@ -9,21 +9,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// the24Pairs is the audited in-scope corpus, listed independently of the
+// theInScopePairs is the audited in-scope corpus, listed independently of the
 // package's own inScopeFXPairs so the test would catch an accidental edit to
 // that set.
-var the24Pairs = []string{
+var theInScopePairs = []string{
 	"AUDCAD", "AUDCHF", "AUDJPY", "AUDNZD", "AUDUSD",
-	"CADJPY", "CHFJPY",
+	"CADCHF", "CADJPY", "CHFJPY",
 	"EURAUD", "EURCAD", "EURCHF", "EURGBP", "EURJPY", "EURNZD", "EURUSD",
-	"GBPAUD", "GBPCAD", "GBPJPY", "GBPNZD", "GBPUSD",
+	"GBPAUD", "GBPCAD", "GBPCHF", "GBPJPY", "GBPNZD", "GBPUSD",
 	"NZDJPY", "NZDUSD",
 	"USDCAD", "USDCHF", "USDJPY",
 }
 
-func TestResolveSymbolAll24InScopePairs(t *testing.T) {
-	require.Len(t, the24Pairs, 24)
-	for _, sym := range the24Pairs {
+func TestResolveSymbolAllInScopePairs(t *testing.T) {
+	require.Len(t, theInScopePairs, 26)
+	for _, sym := range theInScopePairs {
 		id, err := resolveSymbol(sym)
 		require.NoError(t, err, sym)
 		want := instrument.CurrencyPairID(

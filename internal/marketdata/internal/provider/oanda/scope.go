@@ -11,7 +11,7 @@ import (
 // Sentinel errors, classifiable with errors.Is.
 var (
 	// ErrInstrumentOutOfScope reports a provider symbol that is well-formed
-	// but is not one of the 24 in-scope M2 FX pairs — XAUUSD (gold is not an
+	// but is not one of the 26 in-scope FX pairs — XAUUSD (gold is not an
 	// FX leg), and also any valid-looking pair such as USDEUR that is simply
 	// not part of the preserved corpus. It is deliberately distinct from a
 	// malformed symbol: a caller walking the archive uses it to skip a
@@ -29,16 +29,16 @@ var (
 	ErrMalformedData = errors.New("oanda: malformed data")
 )
 
-// inScopeFXPairs is the exact set of 24 FX pairs preserved in the archive and
-// in scope for M2. It is an audited symbol set, not a currency-combination
+// inScopeFXPairs is the exact set of 26 FX pairs: the 24 preserved in the
+// archive and in scope for M2, plus GBPCHF and CADCHF (issue #482). It is an audited symbol set, not a currency-combination
 // rule: two in-scope currencies do not by themselves make an in-scope pair
 // (there is no USDEUR or CADNZD partition), and gold (XAU) is not present at
 // all. A symbol is in scope only if it appears here verbatim.
 var inScopeFXPairs = map[string]struct{}{
 	"AUDCAD": {}, "AUDCHF": {}, "AUDJPY": {}, "AUDNZD": {}, "AUDUSD": {},
-	"CADJPY": {}, "CHFJPY": {},
+	"CADCHF": {}, "CADJPY": {}, "CHFJPY": {},
 	"EURAUD": {}, "EURCAD": {}, "EURCHF": {}, "EURGBP": {}, "EURJPY": {}, "EURNZD": {}, "EURUSD": {},
-	"GBPAUD": {}, "GBPCAD": {}, "GBPJPY": {}, "GBPNZD": {}, "GBPUSD": {},
+	"GBPAUD": {}, "GBPCAD": {}, "GBPCHF": {}, "GBPJPY": {}, "GBPNZD": {}, "GBPUSD": {},
 	"NZDJPY": {}, "NZDUSD": {},
 	"USDCAD": {}, "USDCHF": {}, "USDJPY": {},
 }
@@ -46,7 +46,7 @@ var inScopeFXPairs = map[string]struct{}{
 // resolveSymbol maps a raw OANDA provider symbol such as "EURUSD" to its
 // canonical instrument.ID through instrument's currency-pair facility. It
 // reports ErrInstrumentOutOfScope for a well-formed six-letter symbol that is
-// not one of the 24 in-scope pairs (for example XAUUSD or USDEUR), and
+// not one of the 26 in-scope pairs (for example XAUUSD or USDEUR), and
 // ErrMalformedData for a symbol that is not six uppercase letters at all.
 func resolveSymbol(symbol string) (instrument.ID, error) {
 	if len(symbol) != 6 || !isUpperAlpha(symbol) {

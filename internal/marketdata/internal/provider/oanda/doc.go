@@ -38,7 +38,8 @@
 //
 // # Scope
 //
-// Scope is an exact, audited set of the 24 FX pairs preserved in the archive,
+// Scope is an exact, audited set of 26 FX pairs (the 24 preserved in the archive plus
+// GBPCHF and CADCHF, issue #482),
 // not a currency-combination rule: two in-scope currencies do not by
 // themselves make an in-scope pair (there is no USDEUR or CADNZD partition).
 // A symbol outside that set — XAUUSD (gold is not an FX leg) or a valid-looking
