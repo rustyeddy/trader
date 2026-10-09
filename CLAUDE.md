@@ -1,11 +1,5 @@
 # Claude Code Instructions
 
-The canonical repository agent instructions are in `AGENTS.md`.
-
-Read and follow:
-
 @AGENTS.md
-@docs/arch/trader-framework-architecture.org
-@docs/arch/adr-decisions.org
-@CONTRIBUTING.org
 
+Follow the shared instructions above. Read only issue-relevant architecture and ADR sections as needed; do not preload the full architecture or ADR registry.
