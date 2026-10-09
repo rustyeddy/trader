@@ -87,6 +87,13 @@ func (g *grpcServer) Handshake(ctx context.Context, req *v1.HandshakeRequest) (*
 	}
 
 	negotiated := negotiateCapabilities(req.GetCapabilities())
+	for _, c := range negotiated {
+		if c == v1.Capability_CAPABILITY_BARS_DELIVERY {
+			if err := validateBarsDelivery(descriptor); err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "external: handshake: %v", err)
+			}
+		}
+	}
 
 	sessionID, err := newSessionID()
 	if err != nil {
@@ -178,15 +185,39 @@ func (g *grpcServer) expireIfNeverBound(sessionID string, sess *runSession, stra
 // is silently dropped rather than rejected, matching v1's own
 // additive-capability compatibility rule.
 func negotiateCapabilities(requested []v1.Capability) []v1.Capability {
-	var out []v1.Capability
-	seen := false
+	var fill, bars bool
 	for _, c := range requested {
-		if c == v1.Capability_CAPABILITY_FILL_HANDLER && !seen {
-			seen = true
-			out = append(out, c)
+		switch c {
+		case v1.Capability_CAPABILITY_FILL_HANDLER:
+			fill = true
+		case v1.Capability_CAPABILITY_BARS_DELIVERY:
+			bars = true
 		}
 	}
+	var out []v1.Capability
+	if fill {
+		out = append(out, v1.Capability_CAPABILITY_FILL_HANDLER)
+	}
+	if bars {
+		out = append(out, v1.Capability_CAPABILITY_BARS_DELIVERY)
+	}
 	return out
+}
+
+// validateBarsDelivery enforces the snapshot-delivery precondition: a
+// BarsEvent carries one interval, so a bars-delivery guest must declare
+// at least one requirement and one interval across all of them.
+func validateBarsDelivery(d strategy.Descriptor) error {
+	if len(d.Requirements) == 0 {
+		return fmt.Errorf("bars delivery requires at least one declared requirement")
+	}
+	for _, r := range d.Requirements[1:] {
+		if r.Interval != d.Requirements[0].Interval {
+			return fmt.Errorf("bars delivery requires a single interval across requirements, got %s and %s",
+				d.Requirements[0].Interval, r.Interval)
+		}
+	}
+	return nil
 }
 
 // Run is the guest-opened, bidirectional, long-lived session stream.
@@ -247,6 +278,12 @@ func (g *grpcServer) Run(stream v1.StrategyHostService_RunServer) error {
 					return
 				}
 				sess.dispatch(payload.OnBarResponse.GetSequence(), msg)
+			case *v1.RunClientMessage_OnBarsResponse:
+				if payload.OnBarsResponse == nil {
+					sess.forceTeardown(status.Error(codes.InvalidArgument, "external: run: on_bars_response payload must not be nil"))
+					return
+				}
+				sess.dispatch(payload.OnBarsResponse.GetSequence(), msg)
 			case *v1.RunClientMessage_OnFillResponse:
 				if payload.OnFillResponse == nil {
 					sess.forceTeardown(status.Error(codes.InvalidArgument, "external: run: on_fill_response payload must not be nil"))
@@ -285,7 +322,7 @@ func (g *grpcServer) GetHistoryBars(_ context.Context, req *v1.GetHistoryBarsReq
 	view, ok := sess.history(q.CallbackSequence)
 	if !ok {
 		return nil, status.Errorf(codes.FailedPrecondition,
-			"external: get history bars: callback %d is not an in-flight on-bar callback", q.CallbackSequence)
+			"external: get history bars: callback %d is not an in-flight bar or bars callback", q.CallbackSequence)
 	}
 
 	declared := false

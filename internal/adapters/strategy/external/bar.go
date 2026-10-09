@@ -38,6 +38,34 @@ func ToWireBars(bars []marketdata.Bar) []*v1.Bar {
 	return out
 }
 
+// ToWireBarsEvent builds the *v1.BarsEvent the host writes down the Run
+// stream for one strategy.BarsEvent snapshot. Interval, sequence and the
+// account snapshot are carried once, not per member; bars and missing
+// ids keep event's own (requirement-declaration) order.
+func ToWireBarsEvent(sequence uint64, event strategy.BarsEvent, acct account.Snapshot) (*v1.BarsEvent, error) {
+	interval, err := ToWireInterval(event.Interval)
+	if err != nil {
+		return nil, fmt.Errorf("external: bars event: %w", err)
+	}
+	wireAcct, err := ToWireAccountSnapshot(acct)
+	if err != nil {
+		return nil, fmt.Errorf("external: bars event: %w", err)
+	}
+	out := &v1.BarsEvent{
+		Sequence:          sequence,
+		Interval:          interval,
+		BoundaryUnixNanos: event.Boundary.UTC().UnixNano(),
+		Account:           wireAcct,
+	}
+	for _, b := range event.Bars {
+		out.Bars = append(out.Bars, &v1.InstrumentBar{InstrumentId: b.Instrument.String(), Bar: ToWireBar(b.Bar)})
+	}
+	for _, id := range event.Missing {
+		out.MissingInstrumentIds = append(out.MissingInstrumentIds, id.String())
+	}
+	return out, nil
+}
+
 // ToWireBarEvent builds the *v1.BarEvent the host writes down the Run
 // stream for one strategy.BarEvent, at sequence, carrying acct as the
 // inline account snapshot ADR-062's View design requires — the host

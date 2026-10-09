@@ -44,12 +44,27 @@ for a complete, minimal, compiling example.
 ## Implementing a strategy
 
 ```go
-type Strategy interface {
+// Every consumer:
+type ConsumerBase interface {
     Describe() Descriptor
     Start(ctx context.Context, env Environment) error
+}
+
+// A bar-by-bar strategy (sdk.BarConsumer; sdk.Strategy is an alias):
+type BarHandler interface {
     OnBar(ctx context.Context, event BarEvent, view View) ([]DescribedIntent, []DescribedSignal, error)
 }
+
+// A snapshot consumer such as a scanner (sdk.BarsConsumer):
+type BarsHandler interface {
+    OnBars(ctx context.Context, event BarsEvent, view View) ([]DescribedIntent, []DescribedSignal, error)
+}
 ```
+
+Implement `ConsumerBase` plus **exactly one** of `OnBar` or `OnBars`.
+You never write a dummy callback for the shape you do not use, and
+`Serve` rejects a consumer that implements both or neither. Existing
+`sdk.Strategy` code compiles unchanged.
 
 `Describe` returns your strategy's name, version, and the
 instrument/interval data it needs — carried to the host at Handshake,
@@ -71,6 +86,40 @@ built — never real `order.Intent`/`journal.Record` values, which only
 the host ever constructs (so a compromised or buggy guest can never
 forge one). An empty slice for either is a valid, explicit "nothing
 this bar" response.
+
+### Receiving a whole universe at once (`OnBars`)
+
+A scanner, study, or cross-sectional strategy evaluates many instruments
+at one completed time boundary. Implement `OnBars` instead of `OnBar` and
+`Serve` advertises snapshot delivery at Handshake, so the host and your
+process agree on the mode without either side guessing:
+
+```go
+func (s *scanner) OnBars(ctx context.Context, ev sdk.BarsEvent, view sdk.View) ([]sdk.DescribedIntent, []sdk.DescribedSignal, error) {
+    for _, b := range ev.Bars {   // completed bars at ev.Boundary
+        _ = b.Instrument; _ = b.Bar
+    }
+    for _, id := range ev.Missing { // declared, but no bar at this boundary
+        _ = id
+    }
+    return nil, []sdk.DescribedSignal{{Strategy: "scanner", Values: map[string]string{"best": "EUR/USD"}}}, nil
+}
+```
+
+A `BarsEvent` is one coherent snapshot, not "whatever arrived together":
+
+- Every bar in `Bars` is at `Boundary`, for `Interval`.
+- Every requirement you declared appears in exactly one of `Bars` or
+  `Missing`, so a partial universe is never ambiguous. Both follow your
+  `Descriptor.Requirements` order, so runs are deterministic.
+- All requirements must share one interval (a `BarsEvent` has a single
+  `Interval`), and you must declare at least one. `Serve` and the host
+  both enforce this at startup.
+- `View` behaves as it does for `OnBar`: the account snapshot is inline
+  and `HistoryBars` returns bars strictly before `Boundary` for any
+  declared requirement.
+- Responses follow the `OnBar` rules: the host builds canonical
+  intents and journals signals, and an error contributes nothing.
 
 ### Describing an intent
 

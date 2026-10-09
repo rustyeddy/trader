@@ -19,6 +19,12 @@
 //     described intents/signals/error, an OnFillResponse's error, or
 //     a GetHistoryBarsRequest's query.
 //
+// Snapshot delivery (issue #467, ADR-074): a guest that negotiated
+// CAPABILITY_BARS_DELIVERY is served by a strategy.Strategy that also
+// implements strategy.BarsHandler, so a runtime calls OnBars once per
+// completed boundary (ToWireBarsEvent) and never OnBar; every other
+// session's strategy lacks OnBars, so exactly one shape is visible.
+//
 // No function here returns a *v1.* type to, or accepts one from, any
 // package outside this one: the only packages that will ever import
 // protocol/strategy/v1 are this one (host side, ADR-062) and the

@@ -18,6 +18,19 @@
 // alongside public values and pure indicator/analysis packages. Trader's
 // orchestration, broker, storage, identity, and test infrastructure are internal.
 //
+// # Consumer shapes: ConsumerBase, BarConsumer, BarsConsumer
+//
+// A consumer implements sdk.ConsumerBase (Describe, Start) plus exactly
+// one delivery callback: OnBar (sdk.BarConsumer, one callback per
+// completed bar) or OnBars (sdk.BarsConsumer, one callback per completed
+// time boundary carrying the whole subscribed universe — for scanners,
+// studies, and cross-sectional strategies). Serve selects the shape by
+// interface assertion and declares it at Handshake as
+// CAPABILITY_BARS_DELIVERY, so host and guest never infer it
+// independently; a consumer implementing both callbacks or neither is
+// rejected rather than resolved by precedence (ADR-074). sdk.Strategy is
+// kept as an alias of sdk.BarConsumer.
+//
 // # sdk.Strategy is its own interface, not strategy.Strategy
 //
 // sdk.Strategy mirrors strategy.Strategy's shape (Describe,

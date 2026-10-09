@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/account"
 	"github.com/rustyeddy/trader/internal/adapters/strategy/external"
 	"github.com/rustyeddy/trader/internal/strategy"
 	"github.com/rustyeddy/trader/marketdata"
@@ -69,4 +71,31 @@ func TestToWireBarEvent(t *testing.T) {
 	require.Equal(t, "1.1", w.GetBar().GetOpen())
 	require.NotNil(t, w.GetAccount())
 	require.Equal(t, snap.AccountID().String(), w.GetAccount().GetAccountId())
+}
+
+func TestToWireBarsEvent(t *testing.T) {
+	eur := eurUSD(t)
+	gbp := instrument.CurrencyPairID(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	event := strategy.BarsEvent{
+		Boundary: testBar(t).Time,
+		Interval: marketdata.H1,
+		Bars:     []strategy.BarEvent{{Instrument: eur, Interval: marketdata.H1, Bar: testBar(t)}},
+		Missing:  []instrument.ID{gbp},
+	}
+	w, err := external.ToWireBarsEvent(7, event, testSnapshot(t))
+	require.NoError(t, err)
+
+	require.Equal(t, uint64(7), w.GetSequence())
+	require.Equal(t, event.Boundary.UnixNano(), w.GetBoundaryUnixNanos())
+	require.Equal(t, v1.IntervalUnit_INTERVAL_UNIT_HOUR, w.GetInterval().GetUnit())
+	require.Len(t, w.GetBars(), 1)
+	require.Equal(t, eur.String(), w.GetBars()[0].GetInstrumentId())
+	require.Equal(t, "1.102", w.GetBars()[0].GetBar().GetClose())
+	require.Equal(t, []string{gbp.String()}, w.GetMissingInstrumentIds())
+	require.NotNil(t, w.GetAccount())
+}
+
+func TestToWireBarsEvent_ZeroAccountSnapshotRejected(t *testing.T) {
+	_, err := external.ToWireBarsEvent(1, strategy.BarsEvent{Boundary: testBar(t).Time, Interval: marketdata.H1}, account.Snapshot{})
+	require.Error(t, err)
 }

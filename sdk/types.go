@@ -41,6 +41,26 @@ type BarEvent struct {
 	Bar        marketdata.Bar
 }
 
+// BarsEvent is one coherent cross-sectional snapshot, the trigger for
+// OnBars. Every entry in Bars and Missing belongs to the same completed
+// boundary of the same Interval for this consumer's own declared
+// requirements — it is never merely "whatever bars happened to arrive
+// together". Completeness is never ambiguous: each requirement at this
+// Interval appears in exactly one of Bars (it produced a completed bar
+// for Boundary) or Missing (it could not), so a consumer can tell a full
+// universe from a partial one. Both slices are in the consumer's own
+// Descriptor.Requirements order, so delivery is deterministic.
+type BarsEvent struct {
+	// Boundary is the completed time boundary shared by every bar.
+	Boundary time.Time
+	Interval marketdata.Interval
+	// Bars holds the completed bars available at Boundary.
+	Bars []BarEvent
+	// Missing lists requirements that contributed no completed bar at
+	// Boundary.
+	Missing []instrument.ID
+}
+
 // FillEvent is one execution report delivered to a strategy
 // implementing FillHandler — sdk's own counterpart to
 // strategy.FillEvent, carrying exactly the minimal slice
