@@ -420,3 +420,20 @@ func TestNewClient_BaseURLMayCarryTheV3Suffix(t *testing.T) {
 		assert.Equal(t, "https://api-fxtrade.oanda.com", c.baseURL, base)
 	}
 }
+
+func TestNormalizeBaseURL(t *testing.T) {
+	cases := map[string]string{
+		"https://api-fxtrade.oanda.com/v3":  "https://api-fxtrade.oanda.com",
+		"https://api-fxtrade.oanda.com/v3/": "https://api-fxtrade.oanda.com",
+		"https://api-fxtrade.oanda.com":     "https://api-fxtrade.oanda.com",
+		"https://v3":                        "https://v3",
+		"https://v3/v3":                     "https://v3",
+		"https://proxy.example/oanda/v3":    "https://proxy.example/oanda",
+		"http://localhost:8080/":            "http://localhost:8080",
+		"https://api.example/v3/extra":      "https://api.example/v3/extra",
+		"not a url":                         "not a url",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, normalizeBaseURL(in), in)
+	}
+}
