@@ -477,7 +477,7 @@ func (r candleResponse) records() ([]Record, error) {
 
 // toAPISymbol converts an archive-form symbol ("EURUSD") to OANDA's own
 // wire form ("EUR_USD"). It reuses resolveSymbol's scope validation
-// (six uppercase letters, one of the 24 in-scope pairs) so an
+// (six uppercase letters, one of the 26 in-scope pairs) so an
 // out-of-scope or malformed symbol is rejected before ever reaching a
 // request — XAUUSD, in particular, can never be requested through this
 // client, matching the issue's explicit constraint.
