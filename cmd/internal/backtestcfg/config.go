@@ -51,6 +51,10 @@ type ModelSection struct {
 	StartingCapital string `config:"starting_capital" flag:"model-starting-cash"`
 }
 
+// IsModel reports whether the config is a model (study) run, which trades
+// nothing and so has no backtest report worth printing (issue #489).
+func (c RunConfig) IsModel() bool { return c.Model.active() }
+
 // active reports whether any model key is set.
 func (m ModelSection) active() bool { return m != (ModelSection{}) }
 

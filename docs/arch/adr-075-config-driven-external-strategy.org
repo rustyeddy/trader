@@ -58,7 +58,9 @@ it into =Backtest=, so the run reads one shape; explicit =backtest= values
 (in practice flags) win over the model's. =backtest.from=, =to= and
 =adverse_distance= lose their =required= tag and are enforced in
 =Validate=/=LoadRunConfig= unless a model is present. Data locations stay
-under =backtest=.
+under =backtest=. A model run prints a short study summary (including the
+number of signals emitted) instead of the backtest report, since it
+trades nothing (issue #489).
 
 * Consequences
 
