@@ -146,7 +146,9 @@ file < environment < flags. Keys are the data settings (`store_root`,
 `raw_root`, `archive_root`, `provider`, `oanda_base_url`,
 `alpaca_base_url`) plus `oanda_token_file`, a path (a leading `~/` is
 expanded) to a file containing the OANDA token. The token is never stored
-in the config file itself, and `TRADER_OANDA_TOKEN` wins over the file.
+in the config file itself (an `oanda_token`, `alpaca_key_id` or
+`alpaca_secret_key` key there is an error), and `TRADER_OANDA_TOKEN` wins
+over the file.
 
 ```yaml
 # /etc/trader/config.yml
