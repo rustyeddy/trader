@@ -685,28 +685,31 @@ func TestInspectMatching_OnlyAcceptedPartitionsAreInventoried(t *testing.T) {
 }
 
 // TestInspectMatching_RejectedFilesAreNeverRead is the point of the
-// filter: an unreadable file that match rejects must not even be opened.
+// filter: a file match rejects must not even be opened. The read hook
+// records every file read, so a post-read filter would fail here.
 func TestInspectMatching_RejectedFilesAreNeverRead(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: file permissions cannot make a file unreadable")
-	}
 	root := t.TempDir()
-	good := writeFile(t, root+"/EURUSD/2020/05", "EURUSD-2020-05-h1.csv",
-		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
-	other := writeFile(t, root+"/GBPUSD/2020/05", "GBPUSD-2020-05-h1.csv",
-		fmtHeader("GBPUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
-	require.NoError(t, os.Chmod(other, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(other, 0o644) })
-	_ = good
+	row := h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true)
+	good := writeFile(t, root+"/EURUSD/2020/05", "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+row)
+	other := writeFile(t, root+"/GBPUSD/2020/05", "GBPUSD-2020-05-h1.csv", fmtHeader("GBPUSD", 2020, 5)+row)
+	otherInterval := writeFile(t, root+"/EURUSD/2020/05", "EURUSD-2020-05-h4.csv", fmtHeaderTF("EURUSD", "h4", 2020, 5)+row)
+	reads := recordReads(t)
 
-	inv, err := InspectMatching(context.Background(), root, func(symbol string, _ RawInterval) bool { return symbol == "EURUSD" })
+	inv, err := InspectMatching(context.Background(), root, func(symbol string, interval RawInterval) bool {
+		return symbol == "EURUSD" && interval == RawH1
+	})
 	require.NoError(t, err)
 	require.Len(t, inv.Partitions, 1)
 	assert.Equal(t, PartitionStatusOK, inv.Partitions[0].Status)
+	assert.Equal(t, []string{good}, *reads, "only the accepted file is read")
+	assert.NotContains(t, *reads, other)
+	assert.NotContains(t, *reads, otherInterval)
 
+	*reads = nil
 	all, err := Inspect(context.Background(), root)
 	require.NoError(t, err)
-	assert.Len(t, all.Partitions, 2, "without a filter the unreadable file is inventoried")
+	assert.Len(t, all.Partitions, 3)
+	assert.Len(t, *reads, 3, "without a filter every file is read")
 }
 
 func TestInspectMatching_NilMatchesEverything(t *testing.T) {
@@ -717,4 +720,17 @@ func TestInspectMatching_NilMatchesEverything(t *testing.T) {
 	b, err := InspectMatching(context.Background(), root, nil)
 	require.NoError(t, err)
 	assert.Equal(t, a, b)
+}
+
+// recordReads replaces readFile for the test and returns the paths read.
+func recordReads(t *testing.T) *[]string {
+	t.Helper()
+	var reads []string
+	orig := readFile
+	readFile = func(path string) ([]byte, error) {
+		reads = append(reads, path)
+		return os.ReadFile(path)
+	}
+	t.Cleanup(func() { readFile = orig })
+	return &reads
 }

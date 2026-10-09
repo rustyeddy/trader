@@ -240,6 +240,11 @@ func InspectMatching(ctx context.Context, root string, match func(symbol string,
 	return inv, nil
 }
 
+// readFile reads one candidate partition file. It is a variable only so a
+// test can observe which files an inspection opens (the filter must keep
+// rejected files from ever reaching it).
+var readFile = os.ReadFile
+
 // errNotMatched is inspectFile's internal signal that match rejected the
 // file; InspectMatching drops it without recording anything.
 var errNotMatched = errors.New("oanda: inspect: file not matched")
@@ -298,7 +303,7 @@ func inspectFile(ctx context.Context, root, path string, match func(symbol strin
 	// only ever surface here, as PartitionStatusUnreadable — there is no
 	// second filesystem access left that could instead misreport it as
 	// PartitionStatusMalformed.
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		p.Status = PartitionStatusUnreadable
 		p.Err = err

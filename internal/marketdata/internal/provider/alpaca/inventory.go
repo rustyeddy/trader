@@ -144,6 +144,11 @@ func InspectMatching(ctx context.Context, root string, match func(symbol string)
 	return inv, nil
 }
 
+// readFile reads one candidate partition file. It is a variable only so a
+// test can observe which files an inspection opens (the filter must keep
+// rejected files from ever reaching it).
+var readFile = os.ReadFile
+
 func inspectFile(ctx context.Context, root, path string, match func(symbol string) bool) (Partition, bool, error) {
 	m, err := parsePathMeta(path)
 	if err != nil {
@@ -161,7 +166,7 @@ func inspectFile(ctx context.Context, root, path string, match func(symbol strin
 	if err := ctx.Err(); err != nil {
 		return Partition{}, false, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return Partition{}, false, ctxErr

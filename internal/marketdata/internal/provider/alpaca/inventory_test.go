@@ -83,28 +83,26 @@ func writeFile(path, content string) error {
 }
 
 // TestInspectMatching_RejectedSymbolsAreNeverRead proves the filter runs
-// before any file I/O: an unreadable file of a rejected symbol is simply
-// absent, while an unfiltered Inspect inventories it as unreadable.
+// before any file I/O: the read hook records every file read, and a
+// rejected symbol's file never appears in it.
 func TestInspectMatching_RejectedSymbolsAreNeverRead(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: file permissions cannot make a file unreadable")
-	}
 	root := t.TempDir()
-	writePartitionFile(t, root, "SPY", 2020, time.May, "not a valid partition\n")
-	other := writePartitionFile(t, root, "QQQ", 2020, time.May, "not a valid partition\n")
-	require.NoError(t, os.Chmod(other, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(other, 0o644) })
+	spy := writePartitionFile(t, root, "SPY", 2020, time.May, "not a valid partition\n")
+	qqq := writePartitionFile(t, root, "QQQ", 2020, time.May, "not a valid partition\n")
+	reads := recordReads(t)
 
 	ctx := context.Background()
 	got, err := InspectMatching(ctx, root, func(symbol string) bool { return symbol == "SPY" })
 	require.NoError(t, err)
 	require.Len(t, got.Partitions, 1)
 	assert.Equal(t, "SPY", got.Partitions[0].Symbol)
+	assert.Equal(t, []string{spy}, *reads, "only the accepted file is read")
 
+	*reads = nil
 	all, err := Inspect(ctx, root)
 	require.NoError(t, err)
 	require.Len(t, all.Partitions, 2)
-	assert.Equal(t, PartitionStatusUnreadable, all.Partitions[0].Status, "QQQ sorts first")
+	assert.ElementsMatch(t, []string{spy, qqq}, *reads, "without a filter every file is read")
 }
 
 func TestInspectMatching_NilMatchesEverything(t *testing.T) {
@@ -115,4 +113,17 @@ func TestInspectMatching_NilMatchesEverything(t *testing.T) {
 	b, err := InspectMatching(context.Background(), root, nil)
 	require.NoError(t, err)
 	assert.Equal(t, a, b)
+}
+
+// recordReads replaces readFile for the test and returns the paths read.
+func recordReads(t *testing.T) *[]string {
+	t.Helper()
+	var reads []string
+	orig := readFile
+	readFile = func(path string) ([]byte, error) {
+		reads = append(reads, path)
+		return os.ReadFile(path)
+	}
+	t.Cleanup(func() { readFile = orig })
+	return &reads
 }
