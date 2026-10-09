@@ -357,6 +357,7 @@ func TestRun_ConfigInvalidCombinationsRejected(t *testing.T) {
 		{"strategy.config without exec", "  symbols: EURUSD\nstrategy:\n  config: x.yml\n", nil, "strategy.config requires strategy.exec"},
 		{"strategy-args without any exec", "  symbols: EURUSD\n", []string{"--strategy-args", "--v"}, "--strategy-args requires"},
 		{"strategy-config flag without any exec", "  symbols: EURUSD\n", []string{"--strategy-config", "x.yml"}, "strategy.config requires strategy.exec"},
+		{"multi-symbol universe in YAML with an in-process strategy", "  symbols: EURUSD,GBPUSD\n", nil, "single-instrument experiment"},
 		{"multi --symbol with an in-process config", "  symbol: EURUSD\n", []string{"--symbol", "EURUSD", "--symbol", "GBPUSD"}, "single-instrument experiment"},
 	}
 	for _, tt := range tests {

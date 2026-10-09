@@ -118,7 +118,7 @@ func newRunCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.strategyExec, "strategy-exec", "", "path to an out-of-tree strategy executable, launched and driven over Strategy Protocol v1 (ADR-062/ADR-063) instead of an in-tree strategy; may also be set as strategy.exec in --config")
 	cmd.Flags().StringArrayVar(&flags.strategyArgs, "strategy-args", nil, "extra argument passed to the external strategy executable, unmodified; repeatable, in order; requires --strategy-exec or strategy.exec")
-	cmd.Flags().StringVar(&flags.strategyConfig, "strategy-config", "", "path to a config file for --strategy-exec's own executable; forwarded as the "+backtestcfg.StrategyConfigPathEnv+" environment variable, never parsed by trader itself; requires --strategy-exec or strategy.exec (or strategy.config in --config)")
+	cmd.Flags().StringVar(&flags.strategyConfig, "strategy-config", "", "path to a config file for --strategy-exec's own executable; forwarded as the "+backtestcfg.StrategyConfigPathEnv+" environment variable, never parsed by trader itself; requires an executable from --strategy-exec or strategy.exec; the same path may instead be set as strategy.config in --config")
 
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required, or supplied by --config)")
@@ -162,9 +162,11 @@ func validateStrategyFlags(cmd *cobra.Command, flags runFlags) error {
 // silently ignored) only when neither names one. A config may also carry
 // a multi-instrument universe only for an external strategy, whose own
 // Descriptor determines what it trades; --config with more than one
-// --symbol remains rejected for in-process strategies, whose config
-// describes a single experiment.
-func validateStrategySelection(cmd *cobra.Command, flags runFlags, cfg backtestcfg.RunConfig) error {
+// --symbol or backtest.symbols remains rejected for in-process
+// strategies, whose config describes a single experiment; symbols is the
+// effective universe from effectiveSymbols, so a YAML-carried universe is
+// checked as well as repeated flags.
+func validateStrategySelection(cmd *cobra.Command, flags runFlags, cfg backtestcfg.RunConfig, symbols []string) error {
 	if cfg.Strategy.Exec == "" {
 		if cmd.Flags().Changed("strategy-args") {
 			return fmt.Errorf("--strategy-args requires --strategy-exec or strategy.exec")
@@ -172,9 +174,10 @@ func validateStrategySelection(cmd *cobra.Command, flags runFlags, cfg backtestc
 		if cmd.Flags().Changed("strategy-config") {
 			return fmt.Errorf("--strategy-config requires --strategy-exec or strategy.exec")
 		}
-		if flags.config != "" && len(flags.symbols) > 1 {
-			return fmt.Errorf("--config describes a single-instrument experiment; " +
-				"repeat --symbol without --config for a multi-instrument run")
+		if flags.config != "" && len(symbols) > 1 {
+			return fmt.Errorf("--config describes a single-instrument experiment for an in-process strategy; " +
+				"a multi-instrument universe (repeated --symbol or backtest.symbols) needs strategy.exec, " +
+				"or repeat --symbol without --config")
 		}
 	}
 	return nil
@@ -225,14 +228,14 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	if err != nil {
 		return err
 	}
-	if err := validateStrategySelection(cmd, flags, cfg); err != nil {
-		return err
-	}
 	if cfg.Backtest.DataRawRoot == "" {
 		return fmt.Errorf("backtest.data_raw_root is required (set it in --config or pass --data-raw-root)")
 	}
 	symbols, err := effectiveSymbols(flags.symbols, cfg.Backtest.Symbol, cfg.Backtest.Symbols)
 	if err != nil {
+		return err
+	}
+	if err := validateStrategySelection(cmd, flags, cfg, symbols); err != nil {
 		return err
 	}
 	outputDir, err := backtestcfg.LoadOutputDir(os.Environ(), flags.config, changedFlag(cmd, "output-dir", flags.outputDir))
