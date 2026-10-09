@@ -1298,8 +1298,9 @@ func (x *BarEvent) GetAccount() *AccountSnapshot {
 }
 
 // InstrumentBar is one instrument's completed bar inside a BarsEvent.
-// It carries only what is not already snapshot-wide: interval, sequence,
-// and the account snapshot live once on the enclosing BarsEvent.
+// It carries only the instrument id and its bar: the interval, sequence,
+// boundary and account snapshot are snapshot-wide and live once on the
+// enclosing BarsEvent.
 type InstrumentBar struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	InstrumentId  string                 `protobuf:"bytes,1,opt,name=instrument_id,json=instrumentId,proto3" json:"instrument_id,omitempty"`
@@ -2199,9 +2200,10 @@ func (*RunClientMessage_OnBarsResponse) isRunClientMessage_Payload() {}
 // be when the RPC arrives (ADR-062's own corrected View design):
 // session_id must name the active session this request belongs to
 // (ERROR_CODE_UNKNOWN_SESSION otherwise — review finding, above), and
-// callback_sequence must name a BarEvent that session's adapter is
-// still waiting on an OnBarResponse for, or the host rejects the
-// request (ERROR_CODE_UNKNOWN_CALLBACK). instrument_id/interval must
+// callback_sequence must name a BarEvent (or, for a bars-delivery
+// session, a BarsEvent) that session's adapter is still waiting on an
+// OnBarResponse (respectively OnBarsResponse) for, or the host rejects
+// the request (ERROR_CODE_UNKNOWN_CALLBACK). instrument_id/interval must
 // also be one of the Handshake-declared Requirements
 // (ERROR_CODE_REQUIREMENT_NOT_DECLARED otherwise).
 type GetHistoryBarsRequest struct {

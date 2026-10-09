@@ -2,7 +2,7 @@
 // cross-sectional counterpart to examples/sdk-minimal (issue #467).
 //
 // Each completed D1 boundary it receives the whole subscribed universe
-// at once, picks the pair with the largest close-to-close range, and
+// at once, picks the pair with the largest high-to-low range, and
 // reports it as a described signal. It emits no intents: a scanner
 // observes and ranks, it does not trade. Like every sdk consumer it
 // imports only sdk and public value packages.

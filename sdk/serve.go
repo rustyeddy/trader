@@ -256,6 +256,57 @@ func selectDelivery(strat ConsumerBase) (delivery, error) {
 	return delivery{}, fmt.Errorf("sdk: consumer implements neither OnBar nor OnBars")
 }
 
+// validateBarsPartition enforces BarsEvent's public invariant against the
+// consumer's own declared requirements: every requirement appears in
+// exactly one of Bars or Missing, nothing undeclared appears, nothing
+// repeats, and each list follows descriptor order. It also requires the
+// event's interval to be the one the requirements declare.
+func validateBarsPartition(ev BarsEvent, reqs []DataRequirement) error {
+	index := make(map[instrument.ID]int, len(reqs))
+	for i, r := range reqs {
+		index[r.Instrument] = i
+	}
+	if len(reqs) > 0 && ev.Interval != reqs[0].Interval {
+		return fmt.Errorf("%w: snapshot interval %v is not the declared interval %v", ErrInvalidWireValue, ev.Interval, reqs[0].Interval)
+	}
+
+	seen := make(map[instrument.ID]string, len(reqs))
+	check := func(list string, ids []instrument.ID) error {
+		last := -1
+		for _, id := range ids {
+			i, ok := index[id]
+			switch {
+			case !ok:
+				return fmt.Errorf("%w: %s lists %s, which was never declared", ErrInvalidWireValue, list, id)
+			case seen[id] != "":
+				return fmt.Errorf("%w: %s appears in both or twice (%s, %s)", ErrInvalidWireValue, id, seen[id], list)
+			case i <= last:
+				return fmt.Errorf("%w: %s lists %s out of descriptor order", ErrInvalidWireValue, list, id)
+			}
+			seen[id] = list
+			last = i
+		}
+		return nil
+	}
+
+	barIDs := make([]instrument.ID, len(ev.Bars))
+	for i, b := range ev.Bars {
+		barIDs[i] = b.Instrument
+	}
+	if err := check("bars", barIDs); err != nil {
+		return err
+	}
+	if err := check("missing", ev.Missing); err != nil {
+		return err
+	}
+	for _, r := range reqs {
+		if seen[r.Instrument] == "" {
+			return fmt.Errorf("%w: %s is in neither bars nor missing", ErrInvalidWireValue, r.Instrument)
+		}
+	}
+	return nil
+}
+
 // requireSingleInterval enforces that a snapshot consumer declares one
 // interval across all its requirements: a BarsEvent carries a single
 // interval, so a mixed-interval universe has no single completed
@@ -306,6 +357,19 @@ func verifyNegotiatedCapabilities(requested, accepted []v1.Capability) error {
 	for _, c := range requested {
 		if !acceptedSet[c] {
 			return fmt.Errorf("%w: host did not negotiate capability %s this strategy requires", ErrInvalidWireValue, c)
+		}
+	}
+	// Negotiation is bilateral, so the accepted set must also be a
+	// subset of the requested one. An unsolicited capability — notably
+	// CAPABILITY_BARS_DELIVERY returned to a bar-by-bar guest — would
+	// leave the host delivering a shape the guest never selected.
+	requestedSet := make(map[v1.Capability]bool, len(requested))
+	for _, c := range requested {
+		requestedSet[c] = true
+	}
+	for _, c := range accepted {
+		if !requestedSet[c] {
+			return fmt.Errorf("%w: host negotiated capability %s this strategy did not request", ErrInvalidWireValue, c)
 		}
 	}
 	return nil
@@ -476,6 +540,14 @@ func (g *guestRun) handleBarsEvent(w *v1.BarsEvent) error {
 	event, err := fromWireBarsEvent(w)
 	if err != nil {
 		return fmt.Errorf("sdk: bars event: %w", err)
+	}
+	if g.barsHandler != nil {
+		// Checked against the cached Handshake descriptor before the
+		// consumer ever sees the event, so a buggy or mismatched host
+		// can never hand it an ambiguous universe.
+		if err := validateBarsPartition(event, g.requirements); err != nil {
+			return fmt.Errorf("sdk: bars event: %w", err)
+		}
 	}
 	if g.clock != nil {
 		g.clock.set(event.Boundary)

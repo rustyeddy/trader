@@ -166,8 +166,12 @@ func TestBarsConsumer_CallbackErrorContributesNothing(t *testing.T) {
 	strat := startBarsSession(t, h, guest)
 	<-guest.startedCh
 
-	event := strategy.NewBarsEvent(testBar(t).Time, nil, nil)
-	event.Interval = mustInterval(t)
+	// Every declared requirement is accounted for (all Missing), which is a
+	// valid snapshot; the callback itself is what fails.
+	event := strategy.NewBarsEvent(testBar(t).Time, []strategy.DataRequirement{
+		{Instrument: eurUSD(t), Interval: mustInterval(t)},
+		{Instrument: gbpUSD(t), Interval: mustInterval(t)},
+	}, nil)
 	intents, err := strat.(strategy.BarsHandler).OnBars(context.Background(), event, fakeView{acct: testFlatSnapshot(t)})
 	require.ErrorContains(t, err, "scan failed")
 	require.Empty(t, intents)

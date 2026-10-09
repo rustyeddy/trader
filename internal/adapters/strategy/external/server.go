@@ -322,7 +322,7 @@ func (g *grpcServer) GetHistoryBars(_ context.Context, req *v1.GetHistoryBarsReq
 	view, ok := sess.history(q.CallbackSequence)
 	if !ok {
 		return nil, status.Errorf(codes.FailedPrecondition,
-			"external: get history bars: callback %d is not an in-flight on-bar callback", q.CallbackSequence)
+			"external: get history bars: callback %d is not an in-flight bar or bars callback", q.CallbackSequence)
 	}
 
 	declared := false

@@ -60,6 +60,14 @@ consumer must declare one interval across all requirements and at least one
 requirement: the guest checks this at startup and the host rejects the
 Handshake (=InvalidArgument=) independently.
 
+The guest does not trust the host to honour this: before calling =OnBars=
+it validates the received snapshot against its own cached descriptor and
+rejects an omitted, duplicated, overlapping, undeclared or out-of-order
+member, or a wrong interval, as an invalid wire value. Likewise the
+Handshake check is bilateral: the accepted capability set must be exactly a
+subset of what the guest requested, so a host cannot hand a bar-by-bar guest
+snapshot delivery.
+
 ** Host delivery and the View
 
 Scheduler already groups replay events by timestamp into one batch with one
