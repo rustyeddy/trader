@@ -341,3 +341,112 @@ func TestSync_UnsupportedRawInterval(t *testing.T) {
 	}}})
 	assert.Error(t, err)
 }
+
+// TestSync_ClipsCandlesFromOutsideTheMonth (D1): OANDA returns the candle that
+// contains From, so a D1 request for April returns March 31's 21:00Z bar
+// (US daylight time). It belongs to March's partition only.
+func TestSync_ClipsCandlesFromOutsideTheMonth(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeOandaDoer{responses: []fakeOandaResponse{
+		{status: 200, body: candlesJSONForTest([]time.Time{
+			time.Date(2020, 3, 31, 21, 0, 0, 0, time.UTC), // previous month's bar
+			time.Date(2020, 4, 1, 21, 0, 0, 0, time.UTC),
+			time.Date(2020, 4, 2, 21, 0, 0, 0, time.UTC),
+			time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), // next month: never ours
+		}, true)},
+	}}
+	mgr := newTestManagerWithSync(t, rawRoot, doer)
+
+	action := downloadAction(2020, time.April)
+	action.Interval = marketdata.D1 // the affected path: daily bars
+	result, err := mgr.Sync(context.Background(), Plan{Actions: []Action{action}})
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
+
+	require.Equal(t, 1, doer.requestCount())
+	assert.Equal(t, "D", doer.requests[0].URL.Query().Get("granularity"), "the request went through the D1 path")
+
+	records, err := oanda.ReadPartitionRecords(context.Background(), rawRoot, "EURUSD", oanda.RawD1, 2020, time.April)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	assert.Equal(t, time.Date(2020, 4, 1, 21, 0, 0, 0, time.UTC), records[0].Time)
+	assert.Equal(t, time.Date(2020, 4, 2, 21, 0, 0, 0, time.UTC), records[1].Time)
+	for _, r := range records {
+		assert.False(t, r.Time.Before(time.Date(2020, 4, 1, 0, 0, 0, 0, time.UTC)), "previous month's bar is absent")
+		assert.True(t, r.Time.Before(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC)), "next month's bar is absent")
+	}
+}
+
+// TestSync_ClipsCandlesWhenExtendingAnExistingPartition covers the
+// incremental path: the extend starts just after the last stored record, so
+// OANDA returns the candle containing that instant again (a duplicate the
+// merge must collapse) and, defensively, bars outside the month must still
+// be dropped.
+func TestSync_ClipsCandlesWhenExtendingAnExistingPartition(t *testing.T) {
+	rawRoot := t.TempDir()
+	apr1 := time.Date(2020, 4, 1, 21, 0, 0, 0, time.UTC)
+	price := num.MustParsePrice("1.1")
+	existing := []oanda.Record{{
+		Time:    apr1,
+		BidOpen: price, BidHigh: price, BidLow: price, BidClose: price,
+		AskOpen: price, AskHigh: price, AskLow: price, AskClose: price,
+		Volume: 10, Complete: true,
+	}}
+	require.NoError(t, oanda.WritePartition(context.Background(), rawRoot, "EURUSD", oanda.RawD1, 2020, time.April, existing, true))
+
+	doer := &fakeOandaDoer{responses: []fakeOandaResponse{
+		{status: 200, body: candlesJSONForTest([]time.Time{
+			time.Date(2020, 3, 31, 21, 0, 0, 0, time.UTC), // previous month
+			apr1, // the candle containing From, again
+			time.Date(2020, 4, 2, 21, 0, 0, 0, time.UTC),
+			time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), // next month
+		}, true)},
+	}}
+	mgr := newTestManagerWithSync(t, rawRoot, doer)
+
+	action := Action{
+		Kind: ActionDownloadRaw, Instrument: eurusd(), Interval: marketdata.D1,
+		Year: 2020, Month: time.April, Reason: "extend",
+	}
+	result, err := mgr.Sync(context.Background(), Plan{Actions: []Action{action}})
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+	assert.Equal(t, 2, result.Downloaded[0].RecordsWritten)
+	assert.Equal(t, apr1.Add(time.Nanosecond).Format(time.RFC3339Nano), doer.requests[0].URL.Query().Get("from"),
+		"the extend starts after the stored record")
+
+	records, err := oanda.ReadPartitionRecords(context.Background(), rawRoot, "EURUSD", oanda.RawD1, 2020, time.April)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	assert.Equal(t, apr1, records[0].Time)
+	assert.Equal(t, time.Date(2020, 4, 2, 21, 0, 0, 0, time.UTC), records[1].Time)
+}
+
+// TestSyncThenBuild_PreviousMonthCandleDoesNotBreakTheCanonicalBuild is the
+// end-to-end regression for #486: a synced April D1 partition that OANDA
+// answered with March 31's 21:00Z bar used to fail the canonical build with
+// "bar set contains a bar outside its span".
+func TestSyncThenBuild_PreviousMonthCandleDoesNotBreakTheCanonicalBuild(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeOandaDoer{responses: []fakeOandaResponse{
+		{status: 200, body: candlesJSONForTest([]time.Time{
+			time.Date(2020, 3, 31, 21, 0, 0, 0, time.UTC),
+			time.Date(2020, 4, 1, 21, 0, 0, 0, time.UTC),
+			time.Date(2020, 4, 2, 21, 0, 0, 0, time.UTC),
+		}, true)},
+	}}
+	mgr := newTestManagerWithSync(t, rawRoot, doer)
+
+	action := Action{
+		Kind: ActionDownloadRaw, Instrument: eurusd(), Interval: marketdata.D1,
+		Year: 2020, Month: time.April, Reason: "missing",
+	}
+	_, err := mgr.Sync(context.Background(), Plan{Actions: []Action{action}})
+	require.NoError(t, err)
+
+	result, err := mgr.Build(context.Background(), Plan{Actions: []Action{normalizeAction(2020, time.April, marketdata.D1)}})
+	require.NoError(t, err, "the canonical build must accept the synced partition")
+	require.Len(t, result.Published, 1)
+	assert.Equal(t, 2, result.Published[0].BarCount)
+}
