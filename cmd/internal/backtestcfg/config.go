@@ -54,33 +54,43 @@ type ModelSection struct {
 // active reports whether any model key is set.
 func (m ModelSection) active() bool { return m != (ModelSection{}) }
 
-// Resolve returns c with a model section folded into Backtest, so
-// callers never branch on the config's kind. Explicit backtest.symbol(s),
-// interval, from, to, currency and starting_capital values (in practice
-// command-line flags, which only ever target backtest keys) win over the
-// model's, so `--from` still adjusts a model config. Without a model
-// section c is returned unchanged.
+// Resolve returns c with a model section folded into Backtest and the
+// remaining defaults applied, so callers never branch on the config's
+// kind. Interval, currency and starting capital carry no loader default
+// (that would make "unset" indistinguishable from "explicitly the
+// default"): an explicit backtest value, in practice a command-line flag
+// or environment variable, wins over the model's, the model's wins over
+// the default (H1, USD, 10000), and an invalid explicit value stays
+// visible to validation.
 func (c RunConfig) Resolve() RunConfig {
-	if !c.Model.active() {
-		return c
-	}
 	b := &c.Backtest
-	if b.Symbol == "" && b.Symbols == "" {
-		b.Symbols = c.Model.Symbols
+	if c.Model.active() {
+		if b.Symbol == "" && b.Symbols == "" {
+			b.Symbols = c.Model.Symbols
+		}
+		b.From = firstNonEmpty(b.From, c.Model.From)
+		b.To = firstNonEmpty(b.To, c.Model.To)
+		b.Interval = firstNonEmpty(b.Interval, c.Model.Interval)
+		b.Currency = firstNonEmpty(b.Currency, c.Model.Currency)
+		b.StartingCapital = firstNonEmpty(b.StartingCapital, c.Model.StartingCapital)
 	}
-	if b.From == "" {
-		b.From = c.Model.From
-	}
-	if b.To == "" {
-		b.To = c.Model.To
-	}
-	// Interval, currency and starting capital carry backtest defaults, so
-	// "explicit" cannot be told from "default" here; the model's own
-	// (required) values apply.
-	b.Interval = c.Model.Interval
-	b.Currency = c.Model.Currency
-	b.StartingCapital = c.Model.StartingCapital
+	b.Interval = firstNonEmpty(b.Interval, defaultInterval)
+	b.Currency = firstNonEmpty(b.Currency, defaultCurrency)
+	b.StartingCapital = firstNonEmpty(b.StartingCapital, defaultStartingCapital)
 	return c
+}
+
+const (
+	defaultInterval        = "H1"
+	defaultCurrency        = "USD"
+	defaultStartingCapital = "10000"
+)
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // LoadRunConfig loads a RunConfig with config.Load and resolves a model
@@ -144,11 +154,11 @@ type BacktestSection struct {
 	// because the config loader has no list type; explicit --symbol flags
 	// override it, and setting it together with Symbol is an error.
 	Symbols         string    `config:"symbols" flag:"symbols"`
-	Interval        string    `config:"interval" flag:"interval" default:"H1"`
+	Interval        string    `config:"interval" flag:"interval"`
 	From            string    `config:"from" flag:"from"`
 	To              string    `config:"to" flag:"to"`
-	Currency        string    `config:"currency" flag:"currency" default:"USD"`
-	StartingCapital string    `config:"starting_capital" flag:"starting-cash" default:"10000"`
+	Currency        string    `config:"currency" flag:"currency"`
+	StartingCapital string    `config:"starting_capital" flag:"starting-cash"`
 	RiskFraction    num.Rate  `config:"risk_fraction" flag:"risk-fraction" default:"0.01"`
 	AdverseDistance num.Price `config:"adverse_distance" flag:"adverse-distance"`
 
@@ -276,7 +286,6 @@ func (c RunConfig) Validate() error {
 		if err := c.validateModel(); err != nil {
 			return err
 		}
-		c = c.Resolve()
 	} else {
 		// required:"true" cannot express "required unless a model section
 		// supplies them", so the backtest keys are checked here (and
@@ -288,6 +297,7 @@ func (c RunConfig) Validate() error {
 			return missing("backtest.to")
 		}
 	}
+	c = c.Resolve()
 	if c.Backtest.Symbol != "" && c.Backtest.Symbols != "" {
 		return fmt.Errorf("backtest.symbol and backtest.symbols are mutually exclusive; use symbols for a multi-instrument run")
 	}

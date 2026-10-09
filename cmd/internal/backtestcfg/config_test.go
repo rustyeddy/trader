@@ -34,11 +34,12 @@ strategy:
 
 func loadRunConfig(t *testing.T, yaml string, overrides map[string]string) (RunConfig, error) {
 	t.Helper()
-	return config.Load[RunConfig](config.Options{
+	cfg, err := config.Load[RunConfig](config.Options{
 		Environ:     []string{},
 		FileContent: []byte(yaml),
 		Overrides:   overrides,
 	})
+	return cfg.Resolve(), err // defaults are applied by Resolve (LoadRunConfig does the same)
 }
 
 func TestRunConfig_ParsesIssue247CandidateYAML(t *testing.T) {
@@ -214,7 +215,7 @@ func TestRunConfig_EquivalentEffectiveConfigFromEitherSource(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, fromFile, fromOverrides)
+	assert.Equal(t, fromFile, fromOverrides.Resolve())
 }
 
 // TestRunConfig_ExternalStrategyKeys covers the issue #469 keys.
@@ -304,6 +305,17 @@ func TestModelConfig(t *testing.T) {
 		assert.Equal(t, "2021-01-01", cfg.Backtest.From)
 		assert.Equal(t, "EURUSD", cfg.Backtest.Symbol)
 		assert.Empty(t, cfg.Backtest.Symbols)
+	})
+	t.Run("explicit interval, currency and starting-cash override the model, even when equal to a default", func(t *testing.T) {
+		cfg, err := loadModel(t, modelYAML, map[string]string{"interval": "H1", "currency": "EUR", "starting-cash": "500"})
+		require.NoError(t, err)
+		assert.Equal(t, "H1", cfg.Backtest.Interval)
+		assert.Equal(t, "EUR", cfg.Backtest.Currency)
+		assert.Equal(t, "500", cfg.Backtest.StartingCapital)
+	})
+	t.Run("an invalid explicit interval is not hidden by the model", func(t *testing.T) {
+		_, err := loadModel(t, modelYAML, map[string]string{"interval": "bogus"})
+		require.ErrorContains(t, err, "backtest.interval")
 	})
 	t.Run("every model key is required", func(t *testing.T) {
 		for _, key := range []string{"symbols", "interval", "from", "to", "currency", "starting_capital"} {
