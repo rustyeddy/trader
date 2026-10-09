@@ -20,8 +20,10 @@ per-machine values.
 ignored; a missing explicit file is an error. A new key, =oanda_token_file=,
 names a file holding the token (leading =~/= expanded, whitespace trimmed);
 the token itself is never kept in the config file, and =TRADER_OANDA_TOKEN=
-still wins. Errors name the path, never the contents. Alpaca credentials
-are unchanged (environment only).
+still wins. Errors name the path, never the contents. A credential key
+(=oanda_token=, =alpaca_key_id=, =alpaca_secret_key=) in the file is an error
+naming the key, never the value: the generic loader would otherwise read it.
+Alpaca credentials are unchanged (environment only).
 
 This covers the data commands and =trader-mcp=. =backtest run= keeps its
 own =--config= file; it is not layered over the default file.
