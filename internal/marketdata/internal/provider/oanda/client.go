@@ -126,7 +126,9 @@ func (l *fixedIntervalLimiter) Wait(ctx context.Context) error {
 // follows: Client never reads environment variables or files itself.
 type ClientConfig struct {
 	// BaseURL is OANDA's API base, for example
-	// "https://api-fxpractice.oanda.com". Required. Deliberately a full
+	// "https://api-fxpractice.oanda.com", with or without OANDA's
+	// documented trailing "/v3" (Client adds the version itself and
+	// strips a duplicate). Required. Deliberately a full
 	// URL rather than a "practice"/"live" enum Client would parse
 	// itself — environment selection is the composition root's typed
 	// configuration decision, not domain-level string parsing.
@@ -221,7 +223,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		pageSize = candlePageSize
 	}
 	return &Client{
-		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		baseURL:     strings.TrimSuffix(strings.TrimRight(cfg.BaseURL, "/"), "/v3"),
 		credential:  cfg.Credential,
 		http:        httpClient,
 		clock:       cl,

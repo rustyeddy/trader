@@ -407,3 +407,16 @@ func TestStaticCredential(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "abc", tok)
 }
+
+func TestNewClient_BaseURLMayCarryTheV3Suffix(t *testing.T) {
+	for _, base := range []string{
+		"https://api-fxtrade.oanda.com",
+		"https://api-fxtrade.oanda.com/",
+		"https://api-fxtrade.oanda.com/v3",
+		"https://api-fxtrade.oanda.com/v3/",
+	} {
+		c, err := NewClient(ClientConfig{BaseURL: base, Credential: StaticCredential("x")})
+		require.NoError(t, err, base)
+		assert.Equal(t, "https://api-fxtrade.oanda.com", c.baseURL, base)
+	}
+}
