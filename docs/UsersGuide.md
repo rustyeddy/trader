@@ -131,10 +131,32 @@ INTERVAL is one of the values listed under `backtest run` below.
 | `--kind`            | —                                      | `equity` or `etf`; required with `--exchange`                           |
 
 The OANDA API token itself is never a flag — set the `TRADER_OANDA_TOKEN`
-environment variable instead. Likewise, Alpaca's key ID and secret key are
+environment variable instead, or name a file holding it with
+`oanda_token_file` (see "Default config file" below). Likewise, Alpaca's key ID and secret key are
 never flags — set `TRADER_ALPACA_KEY_ID` and `TRADER_ALPACA_SECRET_KEY`
 instead. Neither provider's secret belongs in shell history or a process
 command line.
+
+#### Default config file
+
+The data commands (and `trader-mcp`) read `/etc/trader/config.yml` when it
+exists (issue #480); `TRADER_CONFIG=/path/to/file.yml` names a different
+file, which must exist. It is the lowest-precedence source: defaults <
+file < environment < flags. Keys are the data settings (`store_root`,
+`raw_root`, `archive_root`, `provider`, `oanda_base_url`,
+`alpaca_base_url`) plus `oanda_token_file`, a path (a leading `~/` is
+expanded) to a file containing the OANDA token. The token is never stored
+in the config file itself, and `TRADER_OANDA_TOKEN` wins over the file.
+
+```yaml
+# /etc/trader/config.yml
+oanda_base_url: https://api-fxtrade.oanda.com/v3
+oanda_token_file: ~/.config/oanda/pat.txt
+raw_root: /srv/trading/data/raw/oanda
+store_root: /srv/trading/data/canonical
+```
+
+Other sections in the file are ignored by the data commands.
 
 ### `trader data bars INSTRUMENT INTERVAL`
 
