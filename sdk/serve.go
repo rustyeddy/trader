@@ -108,7 +108,7 @@ func WithHistoryBarsTimeout(d time.Duration) Option {
 // until the host ends the session, the connection fails, or this
 // process receives SIGINT/SIGTERM — whichever happens first. Serve
 // blocks until one of those occurs, then returns.
-func Serve(strat Strategy, opts ...Option) error {
+func Serve(strat ConsumerBase, opts ...Option) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return ServeContext(ctx, strat, opts...)
@@ -117,7 +117,7 @@ func Serve(strat Strategy, opts ...Option) error {
 // ServeContext is Serve without built-in OS signal handling: it reads
 // SocketPathEnv, dials, and drives strat until the host ends the
 // session, the connection fails, or ctx is done.
-func ServeContext(ctx context.Context, strat Strategy, opts ...Option) error {
+func ServeContext(ctx context.Context, strat ConsumerBase, opts ...Option) error {
 	sockPath := os.Getenv(SocketPathEnv)
 	if sockPath == "" {
 		return fmt.Errorf("sdk: %s is not set — this process must be launched by a Trader host (ADR-063)", SocketPathEnv)
@@ -138,15 +138,20 @@ func ServeContext(ctx context.Context, strat Strategy, opts ...Option) error {
 // caller (typically a test) can supply its own grpc.ClientConnInterface,
 // for example one backed by an in-process bufconn listener, without
 // needing a real Unix-domain socket.
-func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strategy, opts ...Option) error {
+func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat ConsumerBase, opts ...Option) error {
 	cfg := defaultRunConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
+	mode, err := selectDelivery(strat)
+	if err != nil {
+		return err
+	}
+
 	client := v1.NewStrategyHostServiceClient(conn)
 
-	capabilities := negotiatedCapabilities(strat)
+	capabilities := negotiatedCapabilities(strat, mode)
 
 	// Describe() is called exactly once and its result reused for both
 	// the wire Handshake and guestRun's own local requirements set.
@@ -158,6 +163,11 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 	// requirement the host never saw, or rejecting one it did (review
 	// finding).
 	descriptor := strat.Describe()
+	if mode.bars != nil {
+		if err := requireSingleInterval(descriptor); err != nil {
+			return err
+		}
+	}
 	wireDescriptor, err := toWireDescriptor(descriptor)
 	if err != nil {
 		return fmt.Errorf("sdk: describe: %w", err)
@@ -208,6 +218,8 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 		stream:             stream,
 		sessionID:          hsResp.GetSessionId(),
 		strat:              strat,
+		barHandler:         mode.bar,
+		barsHandler:        mode.bars,
 		fillHandler:        asFillHandler(strat),
 		requirements:       descriptor.Requirements,
 		logger:             cfg.logger,
@@ -216,16 +228,66 @@ func ServeConn(ctx context.Context, conn grpc.ClientConnInterface, strat Strateg
 	return g.loop()
 }
 
+// delivery is the one market-data delivery shape a consumer serves:
+// exactly one of bar or bars is non-nil.
+type delivery struct {
+	bar  BarHandler
+	bars BarsHandler
+}
+
+// selectDelivery picks strat's delivery shape from the interfaces it
+// implements. Exactly one of BarHandler or BarsHandler is allowed: a
+// consumer implementing both is rejected rather than resolved by
+// accidental precedence, and a consumer implementing neither has no way
+// to receive data. The chosen shape is declared to the host at
+// Handshake as CAPABILITY_BARS_DELIVERY (bars) or its absence (bar), so
+// host and guest never infer the mode independently.
+func selectDelivery(strat ConsumerBase) (delivery, error) {
+	bh, isBar := strat.(BarHandler)
+	bsh, isBars := strat.(BarsHandler)
+	switch {
+	case isBar && isBars:
+		return delivery{}, fmt.Errorf("sdk: consumer implements both OnBar and OnBars; implement exactly one delivery shape")
+	case isBars:
+		return delivery{bars: bsh}, nil
+	case isBar:
+		return delivery{bar: bh}, nil
+	}
+	return delivery{}, fmt.Errorf("sdk: consumer implements neither OnBar nor OnBars")
+}
+
+// requireSingleInterval enforces that a snapshot consumer declares one
+// interval across all its requirements: a BarsEvent carries a single
+// interval, so a mixed-interval universe has no single completed
+// boundary to snapshot. The host enforces the same rule at Handshake;
+// checking here fails fast with a clearer message.
+func requireSingleInterval(d Descriptor) error {
+	if len(d.Requirements) == 0 {
+		return fmt.Errorf("sdk: OnBars consumer must declare at least one requirement")
+	}
+	first := d.Requirements[0].Interval
+	for _, r := range d.Requirements[1:] {
+		if r.Interval != first {
+			return fmt.Errorf("sdk: OnBars consumer must declare a single interval; got %v and %v", first, r.Interval)
+		}
+	}
+	return nil
+}
+
 // negotiatedCapabilities returns the v1.Capability set strat itself
 // advertises at Handshake, determined entirely by which optional
 // sdk interfaces it implements — mirroring how
 // ExternalStrategyAdapter's own capability wrapper family is selected
 // host-side (ADR-062).
-func negotiatedCapabilities(strat Strategy) []v1.Capability {
+func negotiatedCapabilities(strat ConsumerBase, d delivery) []v1.Capability {
+	var caps []v1.Capability
 	if _, ok := strat.(FillHandler); ok {
-		return []v1.Capability{v1.Capability_CAPABILITY_FILL_HANDLER}
+		caps = append(caps, v1.Capability_CAPABILITY_FILL_HANDLER)
 	}
-	return nil
+	if d.bars != nil {
+		caps = append(caps, v1.Capability_CAPABILITY_BARS_DELIVERY)
+	}
+	return caps
 }
 
 // verifyNegotiatedCapabilities fails explicitly if the host's own
@@ -249,7 +311,7 @@ func verifyNegotiatedCapabilities(requested, accepted []v1.Capability) error {
 	return nil
 }
 
-func asFillHandler(strat Strategy) FillHandler {
+func asFillHandler(strat ConsumerBase) FillHandler {
 	fh, _ := strat.(FillHandler)
 	return fh
 }
@@ -266,7 +328,9 @@ type guestRun struct {
 	client             v1.StrategyHostServiceClient
 	stream             v1.StrategyHostService_RunClient
 	sessionID          string
-	strat              Strategy
+	strat              ConsumerBase
+	barHandler         BarHandler  // set exactly when barsHandler is nil
+	barsHandler        BarsHandler // set exactly when barHandler is nil
 	fillHandler        FillHandler // nil unless strat implements FillHandler
 	requirements       []DataRequirement
 	logger             *slog.Logger
@@ -309,6 +373,10 @@ func (g *guestRun) loop() error {
 			}
 		case *v1.RunServerMessage_BarEvent:
 			if err := g.handleBarEvent(payload.BarEvent); err != nil {
+				return err
+			}
+		case *v1.RunServerMessage_BarsEvent:
+			if err := g.handleBarsEvent(payload.BarsEvent); err != nil {
 				return err
 			}
 		case *v1.RunServerMessage_FillEvent:
@@ -369,16 +437,28 @@ func (g *guestRun) handleBarEvent(w *v1.BarEvent) error {
 		historyBarsTimeout: g.historyBarsTimeout,
 	}
 
-	intents, signals, cbErr := g.strat.OnBar(g.ctx, event, view)
-	if cbErr != nil {
-		return g.sendOnBarResponse(w.GetSequence(), nil, nil, toWireError(v1.ErrorCode_ERROR_CODE_CALLBACK_FAILED, cbErr))
+	if g.barHandler == nil {
+		return g.sendOnBarResponse(w.GetSequence(), nil, nil, toWireError(v1.ErrorCode_ERROR_CODE_CAPABILITY_MISMATCH,
+			fmt.Errorf("sdk: received bar_event but this consumer uses OnBars delivery")))
 	}
+	intents, signals, cbErr := g.barHandler.OnBar(g.ctx, event, view)
+	wireIntents, wireSignals, wireErr := toWireCallbackResult(intents, signals, cbErr)
+	return g.sendOnBarResponse(w.GetSequence(), wireIntents, wireSignals, wireErr)
+}
 
+// toWireCallbackResult converts one OnBar/OnBars return into its wire
+// response parts. A callback error or an unconvertible described intent
+// yields only a wire error: a failed callback contributes no intents or
+// signals (the same rule for both delivery shapes).
+func toWireCallbackResult(intents []DescribedIntent, signals []DescribedSignal, cbErr error) ([]*v1.DescribedIntent, []*v1.DescribedSignal, *v1.Error) {
+	if cbErr != nil {
+		return nil, nil, toWireError(v1.ErrorCode_ERROR_CODE_CALLBACK_FAILED, cbErr)
+	}
 	wireIntents := make([]*v1.DescribedIntent, len(intents))
 	for i, in := range intents {
 		wi, err := toWireDescribedIntent(in)
 		if err != nil {
-			return g.sendOnBarResponse(w.GetSequence(), nil, nil, toWireError(v1.ErrorCode_ERROR_CODE_INVALID_DESCRIBED_INTENT, err))
+			return nil, nil, toWireError(v1.ErrorCode_ERROR_CODE_INVALID_DESCRIBED_INTENT, err)
 		}
 		wireIntents[i] = wi
 	}
@@ -386,8 +466,55 @@ func (g *guestRun) handleBarEvent(w *v1.BarEvent) error {
 	for i, sig := range signals {
 		wireSignals[i] = toWireDescribedSignal(sig)
 	}
+	return wireIntents, wireSignals, nil
+}
 
-	return g.sendOnBarResponse(w.GetSequence(), wireIntents, wireSignals, nil)
+func (g *guestRun) handleBarsEvent(w *v1.BarsEvent) error {
+	if w == nil {
+		return fmt.Errorf("%w: bars_event must be set", ErrInvalidWireValue)
+	}
+	event, err := fromWireBarsEvent(w)
+	if err != nil {
+		return fmt.Errorf("sdk: bars event: %w", err)
+	}
+	if g.clock != nil {
+		g.clock.set(event.Boundary)
+	}
+	account, err := fromWireAccountSnapshot(w.GetAccount())
+	if err != nil {
+		return fmt.Errorf("sdk: bars event: %w", err)
+	}
+
+	if g.barsHandler == nil {
+		return g.sendOnBarsResponse(w.GetSequence(), nil, nil, toWireError(v1.ErrorCode_ERROR_CODE_CAPABILITY_MISMATCH,
+			fmt.Errorf("sdk: received bars_event but this consumer uses OnBar delivery")))
+	}
+
+	// The View during OnBars is the same frozen, callback-scoped view an
+	// OnBar callback gets: account state from the inline snapshot, and
+	// HistoryBars strictly before Boundary for any declared requirement.
+	view := &guestView{
+		ctx:                g.ctx,
+		client:             g.client,
+		sessionID:          g.sessionID,
+		sequence:           w.GetSequence(),
+		account:            account,
+		historyOK:          true,
+		requirements:       g.requirements,
+		historyBarsTimeout: g.historyBarsTimeout,
+	}
+	intents, signals, cbErr := g.barsHandler.OnBars(g.ctx, event, view)
+	wireIntents, wireSignals, wireErr := toWireCallbackResult(intents, signals, cbErr)
+	return g.sendOnBarsResponse(w.GetSequence(), wireIntents, wireSignals, wireErr)
+}
+
+func (g *guestRun) sendOnBarsResponse(sequence uint64, intents []*v1.DescribedIntent, signals []*v1.DescribedSignal, wireErr *v1.Error) error {
+	return g.stream.Send(&v1.RunClientMessage{Payload: &v1.RunClientMessage_OnBarsResponse{OnBarsResponse: &v1.OnBarsResponse{
+		Sequence: sequence,
+		Intents:  intents,
+		Signals:  signals,
+		Error:    wireErr,
+	}}})
 }
 
 func (g *guestRun) sendOnBarResponse(sequence uint64, intents []*v1.DescribedIntent, signals []*v1.DescribedSignal, wireErr *v1.Error) error {

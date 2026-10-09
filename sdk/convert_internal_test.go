@@ -348,3 +348,40 @@ func TestToWireDescribedSignal(t *testing.T) {
 	require.Equal(t, "v", w.GetValues()["k"])
 	require.Equal(t, "grp", w.GetCorrelationToken())
 }
+
+func TestFromWireBarsEvent(t *testing.T) {
+	bar := testWireBar()
+	boundary := bar.TimeUnixNanos
+	iv := &v1.Interval{Unit: v1.IntervalUnit_INTERVAL_UNIT_HOUR, Count: 1}
+	eur := "fx:EUR/USD"
+	gbp := "fx:GBP/USD"
+
+	t.Run("ok", func(t *testing.T) {
+		ev, err := fromWireBarsEvent(&v1.BarsEvent{
+			Interval: iv, BoundaryUnixNanos: boundary,
+			Bars:                 []*v1.InstrumentBar{{InstrumentId: eur, Bar: bar}},
+			MissingInstrumentIds: []string{gbp},
+		})
+		require.NoError(t, err)
+		require.True(t, ev.Boundary.Equal(time.Unix(0, boundary)))
+		require.Len(t, ev.Bars, 1)
+		require.Equal(t, ev.Interval, ev.Bars[0].Interval, "members are stamped with the snapshot interval")
+		require.Len(t, ev.Missing, 1)
+	})
+
+	bad := map[string]*v1.BarsEvent{
+		"nil":                 nil,
+		"bad interval":        {Interval: &v1.Interval{}, BoundaryUnixNanos: boundary},
+		"nil member":          {Interval: iv, BoundaryUnixNanos: boundary, Bars: []*v1.InstrumentBar{nil}},
+		"bad instrument":      {Interval: iv, BoundaryUnixNanos: boundary, Bars: []*v1.InstrumentBar{{InstrumentId: "", Bar: bar}}},
+		"bad bar":             {Interval: iv, BoundaryUnixNanos: boundary, Bars: []*v1.InstrumentBar{{InstrumentId: eur, Bar: &v1.Bar{}}}},
+		"member off boundary": {Interval: iv, BoundaryUnixNanos: boundary + 1, Bars: []*v1.InstrumentBar{{InstrumentId: eur, Bar: bar}}},
+		"bad missing id":      {Interval: iv, BoundaryUnixNanos: boundary, MissingInstrumentIds: []string{""}},
+	}
+	for name, w := range bad {
+		t.Run(name, func(t *testing.T) {
+			_, err := fromWireBarsEvent(w)
+			require.ErrorIs(t, err, ErrInvalidWireValue)
+		})
+	}
+}

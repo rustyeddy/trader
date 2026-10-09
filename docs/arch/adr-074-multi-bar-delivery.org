@@ -1,0 +1,110 @@
+#+TITLE: ADR-074: Snapshot (multi-bar) delivery in Strategy Protocol v1
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #467. An additive extension of ADR-062 (Strategy Protocol
+v1); ADR-062 stays Accepted and no existing v1 invariant changes.
+
+* Context
+
+ADR-062's external consumer receives one =BarEvent= per instrument per
+completed bar. A scanner, study, or cross-sectional/portfolio consumer
+instead wants the whole subscribed universe at one completed time boundary
+(for example ~21 FX pairs on D1, ranked together). Calling =OnBar= per
+instrument is wasteful across the process boundary and forces the guest to
+reconstruct when a complete universe has arrived.
+
+* Decision
+
+** Consumer contracts are split by delivery shape
+
+=sdk.ConsumerBase= owns =Describe= and =Start=. =sdk.BarHandler= (=OnBar=)
+and =sdk.BarsHandler= (=OnBars=) are separate small interfaces, composed
+into =sdk.BarConsumer= and =sdk.BarsConsumer=. =sdk.Strategy= is kept as an
+alias of =BarConsumer=, so existing bar-by-bar code compiles unchanged and
+no consumer implements a dummy callback. =Serve=, =ServeContext= and
+=ServeConn= accept =ConsumerBase= and select the shape by interface
+assertion. A consumer implementing both callbacks, or neither, is rejected
+at startup: there is no precedence rule to learn or get wrong.
+
+** The delivery mode is declared once, as a capability
+
+=CAPABILITY_BARS_DELIVERY= (value 2) is added to the existing Handshake
+capability set. A guest requests it exactly when it implements =OnBars=.
+A bars-delivery session receives =BarsEvent= and never =BarEvent=; any other
+session receives =BarEvent= and never =BarsEvent=. A mismatched message is
+answered with =ERROR_CODE_CAPABILITY_MISMATCH=. Host and guest never infer
+the mode independently: the guest declares it and the host's accepted
+capability set confirms it.
+
+** Wire shape
+
+=BarsEvent= carries =sequence=, =interval=, =boundary_unix_nanos=, one
+=InstrumentBar= per available member, =missing_instrument_ids=, and the
+inline =AccountSnapshot=. Interval, sequence and account are snapshot-wide
+and carried once. =OnBarsResponse= has exactly =OnBarResponse='s fields and
+rules. =RunServerMessage= gains =bars_event = 5= and =RunClientMessage=
+gains =on_bars_response = 4=. The sequence space is shared with
+=BarEvent=/=FillEvent=, so =GetHistoryBars= scoping by =callback_sequence=
+works unchanged.
+
+** Snapshot semantics
+
+A =BarsEvent= is one completed boundary, not "whatever arrived together".
+Every member bar is at =boundary=. Every declared requirement appears in
+exactly one of =bars= or =missing_instrument_ids=, so an incomplete universe
+is never ambiguous. Both lists follow Descriptor requirement order, so
+backtests and live runs observe identical ordering. A bars-delivery
+consumer must declare one interval across all requirements and at least one
+requirement: the guest checks this at startup and the host rejects the
+Handshake (=InvalidArgument=) independently.
+
+** Host delivery and the View
+
+Scheduler already groups replay events by timestamp into one batch with one
+frozen =View=. For a strategy implementing the internal optional capability
+=strategy.BarsHandler=, it calls =OnBars= once per batch with a
+=strategy.BarsEvent= and never calls =OnBar=. The View is the same frozen
+view =OnBar= gets: account state from the inline snapshot, and
+=HistoryBars= strictly before the boundary for declared requirements.
+Warm-up is unchanged and run-wide; bars-seen counts advance for the whole
+batch regardless of delivery shape. A snapshot is emitted for every
+boundary with at least one bar, with absent members listed in =Missing=.
+
+An intent returned from =OnBars= is queued under its own instrument's
+requirement, so next-bar-open eligibility is judged against that
+instrument's next bar. An intent for an undeclared instrument aborts the run
+with =ErrInvalidSchedulerDeps=.
+
+The external adapter's bars wrapper implements =OnBars= and deliberately
+fails =OnBar=; the plain and fill wrappers do not implement =OnBars=, so a
+runtime sees exactly one delivery shape.
+
+** Ownership rules are unchanged
+
+The guest returns described intents and signals; the host mints canonical
+intents and journals. A failed callback contributes no intents or signals.
+
+* Compatibility
+
+Additive within v1 per ADR-062: new messages, new oneof variants, a new
+enum value. An existing guest never sends the new capability and never
+receives a =BarsEvent=. A new guest against an older host: the older host
+drops the unknown capability from its accepted set, and
+=sdk.verifyNegotiatedCapabilities= fails the Handshake rather than running
+with the wrong shape. No v2 decision is required.
+
+* Consequences
+
+- The generated bindings are regenerated with protoc v3.21.12 (the header
+  comment changes from v5.29.3); the generated code is otherwise only the
+  additions above.
+- Mixed-interval universes are out of scope: a consumer needing several
+  intervals uses bar-by-bar delivery.
+
+* Non-goals
+
+No separate scanner protocol or network service; no requirement that a
+consumer support both callbacks; no change to the host's canonical
+intent/journal ownership.

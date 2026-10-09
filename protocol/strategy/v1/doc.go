@@ -16,6 +16,15 @@
 //     domain types (order.Intent, instrument.ID, num.Price, and so
 //     on) is issue #378, in its own package — never here.
 //
+// # Delivery shapes
+//
+// A session receives either BarEvents (bar-by-bar, the default) or
+// BarsEvents (snapshot delivery), never both. The shape is the guest's
+// declaration of CAPABILITY_BARS_DELIVERY at Handshake, confirmed by the
+// host's accepted capabilities (issue #467, ADR-074). The addition is
+// backward-compatible within v1: an older host drops the unknown
+// capability and the SDK then fails the Handshake explicitly.
+//
 // # Dependency direction
 //
 // This package depends only on the generated Protobuf/gRPC runtime

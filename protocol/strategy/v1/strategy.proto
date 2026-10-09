@@ -69,9 +69,21 @@ enum IntentKind {
 // second capability value here (for a future AccountEventHandler or
 // StateManager, once either is published in-process) is an additive,
 // wire-compatible v1 change, not a v2 break.
+//
+// BARS_DELIVERY (issue #467) selects the session's market-data delivery
+// shape. A guest that requests it receives one BarsEvent per completed
+// time boundary and never a BarEvent; a guest that does not request it
+// receives BarEvents and never a BarsEvent. The delivery shape is thus
+// declared once, by the guest, and confirmed by the host's accepted
+// capability set — neither side infers it independently. A host that
+// does not understand BARS_DELIVERY drops it from its accepted set and
+// the guest (sdk.verifyNegotiatedCapabilities) fails the handshake
+// rather than running with the wrong shape, so an older host is
+// backward-compatible by construction.
 enum Capability {
   CAPABILITY_UNSPECIFIED = 0;
   CAPABILITY_FILL_HANDLER = 1;
+  CAPABILITY_BARS_DELIVERY = 2;
 }
 
 // ErrorCode is v1's small, closed structured-error vocabulary — a
@@ -301,6 +313,47 @@ message BarEvent {
   AccountSnapshot account = 5;
 }
 
+// InstrumentBar is one instrument's completed bar inside a BarsEvent.
+// It carries only what is not already snapshot-wide: interval, sequence,
+// and the account snapshot live once on the enclosing BarsEvent.
+message InstrumentBar {
+  string instrument_id = 1;
+  Bar bar = 2;
+}
+
+// BarsEvent is one coherent cross-sectional snapshot (issue #467),
+// delivered only when CAPABILITY_BARS_DELIVERY was negotiated. Every
+// entry in bars and missing_instrument_ids belongs to the same completed
+// boundary_unix_nanos of the same interval, for the guest's own
+// Handshake-declared requirements: each declared requirement appears in
+// exactly one of the two lists, so completeness is never ambiguous. Both
+// lists follow the Handshake descriptor's requirement order, so delivery
+// is deterministic. A bars-delivery guest must declare a single interval
+// across all its requirements; the host rejects the Handshake otherwise.
+message BarsEvent {
+  // sequence uniquely identifies this callback within the session,
+  // shared with BarEvent/FillEvent's sequence space — echoed back in
+  // OnBarsResponse and usable as GetHistoryBarsRequest.callback_sequence
+  // while the response is outstanding.
+  uint64 sequence = 1;
+  Interval interval = 2;
+  int64 boundary_unix_nanos = 3;
+  repeated InstrumentBar bars = 4;
+  repeated string missing_instrument_ids = 5;
+  AccountSnapshot account = 6;
+}
+
+// OnBarsResponse is the guest's response to one BarsEvent, with exactly
+// OnBarResponse's semantics: empty intents/signals are an explicit
+// "nothing this boundary", and when error is set both lists must be
+// empty — a failed callback contributes nothing.
+message OnBarsResponse {
+  uint64 sequence = 1;
+  repeated DescribedIntent intents = 2;
+  repeated DescribedSignal signals = 3;
+  Error error = 4;
+}
+
 // DescribedIntent is the wire shape of a guest's requested trading
 // action — never a canonical order.Intent, and never carrying a real
 // IntentID/EventID/CorrelationID: the host mints those through its
@@ -400,6 +453,7 @@ message RunServerMessage {
     BarEvent bar_event = 2;
     FillEvent fill_event = 3;
     SessionEnd session_end = 4;
+    BarsEvent bars_event = 5;
   }
 }
 
@@ -411,6 +465,7 @@ message RunClientMessage {
     RunOpen run_open = 1;
     OnBarResponse on_bar_response = 2;
     OnFillResponse on_fill_response = 3;
+    OnBarsResponse on_bars_response = 4;
   }
 }
 

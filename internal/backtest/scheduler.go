@@ -358,8 +358,12 @@ type Scheduler struct {
 	// warmupRequired also doubles as the "declared" set History
 	// consults to answer HistoryBars' ok return.
 	warmupRequired map[requirementKey]int
-	barsSeen       map[requirementKey]int
-	warmedUp       bool
+
+	// requirements is Strategy's declared requirement list in
+	// declaration order, retained for snapshot (OnBars) assembly.
+	requirements []strategy.DataRequirement
+	barsSeen     map[requirementKey]int
+	warmedUp     bool
 
 	// history holds one append-only bar buffer per declared
 	// requirement, grown only after a batch's OnBar calls complete.
@@ -430,10 +434,22 @@ func NewScheduler(deps SchedulerDeps) (*Scheduler, error) {
 		}
 		warmupRequired[key] = req.WarmupBars
 	}
+	if _, ok := deps.Strategy.(strategy.BarsHandler); ok {
+		if len(requirements) == 0 {
+			return nil, fmt.Errorf("%w: OnBars strategy declared no requirements", ErrInvalidSchedulerDeps)
+		}
+		for _, req := range requirements[1:] {
+			if req.Interval != requirements[0].Interval {
+				return nil, fmt.Errorf("%w: OnBars strategy must declare a single interval, got %s and %s",
+					ErrInvalidSchedulerDeps, requirements[0].Interval, req.Interval)
+			}
+		}
+	}
 
 	return &Scheduler{
 		deps:                 deps,
 		warmupRequired:       warmupRequired,
+		requirements:         requirements,
 		barsSeen:             make(map[requirementKey]int, len(requirements)),
 		history:              make(map[requirementKey][]marketdata.Bar, len(requirements)),
 		queued:               make(map[requirementKey][]runtimeorder.Intent),
@@ -704,18 +720,47 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 	}
 	var emitted []collected
 	for _, ev := range batch {
+		s.barsSeen[requirementKey{instrument: ev.Instrument, interval: ev.Interval}]++
+	}
+
+	if bh, ok := s.deps.Strategy.(strategy.BarsHandler); ok {
+		// Snapshot delivery (issue #467): one OnBars call for the whole
+		// boundary, against the same frozen view OnBar would get. The
+		// strategy's OnBar is never called. barsSeen was already
+		// advanced for the whole batch above, so warm-up readiness never
+		// depends on delivery shape.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
-		s.barsSeen[key]++
-
-		intents, err := s.deps.Strategy.OnBar(ctx, ev, view)
+		event := strategy.NewBarsEvent(t, s.requirements, batch)
+		intents, err := bh.OnBars(ctx, event, view)
 		if err != nil {
-			return fmt.Errorf("backtest: scheduler: OnBar for %s %s at %s: %w", ev.Instrument, ev.Interval, t, err)
+			return fmt.Errorf("backtest: scheduler: OnBars for %s at %s: %w", event.Interval, t, err)
 		}
-		if len(intents) > 0 {
-			emitted = append(emitted, collected{key: key, intents: intents})
+		// An OnBars intent is queued under its own instrument's
+		// requirement, so next-bar-open eligibility is judged against
+		// the bar of the instrument the intent concerns.
+		for _, in := range intents {
+			key := requirementKey{instrument: in.Instrument, interval: event.Interval}
+			if _, ok := s.warmupRequired[key]; !ok {
+				return fmt.Errorf("%w: OnBars at %s returned an intent for %s, which Strategy.Describe().Requirements never declared",
+					ErrInvalidSchedulerDeps, t, in.Instrument)
+			}
+			emitted = append(emitted, collected{key: key, intents: []runtimeorder.Intent{in}})
+		}
+	} else {
+		for _, ev := range batch {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
+			intents, err := s.deps.Strategy.OnBar(ctx, ev, view)
+			if err != nil {
+				return fmt.Errorf("backtest: scheduler: OnBar for %s %s at %s: %w", ev.Instrument, ev.Interval, t, err)
+			}
+			if len(intents) > 0 {
+				emitted = append(emitted, collected{key: key, intents: intents})
+			}
 		}
 	}
 

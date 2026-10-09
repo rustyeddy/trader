@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/order"
 	v1 "github.com/rustyeddy/trader/protocol/strategy/v1"
@@ -104,6 +105,53 @@ func fromWireBarEvent(w *v1.BarEvent) (BarEvent, error) {
 
 // fromWirePositionSnapshot reconstructs a PositionSnapshot from a
 // received *v1.PositionSnapshot.
+// fromWireBarsEvent converts a v1.BarsEvent into a BarsEvent. Every
+// member bar is stamped with the snapshot's own interval, so a member
+// can never disagree with the boundary it was delivered for.
+func fromWireBarsEvent(w *v1.BarsEvent) (BarsEvent, error) {
+	if w == nil {
+		return BarsEvent{}, fmt.Errorf("%w: bars event must be set", ErrInvalidWireValue)
+	}
+	interval, err := fromWireInterval(w.GetInterval())
+	if err != nil {
+		return BarsEvent{}, err
+	}
+	boundary := time.Unix(0, w.GetBoundaryUnixNanos()).UTC()
+
+	event := BarsEvent{
+		Boundary: boundary,
+		Interval: interval,
+		Bars:     make([]BarEvent, 0, len(w.GetBars())),
+		Missing:  make([]instrument.ID, 0, len(w.GetMissingInstrumentIds())),
+	}
+	for _, m := range w.GetBars() {
+		if m == nil {
+			return BarsEvent{}, fmt.Errorf("%w: bars event member must be set", ErrInvalidWireValue)
+		}
+		instID, err := parseInstrumentID(m.GetInstrumentId())
+		if err != nil {
+			return BarsEvent{}, err
+		}
+		bar, err := fromWireBar(m.GetBar())
+		if err != nil {
+			return BarsEvent{}, err
+		}
+		if !bar.Time.Equal(boundary) {
+			return BarsEvent{}, fmt.Errorf("%w: bars event member %s is at %s, not the snapshot boundary %s",
+				ErrInvalidWireValue, instID, bar.Time, boundary)
+		}
+		event.Bars = append(event.Bars, BarEvent{Instrument: instID, Interval: interval, Bar: bar})
+	}
+	for _, raw := range w.GetMissingInstrumentIds() {
+		instID, err := parseInstrumentID(raw)
+		if err != nil {
+			return BarsEvent{}, err
+		}
+		event.Missing = append(event.Missing, instID)
+	}
+	return event, nil
+}
+
 func fromWirePositionSnapshot(w *v1.PositionSnapshot) (PositionSnapshot, error) {
 	if w == nil {
 		return PositionSnapshot{}, fmt.Errorf("%w: position snapshot must be set", ErrInvalidWireValue)

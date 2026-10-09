@@ -181,6 +181,7 @@ the original decided, use full supersession instead.
 | 071 | One market-data provider registry (in adr-071-market-data-provider-registry.org) | Accepted |
 | 072 | Incremental Stooq raw import (in adr-072-stooq-incremental-import.org) | Accepted |
 | 073 | Stooq daily history is dividend-adjusted (in adr-073-stooq-dividend-adjusted.org) | Accepted, partial amendment of 048 |
+| 074 | Snapshot (multi-bar) delivery in Strategy Protocol v1 (in adr-074-multi-bar-delivery.org) | Accepted, additive extension of 062 |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
@@ -774,6 +775,14 @@ volume decisions are unchanged. The code change is issue #465. ADR-072
 (incremental Stooq raw import, issue #459) depends on the finding: every
 ex-dividend date rewrites older rows, so its close comparison falls back to a
 full re-import for dividend payers.
+
+Note: ADR-074 is likewise maintained in its own file,
+=docs/arch/adr-074-multi-bar-delivery.org=, rather than inline in this
+registry. Its own Status section is authoritative. Issue #467 adds snapshot
+delivery to Strategy Protocol v1: =sdk.ConsumerBase= with separate =OnBar= and
+=OnBars= consumer shapes, a =CAPABILITY_BARS_DELIVERY= handshake capability,
+and =BarsEvent=/=OnBarsResponse= messages. It is an additive extension of
+ADR-062, not an amendment: no v1 invariant changes.
 
 * ADR-001: Modular monolith before service decomposition
 
