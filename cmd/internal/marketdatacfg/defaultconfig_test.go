@@ -102,3 +102,28 @@ func TestLoad_MissingExplicitConfigIsAnErrorButMissingDefaultIsNot(t *testing.T)
 	_, err = Load([]string{}, nil) // DefaultConfigPath does not exist
 	require.NoError(t, err)
 }
+
+func TestLoad_CredentialsInTheConfigFileAreRejected(t *testing.T) {
+	for _, key := range []string{"oanda_token", "alpaca_key_id", "alpaca_secret_key"} {
+		t.Run(key, func(t *testing.T) {
+			useDefaultConfig(t, "raw_root: /r\n"+key+": hunter2-value\n")
+			_, err := Load([]string{}, nil)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, key)
+			assert.NotContains(t, err.Error(), "hunter2-value", "the value is never echoed")
+		})
+	}
+}
+
+func TestLoad_EnvironmentTokenStillOverridesTokenFile(t *testing.T) {
+	tok := writeTemp(t, "pat.txt", "from-file")
+	useDefaultConfig(t, "oanda_token_file: "+tok+"\n")
+
+	cfg, err := Load([]string{"TRADER_OANDA_TOKEN=from-env"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", cfg.OANDAToken)
+
+	cfg, err = Load([]string{}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "from-file", cfg.OANDAToken)
+}

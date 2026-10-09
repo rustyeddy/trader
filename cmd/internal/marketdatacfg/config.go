@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/clock"
 	"github.com/rustyeddy/trader/internal/config"
@@ -125,6 +127,11 @@ func Load(environ []string, overrides map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if path != "" {
+		if err := rejectCredentialsInFile(path); err != nil {
+			return Config{}, err
+		}
+	}
 	cfg, err := config.Load[Config](config.Options{
 		EnvPrefix: EnvPrefix,
 		Environ:   environ,
@@ -167,6 +174,32 @@ func configFile(environ []string) (string, error) {
 		return "", fmt.Errorf("default config %s: %w", DefaultConfigPath, err)
 	}
 	return DefaultConfigPath, nil
+}
+
+// fileForbiddenKeys are credentials the config file must never carry: the
+// generic loader would happily read them from YAML, so they are rejected
+// by name. The OANDA token reaches a run through oanda_token_file or
+// TRADER_OANDA_TOKEN, Alpaca's credentials through the environment only.
+var fileForbiddenKeys = []string{"oanda_token", "alpaca_key_id", "alpaca_secret_key"}
+
+// rejectCredentialsInFile errors if the top level of the YAML file at path
+// sets a forbidden credential key. The error names the key and the file,
+// never a value.
+func rejectCredentialsInFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", path, err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil // the generic loader reports malformed YAML itself
+	}
+	for _, key := range fileForbiddenKeys {
+		if _, ok := doc[key]; ok {
+			return fmt.Errorf("config %s: %s must not be set in a config file (use oanda_token_file or the environment)", path, key)
+		}
+	}
+	return nil
 }
 
 // readTokenFile reads a secret from path, expanding a leading ~/ . Errors
