@@ -54,6 +54,9 @@ guess.
 
 * Handoff template
 
+Use =docs/workflows/implementation-checklist.org= for the plan and evidence
+that feed the handoff.
+
 Post this as an issue or PR comment whenever work changes hands (Implementer to
 Reviewer, or one Implementer to another):
 

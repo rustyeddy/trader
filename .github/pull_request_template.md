@@ -4,7 +4,11 @@
 
 ## Linked issue
 
-<!-- Closes #NNN -->
+<!--
+Closes #NNN. For the full implementation checklist (scope, ADRs consulted,
+evidence per acceptance criterion, safety, needs-design), see
+docs/workflows/implementation-checklist.org.
+-->
 
 ## Architectural impact
 
@@ -22,8 +26,9 @@ change is contained within an existing boundary.
 
 <!--
 Which tests were added or updated, and how they were run. Name the
-commands (for example `make check`, `go test -race ./...`). State the
-error and boundary cases covered.
+commands (for example `make check`, `go test -race ./...`) and quote the
+result. Do not write "tests pass" without evidence; list anything you did
+not run and why. State the error and boundary cases covered.
 -->
 
 ## Documentation updated
@@ -45,7 +50,8 @@ or amended ADR, or state that no durable architectural decision was made.
 
 <!--
 Live-trading safety, credential handling, data loss, reconciliation, and
-concurrency. Confirm real-money trading remains disabled by default.
+concurrency. Confirm real-money trading remains disabled by default. If
+architecture is unresolved, stop and add the `needs-design` label.
 -->
 
 ## Acceptance criteria
