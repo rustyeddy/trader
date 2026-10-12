@@ -92,10 +92,14 @@ targets are:
 
 - `make fmt` — format sources with `go fmt ./...`
 - `make fmt-check` — verify sources are already formatted
+- `make tidy-check` — verify `go.mod`/`go.sum` are tidy (`go mod tidy -diff`)
 - `make vet` — run `go vet ./...`
+- `make lint` — run the pinned `golangci-lint`
 - `make test` — run `go test ./...`
 - `make race` — run tests with the race detector
-- `make check` — run `fmt-check`, `vet`, `test`, and `race` (default target)
+- `make check` — the canonical verification: `tidy-check`, `fmt-check`, `vet`,
+  `lint`, `test`, and `race`, the same gates as CI (default target); see
+  [Testing](docs/workflows/testing.org)
 
 ## License
 

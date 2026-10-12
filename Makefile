@@ -82,6 +82,11 @@ fmt:
 fmt-check:
 	test -z "$$(gofmt -l .)"
 
+# tidy-check fails when go.mod/go.sum are not what `go mod tidy` would
+# produce, without modifying them. CI runs this same target.
+tidy-check:
+	go mod tidy -diff
+
 vet:
 	go vet ./...
 
@@ -105,6 +110,9 @@ coverage:
 coverage-html: coverage
 	go tool cover -html=$(COVERPROFILE) -o coverage.html
 
-check: fmt-check vet lint test race
+# check is the canonical verification command: it runs every gate CI
+# runs (tidy-check, fmt-check, vet, lint, test, race). Run it before
+# pushing; see docs/workflows/testing.org.
+check: tidy-check fmt-check vet lint test race
 
-.PHONY: all build install gen-proto fmt fmt-check vet test race lint coverage coverage-html check
+.PHONY: all build install gen-proto fmt fmt-check tidy-check vet test race lint coverage coverage-html check
