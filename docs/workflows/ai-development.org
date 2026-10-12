@@ -1,0 +1,105 @@
+#+TITLE: AI-Assisted Development Workflow
+#+STARTUP: showall
+
+How Claude Code, GitHub Copilot, ChatGPT, and other assistants collaborate
+with each other and with the maintainer.  This complements
+=CONTRIBUTING.org= (workflow, Definition of Done) and =AGENTS.md= (task-scoped
+instructions).  There is no automated orchestration: people start each step.
+
+* Principles
+
+- *GitHub is the source of truth.*  Plans, assumptions, test evidence,
+  blockers, and review findings are posted on the issue or pull request, not
+  kept in a private chat.  A fresh assistant must be able to continue from the
+  issue and PR alone.
+- *Read selectively.*  Each assistant reads the linked issue, =AGENTS.md=,
+  =CONTRIBUTING.org=, the affected packages and tests, and only the
+  architecture/ADR sections relevant to the change (see =AGENTS.md=).  Do not
+  load the full architecture or ADR registry.
+- *No vendor lock-in.*  Everything an assistant needs lives in the repository
+  (=AGENTS.md=, =CONTRIBUTING.org=, =Makefile=, this file).  Assistant-specific
+  files (=CLAUDE.md=, =.github/copilot-instructions.md=) only point to them.
+  Any assistant can take any role below.
+- *Humans decide.*  The maintainer approves and merges.  An assistant never
+  merges its own pull request.
+
+* Roles
+
+| Role           | Who                      | Responsibilities                                                   |
+|----------------+--------------------------+--------------------------------------------------------------------|
+| Maintainer     | Human                    | Writes or approves issues, resolves =needs-design=, merges         |
+| Implementer    | One assistant per issue  | Owns the branch and PR; plan, code, tests, docs, replies to review |
+| Reviewer       | A different assistant    | Independent review; reports findings; does not push to the branch  |
+
+Rules:
+
+- *One owner per branch.*  Only the Implementer pushes to the issue's branch.
+  The Reviewer comments on the PR; fixes are made by the Implementer.  To hand
+  ownership to another assistant, the current owner posts a handoff (below) and
+  stops pushing first.
+- *Independent review.*  The Reviewer should be a different assistant (or at
+  least a fresh session) from the Implementer, and works from the PR diff, the
+  issue, and its acceptance criteria rather than the Implementer's reasoning.
+- *Never edit the same branch simultaneously.*  Parallel work uses separate
+  issues and branches.
+
+* Escalation: =needs-design=
+
+When architecture is unresolved, or a change would contradict an accepted ADR
+or alter a package boundary, the assistant stops, adds the =needs-design=
+label, and posts the question with the options considered.  The maintainer
+decides (typically recorded as an ADR) before work resumes.  Assistants do not
+guess.
+
+* Handoff template
+
+Post this as an issue or PR comment whenever work changes hands (Implementer to
+Reviewer, or one Implementer to another):
+
+#+BEGIN_EXAMPLE
+## Handoff
+- Issue / PR: #<n>
+- Branch and commit: <branch> @ <sha>
+- Changed files: <paths, one line each, with a few words on each>
+- Tests: <commands run and results; e.g. `make check` passed>
+- Not run / not verified: <anything skipped, and why>
+- Open risks and assumptions: <list>
+- Docs/ADRs consulted or changed: <list>
+- Next step for the recipient: <what is being asked>
+#+END_EXAMPLE
+
+* Example: issue to merge
+
+Issue #123, "marketdata: reject bars outside their span".
+
+1. *Issue.*  The maintainer files #123 with acceptance criteria and, if
+   needed, assigns Claude Code as Implementer.
+2. *Plan.*  Claude Code reads the issue, =AGENTS.md=, the =marketdata=
+   package and tests, and the matching ADR sections only.  It comments a short
+   plan and its assumptions on #123.
+3. *Implementation.*  It creates =fix/123-bar-span-check=, implements the
+   change with tests and docs, runs =make check= (and =make lint=), and opens a
+   PR that closes #123, stating what changed, why, how it was tested, and which
+   docs changed.
+4. *Handoff.*  It posts the handoff comment on the PR with the commit SHA,
+   changed files, test evidence, and open risks, then stops pushing.
+5. *Independent review.*  The maintainer asks Copilot (or ChatGPT) to review
+   the PR.  The Reviewer checks the diff against the acceptance criteria, ADRs,
+   and Definition of Done, and posts findings as review comments, marking any
+   it considers blocking.
+6. *Fixes.*  Claude Code, still the owner, addresses each finding, pushes,
+   and replies to every comment with the commit that fixes it (or why it
+   declines).  If the fix is non-trivial, it posts a new handoff and the
+   Reviewer re-checks.
+7. *Merge.*  When CI is green and blocking findings are resolved, the
+   maintainer approves and merges.  The issue closes.
+8. *Clean-up.*  The merged branch is deleted.
+
+* Posting guidance
+
+- Plans and assumptions: issue comment, before substantial work.
+- Test evidence: PR description and handoff, with the actual commands.
+- Blockers: comment on the issue or PR, with =needs-design= when architectural.
+- Review findings: PR review comments, with severity and a suggested fix.
+- Keep comments short and factual; link to code and ADRs instead of pasting
+  them.

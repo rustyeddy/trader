@@ -19,7 +19,7 @@ Example: a historical-bar normalization change should inspect `marketdata`, `int
 - Keep changes focused; document architecture changes and do not silently contradict accepted ADRs.
 - Run `make check` before pushing, or explicitly disclose any checks you could not run. CI must pass.
 - Preserve deterministic behavior and paper-trading-by-default safety. Strategies emit intents, not broker orders; risk and execution remain separate.
-- See `CONTRIBUTING.org` for branch naming, testing, documentation, review, and Definition of Done.
+- See `CONTRIBUTING.org` for branch naming, testing, documentation, review, and Definition of Done. For multi-assistant handoffs and review roles, see `docs/workflows/ai-development.org`.
 
 ## Logging
 
