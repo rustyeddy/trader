@@ -47,6 +47,11 @@ func Load[T any](opts Options) (T, error) {
 
 	var errs []*FieldError
 	for _, l := range leaves {
+		if _, inFile := files[l.Path]; inFile && l.Secret {
+			errs = append(errs, &FieldError{Path: l.Path, Err: ErrSecretInFile})
+			l.Resolved = true // already reported; do not also report it missing
+			continue
+		}
 		raw, ok := resolveValue(l, opts, files, envs)
 		if !ok {
 			continue
@@ -79,7 +84,7 @@ func resolveValue(l *leaf, opts Options, files, envs map[string]string) (string,
 	if l.HasDefault {
 		value, ok = l.Default, true
 	}
-	if v, found := files[l.Path]; found {
+	if v, found := files[l.Path]; found && !l.Secret {
 		value, ok = v, true
 	}
 	if v, found := envs[l.EnvName(opts.EnvPrefix)]; found {

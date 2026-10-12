@@ -3,8 +3,10 @@ package marketdatacfg
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
+	"github.com/rustyeddy/trader/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -110,6 +112,7 @@ func TestLoad_CredentialsInTheConfigFileAreRejected(t *testing.T) {
 			_, err := Load([]string{}, nil)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, key)
+			assert.ErrorIs(t, err, config.ErrSecretInFile)
 			assert.NotContains(t, err.Error(), "hunter2-value", "the value is never echoed")
 		})
 	}
@@ -126,4 +129,31 @@ func TestLoad_EnvironmentTokenStillOverridesTokenFile(t *testing.T) {
 	cfg, err = Load([]string{}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "from-file", cfg.OANDAToken)
+}
+
+// A key's case does not matter to the generic loader, so it must not
+// matter to the rejection either.
+func TestLoad_CredentialKeyCaseDoesNotEvadeRejection(t *testing.T) {
+	useDefaultConfig(t, "OANDA_TOKEN: hunter2-value\n")
+	_, err := Load([]string{}, nil)
+	require.ErrorIs(t, err, config.ErrSecretInFile)
+	assert.NotContains(t, err.Error(), "hunter2-value")
+}
+
+// Every secret-tagged field of Config is environment-only: a future
+// credential is covered by its tag with no list to update.
+func TestConfig_EverySecretFieldIsRejectedInAFile(t *testing.T) {
+	typ := reflect.TypeOf(Config{})
+	n := 0
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if f.Tag.Get("secret") != "true" {
+			continue
+		}
+		n++
+		useDefaultConfig(t, f.Tag.Get("config")+": value-must-not-leak\n")
+		_, err := Load([]string{}, nil)
+		require.ErrorIs(t, err, config.ErrSecretInFile, f.Name)
+	}
+	assert.GreaterOrEqual(t, n, 3, "OANDA token and both Alpaca credentials")
 }

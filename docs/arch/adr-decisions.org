@@ -185,6 +185,7 @@ the original decided, use full supersession instead.
 | 075 | Config-driven external strategy runs (in adr-075-config-driven-external-strategy.org) | Accepted, extends 062 launch mechanics |
 | 076 | Default config file for market-data settings (in adr-076-default-config-file.org) | Accepted |
 | 077 | Run kind and reusable market section in run configs (in adr-077-run-kind-and-market-config.org) | Accepted, supersedes the 075 config grammar |
+| 078 | Security rules, a living ADR (in adr-078-security.org) | Accepted; S-1 secrets are environment-only |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

@@ -38,6 +38,12 @@ var (
 	// otherwise disable redaction without any signal that it had happened.
 	ErrInvalidTag = errors.New("config: invalid struct tag")
 
+	// ErrSecretInFile reports a secret-tagged field that the file source
+	// tried to supply. A secret never comes from a config file (ADR-078);
+	// the field is filled from the environment or by the caller. The error
+	// names the field's path, never its value.
+	ErrSecretInFile = errors.New("config: secret must not be set in a config file")
+
 	// ErrValidation reports a non-nil error returned by the destination's
 	// Validate method.
 	ErrValidation = errors.New("config: validation failed")

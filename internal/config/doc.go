@@ -44,7 +44,15 @@
 //	default:"value"  the value used when no source sets this field
 //	enum:"a,b,c"     restricts an already-decoded string field to this list
 //	required:"true"  Load fails if no source (including default) supplied this field a value
-//	secret:"true"    this field's value is never written to error messages or Render output
+//	secret:"true"    this field's value is never written to error messages or Render output, and never read from the file source
+//
+// A secret field is environment-only as far as files go: if the file source
+// mentions its path at all, Load reports ErrSecretInFile for that field
+// (naming the path, never the value) rather than reading or ignoring it.
+// The rule is carried by the tag, so a secret added later is covered
+// without anyone remembering to list it (ADR-078). Overrides remain the
+// caller's responsibility: give a secret no flag, so it never reaches shell
+// history or the process command line.
 //
 // required is a presence check, not a zero-value check: an explicitly
 // supplied false, 0, "", or an exact numeric zero such as num.Rate("0")

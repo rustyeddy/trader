@@ -303,3 +303,61 @@ func TestLoadUsesRealEnvironmentWhenEnvironNil(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 4242, got.LoadTestPort)
 }
+
+// A secret field is never read from the file source (ADR-078): the file
+// naming it is an error that cites the path, not the value.
+func TestLoadSecretInFileIsRejected(t *testing.T) {
+	type Config struct {
+		Name  string
+		Token string `config:"api_token" secret:"true"`
+	}
+	for _, content := range []string{"api_token: hunter2-value\n", "API_TOKEN: hunter2-value\n"} {
+		_, err := Load[Config](Options{
+			Environ:     []string{},
+			FileContent: []byte("name: x\n" + content),
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrSecretInFile)
+		assert.Contains(t, err.Error(), "api_token")
+		assert.NotContains(t, err.Error(), "hunter2-value", "the value is never echoed")
+	}
+}
+
+func TestLoadSecretFromEnvironmentStillWorks(t *testing.T) {
+	type Config struct {
+		Token string `config:"api_token" secret:"true"`
+	}
+	got, err := Load[Config](Options{
+		Environ:     []string{"API_TOKEN=from-env"},
+		FileContent: []byte("name: ignored-unknown-key\n"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", got.Token)
+}
+
+// A nested secret is covered the same way, and a null value supplies
+// nothing, so it is not an error.
+func TestLoadNestedSecretInFileIsRejected(t *testing.T) {
+	type Config struct {
+		DB struct {
+			Password string `secret:"true"`
+		}
+	}
+	_, err := Load[Config](Options{Environ: []string{}, FileContent: []byte("db:\n  password: hunter2-value\n")})
+	require.ErrorIs(t, err, ErrSecretInFile)
+	assert.NotContains(t, err.Error(), "hunter2-value")
+
+	_, err = Load[Config](Options{Environ: []string{"DB_PASSWORD=ok"}, FileContent: []byte("db:\n  password:\n")})
+	require.NoError(t, err)
+}
+
+// A required secret that the file tried to supply is reported once, as
+// the file's mistake, not also as missing.
+func TestLoadRequiredSecretInFileReportsOnlyTheFileError(t *testing.T) {
+	type Config struct {
+		Token string `config:"api_token" secret:"true" required:"true"`
+	}
+	_, err := Load[Config](Options{Environ: []string{}, FileContent: []byte("api_token: v\n")})
+	require.ErrorIs(t, err, ErrSecretInFile)
+	assert.NotErrorIs(t, err, ErrRequired)
+}
