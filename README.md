@@ -84,6 +84,7 @@ implementation details. This pre-release change has no compatibility shims.
 - [AI-assisted development](docs/workflows/ai-development.org)
 - [Implementation checklist](docs/workflows/implementation-checklist.org)
 - [AI review rubric](docs/workflows/ai-review-rubric.org)
+- [Reusable agent workflows](docs/workflows/ai-skills.org)
 - [M0 foundation review](docs/reviews/m0-foundation-review.org)
 
 ## Development
