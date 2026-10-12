@@ -1,13 +1,5 @@
 # GitHub Copilot Instructions
 
-Follow the canonical repository instructions in `AGENTS.md`.
+Follow the canonical, provider-neutral `AGENTS.md` and `CONTRIBUTING.org`.
 
-Before implementing an issue:
-
-1. Read `AGENTS.md`.
-2. Read the relevant architecture and ADR sections.
-3. Follow `CONTRIBUTING.org` (once it exists in the repo).
-4. Satisfy every issue acceptance criterion.
-5. Run `make check`.
-6. Update tests and documentation in the same pull request.
-
+Start from the issue and affected code. Consult only the architecture sections and ADRs relevant to the task; do not preload the full ADR registry. Satisfy acceptance criteria, update tests and documentation, and run `make check` before pushing (or disclose why it could not run).
