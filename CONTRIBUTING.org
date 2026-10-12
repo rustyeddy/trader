@@ -8,11 +8,10 @@ project-wide Definition of Done for Trader.  It applies equally to human
 contributors and to agent contributors (for example, Claude Code or GitHub
 Copilot agents) working on issues in this repository.
 
-Read this document together with:
-
-- =AGENTS.md=
-- =docs/arch/trader-framework-architecture.org=
-- =docs/arch/adr-decisions.org=
+Read this document together with =AGENTS.md=.  Architecture and ADR
+documents (=docs/arch/=) are consulted selectively, based on the issue
+and the packages it affects, as described in =AGENTS.md=; do not read
+the full architecture or ADR registry by default.
 
 * Workflow
 
@@ -143,8 +142,8 @@ form.
 Agent contributors follow the same workflow and Definition of Done as
 human contributors, with these additional expectations:
 
-- Read =AGENTS.md= and the architecture/ADR documents before making
-  changes.
+- Read =AGENTS.md= before making changes, and consult only the
+  architecture/ADR sections relevant to the issue and affected packages.
 - Do not fix pre-existing issues unrelated to the current task.
 - Do not introduce security vulnerabilities or secrets.
 - When architecture is unresolved, stop and escalate with =needs-design=
