@@ -36,7 +36,8 @@ Rules:
 - *One owner per branch.*  Only the Implementer pushes to the issue's branch.
   The Reviewer comments on the PR; fixes are made by the Implementer.  To hand
   ownership to another assistant, the current owner posts a handoff (below) and
-  stops pushing first.
+  stops pushing first.  A handoff to a Reviewer is not a transfer of ownership:
+  the Implementer only pauses pushes during review.
 - *Independent review.*  The Reviewer should be a different assistant (or at
   least a fresh session) from the Implementer, and works from the PR diff, the
   issue, and its acceptance criteria rather than the Implementer's reasoning.
@@ -82,7 +83,8 @@ Issue #123, "marketdata: reject bars outside their span".
    PR that closes #123, stating what changed, why, how it was tested, and which
    docs changed.
 4. *Handoff.*  It posts the handoff comment on the PR with the commit SHA,
-   changed files, test evidence, and open risks, then stops pushing.
+   changed files, test evidence, and open risks, then pauses pushes while
+   review is in progress.  Ownership of the branch stays with Claude Code.
 5. *Independent review.*  The maintainer asks Copilot (or ChatGPT) to review
    the PR.  The Reviewer checks the diff against the acceptance criteria, ADRs,
    and Definition of Done, and posts findings as review comments, marking any
