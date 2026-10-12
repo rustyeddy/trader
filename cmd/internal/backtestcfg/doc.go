@@ -50,7 +50,7 @@
 //     executable will actually request.
 //     The executable, its forwarded config file and a multi-instrument
 //     universe may all come from the run config instead of flags
-//     (strategy.exec, strategy.config, backtest.symbols; issue #469). Like nextBarOpenPriceSource
+//     (strategy.exec, strategy.config, market.symbols; issue #469). Like nextBarOpenPriceSource
 //     above, it gets a general per-bar-lookup FillPriceSource, since an
 //     external strategy's entry/exit timing is exactly as
 //     run-dependent as EMA crossover's.

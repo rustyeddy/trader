@@ -3,6 +3,7 @@ package backtest
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -18,21 +19,16 @@ import (
 // buildDatasetConfig is the identical pattern this mirrors, including
 // why only Changed flags are ever placed in Overrides).
 //
-// --symbol is repeatable (multi-instrument, issue #224) but backtestcfg.RunConfig's
-// own Symbol field is a single string: a config file describes one
-// instrument with backtest.symbol, or a comma-separated universe with
-// backtest.symbols (issue #469). Whether --config may be combined with
-// more than one --symbol depends on the resolved strategy, so that rule
-// lives in runBacktest, after this has loaded the config.
+// --symbol is repeatable (multi-instrument, issue #224); a config file
+// describes its universe as a comma-separated market.symbols, and
+// explicit --symbol flags replace it. Whether --config may be combined
+// with more than one --symbol depends on the resolved strategy, so that
+// rule lives in runBacktest, after this has loaded the config.
 func buildRunConfig(cmd *cobra.Command, flags runFlags) (backtestcfg.RunConfig, error) {
 	overrides := map[string]string{}
-	if cmd.Flags().Changed("symbol") && len(flags.symbols) == 1 {
-		overrides["symbol"] = flags.symbols[0]
-	}
 	if cmd.Flags().Changed("symbol") {
-		// Explicit --symbol flags replace the config's whole universe, so
-		// a config's backtest.symbols can never combine with them.
-		overrides["symbols"] = ""
+		// Explicit --symbol flags replace the config's whole universe.
+		overrides["symbols"] = strings.Join(flags.symbols, ",")
 	}
 	if cmd.Flags().Changed("interval") {
 		overrides["interval"] = flags.interval

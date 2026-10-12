@@ -186,13 +186,16 @@ func TestRunCLI_InvalidMarginRatioRejectedAtConfigLoad(t *testing.T) {
 	}
 	t.Run("config file", func(t *testing.T) {
 		configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+
+backtest:
   adverse_distance: 0.01000
   initial_margin_ratio: 0
+
 `)
 		_, err := runReport(t, []string{"run", "--config", configPath, "--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir()})
 		require.Error(t, err)

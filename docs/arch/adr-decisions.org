@@ -184,6 +184,7 @@ the original decided, use full supersession instead.
 | 074 | Snapshot (multi-bar) delivery in Strategy Protocol v1 (in adr-074-multi-bar-delivery.org) | Accepted, additive extension of 062 |
 | 075 | Config-driven external strategy runs (in adr-075-config-driven-external-strategy.org) | Accepted, extends 062 launch mechanics |
 | 076 | Default config file for market-data settings (in adr-076-default-config-file.org) | Accepted |
+| 077 | Run kind and reusable market section in run configs (in adr-077-run-kind-and-market-config.org) | Accepted, supersedes the 075 config grammar |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
@@ -789,7 +790,8 @@ ADR-062, not an amendment: no v1 invariant changes.
 Note: ADR-075 is likewise maintained in its own file,
 =docs/arch/adr-075-config-driven-external-strategy.org=. Its own Status
 section is authoritative. Issue #469 lets =trader backtest run --config=
-carry =backtest.symbols=, =strategy.exec= and =strategy.config=.
+carry =market.symbols= (ADR-077; originally =backtest.symbols=),
+=strategy.exec= and =strategy.config=.
 
 * ADR-001: Modular monolith before service decomposition
 

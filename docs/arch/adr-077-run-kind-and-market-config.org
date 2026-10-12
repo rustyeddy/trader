@@ -1,0 +1,68 @@
+#+TITLE: ADR-077: Run kind and reusable market section in run configs
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #474. Supersedes the config grammar of ADR-075 (market keys
+under =backtest:=) and the =model:= section of issue #471. ADR-075's launch
+mechanics and ADR-062 are unchanged. Configuration precedence is unchanged:
+defaults < file < environment < flags (=internal/config=).
+
+* Context
+
+A study (scanner) and a backtest read the same kind of market data, but the
+run config only had =backtest:=, which mixes market selection (symbols,
+interval, span, provider, data roots) with simulation mechanics (account,
+risk, margin). Issue #471 added =model:= beside it, so the universe and span
+now had two homes and a study still carried backtest-shaped fields.
+
+* Decision
+
+A run config is one document of one =kind=, a top-level discriminator:
+=backtest= (the default) or =study=. There is no =run.kind=.
+
+- =market:= holds what data the run reads, for every kind: =symbols= (a
+  comma-separated universe), =interval=, =from=, =to=, =provider=,
+  =data_raw_root=, =data_store_root=.
+- =backtest:= holds only simulation mechanics: =currency=,
+  =starting_capital=, =risk_fraction=, =adverse_distance=,
+  =initial_margin_ratio=.
+- =study:= holds only launch identity: =name=, =exec=, =config=. Trader never
+  interprets a study's parameters. =config= defaults to the run file itself,
+  so a scanner may keep its settings in its own section of the same document
+  (Trader ignores unknown top-level sections); an explicit =config= keeps the
+  two-file split available.
+- =strategy:= is unchanged and applies to =kind: backtest=.
+
+A study needs no account, sizing or margin keys; the host supplies internal
+account defaults (USD, 10000, risk 0.01, margin 1) because the engine still
+runs against an account.
+
+** Migration
+
+The old grammar is replaced, not carried: a =model:= section, or any of
+=symbol=, =symbols=, =interval=, =from=, =to=, =provider=, =data_raw_root=,
+=data_store_root= under =backtest:=, fails with an error naming the key's new
+home. Silently ignoring them would surface only as a misleading "market.from
+is required". Environment variables follow the section:
+=TRADER_BACKTEST_FROM= becomes =TRADER_MARKET_FROM=. Command-line flag names
+are unchanged. The single-instrument =symbol= key is gone; =symbols= with one
+entry replaces it.
+
+** Ambiguity
+
+A document is exactly one kind and mixing is rejected rather than resolved:
+backtest-only keys beside =kind: study= (account/sizing values other than the
+host defaults, which Resolve itself fills in), =strategy.exec=/=config= and
+quantity-mode keys beside =kind: study= (use =study.exec=/=config=), and any
+=study:= key beside =kind: backtest=. An omitted =kind= is =backtest=, so a
+study document missing =kind= is rejected by the previous rule.
+
+* Consequences
+
+The universe and span have one home. Studies state only what they use.
+Existing configs and TRADER_BACKTEST_* environment variables must be
+migrated once. A study value equal to a host default (for example
+=currency: USD=) is indistinguishable from the default and accepted.
+Whether studies and backtests need distinct execution paths, not only
+distinct validation, is left to follow-up issues.

@@ -177,13 +177,16 @@ func TestBuyHoldQuantity_UnaffordableQuantityRejectedNotResized(t *testing.T) {
 
 func TestBuyHoldQuantity_ConfigFile(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T12:00:00Z
+
+backtest:
   starting_capital: 10000
   adverse_distance: 0.01000
+
 
 strategy:
   name: buy-and-hold
@@ -261,12 +264,15 @@ func TestBuyHoldQuantity_ExplicitZeroNeverFallsBackToDemo(t *testing.T) {
 	})
 	t.Run("config file", func(t *testing.T) {
 		configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T12:00:00Z
+
+backtest:
   adverse_distance: 0.01000
+
 
 strategy:
   name: buy-and-hold
