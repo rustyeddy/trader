@@ -1,3 +1,40 @@
 * TODO Testing
 
+** Verification commands
+
+=make check= is the one canonical local verification command.  It runs, in
+order, the same gates as CI:
+
+| Target             | Command                  | Catches                              |
+|--------------------+--------------------------+--------------------------------------|
+| =make tidy-check=  | =go mod tidy -diff=      | untidy =go.mod= / =go.sum=           |
+| =make fmt-check=   | =gofmt -l .=             | unformatted files                    |
+| =make vet=         | =go vet ./...=           | suspicious constructs                |
+| =make lint=        | pinned golangci-lint     | lint findings (CI enforces this)     |
+| =make test=        | =go test ./...=          | test failures                        |
+| =make race=        | =go test -race ./...=    | data races                           |
+
+CI (=.github/workflows/ci.yml=) runs each of these targets as a separate step
+so a failure names the gate; it must stay equivalent to =make check=.  Add new
+gates to the Makefile first, then to =check= and CI together.
+
+*** When to run what
+
+- Before pushing, and before saying work is done: run full =make check=.
+- While iterating, run the narrowest target that covers your change, for
+  example =go test ./path/to/pkg= or =make test=.  These are for feedback only
+  and never replace =make check= before a push.
+- Documentation-only changes need no Go checks, but say so in the PR.
+- There is no separate "quick" target: on a warm cache the whole of =make
+  check= takes about 15 seconds, so a subset would add a second command to
+  keep in sync without saving meaningful time.
+
+*** Recording results in handoffs
+
+In PR descriptions and handoff comments, record each command you ran, its
+exit status, and the relevant failure lines (not the whole log), e.g.
+=make check: exit 0= or =make lint: exit 2, errcheck at foo.go:12=.  List any
+gate you did not run and why; "tests pass" without a command is not evidence
+(see =docs/workflows/implementation-checklist.org=).
+
 

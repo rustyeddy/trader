@@ -17,7 +17,7 @@ Example: a historical-bar normalization change should inspect `marketdata`, `int
 - Write idiomatic Go. Every change must correspond to a GitHub issue.
 - Use a short-lived branch and open a PR; all changes require review before merge.
 - Keep changes focused; document architecture changes and do not silently contradict accepted ADRs.
-- Run `make check` before pushing, or explicitly disclose any checks you could not run. CI must pass.
+- Run `make check` (the canonical verification: tidy, fmt, vet, lint, test, race — same gates as CI) before pushing, or explicitly disclose any checks you could not run. Use narrower targets such as `go test ./pkg` only while iterating. Record each command and its exit status in the PR/handoff. See `docs/workflows/testing.org`. CI must pass.
 - Preserve deterministic behavior and paper-trading-by-default safety. Strategies emit intents, not broker orders; risk and execution remain separate.
 - See `CONTRIBUTING.org` for branch naming, testing, documentation, review, and Definition of Done. For multi-assistant handoffs and review roles, see `docs/workflows/ai-development.org`.
 

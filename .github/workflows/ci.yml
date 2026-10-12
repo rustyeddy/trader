@@ -17,12 +17,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Tidy
-        run: |
-          go mod tidy
-          git diff --exit-code -- go.mod
-          if test -e go.sum; then
-            git diff --exit-code -- go.sum
-          fi
+        run: make tidy-check
 
       - name: Format check
         run: make fmt-check
