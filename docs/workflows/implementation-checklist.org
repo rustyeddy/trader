@@ -110,12 +110,17 @@ handoffs"), whose scope is unchanged by this example.
       — evidence: CONTRIBUTING.org, AGENTS.md, README.md
 
 ### Tests
-- [ ] Tests added/updated: N/A, documentation only
-- Not run / not verified: make check not run (no code changed); CI ran on the PR.
+- [ ] Tests added/updated: N/A: documentation only, no behavior changed
+- [ ] Commands run and results: `make check` not run locally (docs only).
+      CI check `ci` on PR #498 head 3f5f65b: pass (run 38193275151, #801).
+- [ ] Race detector: N/A: no Go code or concurrency touched
+- [ ] Lint: N/A: no Go code changed (`make lint` not run)
+- Not run / not verified: `make check`, `go test -race`, `make lint`; all
+  skipped because only .org/.md files changed.
 
 ### Documentation
 - [x] Docs changed: docs/workflows/ai-development.org, CONTRIBUTING.org,
-      AGENTS.md, README.md
+      AGENTS.md, README.md, docs/plans/claude-gpt-copilot-pipeline-plan.org
 - [x] ADR: No durable decision: this is process documentation.
 
 ### Safety
@@ -129,5 +134,8 @@ handoffs"), whose scope is unchanged by this example.
 ### Risks and handoff
 - Open risks: the older automated-pipeline plan could be mistaken for policy;
   mitigated by a header marking it exploratory.
-- Branch @ commit: merged to main as cbeffde.
+- Branch @ commit: docs/492-ai-handoffs @ 3f5f65b; merged to main as cbeffde.
+- Changed files: the five docs listed above, plus the new
+  docs/workflows/ai-development.org.
+- Next step / who: none; merged and the branch deleted.
 #+END_EXAMPLE
