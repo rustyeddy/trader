@@ -30,4 +30,8 @@ Example: a historical-bar normalization change should inspect `marketdata`, `int
 
 - New or changed behavior requires tests, including edge and failure cases; use Go `testify`.
 - Target at least 85% coverage; exercise concurrency changes with the race detector.
-- See `docs/workflows/workflows.org` for workflow details. `docs/workflows/testing.org` is currently a placeholder.
+- See `docs/workflows/workflows.org` for workflow details. `docs/workflows/testing.org` documents the verification commands.
+
+## Reusable workflows
+
+The canonical implement-issue and review-pr procedures are in `docs/workflows/ai-skills.org`.

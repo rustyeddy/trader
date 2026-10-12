@@ -1,0 +1,130 @@
+#+TITLE: Reusable Agent Workflows
+#+STARTUP: showall
+
+Two reusable workflows, written once and provider-neutral, for the roles in
+=docs/workflows/ai-development.org=.  They add no orchestration: a person
+starts each one, and a human merges.  This document is the canonical source;
+any future tool-specific wrapper would only point here.
+
+* Scope
+
+- Exactly two workflows: *implement-issue* and *review-pr*.  Add a third only
+  after one of these has proved its value and the maintainer asks.
+- No multi-agent framework, no runtime LLM integration, no MCP servers.  Those
+  are deferred to a future milestone and are out of scope for this repository's
+  current process.
+
+* Workflow 1: implement-issue
+
+Input: an issue number.
+
+1. Read the issue and its acceptance criteria (=gh issue view N=).  If scope
+   or architecture is unclear, stop, label =needs-design=, and ask.
+2. Read =AGENTS.md= and =CONTRIBUTING.org=; inspect the affected packages and
+   tests; read only the relevant ADR sections.
+3. Create a branch =<type>/<N>-<short-description>= from =main=.
+4. Post or keep a plan using =docs/workflows/implementation-checklist.org=.
+5. Implement the smallest change that meets the criteria, with tests and docs.
+6. Verify per =docs/workflows/testing.org=: run =make check= before pushing
+   code changes; for documentation-only changes record the permitted skip and
+   the reason.  Record each command and its exit status, and never claim a
+   check passed that was not run.
+7. Push and open a PR that closes the issue, using the PR template and the
+   completed checklist.
+8. Post a handoff (=docs/workflows/ai-development.org=) and stop pushing while
+   review runs.  Reply to every review comment: with the fixing commit when you
+   change something, or with a reason or evidence when you decline a
+   suggestion or answer a question.  Push fixes and re-verify as in step 6.
+9. Do not merge; the maintainer merges.
+
+* Workflow 2: review-pr
+
+Input: a PR number.
+
+1. Read the PR description, the linked issue and its acceptance criteria, and
+   the diff (=gh pr diff N=).  Do not rely on the author's reasoning.
+2. Read only the ADR/architecture sections the diff touches.
+3. Check the CI result (=gh pr checks N=) and the evidence in the PR; optionally
+   run =make check= on the PR head and record the result.  The reviewer's own
+   verification follows =docs/workflows/testing.org= too.
+4. Apply =docs/workflows/ai-review-rubric.org=: label every finding blocker,
+   suggestion or question; cite its source; list what you did not verify.
+5. Post the review as PR comments.  Do not approve, merge, or push to the
+   branch.
+
+* ChatGPT and other chat assistants
+
+Chat assistants do not read this repository's tool-specific files, and the
+procedures above are written so they do not need to.
+
+- *With repository access* (a GitHub connector or a checkout): execute the
+  canonical steps above directly, including reading the issue or PR, checking
+  CI, and posting findings.  This is how most Trader PRs have been reviewed.
+- *Without repository access*: paste the inputs and apply the output by hand.
+  - Implement: give it the workflow text, =AGENTS.md=, =CONTRIBUTING.org=,
+    =docs/workflows/implementation-checklist.org=, the issue text with its
+    acceptance criteria, and the relevant files.  Apply its patch locally, run
+    the verification from step 6 yourself, and paste the real output back; do
+    not accept "this should pass".
+  - Review: give it the workflow text, =docs/workflows/ai-review-rubric.org=,
+    the PR description, the linked issue and its acceptance criteria, the diff
+    (=gh pr diff N=), and the CI result.  Post its findings yourself.
+
+* Tool wrappers
+
+None are included.  A wrapper is a few lines that tells one tool to follow the
+workflow above without restating it.  Add one only after the evaluation below
+shows, from real use, that it saves effort.
+
+| Tool        | Wrapper                              | Status                                 |
+|-------------+--------------------------------------+----------------------------------------|
+| Claude Code | =.claude/skills/<workflow>/SKILL.md= | not added: not yet piloted             |
+| Copilot     | =.github/prompts/*.prompt.md=        | not added: no evidence it saves effort |
+| ChatGPT     | none                                 | see the section above                  |
+
+Criteria for adding one: it has been used on at least one new issue or PR, the
+effort saved is recorded below, and it contains a pointer to this document and
+any role-specific rule, but no policy of its own (verification follows
+=docs/workflows/testing.org=).
+
+* Pilot evaluation
+
+*What was piloted.*  The implement-issue procedure was followed manually for
+issues #492, #493, #494 and #495 (PRs #498, #499, #500, #501), and review-pr
+was exercised on #490 (see the pilot in =docs/workflows/ai-review-rubric.org=).
+
+*Conclusion: not enough evidence yet for tool wrappers.*  The procedures
+themselves proved worth writing down; no wrapper has been tried on a real
+issue, so none is added.  Any benefit a wrapper might have is unmeasured.
+
+*Benefits observed (of the written procedure).*
+- The steps repeated almost unchanged across four issues: read issue, branch,
+  implement, verify, PR, handoff, reply to every review comment.  Writing them
+  down once removes re-explaining them each time.
+- Independent review (Copilot) plus maintainer review caught real defects in
+  the process documents themselves on all four PRs (for example inaccurate
+  evidence and unverified concurrency claims), so the "evidence not claims"
+  steps are worth keeping in the procedure.
+
+*Friction observed.*
+- Reviews on every PR needed one or more fix rounds; most findings were about
+  inconsistency between documents, so the procedure's real cost is keeping
+  linked documents in step.  A wrapper that restates policy would add another
+  place to drift; this PR's own first draft did so (its wrapper required
+  =make check= unconditionally, contradicting the docs-only exception).
+- CI takes about 3 to 4 minutes per push, which dominates the loop more than
+  any procedure step.
+- A self-review by the authoring assistant is not independent; the procedure
+  cannot fix that, only label it.
+
+*Maintenance cost.*
+- Canonical text: one file (this one), and it must stay consistent with
+  =testing.org=, =ai-development.org= and the rubric.
+- A future wrapper would add roughly one small file per workflow per tool; the
+  cost is only worth paying if it is measured to save effort.
+
+* Deferred
+
+Runtime LLM research, MCP integrations, and any multi-agent or scheduled
+orchestration are deferred to a future milestone and are not part of this
+workflow.

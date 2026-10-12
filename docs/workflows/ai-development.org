@@ -72,6 +72,12 @@ Reviewer, or one Implementer to another):
 - Next step for the recipient: <what is being asked>
 #+END_EXAMPLE
 
+* Reusable workflows
+
+=docs/workflows/ai-skills.org= holds the two canonical procedures
+(implement-issue, review-pr), the ChatGPT equivalent, and the evaluation of
+thin tool wrappers.
+
 * Review rubric
 
 The Reviewer uses =docs/workflows/ai-review-rubric.org=: findings are labeled
