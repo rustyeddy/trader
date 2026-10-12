@@ -92,7 +92,8 @@ head: =143aa59=.
 ** Copilot's findings, in rubric terms
 
 Copilot worked from the diff and the repository, not from the author's
-reasoning.  Its four findings, labeled as the rubric requires:
+reasoning.  Copilot did not use these labels; they were assigned afterwards to
+show how its four findings map onto the rubric:
 
 | Label   | Source                      | Finding                                            | Author response (head 143aa59)                      |
 |---------+-----------------------------+----------------------------------------------------+-----------------------------------------------------|
