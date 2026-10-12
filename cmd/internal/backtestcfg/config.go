@@ -9,12 +9,29 @@ import (
 	"github.com/rustyeddy/trader/num"
 )
 
+// Run kinds. kind is the top-level discriminator of a run configuration
+// document (issue #474, ADR-077): a backtest simulates trading with an
+// account and a position-sizing policy; a study runs a trading-free
+// strategy executable (a scanner) over market data.
+const (
+	KindBacktest = "backtest"
+	KindStudy    = "study"
+)
+
 // RunConfig is the typed configuration "trader backtest run" resolves
-// via --config: the backtest composition inputs this command already
-// accepts as individual flags, plus a generic strategy selector.
+// via --config (issue #474, ADR-077). The document separates what kind of
+// run it is (Kind), what market data it reads (Market), the mechanics
+// specific to that kind (Backtest or Study), and the strategy to run
+// (Strategy, for a backtest):
+//
+//	kind: study                  kind: backtest
+//	market: {...}                market: {...}
+//	study: {name, exec, config}  backtest: {starting_capital, ...}
+//	                             strategy: {...}
+//
 // config.Load applies its own defaults-then-file-then-environment-then-overrides
-// precedence; buildRunConfig below only places explicitly changed flags
-// into Overrides, so config-file values remain effective by default.
+// precedence; buildRunConfig only places explicitly changed flags into
+// Overrides, so config-file values remain effective by default.
 //
 // Interval is decoded as a plain string, not restricted by an enum
 // tag: parseInterval already normalizes case and reports a clear error
@@ -25,70 +42,47 @@ import (
 // strategies. An unsupported or misspelled name fails loudly rather than
 // silently selecting a different implementation.
 //
-// Model is the alternative to the backtest experiment inputs for a study
-// or scanner (issue #471): it names only the universe, span and account,
-// and omits the position-sizing policy (risk_fraction, adverse_distance)
-// a model that never trades has no use for. A config uses Model or the
-// backtest experiment keys, never needs both; Resolve folds Model into
-// Backtest so the rest of the run reads one shape.
+// A study carries no account or sizing keys: Resolve supplies the host's
+// internal account defaults, so a study never has to state values it does
+// not use. Mixing the two kinds' sections is rejected, never guessed at.
 type RunConfig struct {
+	Kind     string `config:"kind" flag:"kind" default:"backtest" enum:"backtest,study"`
+	Market   MarketSection
 	Backtest BacktestSection
+	Study    StudySection
 	Strategy StrategySection
-	Model    ModelSection
 }
 
-// ModelSection is the minimal config for a model (study/scanner) run
-// (issue #471). Every field is required once any is set. Symbols is a
-// comma-separated universe, like backtest.symbols. Data locations
-// (data_raw_root, data_store_root, provider) are infrastructure, not part
-// of the experiment, and stay under backtest.
-type ModelSection struct {
-	Symbols         string `config:"symbols" flag:"model-symbols"`
-	Interval        string `config:"interval" flag:"model-interval"`
-	From            string `config:"from" flag:"model-from"`
-	To              string `config:"to" flag:"model-to"`
-	Currency        string `config:"currency" flag:"model-currency"`
-	StartingCapital string `config:"starting_capital" flag:"model-starting-cash"`
-}
+// IsStudy reports whether the config is a study run, which trades nothing
+// and so has no backtest report worth printing (issue #489).
+func (c RunConfig) IsStudy() bool { return c.Kind == KindStudy }
 
-// IsModel reports whether the config is a model (study) run, which trades
-// nothing and so has no backtest report worth printing (issue #489).
-func (c RunConfig) IsModel() bool { return c.Model.active() }
-
-// active reports whether any model key is set.
-func (m ModelSection) active() bool { return m != (ModelSection{}) }
-
-// Resolve returns c with a model section folded into Backtest and the
-// remaining defaults applied, so callers never branch on the config's
-// kind. Interval, currency and starting capital carry no loader default
-// (that would make "unset" indistinguishable from "explicitly the
-// default"): an explicit backtest value, in practice a command-line flag
-// or environment variable, wins over the model's, the model's wins over
-// the default (H1, USD, 10000), and an invalid explicit value stays
-// visible to validation.
-func (c RunConfig) Resolve() RunConfig {
-	b := &c.Backtest
-	if c.Model.active() {
-		if b.Symbol == "" && b.Symbols == "" {
-			b.Symbols = c.Model.Symbols
-		}
-		b.From = firstNonEmpty(b.From, c.Model.From)
-		b.To = firstNonEmpty(b.To, c.Model.To)
-		b.Interval = firstNonEmpty(b.Interval, c.Model.Interval)
-		b.Currency = firstNonEmpty(b.Currency, c.Model.Currency)
-		b.StartingCapital = firstNonEmpty(b.StartingCapital, c.Model.StartingCapital)
-	}
-	b.Interval = firstNonEmpty(b.Interval, defaultInterval)
-	b.Currency = firstNonEmpty(b.Currency, defaultCurrency)
-	b.StartingCapital = firstNonEmpty(b.StartingCapital, defaultStartingCapital)
-	return c
-}
-
+// Internal account defaults a study never states (the host still needs an
+// account to run against) and a backtest's optional keys.
 const (
 	defaultInterval        = "H1"
 	defaultCurrency        = "USD"
 	defaultStartingCapital = "10000"
 )
+
+// Resolve returns c with the effective run settings filled in, so callers
+// never branch on the config's kind: a study's launch settings become the
+// strategy selection (study.exec -> strategy.exec, study.name ->
+// strategy.name), and the account and sizing defaults a kind does not
+// state are applied (interval H1, USD, 10000, ...). A zero risk_fraction or initial_margin_ratio is
+// treated as unset, since neither has a meaningful zero.
+func (c RunConfig) Resolve() RunConfig {
+	c.Market.Interval = firstNonEmpty(c.Market.Interval, defaultInterval)
+	b := &c.Backtest
+	b.Currency = firstNonEmpty(b.Currency, defaultCurrency)
+	b.StartingCapital = firstNonEmpty(b.StartingCapital, defaultStartingCapital)
+	if c.IsStudy() {
+		c.Strategy.Name = c.Study.Name
+		c.Strategy.Exec = c.Study.Exec
+		c.Strategy.Config = c.Study.Config
+	}
+	return c
+}
 
 func firstNonEmpty(a, b string) string {
 	if a != "" {
@@ -97,14 +91,39 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// LoadRunConfig loads a RunConfig with config.Load and resolves a model
-// section, the one entry point every composition root should use.
+// LoadRunConfig loads a RunConfig with config.Load: the one entry point
+// every composition root should use. Around the generic loader it
+//
+//   - rejects the pre-#474 grammar with a pointer to its replacement,
+//   - routes the existing --strategy-name/-exec/-config overrides to
+//     study.name/exec/config when the document is a study, so the CLI surface
+//     is the same for both kinds,
+//   - rejects any key of the wrong kind that was written in the file, the
+//     environment or the overrides, even when it equals the loader default,
+//   - and resolves the effective settings.
+//
+// A study whose study.config is omitted forwards the run file itself to the
+// executable, so a scanner can keep its settings in the same document.
 func LoadRunConfig(opts config.Options) (RunConfig, error) {
+	doc := readDocument(opts)
+	if err := rejectLegacyKeys(doc); err != nil {
+		return RunConfig{}, err
+	}
+	kind := effectiveKind(opts, doc)
+	if kind == KindStudy {
+		opts.Overrides = routeStudyOverrides(opts.Overrides)
+	}
 	cfg, err := config.Load[RunConfig](opts)
 	if err != nil {
 		return cfg, err
 	}
-	if !cfg.Model.active() && cfg.Backtest.AdverseDistance.IsZero() {
+	if err := checkSections(kind, presentKeys(opts, doc)); err != nil {
+		return cfg, err
+	}
+	if cfg.IsStudy() && cfg.Study.Config == "" {
+		cfg.Study.Config = opts.FilePath
+	}
+	if !cfg.IsStudy() && cfg.Backtest.AdverseDistance.IsZero() {
 		// Not in Validate: programmatic callers (tests, the service
 		// layer) build RunConfigs without a sizing policy.
 		return cfg, &config.Error{Fields: []*config.FieldError{{Path: "backtest.adverse_distance", Err: config.ErrRequired}}}
@@ -118,49 +137,46 @@ func missing(key string) error {
 	return fmt.Errorf("%s: %w", key, config.ErrRequired)
 }
 
-// validateModel checks a model config: all six keys present, an external
-// strategy to run (an in-process strategy sizes positions from
-// risk_fraction/adverse_distance, which a model config does not carry),
-// and the sizing keys absent.
-func (c RunConfig) validateModel() error {
-	m := c.Model
-	for _, f := range []struct{ key, val string }{
-		{"model.symbols", m.Symbols}, {"model.interval", m.Interval}, {"model.from", m.From},
-		{"model.to", m.To}, {"model.currency", m.Currency}, {"model.starting_capital", m.StartingCapital},
-	} {
-		if f.val == "" {
-			return missing(f.key)
-		}
-	}
-	if c.Strategy.Exec == "" {
-		return fmt.Errorf("model requires strategy.exec: a model run has no position-sizing policy for an in-process strategy")
-	}
-	if !c.Backtest.AdverseDistance.IsZero() {
-		return fmt.Errorf("backtest.adverse_distance does not apply to a model run; remove it")
-	}
-	return nil
+// MarketSection answers "what market data does this run operate on?"
+// (issue #474). It is shared by every kind, so a backtest and a study never
+// keep parallel copies of the universe, span or data locations. Symbols is
+// a comma-separated universe, a scalar because the config loader has no
+// list type; explicit --symbol flags replace it.
+type MarketSection struct {
+	Symbols  string `config:"symbols" flag:"symbols"`
+	Interval string `config:"interval" flag:"interval"`
+	From     string `config:"from" flag:"from"`
+	To       string `config:"to" flag:"to"`
+	Provider string `config:"provider" flag:"provider" default:"oanda"`
+
+	// DataStoreRoot is the canonical data store's persistent home
+	// (issue #268): unlike every other field here, its default is not
+	// a research-neutral placeholder but a real, opinionated local
+	// path — /srv/trading/data/canonical, chosen to sit next to the
+	// raw archive at /srv/trading/data/raw/oanda and kept distinct
+	// from the legacy trader-first-try system's own
+	// /srv/trading/data/candles cache, which this default must never
+	// collide with. An explicit --data-store-root "" (or
+	// TRADER_MARKET_DATA_STORE_ROOT="") still opts back into a
+	// fresh, ephemeral temporary directory per run (runBacktest's own
+	// storeRoot resolution) — this is what every test that must not
+	// share state across runs relies on, so this default only ever
+	// takes effect when nothing more specific overrides it.
+	DataStoreRoot string `config:"data_store_root" flag:"data-store-root" default:"/srv/trading/data/canonical"`
+	DataRawRoot   string `config:"data_raw_root" flag:"data-raw-root"`
 }
 
-// BacktestSection mirrors runFlags' own scalar backtest inputs.
-// StartingCapital stays a plain string, combined with Currency via
-// num.ParseMoney in runBacktest — num.Money's own TextUnmarshaler
-// expects its single-field "<amount> <currency>" form (num/encoding.go),
-// not the two separate YAML keys #247's own candidate config uses.
+// BacktestSection is the simulation's account and sizing mechanics: the
+// settings only a backtest has (issue #474). A study that sets any of them
+// to something other than the host's internal default (USD, 10000, 0.01,
+// 1; adverse_distance has none) is an ambiguous mixed document and is
+// rejected. The defaults are exempt because Resolve fills them in for a
+// study, and run validates the resolved config. StartingCapital stays a plain string, combined
+// with Currency via num.ParseMoney in runBacktest — num.Money's own
+// TextUnmarshaler expects its single-field "<amount> <currency>" form
+// (num/encoding.go), not the two separate YAML keys #247's candidate config
+// uses.
 type BacktestSection struct {
-	// Symbol is deliberately not required:"true" here: it is validated
-	// in code (buildInstrumentSymbols in run.go), not by config.Load,
-	// because a multi-instrument run (repeated --symbol, issue #224)
-	// supplies its instruments outside this single-string field
-	// entirely — see buildRunConfig's own doc comment.
-	Symbol string `config:"symbol" flag:"symbol"`
-	// Symbols is a multi-instrument run's universe as a comma-separated
-	// list (issue #469), for example "EURUSD,GBPUSD". It is a scalar
-	// because the config loader has no list type; explicit --symbol flags
-	// override it, and setting it together with Symbol is an error.
-	Symbols         string    `config:"symbols" flag:"symbols"`
-	Interval        string    `config:"interval" flag:"interval"`
-	From            string    `config:"from" flag:"from"`
-	To              string    `config:"to" flag:"to"`
 	Currency        string    `config:"currency" flag:"currency"`
 	StartingCapital string    `config:"starting_capital" flag:"starting-cash"`
 	RiskFraction    num.Rate  `config:"risk_fraction" flag:"risk-fraction" default:"0.01"`
@@ -173,23 +189,18 @@ type BacktestSection struct {
 	// account_initial_margin risk rule and the simulated account's
 	// fill-time margin model — they are never configured separately.
 	InitialMarginRatio num.Rate `config:"initial_margin_ratio" flag:"initial-margin-ratio" default:"1"`
+}
 
-	// DataStoreRoot is the canonical data store's persistent home
-	// (issue #268): unlike every other field here, its default is not
-	// a research-neutral placeholder but a real, opinionated local
-	// path — /srv/trading/data/canonical, chosen to sit next to the
-	// raw archive at /srv/trading/data/raw/oanda and kept distinct
-	// from the legacy trader-first-try system's own
-	// /srv/trading/data/candles cache, which this default must never
-	// collide with. An explicit --data-store-root "" (or
-	// TRADER_BACKTEST_DATA_STORE_ROOT="") still opts back into a
-	// fresh, ephemeral temporary directory per run (runBacktest's own
-	// storeRoot resolution) — this is what every test that must not
-	// share state across runs relies on, so this default only ever
-	// takes effect when nothing more specific overrides it.
-	DataStoreRoot string `config:"data_store_root" flag:"data-store-root" default:"/srv/trading/data/canonical"`
-	DataRawRoot   string `config:"data_raw_root" flag:"data-raw-root"`
-	Provider      string `config:"provider" flag:"provider" default:"oanda"`
+// StudySection is the launch identity of a study (issue #474): the
+// out-of-tree executable to run, never its parameters. Trader does not
+// parse those; they stay owned by the executable. Config is the path
+// forwarded to it as StrategyConfigPathEnv and defaults to the run file
+// itself, so a scanner may keep its settings in its own section of the same
+// document.
+type StudySection struct {
+	Name   string `config:"name" flag:"study-name"`
+	Exec   string `config:"exec" flag:"study-exec"`
+	Config string `config:"config" flag:"study-config"`
 }
 
 // StrategySection is the EMA crossover strategy's own configuration —
@@ -284,27 +295,26 @@ func (s StrategySection) parseBuyHold(from time.Time) (buyHoldSettings, error) {
 // Validate implements config's validator hook, checked after every
 // source has been applied and every required field is present
 // (config/load.go's validateDestination). It covers exactly what plain
-// field decoding cannot: relationships between fields.
+// field decoding cannot: relationships between fields, and the rule that a
+// document is exactly one kind (issue #474): a section belonging to the
+// other kind is an error, never silently ignored.
 func (c RunConfig) Validate() error {
-	if c.Model.active() {
-		if err := c.validateModel(); err != nil {
+	switch c.Kind {
+	case KindStudy:
+		if err := c.validateStudy(); err != nil {
 			return err
 		}
-	} else {
-		// required:"true" cannot express "required unless a model section
-		// supplies them", so the backtest keys are checked here (and
-		// backtest.adverse_distance in LoadRunConfig).
-		if c.Backtest.From == "" {
-			return missing("backtest.from")
-		}
-		if c.Backtest.To == "" {
-			return missing("backtest.to")
-		}
+	case KindBacktest, "": // empty: a programmatically built RunConfig, a backtest
+	default:
+		return fmt.Errorf("kind %q is not supported; use %q or %q", c.Kind, KindBacktest, KindStudy)
+	}
+	if c.Market.From == "" {
+		return missing("market.from")
+	}
+	if c.Market.To == "" {
+		return missing("market.to")
 	}
 	c = c.Resolve()
-	if c.Backtest.Symbol != "" && c.Backtest.Symbols != "" {
-		return fmt.Errorf("backtest.symbol and backtest.symbols are mutually exclusive; use symbols for a multi-instrument run")
-	}
 	if c.Strategy.Config != "" && c.Strategy.Exec == "" {
 		return fmt.Errorf("strategy.config requires strategy.exec")
 	}
@@ -313,7 +323,7 @@ func (c RunConfig) Validate() error {
 		// An external executable supplies its own strategy; the
 		// in-process registry and its parameters do not apply.
 	case c.Strategy.Name == demoStrategyName:
-		if err := c.Strategy.validateBuyHold(c.Backtest.From); err != nil {
+		if err := c.Strategy.validateBuyHold(c.Market.From); err != nil {
 			return err
 		}
 	case c.Strategy.Name == emacross.Name:
@@ -329,26 +339,40 @@ func (c RunConfig) Validate() error {
 			c.Strategy.Name, demoStrategyName, emacross.Name)
 	}
 
-	from, err := parseDate(c.Backtest.From)
+	from, err := parseDate(c.Market.From)
 	if err != nil {
-		return fmt.Errorf("backtest.from: %w", err)
+		return fmt.Errorf("market.from: %w", err)
 	}
-	to, err := parseDate(c.Backtest.To)
+	to, err := parseDate(c.Market.To)
 	if err != nil {
-		return fmt.Errorf("backtest.to: %w", err)
+		return fmt.Errorf("market.to: %w", err)
 	}
 	if !to.After(from) {
-		return fmt.Errorf("backtest.to (%s) must be after backtest.from (%s)", c.Backtest.To, c.Backtest.From)
+		return fmt.Errorf("market.to (%s) must be after market.from (%s)", c.Market.To, c.Market.From)
 	}
 
-	if _, err := parseInterval(c.Backtest.Interval); err != nil {
-		return fmt.Errorf("backtest.interval: %w", err)
+	if _, err := parseInterval(c.Market.Interval); err != nil {
+		return fmt.Errorf("market.interval: %w", err)
 	}
 
 	if c.Backtest.InitialMarginRatio.Sign() <= 0 {
 		return fmt.Errorf("backtest.initial_margin_ratio must be positive, got %s", c.Backtest.InitialMarginRatio)
 	}
 
+	return nil
+}
+
+// validateStudy checks the values a kind: study document must carry. Keys
+// belonging to the other kind are rejected by checkSections, which sees which
+// keys were actually written; Validate only sees effective values, in which
+// an explicit default is indistinguishable from an absent key.
+func (c RunConfig) validateStudy() error {
+	if c.Study.Name == "" {
+		return missing("study.name")
+	}
+	if c.Study.Exec == "" {
+		return missing("study.exec")
+	}
 	return nil
 }
 

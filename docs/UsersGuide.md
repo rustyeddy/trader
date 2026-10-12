@@ -341,9 +341,9 @@ There are three strategy paths:
 | `--adverse-distance` | —                               | adverse price distance for sizing, **required** (or via `--config`)                    |
 | `--initial-margin-ratio` | `1`                         | equity required per unit of gross notional; `1` unlevered, `0.5` = 2×, `0.25` = 4× (see below) |
 | `--warmup-bars`      | `0`                             | warm-up bars before the **demo** strategy may trade (ignored with `--config`)          |
-| `--data-raw-root`    | —                               | raw archive root (required, or supplied by `backtest.data_raw_root`)                  |
+| `--data-raw-root`    | —                               | raw archive root (required, or supplied by `market.data_raw_root`)                    |
 | `--data-store-root`  | `/srv/trading/data/canonical`\* | canonical data store root; an explicit empty value opts into a fresh temp dir per run  |
-| `--provider`         | `oanda`                         | market data provider name; `backtest.provider` in `--config` may supply it            |
+| `--provider`         | `oanda`                         | market data provider name; `market.provider` in `--config` may supply it              |
 | `--config`           | —                               | YAML file supplying backtest/strategy parameters (see below)                           |
 | `--strategy-name`    | —                               | in-process strategy name selected by `--config`                                      |
 | `--fast-period`      | —                               | EMA fast period for `ema-cross`                                                       |
@@ -376,20 +376,29 @@ trader backtest run \
 
 #### `--config` YAML reference
 
+A config is one document of one `kind` (issue #474, ADR-077): `kind:
+backtest` (the default) simulates trading, and `kind: study` runs a
+trading-free executable (see [Study configs](#study-configs-kind-study)).
+Both describe their data in a shared `market:` section.
+
 ```yaml
-backtest:
-  symbol: EURUSD              # required
-  interval: H1                # default H1
-  from: 2015-01-01T00:00:00Z  # required
-  to: 2025-01-01T00:00:00Z    # required
+kind: backtest                 # backtest (default) or study
+
+market:                        # what market data the run reads
+  symbols: EURUSD              # comma-separated universe; required
+  interval: H1                 # default H1
+  from: 2015-01-01T00:00:00Z   # required
+  to: 2025-01-01T00:00:00Z     # required
+  provider: oanda              # default oanda; e.g. stooq
+  data_raw_root: /path/to/raw/oanda    # required
+  data_store_root: /path/to/canonical  # default /srv/trading/data/canonical
+
+backtest:                      # simulation account and sizing only
   currency: USD                # default USD
   starting_capital: 10000      # default 10000
   risk_fraction: 0.01          # default 0.01
   adverse_distance: 0.0050     # required
   initial_margin_ratio: 1      # default 1 (unlevered); must be positive
-  data_raw_root: /path/to/raw/oanda  # required
-  data_store_root: /path/to/canonical  # default /srv/trading/data/canonical
-  provider: oanda                    # default oanda; e.g. stooq
 
 strategy:
   name: buy-and-hold            # registered in-process strategy; also supports ema-cross
@@ -401,10 +410,19 @@ strategy:
   sell_date: 2024-06-28        # quantity mode; optional
 ```
 
+The pre-#474 grammar (market keys under `backtest:`, and the `model:`
+section) is not accepted: a document that uses it fails with a message naming
+the key's new home. To migrate, move `symbol`/`symbols`, `interval`, `from`,
+`to`, `provider`, `data_raw_root` and `data_store_root` from `backtest:` into
+`market:` (a single `symbol: X` becomes `symbols: X`), and turn a `model:`
+section into `kind: study` (below). Environment variables follow the section:
+`TRADER_BACKTEST_FROM` is now `TRADER_MARKET_FROM`.
+
 Precedence for each of the fields shown above (the ones with a `config:`
 tag backing them — see [Environment Variables](#environment-variables))
-is: explicit CLI flag > `--config` file value > `TRADER_BACKTEST_*`/
-`TRADER_STRATEGY_*` environment variable > the default shown above.
+is: explicit CLI flag > `TRADER_*` environment variable (`TRADER_MARKET_*`,
+`TRADER_BACKTEST_*`, `TRADER_STUDY_*`, `TRADER_STRATEGY_*`, `TRADER_KIND`) >
+`--config` file value > the default shown above.
 `--journal`, `--format`, and `--warmup-bars` are plain CLI flags with no
 `--config`/environment-variable backing at all — see the flag table above
 for which is which. `--output-dir` is shared with `show` and `trader-mcp`:
@@ -488,9 +506,9 @@ behavior into the Buy & Hold baseline:
 
 | Setting | Meaning |
 |---|---|
-| instrument | the run's single `--symbol` / `backtest.symbol` |
+| instrument | the run's single `--symbol` / `market.symbols` |
 | `quantity` | exactly how much to buy; never sized or resized. Must be positive: an explicit `0` is an error, not a fallback to the demo |
-| `buy_date` | buy on the first bar at or after it (default: `backtest.from`) |
+| `buy_date` | buy on the first bar at or after it (default: `market.from`) |
 | `sell_date` | optional: exit on the first bar at or after it, once the position is held; must be after the (effective) buy date |
 
 - The strategy decides *what and when*. Margin decides whether that
@@ -570,23 +588,24 @@ strategy built on it, is architecturally barred from importing Trader's
 
 `--config` may carry an external run in full (issue #469): `strategy.exec`
 names the executable, `strategy.config` the file forwarded to it, and
-`backtest.symbols` the universe as a comma-separated list (the config
-loader has no list type; a folded `>-` scalar keeps a long list readable).
-`backtest.symbol` and `backtest.symbols` are mutually exclusive, and an
-explicit `--symbol` replaces the config's universe. With `strategy.exec`
-set, `strategy.name` is not checked against the in-process registry.
+`market.symbols` the universe as a comma-separated list (the config loader
+has no list type; a folded `>-` scalar keeps a long list readable). An
+explicit `--symbol` replaces the config's universe. With `strategy.exec` set,
+`strategy.name` is not checked against the in-process registry.
 `--strategy-args` remains flag-only. Relative paths resolve against the
 working directory, not the config file.
 
 ```yaml
-backtest:
+kind: backtest
+market:
   interval: D1
   from: 2020-01-01T00:00:00Z
   to: 2024-12-31T00:00:00Z
-  adverse_distance: 0.01
   data_raw_root: /path/to/raw/oanda
   symbols: >-
     EURUSD, GBPUSD, AUDUSD
+backtest:
+  adverse_distance: 0.01
 strategy:
   exec: ./my-scanner
   config: my-scanner.yml
@@ -596,39 +615,54 @@ strategy:
 trader backtest run --config run.yml
 ```
 
-#### Model (study/scanner) configs
+#### Study configs (`kind: study`)
 
-A study or scanner that never trades has no use for position sizing, yet a
-`backtest:` config must carry `adverse_distance`. For that case (issue
-#471) use a `model:` section instead; it needs only these keys, all
-required, and `strategy.exec` is required with it:
+A study or scanner never trades, so it has no use for an account or position
+sizing. A `kind: study` document states only its market and the executable to
+launch (issues #471 and #474):
 
 ```yaml
-model:
+kind: study
+
+market:
   symbols: >-
     EURUSD, GBPUSD, AUDUSD
   interval: D1
+  provider: oanda
   from: 2020-01-01T00:00:00Z
   to: 2024-12-31T00:00:00Z
-  currency: USD
-  starting_capital: 10000
-backtest:             # optional: data locations only
   data_raw_root: /path/to/raw/oanda
-strategy:
+
+study:
+  name: my-scanner
   exec: ./my-scanner
+  config: my-scanner.yml    # optional: defaults to this file itself
 ```
 
-A model run does not print the backtest report (it trades nothing, so
+`study.name` and `study.exec` are required. Trader does not interpret the
+study's own parameters: they belong to the executable, which receives
+`study.config` (by default the run file itself, so a scanner can keep its
+settings in its own section of the same document, such as `scanner:`) as
+`TRADER_STRATEGY_CONFIG`. Unknown top-level sections are ignored by Trader.
+
+A study run does not print the backtest report (it trades nothing, so
 performance and trade statistics would be all zeros). It prints a short
 study summary (strategy, run id, span, interval, instrument count and the
 number of signals the strategy emitted); `--format json` prints the same
 fields as JSON. The signals themselves are journaled with `--journal PATH`.
 
-`backtest.adverse_distance` is rejected beside a `model:` section, and a
-model run has no sizing policy, so a strategy that emits an intent fails at
-sizing. Explicit command-line flags (`--from`, `--symbol`, ...) still
-override the model's values. A config without `model:` keeps requiring
-`backtest.from`, `backtest.to` and `backtest.adverse_distance`.
+A document is exactly one kind, and mixing is an error rather than a guess.
+The check is by presence: any key of the other kind written in the file, the
+environment or the flags is rejected, even when it equals the default
+(`backtest.currency: USD` beside `kind: study` is an error). Beside `kind:
+study`, `backtest.*` and every `strategy.*` key are rejected (`strategy.exec`
+and `strategy.config` with a pointer to `study.exec`/`study.config`); beside
+`kind: backtest`, any `study.*` key is. For a study, `--strategy-exec`,
+`--strategy-config` and `--strategy-name` override `study.exec`,
+`study.config` and `study.name` (there is no such alias for the environment:
+use `TRADER_STUDY_EXEC` and friends). A study run has no sizing policy, so a
+strategy that emits an intent fails at sizing. Explicit command-line flags
+(`--from`, `--symbol`, ...) still override the market values.
 
 Because `trader` forwards `strategy.config` as `TRADER_STRATEGY_CONFIG`, a
 strategy can often read the same file it was launched with and need no
@@ -843,13 +877,14 @@ config path, uppercased with `.` replaced by `_` — see the
 Concretely, per command:
 
 - **`trader backtest run`** — only the fields shown in the `--config`
-  YAML reference above are env-backed: `TRADER_BACKTEST_SYMBOL`,
-  `_INTERVAL`, `_FROM`, `_TO`, `_CURRENCY`, `_STARTING_CAPITAL`,
-  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_INITIAL_MARGIN_RATIO`, `_DATA_STORE_ROOT`, `_DATA_RAW_ROOT`, and
-  `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
+  YAML reference above are env-backed: `TRADER_KIND`,
+  `TRADER_MARKET_SYMBOLS`, `_INTERVAL`, `_FROM`, `_TO`, `_PROVIDER`, `_DATA_STORE_ROOT`,
+  `_DATA_RAW_ROOT`, `TRADER_BACKTEST_CURRENCY`, `_STARTING_CAPITAL`,
+  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_INITIAL_MARGIN_RATIO`,
+  `TRADER_STUDY_NAME`, `_EXEC`, `_CONFIG`, and `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
   `_ALLOWED_SIDE`, `_QUANTITY`, `_BUY_DATE`, `_SELL_DATE`, plus
   `TRADER_BACKTEST_OUTPUT_DIR` (shared with `show` and `trader-mcp`).
-  `--provider`, `--journal`, `--format`, and `--warmup-bars` are **not**
+  `--journal`, `--format`, and `--warmup-bars` are **not**
   env-backed — flag only.
 - **`trader data`** (all subcommands) — only the parent command's
   persistent flags are env-backed: `TRADER_STORE_ROOT`,

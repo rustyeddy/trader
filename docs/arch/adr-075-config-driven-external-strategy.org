@@ -5,7 +5,9 @@
 
 Accepted. Issue #469. Extends ADR-062 (Strategy Protocol v1) launch
 mechanics and the =backtest run --config= precedence rules; no protocol
-invariant changes.
+invariant changes. The config key names below (=backtest.symbols= and the
+=model:= section) are superseded by ADR-077: market keys now live under
+=market:= and a model run is =kind: study=.
 
 * Context
 

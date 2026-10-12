@@ -279,27 +279,38 @@ func TestVerticalSlice_RunWithStrategyExec_ProcessCrashReportedAsFailure(t *test
 }
 
 // writeExternalConfig writes a backtest YAML config for the flip-flop
-// fixture, with extra lines appended verbatim, and returns its path.
+// fixture and returns its path. extra is appended verbatim: its leading
+// indented lines are extra market keys, and anything from its first
+// unindented line on (for example a strategy: section) follows the
+// backtest section.
 func writeExternalConfig(t *testing.T, extra string) string {
 	t.Helper()
-	body := `backtest:
+	var market strings.Builder
+	rest := extra
+	for strings.HasPrefix(rest, " ") {
+		line, after, _ := strings.Cut(rest, "\n")
+		market.WriteString(line + "\n")
+		rest = after
+	}
+	body := `market:
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+  data_raw_root: testdata/raw/oanda
+` + market.String() + `backtest:
   currency: USD
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
   initial_margin_ratio: 0.25
-  data_raw_root: testdata/raw/oanda
-` + extra
+` + rest
 	path := filepath.Join(t.TempDir(), "run.yml")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 	return path
 }
 
 // TestRun_ExternalStrategyDrivenEntirelyFromConfig is issue #469's core
-// acceptance path: strategy.exec and backtest.symbols in --config alone
+// acceptance path: strategy.exec and market.symbols in --config alone
 // launch the external strategy and run it, with no other flag naming the
 // executable or the universe.
 func TestRun_ExternalStrategyDrivenEntirelyFromConfig(t *testing.T) {
@@ -340,7 +351,7 @@ func TestRun_StrategyExecFlagOverridesConfig(t *testing.T) {
 }
 
 // TestRun_ConfigSymbolsIsOverriddenBySymbolFlag proves explicit --symbol
-// flags win over backtest.symbols: the config names a pair with no
+// flags win over market.symbols: the config names a pair with no
 // fixture data, the flag names one that has it.
 func TestRun_ConfigSymbolsIsOverriddenBySymbolFlag(t *testing.T) {
 	cfgPath := writeExternalConfig(t, "  symbols: NOSUCHPAIR\nstrategy:\n  exec: "+flipFlopPath+"\n")
@@ -363,12 +374,11 @@ func TestRun_ConfigInvalidCombinationsRejected(t *testing.T) {
 		args  []string
 		want  string
 	}{
-		{"symbol and symbols together", "  symbol: EURUSD\n  symbols: EURUSD,GBPUSD\n", nil, "mutually exclusive"},
 		{"strategy.config without exec", "  symbols: EURUSD\nstrategy:\n  config: x.yml\n", nil, "strategy.config requires strategy.exec"},
 		{"strategy-args without any exec", "  symbols: EURUSD\n", []string{"--strategy-args", "--v"}, "--strategy-args requires"},
 		{"strategy-config flag without any exec", "  symbols: EURUSD\n", []string{"--strategy-config", "x.yml"}, "strategy.config requires strategy.exec"},
 		{"multi-symbol universe in YAML with an in-process strategy", "  symbols: EURUSD,GBPUSD\n", nil, "single-instrument experiment"},
-		{"multi --symbol with an in-process config", "  symbol: EURUSD\n", []string{"--symbol", "EURUSD", "--symbol", "GBPUSD"}, "single-instrument experiment"},
+		{"multi --symbol with an in-process config", "  symbols: EURUSD\n", []string{"--symbol", "EURUSD", "--symbol", "GBPUSD"}, "single-instrument experiment"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -448,25 +458,24 @@ func TestRun_StrategyConfigWithoutStrategyExecRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "--strategy-exec")
 }
 
-// TestRun_ModelConfigDrivesExternalStrategy is issue #471's vertical
-// slice: a config with only a model section (no risk_fraction or
-// adverse_distance) plus strategy.exec loads, launches the strategy and
+// TestRun_StudyConfigDrivesExternalStrategy is issue #474's vertical
+// slice (formerly #471's model): a kind: study config (no risk_fraction or
+// adverse_distance) with study.exec loads, launches the strategy and
 // replays the universe from the model's own span. The flip-flop fixture
 // trades, and a model carries no position-sizing policy, so the run ends
 // at sizing: a model is meant for a study that emits no intents.
-func TestRun_ModelConfigDrivesExternalStrategy(t *testing.T) {
-	body := `model:
+func TestRun_StudyConfigDrivesExternalStrategy(t *testing.T) {
+	body := `kind: study
+market:
   symbols: EURUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
-  currency: USD
-  starting_capital: 10000
-backtest:
   data_raw_root: testdata/raw/oanda
-strategy:
+study:
+  name: flip-flop
   exec: ` + flipFlopPath + "\n"
-	path := filepath.Join(t.TempDir(), "model.yml")
+	path := filepath.Join(t.TempDir(), "study.yml")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 
 	runCmd := cmdbacktest.New()
@@ -479,21 +488,20 @@ strategy:
 	err := runCmd.Execute()
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "stop distance must be positive",
-		"the strategy must launch and reach sizing, proving the model span and universe were applied")
+		"the strategy must launch and reach sizing, proving the study span and universe were applied")
 }
 
 func studyConfig(t *testing.T) string {
 	t.Helper()
-	body := `model:
+	body := `kind: study
+market:
   symbols: EURUSD,GBPUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
-  currency: USD
-  starting_capital: 10000
-backtest:
   data_raw_root: testdata/raw/oanda
-strategy:
+study:
+  name: study-scanner
   exec: ` + studyScannerPath + "\n"
 	path := filepath.Join(t.TempDir(), "study.yml")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
@@ -513,10 +521,10 @@ func runStudy(t *testing.T, extra ...string) string {
 	return out.String()
 }
 
-// TestRun_ModelRunPrintsAStudySummaryNotABacktestReport covers the model
+// TestRun_StudyRunPrintsAStudySummaryNotABacktestReport covers the study
 // branch of runBacktest (issue #489): the summary reports the signals the
 // strategy emitted and none of the backtest report's trade fields appear.
-func TestRun_ModelRunPrintsAStudySummaryNotABacktestReport(t *testing.T) {
+func TestRun_StudyRunPrintsAStudySummaryNotABacktestReport(t *testing.T) {
 	journalPath := filepath.Join(t.TempDir(), "signals.jsonl")
 	out := runStudy(t, "--journal", journalPath)
 
@@ -536,13 +544,13 @@ func TestRun_ModelRunPrintsAStudySummaryNotABacktestReport(t *testing.T) {
 	assert.Contains(t, out, fmt.Sprintf("Signals:      %d (journaled", journaled))
 }
 
-func TestRun_ModelRunWithoutAJournalStillCountsSignals(t *testing.T) {
+func TestRun_StudyRunWithoutAJournalStillCountsSignals(t *testing.T) {
 	out := runStudy(t)
 	assert.Contains(t, out, "pass --journal PATH to keep them")
 	assert.NotContains(t, out, "Signals:      0 ")
 }
 
-func TestRun_ModelRunJSONAndOrg(t *testing.T) {
+func TestRun_StudyRunJSONAndOrg(t *testing.T) {
 	var doc struct {
 		Strategy string `json:"strategy"`
 		Signals  int    `json:"signals"`
@@ -553,4 +561,46 @@ func TestRun_ModelRunJSONAndOrg(t *testing.T) {
 
 	org := runStudy(t, "--format", "org")
 	assert.True(t, strings.HasPrefix(org, "#+TITLE: Study: study-scanner"), org)
+}
+
+// TestRun_StudyLaunchIdentityIsOverriddenByTheStrategyFlags covers issue
+// #474's flags-over-file contract for studies: the existing --strategy-exec
+// (and -name/-config) flags override study.exec (and study.name/config).
+// The file names the trading flip-flop fixture, which would fail at sizing in
+// a study; the flag swaps in the trading-free scanner.
+func TestRun_StudyLaunchIdentityIsOverriddenByTheStrategyFlags(t *testing.T) {
+	body := `kind: study
+market:
+  symbols: EURUSD,GBPUSD
+  interval: H1
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  data_raw_root: testdata/raw/oanda
+study:
+  name: from-file
+  exec: ` + flipFlopPath + "\n"
+	path := filepath.Join(t.TempDir(), "study.yml")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+
+	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
+	runCmd.SetArgs([]string{
+		"run", "--config", path, "--strategy-exec", studyScannerPath,
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+	})
+	require.NoError(t, runCmd.Execute(), out.String())
+	assert.Contains(t, out.String(), "Study: study-scanner", "the flag's executable ran, not the file's")
+	assert.NotContains(t, out.String(), "Signals:      0 ")
+}
+
+func TestRun_StudyRejectsInProcessStrategyFlags(t *testing.T) {
+	runCmd := cmdbacktest.New()
+	runCmd.SetOut(&bytes.Buffer{})
+	runCmd.SilenceUsage = true
+	runCmd.SetArgs([]string{
+		"run", "--config", studyConfig(t), "--fast-period", "5",
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+	})
+	require.ErrorContains(t, runCmd.Execute(), "strategy.fast_period does not apply to kind: study")
 }

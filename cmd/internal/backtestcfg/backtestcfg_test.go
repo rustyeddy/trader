@@ -51,10 +51,12 @@ func runRequest(t *testing.T, storeRoot string, prepare bool) Request {
 	require.NoError(t, err)
 	return Request{
 		Config: RunConfig{
+			Market: MarketSection{
+				Interval: "H1", From: "2024-01-08T00:00:00Z", To: "2024-01-08T04:00:00Z", Provider: "oanda",
+			},
 			Backtest: BacktestSection{
-				Interval: "H1", From: "2024-01-08T00:00:00Z", To: "2024-01-08T04:00:00Z",
 				Currency: "USD", StartingCapital: "10000", RiskFraction: num.MustParseRate("0.01"),
-				AdverseDistance: num.MustParsePrice("0.01"), InitialMarginRatio: num.MustParseRate("1"), Provider: "oanda",
+				AdverseDistance: num.MustParsePrice("0.01"), InitialMarginRatio: num.MustParseRate("1"),
 			},
 			Strategy: StrategySection{Name: demoStrategyName},
 		},

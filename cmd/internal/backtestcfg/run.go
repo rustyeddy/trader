@@ -66,7 +66,7 @@ type Request struct {
 	// External, if set, runs an out-of-tree strategy executable instead
 	// of an in-process one (ADR-062/ADR-063).
 	External *ExternalStrategy
-	// Data is the market data the run reads, for Config.Backtest.Provider.
+	// Data is the market data the run reads, for Config.Market.Provider.
 	Data marketdatacfg.Bundle
 	// PrepareData builds missing or stale canonical data before the run.
 	// Without it, data that is not all current fails the run with
@@ -122,11 +122,11 @@ func run(ctx context.Context, req Request) (svcbacktest.RunResponse, error) {
 		return svcbacktest.RunResponse{}, fmt.Errorf("backtestcfg: market data is not configured")
 	}
 
-	interval, err := svcmarketdata.ParseInterval(cfg.Backtest.Interval)
+	interval, err := svcmarketdata.ParseInterval(cfg.Market.Interval)
 	if err != nil {
 		return svcbacktest.RunResponse{}, invalid(err)
 	}
-	span, err := svcmarketdata.ParseRange(cfg.Backtest.From, cfg.Backtest.To)
+	span, err := svcmarketdata.ParseRange(cfg.Market.From, cfg.Market.To)
 	if err != nil {
 		return svcbacktest.RunResponse{}, invalid(fmt.Errorf("invalid backtest.from/backtest.to range: %w", err))
 	}

@@ -34,16 +34,19 @@ func writeConfigFile(t *testing.T, contents string) string {
 // individual --symbol/--from/--to/... flags this command also accepts.
 func TestRunCLI_ConfigFileDrivesFullBacktest(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+
+backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 `)
 
 	outputDir := t.TempDir()
@@ -71,16 +74,19 @@ backtest:
 // actually honored.
 func TestRunCLI_ExplicitFlagBeatsConfigFile(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+
+backtest:
   starting_capital: 1
   risk_fraction: 0.01
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 `)
 
 	outputDir := t.TempDir()
@@ -120,13 +126,16 @@ backtest:
 // touched, not from some unrelated data-access error.
 func TestRunCLI_ConfigFileValidationFailsBeforeRun(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+
+backtest:
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 
 strategy:
   name: ema-cross
@@ -151,12 +160,15 @@ strategy:
 // silently using only the first --symbol or only the config's symbol.
 func TestRunCLI_MultiSymbolWithConfigRejected(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
+market:
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+
+backtest:
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 `)
 
 	runCmd := cmdbacktest.New()
@@ -183,16 +195,19 @@ backtest:
 // is what distinguishes this from a wiring smoke test.
 func TestRunCLI_ConfigDrivesRealEMACrossoverStrategy(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-03-04T00:00:00Z
   to: 2024-03-04T14:00:00Z
+
+backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 
 strategy:
   name: ema-cross
@@ -243,13 +258,16 @@ strategy:
 // review).
 func TestRunCLI_UnsupportedStrategyNameRejected(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+
+backtest:
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 
 strategy:
   name: some-other-strategy
@@ -277,16 +295,19 @@ strategy:
 // "trader backtest run" test exercises it.
 func TestRunCLI_JournalWritesDurableJSONLRecord(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
+
+backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 `)
 
 	outputDir := t.TempDir()
@@ -336,16 +357,19 @@ backtest:
 // the (allowed) short.
 func TestRunCLI_AllowedSideShortOnlyNeverOpensLong(t *testing.T) {
 	configPath := writeConfigFile(t, `
-backtest:
-  symbol: EURUSD
+market:
+  symbols: EURUSD
   interval: H1
   from: 2024-03-04T00:00:00Z
   to: 2024-03-04T14:00:00Z
+
+backtest:
   starting_capital: 10000
   risk_fraction: 0.01
   adverse_distance: 0.01000
   # ~1.1x equity sizing: this fixture opts into leverage (ADR-066).
   initial_margin_ratio: 0.25
+
 
 strategy:
   name: ema-cross

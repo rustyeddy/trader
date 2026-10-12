@@ -84,7 +84,7 @@ func newRunCmd() *cobra.Command {
 			"--strategy-config forwards a config file path via the " + backtestcfg.StrategyConfigPathEnv + "\n" +
 			"environment variable, never parsed by trader itself. With --config,\n" +
 			"strategy.exec and strategy.config set the same two values, and\n" +
-			"backtest.symbols (comma-separated) supplies a multi-instrument\n" +
+			"market.symbols (comma-separated) supplies a multi-instrument\n" +
 			"universe, so a config file alone can drive an external strategy\n" +
 			"(issue #469); explicit flags still override it.\n\n" +
 			"--journal optionally writes a durable JSONL audit trail of\n" +
@@ -122,7 +122,7 @@ func newRunCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required, or supplied by --config)")
-	cmd.Flags().StringVar(&flags.provider, "provider", "", "market data provider name (default: oanda, or backtest.provider from --config)")
+	cmd.Flags().StringVar(&flags.provider, "provider", "", "market data provider name (default: oanda, or market.provider from --config)")
 
 	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "", "directory run snapshots are written to and 'show' reads from (default: backtest.output_dir, TRADER_BACKTEST_OUTPUT_DIR, or "+backtestcfg.DefaultOutputDir+")")
 	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg)
@@ -162,7 +162,7 @@ func validateStrategyFlags(cmd *cobra.Command, flags runFlags) error {
 // silently ignored) only when neither names one. A config may also carry
 // a multi-instrument universe only for an external strategy, whose own
 // Descriptor determines what it trades; --config with more than one
-// --symbol or backtest.symbols remains rejected for in-process
+// --symbol or market.symbols remains rejected for in-process
 // strategies, whose config describes a single experiment; symbols is the
 // effective universe from effectiveSymbols, so a YAML-carried universe is
 // checked as well as repeated flags.
@@ -176,7 +176,7 @@ func validateStrategySelection(cmd *cobra.Command, flags runFlags, cfg backtestc
 		}
 		if flags.config != "" && len(symbols) > 1 {
 			return fmt.Errorf("--config describes a single-instrument experiment for an in-process strategy; " +
-				"a multi-instrument universe (repeated --symbol or backtest.symbols) needs strategy.exec, " +
+				"a multi-instrument universe (repeated --symbol or market.symbols) needs strategy.exec or kind: study, " +
 				"or repeat --symbol without --config")
 		}
 	}
@@ -184,30 +184,23 @@ func validateStrategySelection(cmd *cobra.Command, flags runFlags, cfg backtestc
 }
 
 // effectiveSymbols reconciles --symbol (repeatable, multi-instrument,
-// issue #224) with backtest.symbol (single-instrument, issue #247) and
-// backtest.symbols (a comma-separated universe, issue #469) from
+// issue #224) with market.symbols (a comma-separated universe) from
 // --config: explicit --symbol flags always win when present, and the
-// config values are only a fallback when no --symbol flag was given at
-// all. (Config validation already rejects setting both config keys.)
-func effectiveSymbols(flagSymbols []string, configSymbol, configSymbols string) ([]string, error) {
+// config value is only a fallback when no --symbol flag was given at all.
+func effectiveSymbols(flagSymbols []string, configSymbols string) ([]string, error) {
 	if len(flagSymbols) > 0 {
 		return flagSymbols, nil
 	}
-	if configSymbols != "" {
-		var out []string
-		for _, s := range strings.Split(configSymbols, ",") {
-			if s = strings.TrimSpace(s); s != "" {
-				out = append(out, s)
-			}
-		}
-		if len(out) > 0 {
-			return out, nil
+	var out []string
+	for _, s := range strings.Split(configSymbols, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
 		}
 	}
-	if configSymbol != "" {
-		return []string{configSymbol}, nil
+	if len(out) > 0 {
+		return out, nil
 	}
-	return nil, fmt.Errorf("at least one --symbol, or backtest.symbol/backtest.symbols in --config, is required")
+	return nil, fmt.Errorf("at least one --symbol, or market.symbols in --config, is required")
 }
 
 // runBacktest is newRunCmd's own RunE: resolve the effective
@@ -228,10 +221,10 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	if err != nil {
 		return err
 	}
-	if cfg.Backtest.DataRawRoot == "" {
-		return fmt.Errorf("backtest.data_raw_root is required (set it in --config or pass --data-raw-root)")
+	if cfg.Market.DataRawRoot == "" {
+		return fmt.Errorf("market.data_raw_root is required (set it in --config or pass --data-raw-root)")
 	}
-	symbols, err := effectiveSymbols(flags.symbols, cfg.Backtest.Symbol, cfg.Backtest.Symbols)
+	symbols, err := effectiveSymbols(flags.symbols, cfg.Market.Symbols)
 	if err != nil {
 		return err
 	}
@@ -243,7 +236,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		return err
 	}
 
-	storeRoot := cfg.Backtest.DataStoreRoot
+	storeRoot := cfg.Market.DataStoreRoot
 	if storeRoot == "" {
 		dir, err := os.MkdirTemp("", "trader-backtest-store-")
 		if err != nil {
@@ -253,7 +246,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		storeRoot = dir
 	}
 	data, err := marketdatacfg.New(marketdatacfg.Config{
-		StoreRoot: storeRoot, RawRoot: cfg.Backtest.DataRawRoot, Provider: cfg.Backtest.Provider,
+		StoreRoot: storeRoot, RawRoot: cfg.Market.DataRawRoot, Provider: cfg.Market.Provider,
 	}, logger)
 	if err != nil {
 		return err
@@ -285,7 +278,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	// A model (study) run trades nothing: count its signals so the summary
 	// printed in place of the backtest report can show them.
 	var counter *signalCounter
-	if cfg.IsModel() {
+	if cfg.IsStudy() {
 		counter = &signalCounter{inner: jrnl}
 		jrnl = counter
 	}
