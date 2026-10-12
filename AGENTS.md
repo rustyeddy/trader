@@ -34,4 +34,4 @@ Example: a historical-bar normalization change should inspect `marketdata`, `int
 
 ## Reusable workflows
 
-The canonical implement-issue and review-pr procedures are in `docs/workflows/ai-skills.org`; Claude Code wrappers live in `.claude/skills/` and only point there.
+The canonical implement-issue and review-pr procedures are in `docs/workflows/ai-skills.org`.

@@ -4,7 +4,7 @@
 Two reusable workflows, written once and provider-neutral, for the roles in
 =docs/workflows/ai-development.org=.  They add no orchestration: a person
 starts each one, and a human merges.  This document is the canonical source;
-tool-specific wrappers only point here.
+any future tool-specific wrapper would only point here.
 
 * Scope
 
@@ -25,13 +25,16 @@ Input: an issue number.
 3. Create a branch =<type>/<N>-<short-description>= from =main=.
 4. Post or keep a plan using =docs/workflows/implementation-checklist.org=.
 5. Implement the smallest change that meets the criteria, with tests and docs.
-6. Run =make check=.  Record each command and its exit status; never claim
-   "tests pass" without it.
+6. Verify per =docs/workflows/testing.org=: run =make check= before pushing
+   code changes; for documentation-only changes record the permitted skip and
+   the reason.  Record each command and its exit status, and never claim a
+   check passed that was not run.
 7. Push and open a PR that closes the issue, using the PR template and the
    completed checklist.
 8. Post a handoff (=docs/workflows/ai-development.org=) and stop pushing while
-   review runs.  Reply to every review comment with the fixing commit, push
-   fixes, re-run =make check=.
+   review runs.  Reply to every review comment: with the fixing commit when you
+   change something, or with a reason or evidence when you decline a
+   suggestion or answer a question.  Push fixes and re-verify as in step 6.
 9. Do not merge; the maintainer merges.
 
 * Workflow 2: review-pr
@@ -42,7 +45,8 @@ Input: a PR number.
    the diff (=gh pr diff N=).  Do not rely on the author's reasoning.
 2. Read only the ADR/architecture sections the diff touches.
 3. Check the CI result (=gh pr checks N=) and the evidence in the PR; optionally
-   run =make check= on the PR head and record the result.
+   run =make check= on the PR head and record the result.  The reviewer's own
+   verification follows =docs/workflows/testing.org= too.
 4. Apply =docs/workflows/ai-review-rubric.org=: label every finding blocker,
    suggestion or question; cite its source; list what you did not verify.
 5. Post the review as PR comments.  Do not approve, merge, or push to the
@@ -50,42 +54,53 @@ Input: a PR number.
 
 * ChatGPT and other chat assistants
 
-ChatGPT has no repository-aware skill mechanism here, so use the same
-procedures by hand:
+Chat assistants do not read this repository's tool-specific files, and the
+procedures above are written so they do not need to.
 
-1. Give it the text of the relevant workflow above, =AGENTS.md=, and the
-   issue or =gh pr diff= output.
-2. For implementation, apply its patch locally, run =make check= yourself, and
-   paste the real output back; do not accept "this should pass".
-3. For review, ask it to produce the rubric's checklist and findings, then post
-   them yourself.
-
-This works only because the procedures live in the repository as plain text.
+- *With repository access* (a GitHub connector or a checkout): execute the
+  canonical steps above directly, including reading the issue or PR, checking
+  CI, and posting findings.  This is how most Trader PRs have been reviewed.
+- *Without repository access*: paste the inputs and apply the output by hand.
+  - Implement: give it the workflow text, =AGENTS.md=, =CONTRIBUTING.org=,
+    =docs/workflows/implementation-checklist.org=, the issue text with its
+    acceptance criteria, and the relevant files.  Apply its patch locally, run
+    the verification from step 6 yourself, and paste the real output back; do
+    not accept "this should pass".
+  - Review: give it the workflow text, =docs/workflows/ai-review-rubric.org=,
+    the PR description, the linked issue and its acceptance criteria, the diff
+    (=gh pr diff N=), and the CI result.  Post its findings yourself.
 
 * Tool wrappers
 
-A wrapper is a file of a few lines that tells one tool to follow the workflow
-above.  It must not duplicate the steps, so there is one place to maintain.
+None are included.  A wrapper is a few lines that tells one tool to follow the
+workflow above without restating it.  Add one only after the evaluation below
+shows, from real use, that it saves effort.
 
-| Tool        | Wrapper                                   | Status   |
-|-------------+-------------------------------------------+----------|
-| Claude Code | =.claude/skills/implement-issue/SKILL.md= | included |
-| Claude Code | =.claude/skills/review-pr/SKILL.md=       | included |
-| Copilot     | =.github/prompts/*.prompt.md=             | not added: no pilot evidence it saves effort |
-| ChatGPT     | none (paste the workflow)                 | see above |
+| Tool        | Wrapper                              | Status                                 |
+|-------------+--------------------------------------+----------------------------------------|
+| Claude Code | =.claude/skills/<workflow>/SKILL.md= | not added: not yet piloted             |
+| Copilot     | =.github/prompts/*.prompt.md=        | not added: no evidence it saves effort |
+| ChatGPT     | none                                 | see the section above                  |
+
+Criteria for adding one: it has been used on at least one new issue or PR, the
+effort saved is recorded below, and it contains a pointer to this document and
+any role-specific rule, but no policy of its own (verification follows
+=docs/workflows/testing.org=).
 
 * Pilot evaluation
 
 *What was piloted.*  The implement-issue procedure was followed manually for
 issues #492, #493, #494 and #495 (PRs #498, #499, #500, #501), and review-pr
 was exercised on #490 (see the pilot in =docs/workflows/ai-review-rubric.org=).
-The Claude Code wrappers were written afterwards from that practice and have not
-yet been used on a new issue, so their benefit below is expected, not measured.
 
-*Benefits observed.*
+*Conclusion: not enough evidence yet for tool wrappers.*  The procedures
+themselves proved worth writing down; no wrapper has been tried on a real
+issue, so none is added.  Any benefit a wrapper might have is unmeasured.
+
+*Benefits observed (of the written procedure).*
 - The steps repeated almost unchanged across four issues: read issue, branch,
-  implement, =make check=, PR, handoff, reply to every review comment.  Writing
-  them down once removes re-explaining them each time.
+  implement, verify, PR, handoff, reply to every review comment.  Writing them
+  down once removes re-explaining them each time.
 - Independent review (Copilot) plus maintainer review caught real defects in
   the process documents themselves on all four PRs (for example inaccurate
   evidence and unverified concurrency claims), so the "evidence not claims"
@@ -94,20 +109,19 @@ yet been used on a new issue, so their benefit below is expected, not measured.
 *Friction observed.*
 - Reviews on every PR needed one or more fix rounds; most findings were about
   inconsistency between documents, so the procedure's real cost is keeping
-  linked documents in step.
+  linked documents in step.  A wrapper that restates policy would add another
+  place to drift; this PR's own first draft did so (its wrapper required
+  =make check= unconditionally, contradicting the docs-only exception).
 - CI takes about 3 to 4 minutes per push, which dominates the loop more than
   any procedure step.
 - A self-review by the authoring assistant is not independent; the procedure
   cannot fix that, only label it.
 
 *Maintenance cost.*
-- Canonical text: one file (this one).  Each wrapper is about 10 lines pointing
-  here, so changing a step touches one file, not three.
-- Risk: a wrapper that restates steps would drift.  The wrappers are kept to a
-  pointer plus the two rules that must never be skipped (=make check= evidence,
-  no merging).
-- Revisit this section after the wrappers have been used on a few real issues;
-  delete a wrapper that is not used.
+- Canonical text: one file (this one), and it must stay consistent with
+  =testing.org=, =ai-development.org= and the rubric.
+- A future wrapper would add roughly one small file per workflow per tool; the
+  cost is only worth paying if it is measured to save effort.
 
 * Deferred
 
