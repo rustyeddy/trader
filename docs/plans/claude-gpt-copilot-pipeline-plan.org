@@ -3,6 +3,14 @@
 #+DATE: 2026-09-04
 #+STARTUP: overview
 
+#+BEGIN_QUOTE
+*Status: exploratory. Not the current supported workflow.* The supported
+process has no automated orchestration: people start each step and the
+maintainer approves and merges.  See =docs/workflows/ai-development.org=,
+which supersedes this plan wherever they differ.  Kept as research for a
+possible future.
+#+END_QUOTE
+
 * Goal
 
 Replace the manual relay (tell Claude, tell GPT-5, tell Claude again...)
