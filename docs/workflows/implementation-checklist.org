@@ -135,7 +135,7 @@ handoffs"), whose scope is unchanged by this example.
 - Open risks: the older automated-pipeline plan could be mistaken for policy;
   mitigated by a header marking it exploratory.
 - Branch @ commit: docs/492-ai-handoffs @ 3f5f65b; merged to main as cbeffde.
-- Changed files: the five docs listed above, plus the new
-  docs/workflows/ai-development.org.
+- Changed files: docs/workflows/ai-development.org (new), CONTRIBUTING.org,
+  AGENTS.md, README.md, docs/plans/claude-gpt-copilot-pipeline-plan.org.
 - Next step / who: none; merged and the branch deleted.
 #+END_EXAMPLE
