@@ -28,7 +28,10 @@ Do not rely on the author's reasoning or chat history.
 - *Name what is missing.*  If the PR claims "tests pass" with no command, no
   CI link, or no coverage of an acceptance criterion, record that as missing
   evidence.
-- Cite file and line (or ADR number) for every finding.
+- Cite the source of every finding: =file:line=, an ADR number, an issue
+  acceptance criterion, a PR description or comment, or a CI/check run.  Use
+  whichever applies; evidence findings usually cite the PR description or
+  checks rather than code.
 - State which commit you reviewed.
 
 * Finding labels
@@ -80,54 +83,66 @@ Recommendation: <findings only; the maintainer decides to merge>
 
 * Pilot: PR #490
 
-Piloted on merged PR #490 ("feat(backtest): study summary instead of a trade
-report for model runs", issue #489, merge =b666335=), which changes
-=cmd/trader/backtest= and =cmd/internal/backtestcfg=.
+PR #490 ("feat(backtest): study summary instead of a trade report for model
+runs", issue #489) was written by Claude Code and independently reviewed by
+Copilot, a different assistant, before the maintainer merged it (merge
+=b666335=).  That real review is the pilot.  Reviewed commit: =eec465a=; final
+head: =143aa59=.
 
-*Limitation:* the pilot was run by the same assistant that wrote the PR, so it
-demonstrates the rubric and its output format but is *not* an independent
-review.  The first genuinely independent pilot should be a different assistant
-on a new PR.  The findings below come from reading the diff plus the checks
-noted; nothing here changes #490's scope or merged behavior.
+** Copilot's findings, in rubric terms
 
-#+BEGIN_EXAMPLE
-## Review of #490 @ b666335
-Reviewer: Claude Code (not independent; see limitation); inputs read: PR diff,
-issue #489, PR description, run.go journal handling. ADRs: ADR-075 (already in
-the diff). CI not re-run.
+Copilot worked from the diff and the repository, not from the author's
+reasoning.  Its four findings, labeled as the rubric requires:
 
-- [x] Acceptance criteria: model runs print a study summary instead of the
-      backtest report; covered by TestRun_ModelRunPrintsAStudySummary...
-- [x] ADRs and package boundaries: change stays in cmd/ (CLI) and
-      cmd/internal; no new cross-package import direction seen.
-- [~] Correctness and edge cases: see findings 1 and 2
-- [x] Regression coverage: counter forwarding, no-journal path, table/json/org
-      and invalid format, IsModel, and a CLI-level run are tested.
-- [x] Concurrency: signalCounter has no lock.  I checked run.go: the journal
-      file is closed through journalWriter, not through the counter, so the
-      wrapper's Close is not on the data-loss path.  I did not verify whether
-      the host calls Record from more than one goroutine.
-- [N/A] Trading invariants: output formatting only; no data access, costs,
-      sizing or orders changed.  Paper-trading default untouched.
-- [~] Evidence: PR says "Verified against the real forex-atr scanner" but
-      gives no command or output, and no `make check` result (see finding 3).
-- [x] Docs: UsersGuide.md and ADR-075 updated.
+| Label   | Source                      | Finding                                            | Author response (head 143aa59)                      |
+|---------+-----------------------------+----------------------------------------------------+-----------------------------------------------------|
+| Blocker | =study.go= (span rendering) | Dates dropped the hour/minute accepted by =from/to= | Span now RFC3339; tested                            |
+| Blocker | =study.go= (writes)         | =fmt.Fprintf= errors discarded: truncated output   | One =io.WriteString=, error returned; tested         |
+| Blocker | =run.go:290= (model branch) | No test executes the new branch                    | CLI-level tests against a fixture; fail with branch off |
+| Suggestion | =study.go= (org format)  | =--format org= aliased the table                   | Dedicated Org shape; tested                          |
 
-### Findings
-- Suggestion: cmd/trader/backtest/run.go:316 and study.go:101 — an invalid
-  --format is reported only after the whole run completes (confirmed by
-  grep: no earlier validation).  For long studies this wastes the run.
-  Validate the format before starting.  (Pre-existing for backtest runs.)
-- Suggestion: study.go signalsNote — a run that emitted 0 signals and kept no
-  journal prints "0 (not kept; pass --journal PATH to keep them)", which
-  suggests there is something to keep.  Say "none" for zero.
-- Question: PR description — which command and result support "Verified
-  against the real forex-atr scanner"?  Please quote the command and the
-  summary it printed.  Missing evidence, not a failure.
+All four were actionable, cited a location, and were resolved with a reply and
+a test.  The maintainer merged after the fixes.
 
-### Not verified
-- I did not re-run make check or the forex-atr run on b666335.
-- I did not check whether Record can be called concurrently.
+** Evidence recorded for #490
 
-Recommendation: no blockers found; the maintainer decides whether to merge.
-#+END_EXAMPLE
+- Head =143aa59=; CI check =ci= on that commit: success (run 37977124335,
+  workflow run #795).
+- PR comment from the author: "=make check= and =make lint= pass locally."
+  This is the author's own statement; the commands' output is not quoted.
+- Missing evidence (Question): the description says the change was "verified
+  against the real forex-atr scanner (21 pairs, 2020-2024)" but gives no
+  command or output.
+
+** What a rubric-guided pass adds
+
+Applying the full checklist to the same diff (by the authoring assistant, so
+*not independent*; treat as candidate follow-ups for a human or a different
+assistant to confirm) turned up items Copilot's pass did not raise:
+
+- Concurrency (verified, not assumed): =signalCounter.signals= is an
+  unsynchronized integer.  =internal/backtest/scheduler.go= and =runner.go=
+  contain no goroutines or =sync= use, and the existing
+  =internal/backtest/journal_counter.go= (=countingRecorder.count=) counts
+  records the same unsynchronized way on the same =Record= path.  So the
+  counter relies on the host serializing =Record= calls, as the existing code
+  does.  This was established by search, not by running =-race= on a study.
+- Suggestion: =--format= is validated only after the run completes
+  (=run.go:316=, =study.go:101=), so a typo wastes a long study.  The same
+  holds for backtest runs.
+- Suggestion: a run with zero signals and no journal prints "0 (not kept; pass
+  --journal PATH to keep them)" (=study.go= =signalsNote=).
+- Question: =signalCounter= duplicates the counting-wrapper pattern of
+  =countingRecorder=.  Could one be shared?
+- Trading invariants: N/A.  Output formatting only; no data access, costs,
+  sizing, or orders changed; paper-trading default untouched.
+
+** Lessons for the rubric
+
+- An independent assistant caught three blockers that the author's own tests
+  missed, which is the point of the separate Reviewer role.
+- Review claims need a source: findings citing a PR comment or a check run
+  (as above) are as valid as findings citing code, hence the broadened
+  citation rule.
+- A self-review is useful for filling checklist items the independent pass
+  skipped, but must be labeled as non-independent and not replace it.
