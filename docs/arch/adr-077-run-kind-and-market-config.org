@@ -51,18 +51,31 @@ entry replaces it.
 
 ** Ambiguity
 
-A document is exactly one kind and mixing is rejected rather than resolved:
-backtest-only keys beside =kind: study= (account/sizing values other than the
-host defaults, which Resolve itself fills in), =strategy.exec=/=config= and
-quantity-mode keys beside =kind: study= (use =study.exec=/=config=), and any
-=study:= key beside =kind: backtest=. An omitted =kind= is =backtest=, so a
-study document missing =kind= is rejected by the previous rule.
+A document is exactly one kind and mixing is rejected rather than resolved.
+The check is by /presence/, not by value: any wrong-kind key written in the
+file, the environment (=TRADER_*=) or the flags is an error, even when it
+equals the default (=currency: USD= beside =kind: study= is rejected). Keys the
+host fills in afterwards are not "written". Beside =kind: study= are rejected
+=backtest.currency=, =starting_capital=, =risk_fraction=, =adverse_distance=,
+=initial_margin_ratio=, and every =strategy.*= key (=name=, =fast_period=,
+=slow_period=, =allowed_side=, =quantity=, =buy_date=, =sell_date=; =exec= and
+=config= with a pointer to =study.exec=/=study.config=). Beside =kind: backtest=
+any =study.*= key is rejected. An omitted =kind= is =backtest=, so a study
+document missing =kind= is rejected by the previous rule.
+
+** Flags
+
+The CLI surface is the same for both kinds. For a study, =--strategy-name=,
+=--strategy-exec= and =--strategy-config= override =study.name=, =study.exec=
+and =study.config= (the loader routes the overrides by the effective kind);
+the in-process strategy flags (=--fast-period= and so on) are rejected as
+wrong-kind keys. The environment has no such alias: use =TRADER_STUDY_*=.
 
 * Consequences
 
 The universe and span have one home. Studies state only what they use.
 Existing configs and TRADER_BACKTEST_* environment variables must be
-migrated once. A study value equal to a host default (for example
-=currency: USD=) is indistinguishable from the default and accepted.
-Whether studies and backtests need distinct execution paths, not only
+migrated once. Presence-aware checking lives beside the generic loader
+(=backtestcfg/kind.go=) because =internal/config= reports resolved values,
+not which source wrote them. Whether studies and backtests need distinct execution paths, not only
 distinct validation, is left to follow-up issues.

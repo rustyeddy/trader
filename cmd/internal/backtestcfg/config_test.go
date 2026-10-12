@@ -362,6 +362,22 @@ func TestStudyConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "other.yml", cfg.Strategy.Config)
 	})
+	t.Run("the existing strategy flags override study.exec, study.name and study.config", func(t *testing.T) {
+		cfg, err := loadStudy(t, studyYAML+"  config: file.yml\n", map[string]string{
+			"strategy-exec": "./flag-scanner", "strategy-name": "flag-name", "strategy-config": "flag.yml",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "./flag-scanner", cfg.Strategy.Exec)
+		assert.Equal(t, "flag-name", cfg.Strategy.Name)
+		assert.Equal(t, "flag.yml", cfg.Strategy.Config)
+		assert.Equal(t, "./flag-scanner", cfg.Study.Exec)
+	})
+	t.Run("a study launch identity can come from flags alone", func(t *testing.T) {
+		const noStudy = "kind: study\nmarket:\n  symbols: EURUSD\n  from: 2024-01-01\n  to: 2024-02-01\n"
+		cfg, err := loadStudy(t, noStudy, map[string]string{"strategy-exec": "./s", "strategy-name": "n"})
+		require.NoError(t, err)
+		assert.Equal(t, "./s", cfg.Strategy.Exec)
+	})
 	t.Run("flags still override market values", func(t *testing.T) {
 		cfg, err := loadStudy(t, studyYAML, map[string]string{"from": "2021-01-01", "symbols": "EURUSD"})
 		require.NoError(t, err)
@@ -397,21 +413,51 @@ func TestStudyConfig(t *testing.T) {
 // TestKindRejectsMixedDocuments covers issue #474's "reject ambiguous
 // combinations rather than silently choosing one".
 func TestKindRejectsMixedDocuments(t *testing.T) {
-	t.Run("backtest keys are rejected beside kind: study", func(t *testing.T) {
+	t.Run("backtest keys are rejected beside kind: study, even when equal to a default", func(t *testing.T) {
 		for _, key := range []string{
-			"currency: EUR", "starting_capital: 100", "risk_fraction: 0.02",
-			"adverse_distance: 0.01", "initial_margin_ratio: 0.5",
+			"currency: USD", "currency: EUR", "starting_capital: 10000", "starting_capital: 100",
+			"risk_fraction: 0.01", "risk_fraction: 0.02", "adverse_distance: 0.01",
+			"initial_margin_ratio: 1", "initial_margin_ratio: 0.5",
 		} {
 			_, err := loadStudy(t, studyYAML+"backtest:\n  "+key+"\n", nil)
 			require.ErrorContains(t, err, "does not apply to kind: study", key)
 			assert.ErrorContains(t, err, "backtest."+strings.SplitN(key, ":", 2)[0], key)
 		}
 	})
-	t.Run("in-process strategy keys are rejected beside kind: study", func(t *testing.T) {
+	t.Run("strategy-only keys are rejected beside kind: study", func(t *testing.T) {
+		for _, key := range []string{
+			"name: ema-cross", "name: buy-and-hold", "fast_period: 5", "fast_period: 20",
+			"slow_period: 60", "allowed_side: both", "quantity: 5", "buy_date: 2024-01-02", "sell_date: 2024-01-03",
+		} {
+			_, err := loadStudy(t, studyYAML+"strategy:\n  "+key+"\n", nil)
+			require.ErrorContains(t, err, "does not apply to kind: study", key)
+			assert.ErrorContains(t, err, "strategy."+strings.SplitN(key, ":", 2)[0], key)
+		}
+	})
+	t.Run("strategy.exec and strategy.config point at their study replacements", func(t *testing.T) {
 		_, err := loadStudy(t, studyYAML+"strategy:\n  exec: ./other\n", nil)
 		require.ErrorContains(t, err, "strategy.exec does not apply to kind: study; use study.exec")
-		_, err = loadStudy(t, studyYAML+"strategy:\n  quantity: 5\n", nil)
-		require.ErrorContains(t, err, "strategy.quantity does not apply to kind: study")
+		_, err = loadStudy(t, studyYAML+"strategy:\n  config: x.yml\n", nil)
+		require.ErrorContains(t, err, "strategy.config does not apply to kind: study; use study.config")
+	})
+	t.Run("a wrong-kind key is rejected whichever source wrote it", func(t *testing.T) {
+		env := func(kv ...string) config.Options {
+			return config.Options{EnvPrefix: "TRADER", Environ: kv, FileContent: []byte(studyYAML)}
+		}
+		_, err := LoadRunConfig(env("TRADER_BACKTEST_CURRENCY=USD"))
+		require.ErrorContains(t, err, "backtest.currency does not apply to kind: study")
+		_, err = LoadRunConfig(env("TRADER_STRATEGY_EXEC=./other"))
+		require.ErrorContains(t, err, "strategy.exec does not apply to kind: study")
+		_, err = LoadRunConfig(config.Options{FileContent: []byte(studyYAML), Overrides: map[string]string{"adverse-distance": "0.01"}})
+		require.ErrorContains(t, err, "backtest.adverse_distance does not apply to kind: study")
+		_, err = LoadRunConfig(config.Options{FileContent: []byte(studyYAML), Overrides: map[string]string{"fast-period": "20"}})
+		require.ErrorContains(t, err, "strategy.fast_period does not apply to kind: study")
+	})
+	t.Run("a study key in the environment is rejected beside kind: backtest", func(t *testing.T) {
+		_, err := LoadRunConfig(config.Options{
+			EnvPrefix: "TRADER", Environ: []string{"TRADER_STUDY_EXEC=./x"}, FileContent: []byte(issue247CandidateYAML),
+		})
+		require.ErrorContains(t, err, "study.exec requires kind: study")
 	})
 	t.Run("a study section requires kind: study", func(t *testing.T) {
 		doc := strings.Replace(studyYAML, "kind: study\n", "kind: backtest\n", 1) + "backtest:\n  adverse_distance: 0.01\n"

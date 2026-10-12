@@ -562,3 +562,45 @@ func TestRun_StudyRunJSONAndOrg(t *testing.T) {
 	org := runStudy(t, "--format", "org")
 	assert.True(t, strings.HasPrefix(org, "#+TITLE: Study: study-scanner"), org)
 }
+
+// TestRun_StudyLaunchIdentityIsOverriddenByTheStrategyFlags covers issue
+// #474's flags-over-file contract for studies: the existing --strategy-exec
+// (and -name/-config) flags override study.exec (and study.name/config).
+// The file names the trading flip-flop fixture, which would fail at sizing in
+// a study; the flag swaps in the trading-free scanner.
+func TestRun_StudyLaunchIdentityIsOverriddenByTheStrategyFlags(t *testing.T) {
+	body := `kind: study
+market:
+  symbols: EURUSD,GBPUSD
+  interval: H1
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  data_raw_root: testdata/raw/oanda
+study:
+  name: from-file
+  exec: ` + flipFlopPath + "\n"
+	path := filepath.Join(t.TempDir(), "study.yml")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+
+	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
+	runCmd.SetArgs([]string{
+		"run", "--config", path, "--strategy-exec", studyScannerPath,
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+	})
+	require.NoError(t, runCmd.Execute(), out.String())
+	assert.Contains(t, out.String(), "Study: study-scanner", "the flag's executable ran, not the file's")
+	assert.NotContains(t, out.String(), "Signals:      0 ")
+}
+
+func TestRun_StudyRejectsInProcessStrategyFlags(t *testing.T) {
+	runCmd := cmdbacktest.New()
+	runCmd.SetOut(&bytes.Buffer{})
+	runCmd.SilenceUsage = true
+	runCmd.SetArgs([]string{
+		"run", "--config", studyConfig(t), "--fast-period", "5",
+		"--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+	})
+	require.ErrorContains(t, runCmd.Execute(), "strategy.fast_period does not apply to kind: study")
+}

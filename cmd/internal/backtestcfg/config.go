@@ -2,10 +2,7 @@ package backtestcfg
 
 import (
 	"fmt"
-	"os"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/rustyeddy/trader/internal/config"
 	"github.com/rustyeddy/trader/internal/strategy/emacross"
@@ -66,11 +63,6 @@ const (
 	defaultInterval        = "H1"
 	defaultCurrency        = "USD"
 	defaultStartingCapital = "10000"
-	// defaultRiskFraction and defaultInitialMarginRatio mirror the default
-	// tags on BacktestSection; a study that sets either to another value
-	// is rejected as a mixed document.
-	defaultRiskFraction       = "0.01"
-	defaultInitialMarginRatio = "1"
 )
 
 // Resolve returns c with the effective run settings filled in, so callers
@@ -99,17 +91,33 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// LoadRunConfig loads a RunConfig with config.Load, rejects the pre-#474
-// grammar with a pointer to its replacement, and resolves the effective
-// settings: the one entry point every composition root should use. A study
-// whose study.config is omitted forwards the run file itself to the
-// executable, so a scanner can keep its own settings in the same document.
+// LoadRunConfig loads a RunConfig with config.Load: the one entry point
+// every composition root should use. Around the generic loader it
+//
+//   - rejects the pre-#474 grammar with a pointer to its replacement,
+//   - routes the existing --strategy-name/-exec/-config overrides to
+//     study.name/exec/config when the document is a study, so the CLI surface
+//     is the same for both kinds,
+//   - rejects any key of the wrong kind that was written in the file, the
+//     environment or the overrides, even when it equals the loader default,
+//   - and resolves the effective settings.
+//
+// A study whose study.config is omitted forwards the run file itself to the
+// executable, so a scanner can keep its settings in the same document.
 func LoadRunConfig(opts config.Options) (RunConfig, error) {
-	if err := rejectLegacyKeys(opts); err != nil {
+	doc := readDocument(opts)
+	if err := rejectLegacyKeys(doc); err != nil {
 		return RunConfig{}, err
+	}
+	kind := effectiveKind(opts, doc)
+	if kind == KindStudy {
+		opts.Overrides = routeStudyOverrides(opts.Overrides)
 	}
 	cfg, err := config.Load[RunConfig](opts)
 	if err != nil {
+		return cfg, err
+	}
+	if err := checkSections(kind, presentKeys(opts, doc)); err != nil {
 		return cfg, err
 	}
 	if cfg.IsStudy() && cfg.Study.Config == "" {
@@ -297,9 +305,6 @@ func (c RunConfig) Validate() error {
 			return err
 		}
 	case KindBacktest, "": // empty: a programmatically built RunConfig, a backtest
-		if err := c.validateBacktestKind(); err != nil {
-			return err
-		}
 	default:
 		return fmt.Errorf("kind %q is not supported; use %q or %q", c.Kind, KindBacktest, KindStudy)
 	}
@@ -357,103 +362,16 @@ func (c RunConfig) Validate() error {
 	return nil
 }
 
-// validateStudy checks a kind: study document: a launch identity, and none
-// of the backtest-only account/sizing keys or in-process strategy keys.
-// It is idempotent over Resolve (run validates the resolved config): the
-// values Resolve copies from study.* into strategy.* are not conflicts.
+// validateStudy checks the values a kind: study document must carry. Keys
+// belonging to the other kind are rejected by checkSections, which sees which
+// keys were actually written; Validate only sees effective values, in which
+// an explicit default is indistinguishable from an absent key.
 func (c RunConfig) validateStudy() error {
 	if c.Study.Name == "" {
 		return missing("study.name")
 	}
 	if c.Study.Exec == "" {
 		return missing("study.exec")
-	}
-	for _, f := range []struct {
-		key string
-		set bool
-	}{
-		{"backtest.currency", c.Backtest.Currency != "" && c.Backtest.Currency != defaultCurrency},
-		{"backtest.starting_capital", c.Backtest.StartingCapital != "" && c.Backtest.StartingCapital != defaultStartingCapital},
-		{"backtest.risk_fraction", c.Backtest.RiskFraction.String() != defaultRiskFraction},
-		{"backtest.adverse_distance", !c.Backtest.AdverseDistance.IsZero()},
-		{"backtest.initial_margin_ratio", c.Backtest.InitialMarginRatio.String() != defaultInitialMarginRatio},
-	} {
-		if f.set {
-			return fmt.Errorf("%s does not apply to kind: study; remove it or use kind: backtest", f.key)
-		}
-	}
-	for _, f := range []struct {
-		key, use string
-		set      bool
-	}{
-		{"strategy.exec", "study.exec", c.Strategy.Exec != "" && c.Strategy.Exec != c.Study.Exec},
-		{"strategy.config", "study.config", c.Strategy.Config != "" && c.Strategy.Config != c.Study.Config},
-		{"strategy.quantity", "", c.Strategy.Quantity != ""},
-		{"strategy.buy_date", "", c.Strategy.BuyDate != ""},
-		{"strategy.sell_date", "", c.Strategy.SellDate != ""},
-	} {
-		if !f.set {
-			continue
-		}
-		if f.use != "" {
-			return fmt.Errorf("%s does not apply to kind: study; use %s", f.key, f.use)
-		}
-		return fmt.Errorf("%s does not apply to kind: study", f.key)
-	}
-	return nil
-}
-
-// validateBacktestKind rejects study keys in a kind: backtest document.
-func (c RunConfig) validateBacktestKind() error {
-	for _, f := range []struct {
-		key string
-		set bool
-	}{
-		{"study.name", c.Study.Name != ""},
-		{"study.exec", c.Study.Exec != ""},
-		{"study.config", c.Study.Config != ""},
-	} {
-		if f.set {
-			return fmt.Errorf("%s requires kind: study (this document is kind: backtest)", f.key)
-		}
-	}
-	return nil
-}
-
-// legacyMarketKeys are the pre-#474 backtest.* keys that moved to market.*.
-var legacyMarketKeys = []string{
-	"symbol", "symbols", "interval", "from", "to", "provider", "data_raw_root", "data_store_root",
-}
-
-// rejectLegacyKeys reports a pre-#474 document (a top-level model: section,
-// or market keys under backtest:) with the key's new home, instead of
-// letting the loader ignore the unknown keys and fail with a confusing
-// "market.from is required". The old grammar is not accepted (ADR-077).
-func rejectLegacyKeys(opts config.Options) error {
-	data := opts.FileContent
-	if data == nil && opts.FilePath != "" {
-		b, err := os.ReadFile(opts.FilePath)
-		if err != nil {
-			return nil // config.Load reports unreadable files itself
-		}
-		data = b
-	}
-	var doc map[string]any
-	if len(data) == 0 || yaml.Unmarshal(data, &doc) != nil {
-		return nil // config.Load reports malformed documents itself
-	}
-	if _, ok := doc["model"]; ok {
-		return fmt.Errorf("the model: section was replaced by kind: study with a market: section and a study: section (ADR-077)")
-	}
-	bt, _ := doc["backtest"].(map[string]any)
-	for _, k := range legacyMarketKeys {
-		if _, ok := bt[k]; ok {
-			to := k
-			if k == "symbol" {
-				to = "symbols"
-			}
-			return fmt.Errorf("backtest.%s moved to market.%s; set kind: and use a market: section (ADR-077)", k, to)
-		}
 	}
 	return nil
 }

@@ -651,15 +651,18 @@ study summary (strategy, run id, span, interval, instrument count and the
 number of signals the strategy emitted); `--format json` prints the same
 fields as JSON. The signals themselves are journaled with `--journal PATH`.
 
-A document is exactly one kind, and mixing is an error rather than a guess:
-`backtest.currency`, `starting_capital`, `risk_fraction`, `adverse_distance`
-or `initial_margin_ratio` set to anything but the host's internal default
-(USD, 10000, 0.01, 1), `strategy.exec`/`strategy.config` (use `study.exec`/
-`study.config`) and `strategy.quantity`/`buy_date`/`sell_date` are rejected
-beside `kind: study`, and any `study:` key is rejected beside `kind:
-backtest`. A study run has no sizing policy, so a strategy that emits an
-intent fails at sizing. Explicit command-line flags (`--from`, `--symbol`,
-...) still override the market values.
+A document is exactly one kind, and mixing is an error rather than a guess.
+The check is by presence: any key of the other kind written in the file, the
+environment or the flags is rejected, even when it equals the default
+(`backtest.currency: USD` beside `kind: study` is an error). Beside `kind:
+study`, `backtest.*` and every `strategy.*` key are rejected (`strategy.exec`
+and `strategy.config` with a pointer to `study.exec`/`study.config`); beside
+`kind: backtest`, any `study.*` key is. For a study, `--strategy-exec`,
+`--strategy-config` and `--strategy-name` override `study.exec`,
+`study.config` and `study.name` (there is no such alias for the environment:
+use `TRADER_STUDY_EXEC` and friends). A study run has no sizing policy, so a
+strategy that emits an intent fails at sizing. Explicit command-line flags
+(`--from`, `--symbol`, ...) still override the market values.
 
 Because `trader` forwards `strategy.config` as `TRADER_STRATEGY_CONFIG`, a
 strategy can often read the same file it was launched with and need no
