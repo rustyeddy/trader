@@ -72,6 +72,12 @@ Reviewer, or one Implementer to another):
 - Next step for the recipient: <what is being asked>
 #+END_EXAMPLE
 
+* Review rubric
+
+The Reviewer uses =docs/workflows/ai-review-rubric.org=: findings are labeled
+blocker, suggestion or question; missing evidence is reported as missing; the
+Reviewer never approves or merges.
+
 * Example: issue to merge
 
 Issue #123, "marketdata: reject bars outside their span".

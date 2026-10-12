@@ -1,0 +1,133 @@
+#+TITLE: Independent AI-Assisted PR Review Rubric
+#+STARTUP: showall
+
+A short, vendor-neutral rubric for one assistant (Claude Code, Copilot,
+ChatGPT, ...) reviewing another assistant's pull request.  It supports the
+Reviewer role in =docs/workflows/ai-development.org=.  The reviewer *never
+approves or merges*: the maintainer keeps the merge decision.
+
+* Inputs
+
+Work only from:
+
+1. The PR diff (=gh pr diff N=) and the linked issue with its acceptance
+   criteria.
+2. The ADRs and architecture sections the change touches (selectively, per
+   =AGENTS.md=), plus =docs/arch/package-boundaries.org= when imports or
+   public APIs change.
+3. Test evidence: the PR's stated commands and results, CI status, and, where
+   practical, your own run of =make check= on the PR head.
+
+Do not rely on the author's reasoning or chat history.
+
+* Rules of evidence
+
+- *Verify or say you could not.*  A claim you did not check is reported as
+  "not verified", never as confirmed.  Do not invent test runs, line numbers,
+  or ADR text.
+- *Name what is missing.*  If the PR claims "tests pass" with no command, no
+  CI link, or no coverage of an acceptance criterion, record that as missing
+  evidence.
+- Cite file and line (or ADR number) for every finding.
+- State which commit you reviewed.
+
+* Finding labels
+
+Every comment carries exactly one label:
+
+- *Blocker*: must be fixed before merge (wrong behavior, unmet acceptance
+  criterion, ADR/boundary violation, safety or determinism risk, missing
+  evidence for a stated requirement).
+- *Suggestion*: improvement the author may take or decline with a reason.
+- *Question*: something you could not determine; the author answers with
+  evidence.
+
+* Checklist
+
+#+BEGIN_EXAMPLE
+## Review of #<n> @ <sha>
+Reviewer: <assistant>; inputs read: <diff, issue, ADRs <numbers>, CI run>
+
+- [ ] Acceptance criteria: each criterion met, with evidence (test/line)
+- [ ] ADRs and package boundaries: no contradiction; new import directions OK
+- [ ] Correctness and edge cases: empty/zero/error/boundary inputs, error
+      handling, resource closing
+- [ ] Regression coverage: tests fail without the change; error and boundary
+      paths covered
+- [ ] Concurrency: ownership, shared state, goroutine/process lifetime, -race
+- [ ] Trading invariants (mark N/A with a reason when not touched):
+  - [ ] No look-ahead: decisions use only data available at the bar's time
+  - [ ] Spread, commission and slippage/cost handling is explicit and unchanged
+        or justified
+  - [ ] Reproducible: same inputs give the same outputs (clock, randomness,
+        map order, floating-point rounding)
+  - [ ] Risk and sizing controls are not bypassed; strategies emit intents,
+        not broker orders
+  - [ ] Paper trading remains the default; no credentials or secrets
+- [ ] Evidence: commands/exit statuses stated; anything not run is disclosed
+- [ ] Docs: updated where behavior, boundaries or ADRs changed
+
+### Findings
+- Blocker: <file:line> — <issue> — <suggested fix>
+- Suggestion: ...
+- Question: ...
+
+### Not verified
+- <what you could not check, and why>
+
+Recommendation: <findings only; the maintainer decides to merge>
+#+END_EXAMPLE
+
+* Pilot: PR #490
+
+Piloted on merged PR #490 ("feat(backtest): study summary instead of a trade
+report for model runs", issue #489, merge =b666335=), which changes
+=cmd/trader/backtest= and =cmd/internal/backtestcfg=.
+
+*Limitation:* the pilot was run by the same assistant that wrote the PR, so it
+demonstrates the rubric and its output format but is *not* an independent
+review.  The first genuinely independent pilot should be a different assistant
+on a new PR.  The findings below come from reading the diff plus the checks
+noted; nothing here changes #490's scope or merged behavior.
+
+#+BEGIN_EXAMPLE
+## Review of #490 @ b666335
+Reviewer: Claude Code (not independent; see limitation); inputs read: PR diff,
+issue #489, PR description, run.go journal handling. ADRs: ADR-075 (already in
+the diff). CI not re-run.
+
+- [x] Acceptance criteria: model runs print a study summary instead of the
+      backtest report; covered by TestRun_ModelRunPrintsAStudySummary...
+- [x] ADRs and package boundaries: change stays in cmd/ (CLI) and
+      cmd/internal; no new cross-package import direction seen.
+- [~] Correctness and edge cases: see findings 1 and 2
+- [x] Regression coverage: counter forwarding, no-journal path, table/json/org
+      and invalid format, IsModel, and a CLI-level run are tested.
+- [x] Concurrency: signalCounter has no lock.  I checked run.go: the journal
+      file is closed through journalWriter, not through the counter, so the
+      wrapper's Close is not on the data-loss path.  I did not verify whether
+      the host calls Record from more than one goroutine.
+- [N/A] Trading invariants: output formatting only; no data access, costs,
+      sizing or orders changed.  Paper-trading default untouched.
+- [~] Evidence: PR says "Verified against the real forex-atr scanner" but
+      gives no command or output, and no `make check` result (see finding 3).
+- [x] Docs: UsersGuide.md and ADR-075 updated.
+
+### Findings
+- Suggestion: cmd/trader/backtest/run.go:316 and study.go:101 — an invalid
+  --format is reported only after the whole run completes (confirmed by
+  grep: no earlier validation).  For long studies this wastes the run.
+  Validate the format before starting.  (Pre-existing for backtest runs.)
+- Suggestion: study.go signalsNote — a run that emitted 0 signals and kept no
+  journal prints "0 (not kept; pass --journal PATH to keep them)", which
+  suggests there is something to keep.  Say "none" for zero.
+- Question: PR description — which command and result support "Verified
+  against the real forex-atr scanner"?  Please quote the command and the
+  summary it printed.  Missing evidence, not a failure.
+
+### Not verified
+- I did not re-run make check or the forex-atr run on b666335.
+- I did not check whether Record can be called concurrently.
+
+Recommendation: no blockers found; the maintainer decides whether to merge.
+#+END_EXAMPLE
