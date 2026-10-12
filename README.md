@@ -82,6 +82,7 @@ implementation details. This pre-release change has no compatibility shims.
 - [Workflows](docs/workflows/workflows.org)
 - [Testing](docs/workflows/testing.org)
 - [AI-assisted development](docs/workflows/ai-development.org)
+- [Implementation checklist](docs/workflows/implementation-checklist.org)
 - [M0 foundation review](docs/reviews/m0-foundation-review.org)
 
 ## Development

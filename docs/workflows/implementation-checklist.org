@@ -1,0 +1,133 @@
+#+TITLE: Issue Implementation Checklist
+#+STARTUP: showall
+
+A short, provider-neutral checklist for implementing an issue.  Any
+contributor, human or assistant, copies it into the issue (as a plan comment)
+or the PR description and fills it in.  It needs only GitHub and the commands
+in the =Makefile=; it complements, and does not replace, the issue and PR
+templates in =.github/= and the workflow in =docs/workflows/ai-development.org=.
+
+* How to use it
+
+1. Copy the checklist below into a comment on the issue before substantial
+   work, then keep it current as the work proceeds.
+2. Fill every field.  Write "None" or "N/A: <reason>" rather than leaving a
+   field empty.
+3. Tick a box only when the evidence next to it exists.  "Tests pass" is not
+   evidence; the command and its result are.
+4. Carry the final state into the PR description (the PR template has matching
+   sections) and into the handoff comment.
+
+* Evidence rules
+
+- Quote the exact command you ran and the relevant result line, e.g.
+  =make check: ok= with the package summary, not "tests pass".
+- If you did not run something, say so and why.  Unverified claims are
+  recorded as unverified, never as passing.
+- Link or name files, ADR numbers, and commit SHAs rather than describing
+  them from memory.
+- A tick without evidence is treated as unticked by the reviewer.
+
+* Checklist
+
+#+BEGIN_EXAMPLE
+## Implementation checklist — #<issue>
+
+### Scope
+- Issue goal (one sentence):
+- In scope:
+- Out of scope / non-goals:
+- Scope changes (reason, or "None"):
+
+### Context consulted (only what the issue needs)
+- Packages and tests inspected:
+- ADRs / architecture sections read (numbers and headings):
+- Package-boundary impact (or "None"):
+
+### Acceptance criteria (copy from the issue, one line each)
+- [ ] <criterion> — evidence: <test name, command output, file/line, or link>
+- [ ] <criterion> — evidence:
+
+### Tests
+- [ ] Tests added/updated: <names>; error and boundary cases: <which>
+- [ ] Commands run and results: `<command>` -> <result line>
+- [ ] Race detector, if concurrency is touched: `go test -race ...` -> <result>
+- [ ] Lint, if Go code changed: `make lint` -> <result>
+- Not run / not verified, and why:
+
+### Documentation
+- [ ] Docs changed: <paths> (or "None required: <reason>")
+- [ ] ADR added/amended: <number> (or "No durable decision: <reason>")
+
+### Safety
+- [ ] Paper trading remains the default; no live-trading path enabled or loosened
+- [ ] No credentials or secrets added to code, config, logs, or tests
+- [ ] Deterministic behavior preserved (no new clock, randomness, or map-order dependence)
+- Safety notes:
+
+### Design escalation
+- [ ] Architecture is settled for this change, or I stopped and added the
+      `needs-design` label with the open question and options: <link>
+
+### Risks and handoff
+- Open risks and assumptions:
+- Branch @ commit:
+- Changed files:
+- Next step / who:
+#+END_EXAMPLE
+
+* Worked example: issue #492
+
+Applied after the fact to #492 ("AI dev: Document multi-assistant issue-to-PR
+handoffs"), whose scope is unchanged by this example.
+
+#+BEGIN_EXAMPLE
+## Implementation checklist — #492
+
+### Scope
+- Issue goal: document how Claude Code, Copilot and ChatGPT hand work to each other.
+- In scope: docs/workflows/ai-development.org; links from contributor docs.
+- Out of scope: any automated orchestration; code changes.
+- Scope changes: None. (A review asked to mark an older pipeline plan as
+  exploratory; that was a wording fix to keep the docs consistent.)
+
+### Context consulted
+- Packages and tests inspected: none (docs only).
+- ADRs / architecture sections read: none needed; AGENTS.md and
+  CONTRIBUTING.org for process.
+- Package-boundary impact: None.
+
+### Acceptance criteria
+- [x] End-to-end issue -> implementation -> review -> merge example
+      — evidence: "Example: issue to merge" in ai-development.org
+- [x] Handoff template with SHA, files, tests, risks
+      — evidence: "Handoff template" in ai-development.org
+- [x] Reads only issue-relevant ADRs, per #491
+      — evidence: "Principles" in ai-development.org
+- [x] No simultaneous edits; no vendor lock-in
+      — evidence: "Roles" rules in ai-development.org
+- [x] Linked from contributor docs
+      — evidence: CONTRIBUTING.org, AGENTS.md, README.md
+
+### Tests
+- [ ] Tests added/updated: N/A, documentation only
+- Not run / not verified: make check not run (no code changed); CI ran on the PR.
+
+### Documentation
+- [x] Docs changed: docs/workflows/ai-development.org, CONTRIBUTING.org,
+      AGENTS.md, README.md
+- [x] ADR: No durable decision: this is process documentation.
+
+### Safety
+- [x] Paper trading default unaffected (no code touched)
+- [x] No credentials added
+- [x] Determinism unaffected
+
+### Design escalation
+- [x] Architecture settled; needs-design not required.
+
+### Risks and handoff
+- Open risks: the older automated-pipeline plan could be mistaken for policy;
+  mitigated by a header marking it exploratory.
+- Branch @ commit: merged to main as cbeffde.
+#+END_EXAMPLE

@@ -146,6 +146,8 @@ human contributors, with these additional expectations:
   architecture/ADR sections relevant to the issue and affected packages.
 - Follow =docs/workflows/ai-development.org= for multi-assistant
   handoffs, review roles, and branch ownership.
+- Fill in =docs/workflows/implementation-checklist.org= for each issue,
+  with evidence rather than unverified claims.
 - Do not fix pre-existing issues unrelated to the current task.
 - Do not introduce security vulnerabilities or secrets.
 - When architecture is unresolved, stop and escalate with =needs-design=
