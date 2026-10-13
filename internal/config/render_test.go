@@ -20,8 +20,8 @@ type renderConfig struct {
 
 func TestRenderSortsAndFormats(t *testing.T) {
 	got, err := Load[renderConfig](Options{
-		Environ:     []string{},
-		FileContent: []byte("name: trader\nport: 8080\npassword: super-secret\n"),
+		Environ:     []string{"PASSWORD=super-secret"},
+		FileContent: []byte("name: trader\nport: 8080\n"),
 	})
 	require.NoError(t, err)
 
@@ -42,8 +42,7 @@ func TestRenderSortsAndFormats(t *testing.T) {
 
 func TestRenderNeverContainsSecretValue(t *testing.T) {
 	got, err := Load[renderConfig](Options{
-		Environ:     []string{},
-		FileContent: []byte("password: correct-horse-battery-staple\n"),
+		Environ: []string{"PASSWORD=correct-horse-battery-staple"},
 	})
 	require.NoError(t, err)
 

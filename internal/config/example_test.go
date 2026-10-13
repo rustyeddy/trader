@@ -18,8 +18,7 @@ func Example() {
 	}
 
 	cfg, err := config.Load[serverConfig](config.Options{
-		Environ:     []string{},
-		FileContent: []byte("api_key: sk_live_deadbeef\n"),
+		Environ: []string{"API_KEY=sk_live_deadbeef"},
 	})
 	if err != nil {
 		panic(err)

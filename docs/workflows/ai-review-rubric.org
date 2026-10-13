@@ -67,6 +67,8 @@ Reviewer: <assistant>; inputs read: <diff, issue, ADRs <numbers>, CI run>
   - [ ] Risk and sizing controls are not bypassed; strategies emit intents,
         not broker orders
   - [ ] Paper trading remains the default; no credentials or secrets
+        in code, config files, flags, logs or errors; every credential
+        config field is tagged =secret:"true"= (ADR-078 S-1)
 - [ ] Evidence: commands/exit statuses stated; anything not run is disclosed
 - [ ] Docs: updated where behavior, boundaries or ADRs changed
 

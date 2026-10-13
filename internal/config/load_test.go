@@ -303,3 +303,103 @@ func TestLoadUsesRealEnvironmentWhenEnvironNil(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 4242, got.LoadTestPort)
 }
+
+// A secret field is never read from the file source (ADR-078): the file
+// naming it is an error that cites the path, not the value.
+func TestLoadSecretInFileIsRejected(t *testing.T) {
+	type Config struct {
+		Name  string
+		Token string `config:"api_token" secret:"true"`
+	}
+	for _, content := range []string{"api_token: hunter2-value\n", "API_TOKEN: hunter2-value\n"} {
+		_, err := Load[Config](Options{
+			Environ:     []string{},
+			FileContent: []byte("name: x\n" + content),
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrSecretInFile)
+		assert.Contains(t, err.Error(), "api_token")
+		assert.NotContains(t, err.Error(), "hunter2-value", "the value is never echoed")
+	}
+}
+
+func TestLoadSecretFromEnvironmentStillWorks(t *testing.T) {
+	type Config struct {
+		Token string `config:"api_token" secret:"true"`
+	}
+	got, err := Load[Config](Options{
+		Environ:     []string{"API_TOKEN=from-env"},
+		FileContent: []byte("name: ignored-unknown-key\n"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", got.Token)
+}
+
+// A nested secret is covered the same way.
+func TestLoadNestedSecretInFileIsRejected(t *testing.T) {
+	type Config struct {
+		DB struct {
+			Password string `secret:"true"`
+		}
+	}
+	_, err := Load[Config](Options{Environ: []string{}, FileContent: []byte("db:\n  password: hunter2-value\n")})
+	require.ErrorIs(t, err, ErrSecretInFile)
+	assert.NotContains(t, err.Error(), "hunter2-value")
+}
+
+// Mentioning a secret's path is the violation, whatever the value's YAML
+// form: null, a sequence, a mapping, an alias or a merge key must not slip
+// past the rule (ADR-078).
+func TestLoadSecretPathInFileIsRejectedForEveryNodeKind(t *testing.T) {
+	type Config struct {
+		Token string `config:"api_token" secret:"true"`
+		DB    struct {
+			Password string `secret:"true"`
+		}
+	}
+	cases := map[string]string{
+		"scalar":          "api_token: hunter2-value\n",
+		"null":            "api_token: null\n",
+		"empty":           "api_token:\n",
+		"sequence":        "api_token: [hunter2-value]\n",
+		"mapping":         "api_token:\n  value: hunter2-value\n",
+		"mixed case":      "Api_Token: hunter2-value\n",
+		"nested scalar":   "db:\n  password: hunter2-value\n",
+		"nested null":     "db:\n  password: ~\n",
+		"nested mixed":    "DB:\n  PassWord: [hunter2-value]\n",
+		"alias value":     "x: &a hunter2-value\napi_token: *a\n",
+		"merge key":       "base: &b\n  api_token: hunter2-value\nother:\n  <<: *b\napi_token_unused: 1\ndb:\n  <<: {password: hunter2-value}\n",
+		"merge sequence":  "a: &a {api_token: hunter2-value}\n<<: [*a]\n",
+		"quoted key":      "\"api_token\": hunter2-value\n",
+		"inline mapping":  "db: {password: hunter2-value}\n",
+		"with other keys": "api_token: hunter2-value\nunknown: 1\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load[Config](Options{Environ: []string{}, FileContent: []byte(content)})
+			require.ErrorIs(t, err, ErrSecretInFile)
+			assert.NotContains(t, err.Error(), "hunter2-value", "the value is never echoed")
+		})
+	}
+
+	t.Run("a non-secret neighbour is not affected", func(t *testing.T) {
+		type plain struct {
+			Name  string
+			Token string `config:"api_token" secret:"true"`
+		}
+		got, err := Load[plain](Options{Environ: []string{"API_TOKEN=ok"}, FileContent: []byte("name: n\napi_token_file: /x\n")})
+		require.NoError(t, err)
+		assert.Equal(t, "ok", got.Token)
+	})
+}
+
+// A required secret that the file tried to supply is reported once, as
+// the file's mistake, not also as missing.
+func TestLoadRequiredSecretInFileReportsOnlyTheFileError(t *testing.T) {
+	type Config struct {
+		Token string `config:"api_token" secret:"true" required:"true"`
+	}
+	_, err := Load[Config](Options{Environ: []string{}, FileContent: []byte("api_token: v\n")})
+	require.ErrorIs(t, err, ErrSecretInFile)
+	assert.NotErrorIs(t, err, ErrRequired)
+}

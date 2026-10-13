@@ -300,8 +300,8 @@ func TestConfigRedactsSecrets(t *testing.T) {
 	const secretValue = "sk_live_deadbeefdeadbeef"
 
 	cfg, err := config.Load[appConfig](config.Options{
-		Environ:     []string{},
-		FileContent: []byte("broker: OANDA\napi_key: " + secretValue + "\nlog_level: debug\n"),
+		Environ:     []string{"API_KEY=" + secretValue},
+		FileContent: []byte("broker: OANDA\nlog_level: debug\n"),
 	})
 	require.NoError(t, err)
 	require.Equal(t, secretValue, cfg.APIKey, "Load itself must still resolve the real value")

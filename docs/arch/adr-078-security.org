@@ -1,0 +1,58 @@
+#+TITLE: ADR-078: Security rules
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #488. This is a living ADR: it collects Trader's security
+rules in one place. Add a rule as a new numbered section (S-n) with its own
+date and issue; do not rewrite an accepted rule, supersede it with a new one
+that cites it. Other ADRs may state a rule locally but must agree with this
+one.
+
+* Context
+
+Security decisions were scattered. The OANDA token's handling lived in
+ADR-076, the Alpaca credentials' in a comment on =marketdatacfg.Config=, and
+redaction in =internal/config=. When ADR-076 added a config file, the
+generic loader began accepting =oanda_token= from it, which contradicted the
+intent that a secret never sits in a config file (issue #488). A stopgap
+rejected three credential keys by name, which matched exact case only and
+would not cover the next credential.
+
+* Rules
+
+** S-1 Secrets and access tokens come from the environment only (2026-10)
+
+A /secret/ is any credential: an API token, key ID, secret key, password, or
+anything else that grants access or must not be disclosed.
+
+- A secret is never read from a config file. A config file may name /where/
+  a secret lives (for example =oanda_token_file=, a path), never contain it.
+- A secret is supplied by its environment variable (=TRADER_OANDA_TOKEN=,
+  =TRADER_ALPACA_KEY_ID=, =TRADER_ALPACA_SECRET_KEY=) or, where a provider
+  defines one, by a file the config names. The environment variable wins.
+- A secret has no command-line flag: a flag puts it in shell history and in
+  the process command line (=ps=, =/proc/<pid>/cmdline=).
+- A secret never appears in an error, log line, or =Render= output. Errors
+  name the field or path, never the value.
+
+Enforcement is by the field's tag, not by a list of names. In
+=internal/config=, =secret:"true"= means all of: redacted from errors and
+=Render=; and never read from the file source. If a file mentions a secret
+field's path, in any key case or nesting, =Load= fails with
+=ErrSecretInFile= naming the path. A new credential is covered the moment it
+is tagged =secret:"true"=; there is no second list to keep current.
+
+Any new secret field must carry the tag. A reviewer treats an untagged
+credential field as a defect (=docs/workflows/ai-review-rubric.org=).
+
+* Consequences
+
+A config file can be world-readable or committed without leaking
+credentials. A mistaken =oanda_token:= in a file fails at startup with a
+clear message rather than working silently. Overrides (flags) are not
+checked by the loader; S-1 therefore also requires that no flag exist for a
+secret, which review enforces.
+
+Adding a rule: append =** S-n= with the date, issue and the rule, and add a
+row to =docs/arch/adr-decisions.org= only if the status changes.

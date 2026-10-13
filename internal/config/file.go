@@ -28,7 +28,12 @@ import (
 // that is absent from the file: it does not participate in this source, and
 // resolution falls through to the environment, default, or the field's Go
 // zero value.
-func fileValues(opts Options) (map[string]string, error) {
+//
+// It also returns the set of every key path the document mentions,
+// whatever its value: null, a sequence, a mapping, or an alias. Secret
+// enforcement (ADR-078) uses that set, so a secret cannot slip past by
+// being written as something fileValues does not decode.
+func fileValues(opts Options) (map[string]string, map[string]bool, error) {
 	var data []byte
 	switch {
 	case opts.FileContent != nil:
@@ -36,30 +41,64 @@ func fileValues(opts Options) (map[string]string, error) {
 	case opts.FilePath != "":
 		b, err := os.ReadFile(opts.FilePath)
 		if err != nil {
-			return nil, fmt.Errorf("config: reading %s: %w", opts.FilePath, err)
+			return nil, nil, fmt.Errorf("config: reading %s: %w", opts.FilePath, err)
 		}
 		data = b
 	default:
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("config: parsing YAML: %w", err)
+		return nil, nil, fmt.Errorf("config: parsing YAML: %w", err)
 	}
 
 	out := map[string]string{}
+	paths := map[string]bool{}
 	if len(doc.Content) == 0 {
-		return out, nil // empty document
+		return out, paths, nil // empty document
 	}
 
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("config: parsing YAML: top-level document must be a mapping")
+		return nil, nil, fmt.Errorf("config: parsing YAML: top-level document must be a mapping")
 	}
 
 	flattenYAMLNode("", root, out)
-	return out, nil
+	collectYAMLPaths("", root, paths)
+	return out, paths, nil
+}
+
+// collectYAMLPaths records the dotted path of every key in a YAML mapping,
+// whatever kind of node its value is, recursing into nested mappings. A
+// merge key (<<) contributes the keys of the mapping it merges, at the
+// same level, as YAML defines it.
+func collectYAMLPaths(prefix string, node *yaml.Node, out map[string]bool) {
+	for node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = node.Alias
+	}
+	if node.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode, valNode := node.Content[i], node.Content[i+1]
+		if keyNode.Tag == "!!merge" {
+			if valNode.Kind == yaml.SequenceNode {
+				for _, m := range valNode.Content {
+					collectYAMLPaths(prefix, m, out)
+				}
+			} else {
+				collectYAMLPaths(prefix, valNode, out)
+			}
+			continue
+		}
+		path := strings.ToLower(keyNode.Value)
+		if prefix != "" {
+			path = prefix + "." + path
+		}
+		out[path] = true
+		collectYAMLPaths(path, valNode, out)
+	}
 }
 
 // flattenYAMLNode walks a YAML mapping node, recording each scalar leaf's
