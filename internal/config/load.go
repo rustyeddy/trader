@@ -34,7 +34,7 @@ func Load[T any](opts Options) (T, error) {
 		return dst, err
 	}
 
-	files, err := fileValues(opts)
+	files, filePaths, err := fileValues(opts)
 	if err != nil {
 		return dst, err
 	}
@@ -47,7 +47,7 @@ func Load[T any](opts Options) (T, error) {
 
 	var errs []*FieldError
 	for _, l := range leaves {
-		if _, inFile := files[l.Path]; inFile && l.Secret {
+		if l.Secret && filePaths[l.Path] {
 			errs = append(errs, &FieldError{Path: l.Path, Err: ErrSecretInFile})
 			l.Resolved = true // already reported; do not also report it missing
 			continue

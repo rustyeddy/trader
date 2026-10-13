@@ -335,8 +335,7 @@ func TestLoadSecretFromEnvironmentStillWorks(t *testing.T) {
 	assert.Equal(t, "from-env", got.Token)
 }
 
-// A nested secret is covered the same way, and a null value supplies
-// nothing, so it is not an error.
+// A nested secret is covered the same way.
 func TestLoadNestedSecretInFileIsRejected(t *testing.T) {
 	type Config struct {
 		DB struct {
@@ -346,9 +345,52 @@ func TestLoadNestedSecretInFileIsRejected(t *testing.T) {
 	_, err := Load[Config](Options{Environ: []string{}, FileContent: []byte("db:\n  password: hunter2-value\n")})
 	require.ErrorIs(t, err, ErrSecretInFile)
 	assert.NotContains(t, err.Error(), "hunter2-value")
+}
 
-	_, err = Load[Config](Options{Environ: []string{"DB_PASSWORD=ok"}, FileContent: []byte("db:\n  password:\n")})
-	require.NoError(t, err)
+// Mentioning a secret's path is the violation, whatever the value's YAML
+// form: null, a sequence, a mapping, an alias or a merge key must not slip
+// past the rule (ADR-078).
+func TestLoadSecretPathInFileIsRejectedForEveryNodeKind(t *testing.T) {
+	type Config struct {
+		Token string `config:"api_token" secret:"true"`
+		DB    struct {
+			Password string `secret:"true"`
+		}
+	}
+	cases := map[string]string{
+		"scalar":          "api_token: hunter2-value\n",
+		"null":            "api_token: null\n",
+		"empty":           "api_token:\n",
+		"sequence":        "api_token: [hunter2-value]\n",
+		"mapping":         "api_token:\n  value: hunter2-value\n",
+		"mixed case":      "Api_Token: hunter2-value\n",
+		"nested scalar":   "db:\n  password: hunter2-value\n",
+		"nested null":     "db:\n  password: ~\n",
+		"nested mixed":    "DB:\n  PassWord: [hunter2-value]\n",
+		"alias value":     "x: &a hunter2-value\napi_token: *a\n",
+		"merge key":       "base: &b\n  api_token: hunter2-value\nother:\n  <<: *b\napi_token_unused: 1\ndb:\n  <<: {password: hunter2-value}\n",
+		"merge sequence":  "a: &a {api_token: hunter2-value}\n<<: [*a]\n",
+		"quoted key":      "\"api_token\": hunter2-value\n",
+		"inline mapping":  "db: {password: hunter2-value}\n",
+		"with other keys": "api_token: hunter2-value\nunknown: 1\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load[Config](Options{Environ: []string{}, FileContent: []byte(content)})
+			require.ErrorIs(t, err, ErrSecretInFile)
+			assert.NotContains(t, err.Error(), "hunter2-value", "the value is never echoed")
+		})
+	}
+
+	t.Run("a non-secret neighbour is not affected", func(t *testing.T) {
+		type plain struct {
+			Name  string
+			Token string `config:"api_token" secret:"true"`
+		}
+		got, err := Load[plain](Options{Environ: []string{"API_TOKEN=ok"}, FileContent: []byte("name: n\napi_token_file: /x\n")})
+		require.NoError(t, err)
+		assert.Equal(t, "ok", got.Token)
+	})
 }
 
 // A required secret that the file tried to supply is reported once, as
