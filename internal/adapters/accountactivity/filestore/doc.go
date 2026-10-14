@@ -19,9 +19,14 @@
 // Both files are replaced whole: written to a temporary file in the same
 // directory, fsynced, renamed over the old one, and the directory is then
 // fsynced, so a crash leaves either the old file or the new one, never a
-// torn one. A failed directory sync is an error, never ignored. Every
-// directory the store creates, including ancestors of the root, has its
-// parent fsynced, so a stream cannot vanish after Apply returned success.
+// torn one. A failed directory sync is an error, never ignored. The
+// whole directory chain from the filesystem root down to the stream is fsynced,
+// including directories that already exist, because a directory left by an
+// earlier attempt whose parent sync failed looks identical to a stable one.
+// Successful syncs are remembered per process and failures never are, so a
+// retry re-establishes what failed and a stream cannot vanish after Apply
+// returned success. Ancestors above the store root that the user may not be
+// able to open are tolerated on permission errors only.
 // When a retry finds every activity already stored and so writes nothing,
 // Apply still fsyncs the activities file and its directory before moving the
 // checkpoint: it establishes durability rather than assuming it. Apply writes

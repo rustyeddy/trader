@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -307,38 +309,109 @@ func TestApply_RetryWithNothingNewStillSyncsBeforeTheCheckpoint(t *testing.T) {
 	assert.Equal(t, "cursor-2", cp.Cursor)
 }
 
-// Every directory the store creates must have its parent fsynced, up to and
-// including ancestors of the root.
-func TestMkdirAllDurable_SyncsEveryNewDirectoryAndItsParent(t *testing.T) {
+func testStore(root string, rec *recorder) *Store {
+	return &Store{root: root, ops: rec.ops(), durable: map[string]bool{}, locks: map[accountactivity.SyncKey]*sync.Mutex{}}
+}
+
+// The whole directory chain is made durable, from the filesystem root down:
+// each directory's entry is persisted by its parent's sync.
+func TestMkdirAllDurable_SyncsTheWholeChain(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "a", "b")
 	rec := &recorder{}
-	s := &Store{root: root, ops: rec.ops()}
+	s := testStore(root, rec)
 
-	require.NoError(t, s.mkdirAllDurable(filepath.Join(root, "oanda", "practice", "acct")))
+	leaf := filepath.Join(root, "oanda", "practice", "acct")
+	require.NoError(t, s.mkdirAllDurable(leaf, root))
 	for _, want := range []string{
-		base, // parent of a
-		filepath.Join(base, "a"),
-		root,
-		filepath.Join(root, "oanda"),
-		filepath.Join(root, "oanda", "practice"),
-		filepath.Join(root, "oanda", "practice", "acct"),
+		base, filepath.Join(base, "a"), root,
+		filepath.Join(root, "oanda"), filepath.Join(root, "oanda", "practice"), leaf,
 	} {
 		assert.True(t, rec.has("dir:"+want), "expected a sync of %s", want)
 	}
 
-	// A directory that already exists (left by an earlier failed sync) is
-	// synced again, not skipped.
-	rec2 := &recorder{}
-	s2 := &Store{root: root, ops: rec2.ops()}
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "left", "behind"), 0o750))
-	require.NoError(t, s2.mkdirAllDurable(filepath.Join(root, "left", "behind")))
-	assert.Empty(t, rec2.events, "an existing directory needs no creation")
+	// Already-synced directories are remembered and not synced again.
+	n := len(rec.events)
+	require.NoError(t, s.mkdirAllDurable(leaf, root))
+	assert.Len(t, rec.events, n)
+}
 
-	// Failures propagate.
-	bad := &recorder{failDir: func(string) bool { return true }}
-	s3 := &Store{root: root, ops: bad.ops()}
-	assert.Error(t, s3.mkdirAllDurable(filepath.Join(root, "new")))
+// The causal failure: the child directory is created and its own sync
+// succeeds, but the parent sync fails. The directory is left on disk, so a
+// retry sees it as existing, and must still establish the parent's sync.
+func TestMkdirAllDurable_RetryAfterAFailedParentSync(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "root")
+	require.NoError(t, os.MkdirAll(root, 0o750))
+	child := filepath.Join(root, "oanda")
+	leaf := filepath.Join(child, "practice")
+
+	rec := &recorder{}
+	rec.failDir = func(p string) bool { return p == child } // child's entry lives in root...
+	s := testStore(root, rec)
+	require.Error(t, s.mkdirAllDurable(leaf, root))
+	assert.True(t, exists(leaf), "the directories from the failed attempt are left behind")
+	assert.False(t, s.durable[child], "a failed sync is never remembered")
+
+	// Retry on the same store and on a fresh one (a restarted process): the
+	// existing directories are synced again, not skipped.
+	for name, st := range map[string]*Store{"same store": s, "fresh store": testStore(root, &recorder{})} {
+		t.Run(name, func(t *testing.T) {
+			r := &recorder{}
+			st.ops = r.ops()
+			require.NoError(t, st.mkdirAllDurable(leaf, root))
+			assert.True(t, r.has("dir:"+child), "the left-behind directory is synced on retry")
+			assert.True(t, r.has("dir:"+leaf))
+			assert.True(t, st.durable[child] && st.durable[leaf])
+		})
+	}
+}
+
+// Apply must not publish a checkpoint until the stream's directory chain is
+// durable, including when the directories already exist from a failed try.
+func TestApply_RetryAfterAFailedDirectoryChainSyncPublishesNothingEarly(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	dir := streamDir(t, s)
+	provider := filepath.Dir(filepath.Dir(dir))
+
+	rec := &recorder{}
+	rec.failDir = func(p string) bool { return p == provider }
+	s.ops = rec.ops()
+	_, err := s.Apply(ctx, batch("cursor-1", storetest.Deposit("1", 0)))
+	require.Error(t, err)
+	assert.True(t, exists(dir), "the stream directory was left behind")
+	assert.False(t, exists(filepath.Join(dir, checkpointFile)), "no checkpoint was published")
+
+	rec2 := &recorder{}
+	s.ops = rec2.ops()
+	_, err = s.Apply(ctx, batch("cursor-1", storetest.Deposit("1", 0)))
+	require.NoError(t, err)
+	assert.True(t, rec2.has("dir:"+provider), "the retry re-synced the existing directory")
+}
+
+func TestMkdirAllDurable_PermissionAboveTheStrictPointIsTolerated(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	rec := &recorder{}
+	rec.failDir = func(p string) bool { return p == base }
+	s := testStore(root, rec)
+	s.ops.syncDir = func(p string) error {
+		if p == base {
+			return fs.ErrPermission
+		}
+		return nil
+	}
+	require.NoError(t, s.mkdirAllDurable(root, root), "an unreadable ancestor we did not create is not fatal")
+
+	// At or below the strict point it is fatal.
+	s2 := testStore(root, &recorder{})
+	s2.ops.syncDir = func(p string) error {
+		if p == root {
+			return fs.ErrPermission
+		}
+		return nil
+	}
+	assert.Error(t, s2.mkdirAllDurable(root, root))
 }
 
 func lineLen(t *testing.T, a accountactivity.Activity) int {

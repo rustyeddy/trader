@@ -61,7 +61,8 @@ type Store struct {
 	mu    sync.Mutex
 	locks map[accountactivity.SyncKey]*sync.Mutex
 
-	ops fsOps
+	ops     fsOps
+	durable map[string]bool // directories already synced successfully; guarded by mu
 
 	// afterActivities, if non-nil, runs after activities are durably stored
 	// and before the checkpoint is written. Tests use it to inject a crash.
@@ -75,46 +76,83 @@ func New(root string) (*Store, error) {
 	if root == "" {
 		return nil, errors.New("filestore: root must be set")
 	}
-	s := &Store{root: root, locks: map[accountactivity.SyncKey]*sync.Mutex{}, ops: realOps()}
-	if err := s.mkdirAllDurable(root); err != nil {
+	s := &Store{root: root, locks: map[accountactivity.SyncKey]*sync.Mutex{}, ops: realOps(), durable: map[string]bool{}}
+	if err := s.mkdirAllDurable(root, firstMissing(root)); err != nil {
 		return nil, fmt.Errorf("filestore: creating root: %w", err)
 	}
 	return s, nil
 }
 
-// mkdirAllDurable creates path and any missing ancestors, fsyncing the
-// parent of every directory it creates, so a power loss cannot lose a
-// directory after the call returned. A directory left behind by an earlier
-// failed sync already exists here, so its parent is synced again too: the
-// sync is not skipped just because the directory is present.
-func (s *Store) mkdirAllDurable(path string) error {
-	path = filepath.Clean(path)
-	var missing []string
+// mkdirAllDurable creates path and any missing ancestors, then makes the
+// whole directory chain durable: every directory from the filesystem root
+// down to path is fsynced, so each entry is persisted by its parent's sync
+// and each directory's own metadata by its own.
+//
+// It deliberately syncs directories that already exist. A directory left by
+// an earlier attempt whose parent sync failed is indistinguishable from a
+// stable one, so existence proves nothing about durability; only a sync that
+// succeeded does. Directories this Store has already synced successfully are
+// remembered and skipped, a failure is never remembered, and a new process
+// starts empty and re-establishes the chain once.
+//
+// Directories at or below strictFrom must sync without error. Ancestors above
+// it were not created by this store and may be unreadable to this user (a
+// 0711 home directory, say), so a permission failure there is tolerated;
+// any other failure still propagates.
+func (s *Store) mkdirAllDurable(path, strictFrom string) error {
+	path, strictFrom = filepath.Clean(path), filepath.Clean(strictFrom)
+	if err := os.MkdirAll(path, 0o750); err != nil {
+		return err
+	}
+	var chain []string
 	for p := path; ; {
-		if _, err := os.Stat(p); err == nil {
-			break
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		missing = append(missing, p)
+		chain = append([]string{p}, chain...)
 		parent := filepath.Dir(p)
 		if parent == p {
 			break
 		}
 		p = parent
 	}
-	for i := len(missing) - 1; i >= 0; i-- {
-		if err := os.Mkdir(missing[i], 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
-			return err
+	strict := false
+	for _, d := range chain {
+		if d == strictFrom {
+			strict = true
 		}
-		if err := s.ops.syncDir(missing[i]); err != nil {
-			return err
+		s.mu.Lock()
+		done := s.durable[d]
+		s.mu.Unlock()
+		if done {
+			continue
 		}
-		if err := s.ops.syncDir(filepath.Dir(missing[i])); err != nil {
-			return err
+		if err := s.ops.syncDir(d); err != nil {
+			if !strict && errors.Is(err, fs.ErrPermission) {
+				continue
+			}
+			return fmt.Errorf("syncing %s: %w", d, err)
 		}
+		s.mu.Lock()
+		s.durable[d] = true
+		s.mu.Unlock()
 	}
 	return nil
+}
+
+// firstMissing returns the topmost directory of path that does not exist yet
+// (the first one the store will create), or path itself if it exists.
+func firstMissing(path string) string {
+	path = filepath.Clean(path)
+	first := path
+	for p := path; ; {
+		if _, err := os.Stat(p); err == nil {
+			return first
+		}
+		first = p
+		parent := filepath.Dir(p)
+		if parent == p {
+			return first
+		}
+		p = parent
+	}
 }
 
 func (s *Store) lock(k accountactivity.SyncKey) func() {
@@ -185,7 +223,7 @@ func (s *Store) Apply(ctx context.Context, b accountactivity.Batch) (accountacti
 		}
 	}
 
-	if err := s.mkdirAllDurable(dir); err != nil {
+	if err := s.mkdirAllDurable(dir, s.root); err != nil {
 		return accountactivity.ApplyResult{}, fmt.Errorf("filestore: creating stream directory: %w", err)
 	}
 	if len(added) > 0 {
