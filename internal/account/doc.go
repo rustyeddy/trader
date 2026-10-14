@@ -5,7 +5,8 @@
 // or mutate anything after construction — see ADR-007 and the live
 // package (not yet built) for those responsibilities. Deposit and
 // withdrawal history (account.CashLedgerEntry in the architecture
-// document) is also out of scope here; it is additive future work.
+// document) is also out of scope here; broker-reported cash events are
+// modelled by internal/accountactivity (ADR-079).
 //
 // # Snapshot, not a live handle
 //

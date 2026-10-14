@@ -26,6 +26,7 @@ compatibility facade for removed import paths.
 | internal/order | order (split) | No | Canonical intents/proposals/requests/orders/fills/positions, lifecycle; depends on public order vocabulary and internal IDs |
 | internal/account | account | No | Runtime accounting snapshots |
 | internal/account/margin | account/margin | No | Pure gross-notional and initial-margin arithmetic shared by risk and the simulator (ADR-066) |
+| internal/accountactivity | accountactivity | No | Provider-neutral broker account activity model: fills, costs, cash events, with per-value provenance (ADR-079). Imports only num, instrument, order, internal/account |
 | internal/portfolio | portfolio | No | Cross-account projections |
 | internal/backtest | backtest | No | Deterministic runner and scheduler |
 | internal/broker | broker | No | Broker ports |
@@ -66,6 +67,7 @@ cmd/trader, cmd/trader-mcp -> cmd/internal/backtestcfg -> internal/service/backt
 cmd/trader-mcp -> internal/mcpserver -> internal/service/*
 internal/backtest -> internal/strategy, broker, journal, public values
 internal/pipeline -> internal/execution, risk, broker
+internal/accountactivity -> num, instrument, order, internal/account
 internal/marketdata -> public marketdata, instrument, num
                     -> internal/marketdata/internal/provider/*
 internal/order -> public order, instrument, num, internal/id
