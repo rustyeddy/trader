@@ -1,0 +1,98 @@
+#+TITLE: ADR-080: Account activity store and sync checkpoints
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #509. Builds on ADR-079 (the activity model). The OANDA and
+Alpaca importers (#510, #516) are the first producers.
+
+* Context
+
+Imported broker history must be stored durably and re-imported safely. The
+import is a loop of fetch, normalize, store, checkpoint. Any step can fail,
+and a retry must neither duplicate activities nor skip any.
+
+* Decision
+
+** Port in the domain, adapters beside it
+
+=accountactivity.Store= is storage-neutral, like the journal's ports:
+
+- =Apply(ctx, Batch)= stores a batch of activities, then advances the
+  stream's checkpoint, and returns nil only when both are durable.
+- =Checkpoint(ctx, SyncKey)= and =Query(ctx, Query)= read.
+
+Adapters live under =internal/adapters/accountactivity/=. The first is
+=filestore=, which adds no dependency. A SQL adapter would sit beside it. The
+contract suite =accountactivity/storetest= is what any adapter must pass.
+
+** The checkpoint cannot be advanced on its own
+
+A =Batch= carries both the activities and the cursor to resume from. There is
+no separate "set checkpoint" call, so a caller cannot move the checkpoint past
+activities that were not stored. Within =Apply=, activities are written
+first and the checkpoint second. A failure between them leaves the new
+activities stored and the checkpoint unmoved; retrying the same batch finds
+them already stored (reported as =Unchanged=) and then advances the
+checkpoint. Tests inject a crash at that point.
+
+** Streams and cursors
+
+A stream is =SyncKey= = provider + environment + provider account ID: the
+unit of checkpoint and of query. The cursor is an opaque string owned by the
+provider adapter (a transaction ID, a timestamp, a page token); the store and
+the domain never interpret it, which keeps provider cursor semantics out of
+the canonical model. An empty page may still move the cursor.
+
+** Idempotent, append-only upsert
+
+Identity is the activity =Key= (ADR-079). Applying an activity whose Key
+exists:
+
+- with identical content (=SameRecord=): left as it is; the first
+  =ImportedAt= wins;
+- with different content: =ErrConflict=. The whole batch is rejected before
+  anything is written, and the checkpoint does not move.
+
+The ledger is append-only: a broker correction is surfaced to an operator,
+never silently overwritten. If a provider legitimately amends history, that
+needs its own decision (for example a revision record), not a quiet update.
+
+** Deterministic order and queries
+
+=Compare= orders by =OccurredAt=, then by =ProviderActivityID=, shorter before
+longer and otherwise lexicographic, so digit-string IDs sort numerically. It
+is deterministic and makes no claim about provider sequence beyond
+=OccurredAt=. A =Query= names one stream and a half-open =[From, To)= range
+on =OccurredAt= with an optional kind filter. A store has no run or journal
+identity.
+
+** File layout (filestore)
+
+=<root>/<provider>/<environment>/<account>/activities.jsonl= (one activity per
+line in =Compare= order) and =checkpoint.json=. Path components are escaped
+and =.= / =..= refused, since an account ID is external input. Each file is
+replaced whole by write-to-temp, fsync, rename and a directory fsync whose
+failure is an error, so a crash leaves the old file or the new one and the
+checkpoint is never published ahead of activities that are not durable.
+The whole directory chain down to the stream is fsynced, including
+directories that already exist (one left by a failed attempt looks like a
+stable one); successes are remembered per process, failures never are. A retry that finds
+every activity already stored still fsyncs the activities file and directory
+before advancing the checkpoint. One encoded line is bounded (8 MiB, shared
+by writer and reader) and a larger record is rejected, so the store cannot
+hold a record it cannot read. Reading validates every line (decode, =Validate=, stream,
+duplicate key, order) and fails on corruption instead of skipping it. The wire
+format uses explicit structs with a schema version, because =Value='s fields
+are unexported. A value object must carry a payload (an explicit zero is
+valid) and a checkpoint must carry a cursor and a time, mirroring what the
+write path validates.
+
+* Consequences
+
+Writes rewrite a stream's activity file, which is O(activities) per batch.
+That is acceptable at account-history sizes and batch pages of a thousand; a
+SQL adapter is the answer if it stops being so. Apply is serialized per
+stream within one process; there is no cross-process lock, so one importer
+process per root is assumed, as with the market-data store. Cross-process
+locking is a follow-up if concurrent importers are ever needed.
