@@ -188,6 +188,7 @@ the original decided, use full supersession instead.
 | 078 | Security rules, a living ADR (in adr-078-security.org) | Accepted; S-1 secrets are environment-only |
 | 079 | Broker account activity: ledger, journal and trade history (in adr-079-account-activity.org) | Accepted |
 | 080 | Account activity store and sync checkpoints (in adr-080-account-activity-store.org) | Accepted |
+| 081 | OANDA account activity import (in adr-081-oanda-activity-import.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

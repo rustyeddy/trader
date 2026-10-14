@@ -73,6 +73,7 @@ func TestValidate_RepresentativeActivitiesAreValid(t *testing.T) {
 		"deposit":      {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "3", ProviderType: "TRANSFER_FUNDS", Kind: KindDeposit, OccurredAt: at, ImportedAt: at, Cash: Reported(money("500"))},
 		"withdrawal":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "4", ProviderType: "TRANSFER_FUNDS", Kind: KindWithdrawal, OccurredAt: at, ImportedAt: at, Cash: Reported(money("-200"))},
 		"dividend":     {Provider: "alpaca", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "5", ProviderType: "DIV", Kind: KindDividend, OccurredAt: at, ImportedAt: at, Instrument: instrument.EquityID("NASDAQ", "AAPL"), Cash: Reported(money("2.30"))},
+		"other":        {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "9", ProviderType: "MARKET_ORDER", Kind: KindOther, OccurredAt: at, ImportedAt: at, BrokerOrderID: "9", Instrument: eurusd()},
 		"adjustment":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "6", ProviderType: "ADJUSTMENT", Kind: KindAdjustment, OccurredAt: at, ImportedAt: at, Cash: Reported(money("-0.01"))},
 		"reported 0":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "7", ProviderType: "DAILY_FINANCING", Kind: KindFinancing, OccurredAt: at, ImportedAt: at, Financing: Reported(money("0"))},
 		"derived cost": {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "8", ProviderType: "ORDER_FILL", Kind: KindFill, OccurredAt: at, ImportedAt: at, Instrument: eurusd(), Side: order.Buy, Quantity: Reported(num.MustParseQuantity("1")), Price: Reported(num.MustParsePrice("1.1")), SpreadCost: must(Derived(money("-0.1"), "ask-bid at fill"))},
@@ -136,6 +137,8 @@ func TestValidate_PerKindRules(t *testing.T) {
 		"withdrawal positive":      {Kind: KindWithdrawal, Cash: Reported(money("5"))},
 		"deposit without cash":     {Kind: KindDeposit},
 		"deposit with trade links": {Kind: KindDeposit, Cash: Reported(money("1")), TradeLinks: []TradeLink{{"1", TradeRoleOpened}}},
+		"other with economics":     {Kind: KindOther, Cash: Reported(money("1"))},
+		"other with a fill price":  {Kind: KindOther, Price: Reported(num.MustParsePrice("1"))},
 		"adjustment with side":     {Kind: KindAdjustment, Cash: Reported(money("1")), Side: order.Buy},
 	}
 	for name, a := range nonFill {
@@ -327,4 +330,27 @@ func TestPrices_MustBePositive(t *testing.T) {
 	a.Benchmark = must(ReportedFrom(num.MustParsePrice("0"), "fullPrice.ask"))
 	a.Slippage = must(Derived(num.MustParseRate("-0.1"), "x"))
 	assert.ErrorContains(t, a.Validate(), "benchmark price must be positive")
+}
+
+// Batch identity and the provider-native instrument are part of the record:
+// losing or changing either is a different record, and both are optional.
+func TestSameRecord_BatchIDAndProviderInstrumentAreSignificant(t *testing.T) {
+	a := oandaFill()
+	a.BrokerBatchID, a.ProviderInstrument = "6359", "EUR_USD"
+	require.NoError(t, a.Validate())
+
+	b := a
+	b.BrokerBatchID = "6360"
+	assert.False(t, a.SameRecord(b))
+	c := a
+	c.ProviderInstrument = "EUR_GBP"
+	assert.False(t, a.SameRecord(c))
+	d := a
+	d.BrokerBatchID, d.ProviderInstrument = "", ""
+	assert.False(t, a.SameRecord(d), "dropping them is a change")
+	assert.NoError(t, d.Validate(), "both are optional")
+
+	// A provider event with no canonical instrument still keeps the raw name.
+	other := Activity{Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "10", ProviderType: "ORDER_FILL", Kind: KindOther, OccurredAt: at, ImportedAt: at, ProviderInstrument: "SPX500_USD", BrokerBatchID: "9"}
+	assert.NoError(t, other.Validate())
 }

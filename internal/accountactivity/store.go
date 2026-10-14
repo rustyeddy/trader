@@ -206,3 +206,33 @@ type Store interface {
 	// Query returns the stream's matching activities in Compare order.
 	Query(ctx context.Context, q Query) ([]Activity, error)
 }
+
+// Page is one resumable step of a provider fetch.
+type Page struct {
+	// Activities are the normalized activities in this step. The source
+	// leaves ImportedAt zero; the sync loop stamps it from its injected
+	// clock so ingestion time has one origin.
+	Activities []Activity
+	// Cursor is the provider cursor to checkpoint once Activities are
+	// durably stored. It is opaque to everyone but the source.
+	Cursor string
+	// Done reports that the source has nothing further in this run.
+	Done bool
+}
+
+// Source fetches one stream's activities from a provider in resumable
+// pages. It is the provider side of the import path (fetch, normalize,
+// Apply); the Store is the other side. A source performs no storage and
+// holds no durable state of its own: where it resumes is entirely the
+// cursor it is given, so a replay after any failure is safe.
+type Source interface {
+	// Stream names the provider, environment and account this source reads.
+	Stream() SyncKey
+
+	// Next returns the page after cursor, where cursor is the last durable
+	// checkpoint ("" when the stream has none). A page with no activities
+	// and an unchanged cursor means nothing is newer. Next must be a pure
+	// function of cursor and the provider's data: calling it again with the
+	// same cursor returns the same activities.
+	Next(ctx context.Context, cursor string) (Page, error)
+}

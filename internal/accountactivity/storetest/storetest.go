@@ -71,16 +71,16 @@ func RichFill(activityID string, offset time.Duration) accountactivity.Activity 
 		Instrument: instrument.CurrencyPairID(num.MustParseCurrency("EUR"), usd), Side: order.Buy,
 		Quantity:      accountactivity.Reported(num.MustParseQuantity("1000")),
 		Price:         accountactivity.Reported(num.MustParsePrice("1.08532")),
-		BrokerOrderID: "6359",
-		TradeLinks:    []accountactivity.TradeLink{{BrokerTradeID: "6360", Role: accountactivity.TradeRoleOpened}, {BrokerTradeID: "6301", Role: accountactivity.TradeRoleClosed}},
-		RealizedPL:    accountactivity.Reported(money("0")),
-		SpreadCost:    spread,
-		Commission:    accountactivity.Reported(money("-0.05")),
-		Financing:     accountactivity.Reported(money("0")),
-		OtherFees:     must(accountactivity.Derived(money("-0.01"), "sum of dealing fees")),
-		Benchmark:     bench,
-		Slippage:      slip,
-		SlippageCost:  must(accountactivity.Derived(money("-0.12"), "slippage * quantity")),
+		BrokerOrderID: "6359", BrokerBatchID: "6359", ProviderInstrument: "EUR_USD",
+		TradeLinks:   []accountactivity.TradeLink{{BrokerTradeID: "6360", Role: accountactivity.TradeRoleOpened}, {BrokerTradeID: "6301", Role: accountactivity.TradeRoleClosed}},
+		RealizedPL:   accountactivity.Reported(money("0")),
+		SpreadCost:   spread,
+		Commission:   accountactivity.Reported(money("-0.05")),
+		Financing:    accountactivity.Reported(money("0")),
+		OtherFees:    must(accountactivity.Derived(money("-0.01"), "sum of dealing fees")),
+		Benchmark:    bench,
+		Slippage:     slip,
+		SlippageCost: must(accountactivity.Derived(money("-0.12"), "slippage * quantity")),
 	}
 }
 
@@ -128,6 +128,8 @@ func Run(t *testing.T, newStore Factory) {
 		assert.Equal(t, "halfSpreadCost", got[0].SpreadCost.Source())
 		assert.Equal(t, accountactivity.BasisReported, got[0].Financing.Basis())
 		assert.Len(t, got[0].TradeLinks, 2)
+		assert.Equal(t, "6359", got[0].BrokerBatchID, "the broker's batch grouping is stored")
+		assert.Equal(t, "EUR_USD", got[0].ProviderInstrument, "the provider-native instrument is stored")
 	})
 
 	t.Run("queries return deterministic order whatever the arrival order", func(t *testing.T) {

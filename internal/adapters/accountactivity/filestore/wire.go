@@ -81,10 +81,12 @@ type activityWire struct {
 	OccurredAt time.Time `json:"occurred_at"`
 	ImportedAt time.Time `json:"imported_at"`
 
-	Instrument    string          `json:"instrument,omitempty"`
-	Side          string          `json:"side,omitempty"`
-	BrokerOrderID string          `json:"broker_order_id,omitempty"`
-	TradeLinks    []tradeLinkWire `json:"trade_links,omitempty"`
+	Instrument         string          `json:"instrument,omitempty"`
+	Side               string          `json:"side,omitempty"`
+	BrokerOrderID      string          `json:"broker_order_id,omitempty"`
+	BrokerBatchID      string          `json:"broker_batch_id,omitempty"`
+	ProviderInstrument string          `json:"provider_instrument,omitempty"`
+	TradeLinks         []tradeLinkWire `json:"trade_links,omitempty"`
 
 	Quantity     *valueWire[num.Quantity] `json:"quantity,omitempty"`
 	Price        *valueWire[num.Price]    `json:"price,omitempty"`
@@ -120,6 +122,8 @@ func toWire(a accountactivity.Activity) activityWire {
 		ImportedAt:         a.ImportedAt.UTC(),
 		Instrument:         a.Instrument.String(),
 		BrokerOrderID:      a.BrokerOrderID,
+		BrokerBatchID:      a.BrokerBatchID,
+		ProviderInstrument: a.ProviderInstrument,
 		Quantity:           toValueWire(a.Quantity),
 		Price:              toValueWire(a.Price),
 		RealizedPL:         toValueWire(a.RealizedPL),
@@ -160,6 +164,8 @@ func fromWire(w activityWire) (accountactivity.Activity, error) {
 		OccurredAt:         w.OccurredAt,
 		ImportedAt:         w.ImportedAt,
 		BrokerOrderID:      w.BrokerOrderID,
+		BrokerBatchID:      w.BrokerBatchID,
+		ProviderInstrument: w.ProviderInstrument,
 		Instrument:         instrument.ID{},
 	}
 	switch w.Environment {
