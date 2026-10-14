@@ -350,3 +350,36 @@ func TestSource_AMissingOrNullTransactionsArrayIsABadResponse(t *testing.T) {
 	assert.Empty(t, p.Activities)
 	assert.Equal(t, "5", p.Cursor)
 }
+
+// The list response needs both count and pages; a body missing either must
+// not read as a window with nothing in it, which would let a bounded import
+// succeed having fetched none of the requested history.
+func TestSource_AMissingOrNullListSchemaIsABadResponse(t *testing.T) {
+	bounds := func(c *Config) {
+		c.Bounds = Bounds{From: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2024, 3, 8, 0, 0, 0, 0, time.UTC)}
+	}
+	for name, body := range map[string]string{
+		"empty object":      `{}`,
+		"null":              `null`,
+		"count only":        `{"count":0}`,
+		"pages only":        `{"pages":[]}`,
+		"null pages":        `{"pages":null}`,
+		"zero, null pages":  `{"count":0,"pages":null}`,
+		"null count":        `{"count":null,"pages":[]}`,
+		"count and no list": `{"count":3}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := loadFixture(t)
+			f.listBody = body
+			_, err := newSource(t, f, bounds).Next(context.Background(), "")
+			assert.ErrorIs(t, err, ErrBadResponse)
+		})
+	}
+
+	f := loadFixture(t)
+	f.listBody = `{"count":0,"pages":[]}`
+	p, err := newSource(t, f, bounds).Next(context.Background(), "")
+	require.NoError(t, err, "the real empty response is a valid empty window")
+	assert.Empty(t, p.Activities)
+	assert.True(t, p.Done)
+}

@@ -176,9 +176,12 @@ type IDWindow struct{ First, Last int64 }
 // Empty reports whether the window holds no IDs.
 func (w IDWindow) Empty() bool { return w.Last < w.First }
 
+// listWire's fields are pointers so a missing or null count or pages is told
+// apart from a real empty result ({"count":0,"pages":[]}). A body that omits
+// them must not read as "nothing matched".
 type listWire struct {
-	Count int      `json:"count"`
-	Pages []string `json:"pages"`
+	Count *int      `json:"count"`
+	Pages *[]string `json:"pages"`
 }
 
 // ResolveWindow maps one time window to the transaction ID window it covers,
@@ -199,8 +202,11 @@ func (c *Client) ResolveWindow(ctx context.Context, account string, from, to tim
 	if err := c.get(ctx, "/v3/accounts/"+url.PathEscape(account)+"/transactions", q, &w); err != nil {
 		return IDWindow{}, err
 	}
+	if w.Count == nil || w.Pages == nil {
+		return IDWindow{}, fmt.Errorf("%w: list response needs both count and pages", ErrBadResponse)
+	}
 	win := IDWindow{First: 1<<62 - 1, Last: -1}
-	for _, page := range w.Pages {
+	for _, page := range *w.Pages {
 		u, err := url.Parse(page)
 		if err != nil {
 			return IDWindow{}, fmt.Errorf("%w: page link %q", ErrBadResponse, page)
@@ -214,11 +220,11 @@ func (c *Client) ResolveWindow(ctx context.Context, account string, from, to tim
 		win.Last = max(win.Last, last)
 	}
 	if win.Last < 0 {
-		if w.Count > 0 {
+		if *w.Count > 0 {
 			// The response says transactions matched but links none of them.
 			// Treating that as an empty window would end the import
 			// successfully without the history.
-			return IDWindow{}, fmt.Errorf("%w: list reports %d transactions but no pages", ErrBadResponse, w.Count)
+			return IDWindow{}, fmt.Errorf("%w: list reports %d transactions but no pages", ErrBadResponse, *w.Count)
 		}
 		return IDWindow{First: 1, Last: 0}, nil // no pages: empty
 	}

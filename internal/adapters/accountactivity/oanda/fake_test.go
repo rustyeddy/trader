@@ -100,7 +100,7 @@ func (f *fakeOANDA) Do(req *http.Request) (*http.Response, error) {
 				window = [][2]int64{{lo, hi}}
 			}
 		}
-		var pages []string
+		pages := []string{} // OANDA returns [] for an empty window, never null
 		for _, w := range window {
 			pages = append(pages, "https://api.example"+prefix+"/transactions/idrange?from="+strconv.FormatInt(w[0], 10)+"&to="+strconv.FormatInt(w[1], 10))
 		}
