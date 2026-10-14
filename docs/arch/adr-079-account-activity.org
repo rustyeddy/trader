@@ -1,0 +1,83 @@
+#+TITLE: ADR-079: Broker account activity, ledger, journal and trade history
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #508. Domain model only: storage (#509), import (#510,
+#516), cost and trade linkage (#511), trade reconstruction (#512), slippage
+analysis (#513), CLI (#514), reporting (#515) and reconciliation with
+Trader-originated executions (#517) are separate work.
+
+* Context
+
+Trader needs authoritative historical broker activity to reconstruct
+trades, analyse execution quality and report on an account. The existing
+records do not fit. =internal/journal= is run-scoped (ADR-036) and every
+record belongs to a run; =internal/account= is a point-in-time snapshot
+(ADR-019); the simulated broker produces fills and fees for backtests
+(ADR-028). Imported broker history has no Trader run and must not be given a
+fake one.
+
+* Decision
+
+** Three distinct concepts
+
+- *Broker activity ledger*: historical facts the broker reported. Append-only
+  and keyed by provider-native identity. Its domain type is
+  =accountactivity.Activity=; a store is #509.
+- *Trader journal*: decisions and events Trader generated or observed during a
+  run. Broker history is never written into it, and an Activity carries no
+  RunID.
+- *Trade history*: a derived projection over activities, optionally
+  correlated with journals later. Correlation is additive linkage; it never
+  rewrites either side.
+
+** Package
+
+=internal/accountactivity=, internal for now because nothing consumes it
+yet. It imports only the standard library, =num=, =instrument=, =order= and
+=internal/account=, enforced by an allowlist test. No provider SDK type
+appears outside adapters.
+
+** Rules
+
+- *Unknown is not zero.* Every economic field is a =Value[T]=: absent,
+  broker-reported, or derived by Trader. The zero Value is unknown. A
+  reported zero and a derived zero are known values, distinct from unknown
+  and from each other. Nothing that cannot be defended is estimated.
+- *Reported is not derived.* Provenance is per value, not per record, because
+  one activity can mix a broker-reported price and spread cost with a
+  Trader-derived slippage. A derived value must name its method; a reported
+  value may name the provider field it came from.
+- *Costs are separate.* Realized P/L, spread, commission, financing and other
+  fees are separate fields in the account home currency, never a lump sum.
+  Spread is broker-reported where the broker reports it (OANDA
+  =halfSpreadCost=) and is not inferred from fill prices.
+- *Slippage is derived and needs a benchmark.* A broker does not report
+  slippage. Slippage and slippage cost are valid only with a benchmark price
+  that names its source, and are never marked reported. A fill with no
+  defensible benchmark has no slippage.
+- *Identity is provider-native.* The durable key is provider, environment
+  (practice or live), provider account ID and provider activity ID. The
+  environment is a small enum, not a URL; connection details stay in adapter
+  configuration. =account.Reference= may be carried for correlation but is
+  not identity. The provider's own type or code is kept verbatim.
+- *ImportedAt is not identity.* It is ingestion metadata from an injected
+  clock. Re-importing the same activity later is the same economic record
+  (=SameRecord= ignores it).
+- *One struct, strict kinds.* =Activity= with a =Kind= (fill, financing, fee,
+  deposit, withdrawal, dividend, adjustment) and a per-kind table of
+  required and allowed fields, so the struct is not an unvalidated bag of
+  optionals. A sealed per-kind hierarchy is deferred until trade
+  reconstruction shows it is needed. Order create, cancel and reject history
+  is not a first-cut kind; the provider type and broker order ID are
+  preserved so it can be added without losing provenance.
+
+* Consequences
+
+Importers decide which provider transaction types normalize to which Kind
+(#510, #516). Slippage is a signed price-unit difference held as a =num.Rate=
+because =num.Price= is non-negative; a signed price-difference type may
+follow if analysis needs it. All Money fields in one activity must share a
+currency, the account's home currency. A store (#509) must choose its own
+encoding; none is defined here.
