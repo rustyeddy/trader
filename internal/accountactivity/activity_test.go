@@ -331,3 +331,26 @@ func TestPrices_MustBePositive(t *testing.T) {
 	a.Slippage = must(Derived(num.MustParseRate("-0.1"), "x"))
 	assert.ErrorContains(t, a.Validate(), "benchmark price must be positive")
 }
+
+// Batch identity and the provider-native instrument are part of the record:
+// losing or changing either is a different record, and both are optional.
+func TestSameRecord_BatchIDAndProviderInstrumentAreSignificant(t *testing.T) {
+	a := oandaFill()
+	a.BrokerBatchID, a.ProviderInstrument = "6359", "EUR_USD"
+	require.NoError(t, a.Validate())
+
+	b := a
+	b.BrokerBatchID = "6360"
+	assert.False(t, a.SameRecord(b))
+	c := a
+	c.ProviderInstrument = "EUR_GBP"
+	assert.False(t, a.SameRecord(c))
+	d := a
+	d.BrokerBatchID, d.ProviderInstrument = "", ""
+	assert.False(t, a.SameRecord(d), "dropping them is a change")
+	assert.NoError(t, d.Validate(), "both are optional")
+
+	// A provider event with no canonical instrument still keeps the raw name.
+	other := Activity{Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "10", ProviderType: "ORDER_FILL", Kind: KindOther, OccurredAt: at, ImportedAt: at, ProviderInstrument: "SPX500_USD", BrokerBatchID: "9"}
+	assert.NoError(t, other.Validate())
+}

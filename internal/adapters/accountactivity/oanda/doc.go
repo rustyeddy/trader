@@ -25,14 +25,17 @@
 // zero; fields it reports as zero are reported zeros.
 //
 //   - ORDER_FILL becomes a fill, with realized P/L, half-spread cost
-//     (broker-reported), commission, financing, guaranteed-execution fee, the
-//     order ID and every trade the fill opened, reduced or closed.
+//     (broker-reported, with OANDA's own sign), commission, financing,
+//     guaranteed-execution fee, the order and batch IDs and every trade the
+//     fill opened, reduced or closed. Commission and the fee are positive costs
+//     in OANDA's data and are negated to Trader's account-centric sign.
 //   - DAILY_FINANCING becomes financing.
 //   - TRANSFER_FUNDS becomes a deposit or withdrawal by the sign of the amount.
 //   - DIVIDEND_ADJUSTMENT becomes a dividend.
 //   - Every other transaction, and a fill in an instrument Trader cannot yet
-//     identify, becomes KindOther: its ID, time, type and order ID are kept
-//     and no economics are claimed. Nothing is dropped.
+//     identify (anything but a pair of fiat currencies), becomes KindOther: its
+//     ID, time, type, order ID, batch ID and the provider-native instrument
+//     name are kept and no economics are claimed. Nothing is dropped.
 //
 // A recognized transaction that fails to parse is an error, not a skip: the
 // page fails, the checkpoint does not move, and the problem is visible.

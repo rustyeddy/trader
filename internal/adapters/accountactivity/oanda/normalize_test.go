@@ -39,6 +39,8 @@ func TestNormalize_OrderFillPreservesIdentityTimeAndCosts(t *testing.T) {
 	a := norm(t, f, 3)
 
 	assert.Equal(t, accountactivity.KindFill, a.Kind)
+	assert.Equal(t, "2", a.BrokerBatchID, "the broker's batch grouping is kept")
+	assert.Equal(t, "EUR_USD", a.ProviderInstrument)
 	assert.Equal(t, "ORDER_FILL", a.ProviderType)
 	assert.Equal(t, "3", a.ProviderActivityID)
 	assert.Equal(t, "2", a.BrokerOrderID)
@@ -53,9 +55,8 @@ func TestNormalize_OrderFillPreservesIdentityTimeAndCosts(t *testing.T) {
 	assert.Equal(t, accountactivity.BasisReported, a.Price.Basis())
 	assert.Equal(t, "price", a.Price.Source())
 
-	// OANDA reports halfSpreadCost as a positive cost; Trader holds costs
-	// as negative account-centric money, still broker-reported.
-	assert.Equal(t, "-0.25 USD", money(t, a.SpreadCost))
+	// halfSpreadCost keeps the sign OANDA reports (it can be either).
+	assert.Equal(t, "0.25 USD", money(t, a.SpreadCost))
 	assert.Equal(t, accountactivity.BasisReported, a.SpreadCost.Basis())
 	assert.Equal(t, "halfSpreadCost", a.SpreadCost.Source())
 
@@ -77,7 +78,7 @@ func TestNormalize_SellFillWithMixedCostSignsAndTradeLinks(t *testing.T) {
 	assert.Equal(t, "5.8 USD", money(t, a.RealizedPL), "pl is already signed")
 	assert.Equal(t, "-0.1 USD", money(t, a.Financing), "financing is already signed")
 	assert.Equal(t, "-0.05 USD", money(t, a.Commission), "a positive commission is a cost")
-	assert.Equal(t, "-0.3 USD", money(t, a.SpreadCost))
+	assert.Equal(t, "0.3 USD", money(t, a.SpreadCost), "halfSpreadCost is not negated")
 	assert.False(t, a.OtherFees.Known(), "an absent field is unknown, not zero")
 
 	// A single fill can close one trade and open another.
@@ -183,4 +184,55 @@ func TestNormalize_ExactDecimalsSurvive(t *testing.T) {
 	p, _ := a.Price.Get()
 	assert.Equal(t, "0.12345678", p.String())
 	assert.Equal(t, "92233720368.54775807 USD", money(t, a.RealizedPL))
+}
+
+// halfSpreadCost is signed by OANDA, either way; it is never forced to a sign.
+func TestNormalize_HalfSpreadCostKeepsTheProviderSign(t *testing.T) {
+	for in, want := range map[string]string{"0.2500": "0.25 USD", "-0.2500": "-0.25 USD", "0.0000": "0 USD"} {
+		a, err := normalize(json.RawMessage(`{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","instrument":"EUR_USD","units":"1","price":"1.1","halfSpreadCost":"`+in+`"}`), stream, usd)
+		require.NoError(t, err, in)
+		assert.Equal(t, want, money(t, a.SpreadCost), in)
+		assert.Equal(t, "halfSpreadCost", a.SpreadCost.Source())
+	}
+	// Commission, by contrast, is documented as a positive cost and is negated.
+	a, err := normalize(json.RawMessage(`{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","instrument":"EUR_USD","units":"1","price":"1.1","commission":"0.0500"}`), stream, usd)
+	require.NoError(t, err)
+	assert.Equal(t, "-0.05 USD", money(t, a.Commission))
+}
+
+// Batch identity is kept for every transaction type that carries it, and
+// transactions created together share it.
+func TestNormalize_BatchIDsAreKeptAndShared(t *testing.T) {
+	f := loadFixture(t)
+	order, fill := norm(t, f, 2), norm(t, f, 3)
+	assert.Equal(t, "2", order.BrokerBatchID)
+	assert.Equal(t, order.BrokerBatchID, fill.BrokerBatchID, "an order and its fill share a batch")
+	assert.Equal(t, "6", norm(t, f, 6).BrokerBatchID)
+	assert.Equal(t, "6", norm(t, f, 7).BrokerBatchID)
+	assert.Empty(t, norm(t, f, 4).BrokerBatchID, "absent stays absent")
+}
+
+// Only real fiat pairs are forex. A metal, commodity or index CFD must not
+// become an fx: instrument just because its code looks like a currency; the
+// raw name is kept either way.
+func TestNormalize_OnlyFiatPairsAreForexAndTheRawInstrumentIsAlwaysKept(t *testing.T) {
+	fill := func(inst string) string {
+		return `{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","orderID":"2","instrument":"` + inst + `","units":"1","price":"1.1","pl":"2.0000"}`
+	}
+	for inst, wantID := range map[string]string{"EUR_USD": "fx:EUR/USD", "USD_CNH": "fx:USD/CNH", "USD_ZAR": "fx:USD/ZAR", "GBP_JPY": "fx:GBP/JPY"} {
+		a, err := normalize(json.RawMessage(fill(inst)), stream, usd)
+		require.NoError(t, err, inst)
+		assert.Equal(t, accountactivity.KindFill, a.Kind, inst)
+		assert.Equal(t, wantID, a.Instrument.String(), inst)
+		assert.Equal(t, inst, a.ProviderInstrument)
+	}
+	for _, inst := range []string{"XAU_USD", "XAG_EUR", "WTICO_USD", "BCO_USD", "SPX500_USD", "DE30_EUR", "USB10Y_USD", "XYZ_USD", "EURUSD"} {
+		a, err := normalize(json.RawMessage(fill(inst)), stream, usd)
+		require.NoError(t, err, inst)
+		assert.Equal(t, accountactivity.KindOther, a.Kind, inst)
+		assert.True(t, a.Instrument.IsZero(), "%s must not get an fx: identity", inst)
+		assert.Equal(t, inst, a.ProviderInstrument, "the provider-native name survives for later re-normalization")
+		assert.Equal(t, "ORDER_FILL", a.ProviderType)
+		assert.False(t, a.Price.Known())
+	}
 }

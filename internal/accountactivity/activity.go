@@ -61,6 +61,16 @@ type Activity struct {
 	// BrokerOrderID preserves the broker's order link. It is optional and
 	// not interpreted here.
 	BrokerOrderID string
+	// BrokerBatchID preserves the broker's grouping of transactions that
+	// were created together (OANDA's batchID), so the grouping survives
+	// import. Optional and not interpreted here.
+	BrokerBatchID string
+	// ProviderInstrument is the provider-native instrument name exactly as
+	// the broker wrote it (for example "EUR_USD" or "SPX500_USD"). It is kept
+	// beside the canonical Instrument, which is empty when Trader cannot yet
+	// identify the instrument, so an event can be re-normalized later
+	// without going back to the provider. Optional on every kind.
+	ProviderInstrument string
 	// TradeLinks preserve every broker trade a fill touched, with the
 	// relationship: one OANDA ORDER_FILL can open one trade, reduce
 	// another and close several, all under one provider activity ID.
@@ -72,7 +82,10 @@ type Activity struct {
 	// account home currency. This includes SlippageCost.
 	RealizedPL Value[num.Money]
 	// SpreadCost is the monetary cost of crossing the spread (OANDA
-	// halfSpreadCost), not a bid/ask spread in price units.
+	// halfSpreadCost), not a bid/ask spread in price units. Unlike the other
+	// monetary fields it keeps the sign the broker reported: OANDA defines
+	// halfSpreadCost as either positive or negative, so it is not forced into
+	// the account-centric convention (ADR-081).
 	SpreadCost Value[num.Money]
 	Commission Value[num.Money]
 	Financing  Value[num.Money]

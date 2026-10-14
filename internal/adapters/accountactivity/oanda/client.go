@@ -181,9 +181,11 @@ type listWire struct {
 	Pages []string `json:"pages"`
 }
 
-// ResolveWindow maps a time window to the transaction ID window it covers,
-// using the transactions list endpoint, whose pages are idrange links. An
-// empty window is returned (not an error) when no transactions fall inside.
+// ResolveWindow maps one time window to the transaction ID window it covers,
+// using the transactions list endpoint, whose pages are idrange links. OANDA
+// treats both from and to as inclusive and limits a request to 365 days, so
+// callers split longer spans and pass an inclusive end (Source does). An empty
+// window is returned (not an error) when no transactions fall inside.
 func (c *Client) ResolveWindow(ctx context.Context, account string, from, to time.Time) (IDWindow, error) {
 	q := url.Values{}
 	if !from.IsZero() {
@@ -212,13 +214,22 @@ func (c *Client) ResolveWindow(ctx context.Context, account string, from, to tim
 		win.Last = max(win.Last, last)
 	}
 	if win.Last < 0 {
+		if w.Count > 0 {
+			// The response says transactions matched but links none of them.
+			// Treating that as an empty window would end the import
+			// successfully without the history.
+			return IDWindow{}, fmt.Errorf("%w: list reports %d transactions but no pages", ErrBadResponse, w.Count)
+		}
 		return IDWindow{First: 1, Last: 0}, nil // no pages: empty
 	}
 	return win, nil
 }
 
+// idrangeWire's Transactions is a pointer so a missing or null array (nil)
+// is told apart from an explicit empty one. A response that omits the array
+// must not look like a page with nothing in it.
 type idrangeWire struct {
-	Transactions []json.RawMessage `json:"transactions"`
+	Transactions *[]json.RawMessage `json:"transactions"`
 }
 
 // IDRange fetches the transactions with IDs in [from, to], inclusive, as raw
@@ -231,5 +242,8 @@ func (c *Client) IDRange(ctx context.Context, account string, from, to int64) ([
 	if err := c.get(ctx, "/v3/accounts/"+url.PathEscape(account)+"/transactions/idrange", q, &w); err != nil {
 		return nil, err
 	}
-	return w.Transactions, nil
+	if w.Transactions == nil {
+		return nil, fmt.Errorf("%w: idrange response has no transactions array", ErrBadResponse)
+	}
+	return *w.Transactions, nil
 }

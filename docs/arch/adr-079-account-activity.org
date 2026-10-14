@@ -57,7 +57,9 @@ appears outside adapters.
   not inferred from fill prices.
 - *One sign convention.* Every monetary field is signed from the account's
   point of view: a cost is negative, a credit positive, zero neutral. That
-  includes slippage cost: adverse slippage is negative money. Price-unit
+  includes slippage cost: adverse slippage is negative money. The one
+  exception is =SpreadCost=, which keeps the sign the broker reported because
+  OANDA's =halfSpreadCost= is signed either way (ADR-081). Price-unit
   slippage shares the sign (negative means worse for the trader than the
   benchmark) and Validate rejects the two having strictly opposite signs.
 - *Trade links keep cardinality and role.* A fill carries =TradeLinks=, each a

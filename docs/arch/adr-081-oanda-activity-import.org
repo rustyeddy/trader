@@ -58,21 +58,47 @@ reported zeros. Every value carries =ReportedFrom= with OANDA's field name.
 - DAILY_FINANCING -> financing. TRANSFER_FUNDS -> deposit or withdrawal by the
   sign of the amount (zero is =KindOther=). DIVIDEND_ADJUSTMENT -> dividend.
 - Anything else, and a fill in an instrument Trader cannot yet identify, ->
-  =KindOther=: ID, time, provider type, order ID and instrument are kept, no
-  economics are claimed. Nothing is dropped. =KindOther= is added to ADR-079's
+  =KindOther=: ID, time, provider type, order ID, batch ID and the
+  provider-native instrument name are kept, no economics are claimed. Nothing is dropped. =KindOther= is added to ADR-079's
   vocabulary for this; it has no required or allowed economic fields.
 - A recognized transaction that fails to parse is an error. The page is not
   stored, the checkpoint does not move, and the failure is visible.
 
 ** Sign convention
 
-OANDA reports commission, guaranteed-execution fee and half-spread cost as
-positive costs that reduce the balance. ADR-079 holds every monetary field
-account-centric, so these three are negated on the way in (a cost is
-negative). Realized P/L and financing are already signed and are not changed.
-This is the one place provider convention is translated and it is covered by
-tests; it should be confirmed against a real practice account before the
-numbers are relied on.
+OANDA documents =commission= and =guaranteedExecutionFee= as positive
+quantities that reduce the balance. ADR-079 holds money account-centric, so
+those two are negated on the way in (a cost is negative). Realized P/L and
+financing are already signed and are not changed. =halfSpreadCost= is
+different: OANDA defines it as positive or negative, so it is stored with the
+sign the broker reported and is the one documented exception to the
+account-centric convention; negating it would turn a legitimate negative
+into a credit. Tests cover both signs of each. Commission and fee handling
+follow the v20 documentation and should be confirmed against a real practice
+account before the numbers are relied on.
+
+** Time bounds
+
+A bounded import is half-open, =[From, To)=, like every Trader range. OANDA
+treats both =from= and =to= as inclusive and accepts at most 365 days per
+list request, so the source asks for the instant before =To=, cuts the window
+into spans of at most 365 days (contiguous, never overlapping), and merges
+their ID windows (IDs are sequential in time). =From= is required for a
+bounded import; a bound with no =To= runs to "now" from an injected clock. A
+list that reports matching transactions but links no pages is a bad response,
+not an empty window, and an idrange response without a transactions array is
+a bad response, not an empty page, so neither can move the checkpoint past
+history that was never fetched.
+
+** Instruments and provenance
+
+Only a pair of known fiat currencies becomes an =fx:= instrument. The
+standard currency parser accepts any three to five capitals, so a metal,
+commodity or index code would otherwise pass as a currency; an explicit list
+separates them. Every activity keeps the provider-native instrument name
+(=ProviderInstrument=) beside the canonical one, and the broker's batch ID
+(=BrokerBatchID=), so an event Trader cannot model today can be re-normalized
+later without re-fetching from the provider.
 
 ** Credentials and failure
 
@@ -85,7 +111,9 @@ again.
 
 * Consequences
 
-Order create and cancel events are stored as =KindOther= with the order ID, so
+The top-level fill =price= is marked deprecated by OANDA in favour of the
+per-trade opened, closed and reduced prices; #511 must not treat it as the
+final authoritative execution price. Order create and cancel events are stored as =KindOther= with the order ID, so
 later order-history semantics can be added without re-importing. CFD and
 metal fills are =KindOther= until instrument mapping exists, which is
 visible in the sync result's =Other= count but loses their economics until

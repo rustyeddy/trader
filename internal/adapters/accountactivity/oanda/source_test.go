@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/internal/accountactivity"
+	"github.com/rustyeddy/trader/internal/clock"
 )
 
 func newSource(t *testing.T, f *fakeOANDA, mod ...func(*Config)) *Source {
@@ -117,7 +118,8 @@ func TestSource_BoundedHistoryReadsOnlyTheResolvedWindow(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/transactions") {
 			listed = true
 			assert.Equal(t, "2024-03-05T00:00:00Z", r.URL.Query().Get("from"))
-			assert.Equal(t, "2024-03-07T10:00:00Z", r.URL.Query().Get("to"))
+			assert.Equal(t, "2024-03-07T09:59:59.999999999Z", r.URL.Query().Get("to"),
+				"OANDA's end is inclusive, so the half-open [From, To) asks for the instant before To")
 		}
 	}
 	assert.True(t, listed)
@@ -126,7 +128,9 @@ func TestSource_BoundedHistoryReadsOnlyTheResolvedWindow(t *testing.T) {
 func TestSource_EmptyWindowIsDoneWithNothing(t *testing.T) {
 	f := loadFixture(t)
 	f.window = nil
-	s := newSource(t, f, func(c *Config) { c.Bounds = Bounds{From: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)} })
+	s := newSource(t, f, func(c *Config) {
+		c.Bounds = Bounds{From: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2030, 2, 1, 0, 0, 0, 0, time.UTC)}
+	})
 	p, err := s.Next(context.Background(), "")
 	require.NoError(t, err)
 	assert.Empty(t, p.Activities)
@@ -160,12 +164,14 @@ func TestSource_RejectsABadCursorAndBadConfig(t *testing.T) {
 
 	good := Config{Client: newClient(t, f), Environment: accountactivity.EnvironmentLive, AccountID: testAccount}
 	for name, mod := range map[string]func(*Config){
-		"no client":       func(c *Config) { c.Client = nil },
-		"no environment":  func(c *Config) { c.Environment = accountactivity.EnvironmentUnknown },
-		"no account":      func(c *Config) { c.AccountID = "" },
-		"page too big":    func(c *Config) { c.PageSize = 1001 },
-		"page negative":   func(c *Config) { c.PageSize = -1 },
-		"inverted bounds": func(c *Config) { c.Bounds = Bounds{From: time.Unix(200, 0), To: time.Unix(100, 0)} },
+		"no client":          func(c *Config) { c.Client = nil },
+		"no environment":     func(c *Config) { c.Environment = accountactivity.EnvironmentUnknown },
+		"no account":         func(c *Config) { c.AccountID = "" },
+		"page too big":       func(c *Config) { c.PageSize = 1001 },
+		"page negative":      func(c *Config) { c.PageSize = -1 },
+		"inverted bounds":    func(c *Config) { c.Bounds = Bounds{From: time.Unix(200, 0), To: time.Unix(100, 0)} },
+		"end without start":  func(c *Config) { c.Bounds = Bounds{To: time.Unix(100, 0)} },
+		"open end, no clock": func(c *Config) { c.Bounds = Bounds{From: time.Unix(100, 0)} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := good
@@ -231,4 +237,116 @@ func TestBaseURL(t *testing.T) {
 	assert.Error(t, err)
 	_, err = NewClient("", nil, nil)
 	assert.Error(t, err)
+}
+
+// Bounds are half-open [From, To): a transaction exactly at To is not
+// imported, and nothing is checkpointed past it.
+func TestSource_AnExclusiveEndExcludesATransactionExactlyAtIt(t *testing.T) {
+	f := loadFixture(t)
+	f.byTime = true
+	from := time.Date(2024, 3, 5, 0, 0, 0, 0, time.UTC)
+	boundary := time.Date(2024, 3, 7, 8, 0, 0, 0, time.UTC) // transaction 8 is exactly here
+
+	s := newSource(t, f, func(c *Config) { c.Bounds = Bounds{From: from, To: boundary}; c.PageSize = 100 })
+	p, err := s.Next(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"2", "3", "4", "5", "6", "7"}, ids(p), "transaction 8 is exactly at To and excluded")
+	assert.Equal(t, "7", p.Cursor, "the checkpoint stops before the boundary transaction")
+
+	// Moving To one nanosecond past it includes the transaction.
+	f2 := loadFixture(t)
+	f2.byTime = true
+	s2 := newSource(t, f2, func(c *Config) { c.Bounds = Bounds{From: from, To: boundary.Add(time.Nanosecond)}; c.PageSize = 100 })
+	p, err = s2.Next(context.Background(), "")
+	require.NoError(t, err)
+	assert.Contains(t, ids(p), "8")
+}
+
+// OANDA rejects list spans over 365 days: a long window is cut into spans of
+// at most that, contiguous and non-overlapping, and the ID windows merged.
+func TestSource_LongWindowsAreSplitIntoSupportedSpans(t *testing.T) {
+	f := loadFixture(t)
+	f.byTime = true
+	from := time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2024, 3, 6, 0, 0, 0, 0, time.UTC) // about five years
+
+	s := newSource(t, f, func(c *Config) { c.Bounds = Bounds{From: from, To: to}; c.PageSize = 100 })
+	p, err := s.Next(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1", "2", "3", "4", "5"}, ids(p), "transactions from every span are merged into one ID window")
+
+	require.Greater(t, len(f.lists), 4, "five years need several requests")
+	prevEnd := time.Time{}
+	for i, l := range f.lists {
+		assert.LessOrEqual(t, l.to.Sub(l.from), 365*24*time.Hour, "request %d exceeds OANDA's 365-day limit", i)
+		if !prevEnd.IsZero() {
+			assert.Equal(t, prevEnd.Add(time.Nanosecond), l.from, "spans are contiguous with no overlap and no gap")
+		}
+		prevEnd = l.to
+	}
+	assert.Equal(t, from, f.lists[0].from)
+	assert.Equal(t, to.Add(-time.Nanosecond), f.lists[len(f.lists)-1].to)
+}
+
+// A start with no end means up to now, from the injected clock, and is split
+// the same way.
+func TestSource_AnOpenEndedWindowRunsUpToTheInjectedNow(t *testing.T) {
+	f := loadFixture(t)
+	f.byTime = true
+	now := time.Date(2024, 3, 6, 12, 0, 0, 0, time.UTC)
+	s := newSource(t, f, func(c *Config) {
+		c.Bounds = Bounds{From: time.Date(2021, 3, 1, 0, 0, 0, 0, time.UTC)}
+		c.Clock = clock.NewSimulated(now)
+		c.PageSize = 100
+	})
+	p, err := s.Next(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1", "2", "3", "4", "5", "6", "7"}, ids(p))
+	require.GreaterOrEqual(t, len(f.lists), 3)
+	assert.Equal(t, now, f.lists[len(f.lists)-1].to)
+	for _, l := range f.lists {
+		assert.LessOrEqual(t, l.to.Sub(l.from), 365*24*time.Hour)
+	}
+}
+
+// A list that reports matching transactions but links no pages is not an
+// empty window: treating it as one would end the import without the history.
+func TestSource_ACountWithNoPagesIsABadResponse(t *testing.T) {
+	f := loadFixture(t)
+	f.listBody = `{"count":10,"pages":[]}`
+	s := newSource(t, f, func(c *Config) {
+		c.Bounds = Bounds{From: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2024, 3, 8, 0, 0, 0, 0, time.UTC)}
+	})
+	_, err := s.Next(context.Background(), "")
+	assert.ErrorIs(t, err, ErrBadResponse)
+
+	f.listBody = `{"count":0,"pages":[]}`
+	s2 := newSource(t, f, func(c *Config) {
+		c.Bounds = Bounds{From: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2024, 3, 8, 0, 0, 0, 0, time.UTC)}
+	})
+	p, err := s2.Next(context.Background(), "")
+	require.NoError(t, err, "a genuinely empty window is fine")
+	assert.True(t, p.Done)
+}
+
+// A response without a transactions array must not look like a page with
+// nothing in it: the source would advance past history it never fetched.
+func TestSource_AMissingOrNullTransactionsArrayIsABadResponse(t *testing.T) {
+	for name, body := range map[string]string{
+		"empty object": `{}`, "null": `null`, "null array": `{"transactions":null}`, "wrong key": `{"txs":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := loadFixture(t)
+			f.idrangeBody = body
+			_, err := newSource(t, f).Next(context.Background(), "")
+			assert.ErrorIs(t, err, ErrBadResponse)
+		})
+	}
+
+	f := loadFixture(t)
+	f.idrangeBody = `{"transactions":[]}`
+	p, err := newSource(t, f).Next(context.Background(), "")
+	require.NoError(t, err, "an explicit empty array is a legitimate empty page")
+	assert.Empty(t, p.Activities)
+	assert.Equal(t, "5", p.Cursor)
 }

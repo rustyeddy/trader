@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/internal/accountactivity"
+	"github.com/rustyeddy/trader/internal/clock"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -19,13 +20,20 @@ const Provider = "oanda"
 const DefaultPageSize = 500
 
 // Bounds optionally limits a run to a time window, for bootstrapping
-// existing history. A zero bound is open on that side. From is inclusive and
-// To exclusive in OANDA's own list semantics.
+// existing history. The window is half-open, [From, To), like every Trader
+// range. OANDA itself treats both ends as inclusive, so the source asks for
+// the instant just before To; a transaction exactly at To is not imported.
+// From is required when Bounds is used. A zero To means up to now, taken
+// from Config.Clock.
 type Bounds struct {
 	From, To time.Time
 }
 
 func (b Bounds) set() bool { return !b.From.IsZero() || !b.To.IsZero() }
+
+// maxListSpan is the longest time span OANDA accepts in one transactions
+// list request.
+const maxListSpan = 365 * 24 * time.Hour
 
 // Config configures a Source.
 type Config struct {
@@ -34,6 +42,9 @@ type Config struct {
 	AccountID   string
 	// Bounds, if set, limits the run to a time window.
 	Bounds Bounds
+	// Clock supplies "now" for a bound with no end. Required when Bounds has
+	// a From but no To.
+	Clock clock.Clock
 	// PageSize is the ID span of one page; zero means DefaultPageSize.
 	PageSize int64
 }
@@ -66,8 +77,16 @@ func NewSource(cfg Config) (*Source, error) {
 	if cfg.PageSize < 1 || cfg.PageSize > 1000 {
 		return nil, fmt.Errorf("oanda: page size %d is outside 1..1000", cfg.PageSize)
 	}
-	if !cfg.Bounds.From.IsZero() && !cfg.Bounds.To.IsZero() && !cfg.Bounds.To.After(cfg.Bounds.From) {
-		return nil, errors.New("oanda: bounds end must be after start")
+	if cfg.Bounds.set() {
+		if cfg.Bounds.From.IsZero() {
+			return nil, errors.New("oanda: bounds need a start (From); for everything, import unbounded")
+		}
+		if !cfg.Bounds.To.IsZero() && !cfg.Bounds.To.After(cfg.Bounds.From) {
+			return nil, errors.New("oanda: bounds end must be after start")
+		}
+		if cfg.Bounds.To.IsZero() && cfg.Clock == nil {
+			return nil, errors.New("oanda: bounds with no end need a clock for \"now\"")
+		}
 	}
 	stream := accountactivity.SyncKey{Provider: Provider, Environment: cfg.Environment, ProviderAccountID: cfg.AccountID}
 	if err := stream.Validate(); err != nil {
@@ -95,7 +114,7 @@ func (s *Source) prepare(ctx context.Context) error {
 	s.first, s.last = 1, sum.LastTransactionID
 
 	if s.cfg.Bounds.set() {
-		win, err := s.cfg.Client.ResolveWindow(ctx, s.cfg.AccountID, s.cfg.Bounds.From, s.cfg.Bounds.To)
+		win, err := s.resolveBounds(ctx)
 		if err != nil {
 			return err
 		}
@@ -150,4 +169,38 @@ func (s *Source) Next(ctx context.Context, cursor string) (accountactivity.Page,
 		Cursor:     strconv.FormatInt(end, 10),
 		Done:       end >= s.last,
 	}, nil
+}
+
+// resolveBounds maps the half-open time window to the ID window it covers.
+// The window is cut into spans OANDA accepts (365 days), each asked for with
+// an inclusive end, and the ID windows are merged: IDs are sequential in
+// time, so the first and last across all spans bound the whole window.
+func (s *Source) resolveBounds(ctx context.Context) (IDWindow, error) {
+	from := s.cfg.Bounds.From.UTC()
+	var to time.Time // inclusive
+	if s.cfg.Bounds.To.IsZero() {
+		to = s.cfg.Clock.Now().UTC()
+	} else {
+		to = s.cfg.Bounds.To.UTC().Add(-time.Nanosecond)
+	}
+	merged := IDWindow{First: 1<<62 - 1, Last: -1}
+	for start := from; !start.After(to); {
+		end := start.Add(maxListSpan)
+		if end.After(to) {
+			end = to
+		}
+		win, err := s.cfg.Client.ResolveWindow(ctx, s.cfg.AccountID, start, end)
+		if err != nil {
+			return IDWindow{}, err
+		}
+		if !win.Empty() {
+			merged.First = min(merged.First, win.First)
+			merged.Last = max(merged.Last, win.Last)
+		}
+		start = end.Add(time.Nanosecond)
+	}
+	if merged.Last < 0 {
+		return IDWindow{First: 1, Last: 0}, nil
+	}
+	return merged, nil
 }

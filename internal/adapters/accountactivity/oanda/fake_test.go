@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -28,10 +29,17 @@ type fakeOANDA struct {
 	currency string
 	// window, if non-nil, is what the transactions list endpoint reports:
 	// the idrange pages covering a time window.
-	window   [][2]int64
-	status   int // forced status for every request, if non-zero
-	badBody  string
-	requests []*http.Request
+	window [][2]int64
+	// byTime, if set, derives the list response from the transactions' own
+	// timestamps, both ends inclusive like OANDA, instead of window.
+	byTime bool
+	// lists records the (from, to) of every transactions-list request.
+	lists []listReq
+	// listBody and idrangeBody, if set, replace those endpoints' bodies.
+	listBody, idrangeBody string
+	status                int // forced status for every request, if non-zero
+	badBody               string
+	requests              []*http.Request
 }
 
 func loadFixture(t *testing.T) *fakeOANDA {
@@ -65,13 +73,46 @@ func (f *fakeOANDA) Do(req *http.Request) (*http.Response, error) {
 		last := strconv.Itoa(len(f.txs))
 		return respond(200, `{"account":{"currency":"`+f.currency+`","lastTransactionID":"`+last+`"},"lastTransactionID":"`+last+`"}`)
 	case prefix + "/transactions":
+		from, _ := time.Parse(time.RFC3339Nano, q.Get("from"))
+		to, _ := time.Parse(time.RFC3339Nano, q.Get("to"))
+		f.lists = append(f.lists, listReq{from, to})
+		if f.listBody != "" {
+			return respond(200, f.listBody)
+		}
+		window := f.window
+		count := 0
+		if f.byTime {
+			window = nil
+			lo, hi := int64(-1), int64(-1)
+			for i, tx := range f.txs {
+				var w struct{ Time string }
+				_ = json.Unmarshal(tx, &w)
+				at, _ := time.Parse(time.RFC3339Nano, w.Time)
+				if (from.IsZero() || !at.Before(from)) && (to.IsZero() || !at.After(to)) { // inclusive both ends
+					count++
+					if lo < 0 {
+						lo = int64(i + 1)
+					}
+					hi = int64(i + 1)
+				}
+			}
+			if lo >= 0 {
+				window = [][2]int64{{lo, hi}}
+			}
+		}
 		var pages []string
-		for _, w := range f.window {
+		for _, w := range window {
 			pages = append(pages, "https://api.example"+prefix+"/transactions/idrange?from="+strconv.FormatInt(w[0], 10)+"&to="+strconv.FormatInt(w[1], 10))
 		}
-		b, _ := json.Marshal(map[string]any{"count": len(pages), "pages": pages})
+		if !f.byTime {
+			count = len(pages)
+		}
+		b, _ := json.Marshal(map[string]any{"count": count, "pages": pages})
 		return respond(200, string(b))
 	case prefix + "/transactions/idrange":
+		if f.idrangeBody != "" {
+			return respond(200, f.idrangeBody)
+		}
 		from, _ := strconv.Atoi(q.Get("from"))
 		to, _ := strconv.Atoi(q.Get("to"))
 		var out []json.RawMessage
@@ -97,6 +138,8 @@ func (f *fakeOANDA) idranges() []string {
 	}
 	return out
 }
+
+type listReq struct{ from, to time.Time }
 
 type token string
 

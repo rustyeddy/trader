@@ -225,3 +225,46 @@ func TestSync_NoSecretInStoredDataOrErrors(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnauthorized)
 	assert.NotContains(t, err.Error(), testToken)
 }
+
+// A response that lost its transactions array must not move the checkpoint
+// past history that was never fetched.
+func TestSync_AMalformedPageLeavesTheCheckpointUnchanged(t *testing.T) {
+	store, _ := newFileStore(t)
+	f := loadFixture(t)
+	_, err := run(t, store, f, func(c *Config) { c.PageSize = 5 })
+	require.NoError(t, err)
+
+	f.txs = append(f.txs, []byte(`{"id":"13","type":"DAILY_FINANCING","time":"2024-03-08T22:00:00Z","financing":"-0.9000"}`))
+	f.idrangeBody = `{}`
+	_, err = run(t, store, f)
+	require.ErrorIs(t, err, ErrBadResponse)
+
+	cp, _, err := store.Checkpoint(context.Background(), stream)
+	require.NoError(t, err)
+	assert.Equal(t, "12", cp.Cursor, "the checkpoint did not move past undelivered history")
+	assert.Len(t, query(t, store), 12)
+
+	f.idrangeBody = ""
+	res, err := run(t, store, f)
+	require.NoError(t, err)
+	assert.Equal(t, "13", res.Cursor)
+}
+
+// Batch IDs and provider instrument names survive import and storage.
+func TestSync_BatchIDsAndProviderInstrumentsRoundTripThroughTheStore(t *testing.T) {
+	store, _ := newFileStore(t)
+	_, err := run(t, store, loadFixture(t))
+	require.NoError(t, err)
+
+	byID := map[string]accountactivity.Activity{}
+	for _, a := range query(t, store) {
+		byID[a.ProviderActivityID] = a
+	}
+	assert.Equal(t, "2", byID["2"].BrokerBatchID)
+	assert.Equal(t, "2", byID["3"].BrokerBatchID, "an order and its fill still share a batch after storage")
+	assert.Equal(t, "6", byID["6"].BrokerBatchID)
+	assert.Equal(t, "6", byID["7"].BrokerBatchID)
+	assert.Equal(t, "EUR_USD", byID["3"].ProviderInstrument)
+	assert.Equal(t, "SPX500_USD", byID["10"].ProviderInstrument, "the unmapped instrument is kept for later re-normalization")
+	assert.Equal(t, accountactivity.KindOther, byID["10"].Kind)
+}
