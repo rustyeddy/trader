@@ -1,7 +1,9 @@
 package filestore
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -199,4 +201,274 @@ func TestStore_AccountIDCannotEscapeTheRoot(t *testing.T) {
 func TestNew_RequiresARoot(t *testing.T) {
 	_, err := New("")
 	assert.Error(t, err)
+}
+
+// recorder wraps the durability seam: it records every sync and can fail
+// chosen ones.
+type recorder struct {
+	events   []string
+	failDir  func(path string) bool
+	failFile func(path string) bool
+}
+
+func (r *recorder) ops() fsOps {
+	return fsOps{
+		syncDir: func(p string) error {
+			r.events = append(r.events, "dir:"+p)
+			if r.failDir != nil && r.failDir(p) {
+				return errors.New("injected directory sync failure")
+			}
+			return nil
+		},
+		syncFile: func(p string) error {
+			r.events = append(r.events, "file:"+filepath.Base(p))
+			if r.failFile != nil && r.failFile(p) {
+				return errors.New("injected file sync failure")
+			}
+			return nil
+		},
+	}
+}
+
+func (r *recorder) has(event string) bool {
+	for _, e := range r.events {
+		if e == event {
+			return true
+		}
+	}
+	return false
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// The activities' directory entry must be durable before the checkpoint is
+// published: if that sync fails, the checkpoint must not appear.
+func TestApply_DirectorySyncFailureBlocksTheCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	dir := streamDir(t, s)
+
+	rec := &recorder{}
+	rec.failDir = func(p string) bool {
+		return p == dir && exists(filepath.Join(dir, activitiesFile)) && !exists(filepath.Join(dir, checkpointFile))
+	}
+	s.ops = rec.ops()
+
+	_, err := s.Apply(ctx, batch("cursor-1", storetest.Deposit("1", 0)))
+	require.Error(t, err)
+	assert.False(t, exists(filepath.Join(dir, checkpointFile)), "no checkpoint was published ahead of undurable activities")
+	_, ok, err := s.Checkpoint(ctx, storetest.Sync)
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// A retry once the filesystem behaves converges.
+	rec.failDir = nil
+	res, err := s.Apply(ctx, batch("cursor-1", storetest.Deposit("1", 0)))
+	require.NoError(t, err)
+	assert.Equal(t, accountactivity.ApplyResult{Unchanged: 1}, res)
+	cp, ok, err := s.Checkpoint(ctx, storetest.Sync)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "cursor-1", cp.Cursor)
+}
+
+// A retry that finds every activity already stored skips the rewrite, but
+// must still establish the durability barrier before advancing.
+func TestApply_RetryWithNothingNewStillSyncsBeforeTheCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	dir := streamDir(t, s)
+	b := batch("cursor-1", storetest.Deposit("1", 0))
+	_, err := s.Apply(ctx, b)
+	require.NoError(t, err)
+
+	rec := &recorder{}
+	s.ops = rec.ops()
+	var before []string
+	s.afterActivities = func() error { // runs just before the checkpoint is written
+		before = append([]string(nil), rec.events...)
+		return nil
+	}
+	_, err = s.Apply(ctx, batch("cursor-2", storetest.Deposit("1", 0)))
+	require.NoError(t, err)
+	assert.Contains(t, before, "file:"+activitiesFile, "activities fsynced before the checkpoint moved")
+	assert.Contains(t, before, "dir:"+dir, "stream directory fsynced before the checkpoint moved")
+
+	// And a failure of that barrier keeps the checkpoint where it was.
+	s.afterActivities = nil
+	rec.failFile = func(string) bool { return true }
+	_, err = s.Apply(ctx, batch("cursor-3", storetest.Deposit("1", 0)))
+	require.Error(t, err)
+	cp, _, err := s.Checkpoint(ctx, storetest.Sync)
+	require.NoError(t, err)
+	assert.Equal(t, "cursor-2", cp.Cursor)
+}
+
+// Every directory the store creates must have its parent fsynced, up to and
+// including ancestors of the root.
+func TestMkdirAllDurable_SyncsEveryNewDirectoryAndItsParent(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "a", "b")
+	rec := &recorder{}
+	s := &Store{root: root, ops: rec.ops()}
+
+	require.NoError(t, s.mkdirAllDurable(filepath.Join(root, "oanda", "practice", "acct")))
+	for _, want := range []string{
+		base, // parent of a
+		filepath.Join(base, "a"),
+		root,
+		filepath.Join(root, "oanda"),
+		filepath.Join(root, "oanda", "practice"),
+		filepath.Join(root, "oanda", "practice", "acct"),
+	} {
+		assert.True(t, rec.has("dir:"+want), "expected a sync of %s", want)
+	}
+
+	// A directory that already exists (left by an earlier failed sync) is
+	// synced again, not skipped.
+	rec2 := &recorder{}
+	s2 := &Store{root: root, ops: rec2.ops()}
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "left", "behind"), 0o750))
+	require.NoError(t, s2.mkdirAllDurable(filepath.Join(root, "left", "behind")))
+	assert.Empty(t, rec2.events, "an existing directory needs no creation")
+
+	// Failures propagate.
+	bad := &recorder{failDir: func(string) bool { return true }}
+	s3 := &Store{root: root, ops: bad.ops()}
+	assert.Error(t, s3.mkdirAllDurable(filepath.Join(root, "new")))
+}
+
+func lineLen(t *testing.T, a accountactivity.Activity) int {
+	t.Helper()
+	data, err := json.Marshal(toWire(a))
+	require.NoError(t, err)
+	return len(data) + 1 // the encoder's trailing newline
+}
+
+// The writer must never persist a record the reader cannot read.
+func TestApply_OversizedRecordIsRejectedNotStored(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	good := storetest.Deposit("1", 0)
+	_, err := s.Apply(ctx, batch("cursor-1", good))
+	require.NoError(t, err)
+
+	huge := storetest.Deposit("2", time.Hour)
+	huge.ProviderType = strings.Repeat("x", maxLineBytes+1)
+	_, err = s.Apply(ctx, batch("cursor-2", huge))
+	require.ErrorIs(t, err, ErrRecordTooLarge)
+
+	got, err := s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.NoError(t, err, "the stream is still readable")
+	assert.Len(t, got, 1)
+	cp, _, err := s.Checkpoint(ctx, storetest.Sync)
+	require.NoError(t, err)
+	assert.Equal(t, "cursor-1", cp.Cursor, "the checkpoint did not move")
+}
+
+// The boundary is exact: the largest accepted line round-trips, one byte
+// more is rejected.
+func TestApply_LineSizeBoundaryIsExact(t *testing.T) {
+	ctx := context.Background()
+	base := storetest.Deposit("1", 0)
+	base.ProviderType = ""
+	pad := maxLineBytes - 1 - lineLen(t, base) // longest line the reader can take
+
+	fits := storetest.Deposit("1", 0)
+	fits.ProviderType = strings.Repeat("x", pad)
+	require.Equal(t, maxLineBytes-1, lineLen(t, fits))
+
+	s := newStore(t)
+	_, err := s.Apply(ctx, batch("c", fits))
+	require.NoError(t, err)
+	got, err := s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.NoError(t, err, "the largest accepted record must be readable")
+	require.Len(t, got, 1)
+	assert.Equal(t, pad, len(got[0].ProviderType))
+
+	over := storetest.Deposit("2", time.Hour)
+	over.ProviderType = strings.Repeat("x", pad+1)
+	require.Equal(t, maxLineBytes, lineLen(t, over))
+	_, err = s.Apply(ctx, batch("c2", over))
+	assert.ErrorIs(t, err, ErrRecordTooLarge)
+}
+
+// mutateFirstLine rewrites the first activity line through a generic map.
+func mutateFirstLine(t *testing.T, dir string, f func(m map[string]any)) {
+	t.Helper()
+	path := filepath.Join(dir, activitiesFile)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(bytes.SplitN(data, []byte("\n"), 2)[0], &m))
+	f(m)
+	out, err := json.Marshal(m)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, append(out, '\n'), 0o600))
+}
+
+// A value object without a payload is corruption; an explicit zero is not.
+func TestStore_ValueObjectWithoutPayloadIsCorruption(t *testing.T) {
+	ctx := context.Background()
+	for name, mutate := range map[string]func(slip map[string]any){
+		"missing value": func(slip map[string]any) { delete(slip, "value") },
+		"null value":    func(slip map[string]any) { slip["value"] = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			_, err := s.Apply(ctx, batch("c", storetest.RichFill("1", 0)))
+			require.NoError(t, err)
+			mutateFirstLine(t, streamDir(t, s), func(m map[string]any) { mutate(m["slippage"].(map[string]any)) })
+
+			_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "no value")
+		})
+	}
+
+	t.Run("an explicit zero stays valid", func(t *testing.T) {
+		s := newStore(t)
+		_, err := s.Apply(ctx, batch("c", storetest.RichFill("1", 0))) // reported zero financing and P/L
+		require.NoError(t, err)
+		got, err := s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+		require.NoError(t, err)
+		v, ok := got[0].Financing.Get()
+		require.True(t, ok)
+		assert.True(t, v.IsZero())
+	})
+}
+
+// A checkpoint file must satisfy what Batch.Validate demanded on the way in.
+func TestStore_InvalidCheckpointIsCorruption(t *testing.T) {
+	ctx := context.Background()
+	for name, mutate := range map[string]func(m map[string]any){
+		"empty cursor":   func(m map[string]any) { m["cursor"] = "" },
+		"no cursor":      func(m map[string]any) { delete(m, "cursor") },
+		"zero timestamp": func(m map[string]any) { m["updated_at"] = "0001-01-01T00:00:00Z" },
+		"no timestamp":   func(m map[string]any) { delete(m, "updated_at") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			_, err := s.Apply(ctx, batch("c", storetest.Deposit("1", 0)))
+			require.NoError(t, err)
+
+			path := filepath.Join(streamDir(t, s), checkpointFile)
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			var m map[string]any
+			require.NoError(t, json.Unmarshal(data, &m))
+			mutate(m)
+			out, err := json.Marshal(m)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, out, 0o600))
+
+			_, ok, err := s.Checkpoint(ctx, storetest.Sync)
+			require.Error(t, err)
+			assert.False(t, ok, "an invalid checkpoint is never a resume point")
+		})
+	}
 }

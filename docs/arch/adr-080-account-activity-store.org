@@ -72,11 +72,19 @@ identity.
 =<root>/<provider>/<environment>/<account>/activities.jsonl= (one activity per
 line in =Compare= order) and =checkpoint.json=. Path components are escaped
 and =.= / =..= refused, since an account ID is external input. Each file is
-replaced whole by write-to-temp, fsync, rename, so a crash leaves the old
-file or the new one. Reading validates every line (decode, =Validate=, stream,
+replaced whole by write-to-temp, fsync, rename and a directory fsync whose
+failure is an error, so a crash leaves the old file or the new one and the
+checkpoint is never published ahead of activities that are not durable.
+Directories the store creates have their parents fsynced. A retry that finds
+every activity already stored still fsyncs the activities file and directory
+before advancing the checkpoint. One encoded line is bounded (8 MiB, shared
+by writer and reader) and a larger record is rejected, so the store cannot
+hold a record it cannot read. Reading validates every line (decode, =Validate=, stream,
 duplicate key, order) and fails on corruption instead of skipping it. The wire
 format uses explicit structs with a schema version, because =Value='s fields
-are unexported.
+are unexported. A value object must carry a payload (an explicit zero is
+valid) and a checkpoint must carry a cursor and a time, mirroring what the
+write path validates.
 
 * Consequences
 

@@ -20,8 +20,11 @@ import (
 
 const schemaVersion = 1
 
+// valueWire's Value is a pointer so presence is explicit: a value object
+// with no "value" (or a null one) is corruption, not a known zero, while an
+// explicitly encoded zero is a pointer to zero and stays valid.
 type valueWire[T any] struct {
-	Value  T      `json:"value"`
+	Value  *T     `json:"value"`
 	Basis  string `json:"basis"`
 	Source string `json:"source,omitempty"`
 }
@@ -31,21 +34,24 @@ func toValueWire[T any](v accountactivity.Value[T]) *valueWire[T] {
 	if !ok {
 		return nil
 	}
-	return &valueWire[T]{Value: got, Basis: v.Basis().String(), Source: v.Source()}
+	return &valueWire[T]{Value: &got, Basis: v.Basis().String(), Source: v.Source()}
 }
 
 func fromValueWire[T any](w *valueWire[T]) (accountactivity.Value[T], error) {
 	if w == nil {
 		return accountactivity.Value[T]{}, nil
 	}
+	if w.Value == nil {
+		return accountactivity.Value[T]{}, fmt.Errorf("value object has no value")
+	}
 	switch w.Basis {
 	case "reported":
 		if w.Source == "" {
-			return accountactivity.Reported(w.Value), nil
+			return accountactivity.Reported(*w.Value), nil
 		}
-		return accountactivity.ReportedFrom(w.Value, w.Source)
+		return accountactivity.ReportedFrom(*w.Value, w.Source)
 	case "derived":
-		return accountactivity.Derived(w.Value, w.Source)
+		return accountactivity.Derived(*w.Value, w.Source)
 	default:
 		return accountactivity.Value[T]{}, fmt.Errorf("value basis %q is not reported or derived", w.Basis)
 	}
@@ -262,9 +268,20 @@ func fromCheckpointWire(w checkpointWire) (accountactivity.Checkpoint, error) {
 	default:
 		return accountactivity.Checkpoint{}, fmt.Errorf("environment %q is not practice or live", w.Environment)
 	}
-	return accountactivity.Checkpoint{
+	cp := accountactivity.Checkpoint{
 		Sync:      accountactivity.SyncKey{Provider: w.Provider, Environment: env, ProviderAccountID: w.ProviderAccountID},
 		Cursor:    w.Cursor,
 		UpdatedAt: w.UpdatedAt,
-	}, nil
+	}
+	// The same rules Batch.Validate enforces on the way in.
+	if err := cp.Sync.Validate(); err != nil {
+		return accountactivity.Checkpoint{}, err
+	}
+	if cp.Cursor == "" {
+		return accountactivity.Checkpoint{}, fmt.Errorf("cursor is empty")
+	}
+	if cp.UpdatedAt.IsZero() {
+		return accountactivity.Checkpoint{}, fmt.Errorf("updated_at is not set")
+	}
+	return cp, nil
 }
