@@ -83,3 +83,42 @@ func (e Environment) String() string {
 func (e Environment) Valid() bool {
 	return e == EnvironmentPractice || e == EnvironmentLive
 }
+
+// TradeRole is how a fill relates to a broker trade.
+type TradeRole uint8
+
+const (
+	// TradeRoleUnknown is the zero value and is never valid.
+	TradeRoleUnknown TradeRole = iota
+	// TradeRoleOpened means the fill opened the trade.
+	TradeRoleOpened
+	// TradeRoleReduced means the fill partly closed the trade.
+	TradeRoleReduced
+	// TradeRoleClosed means the fill closed the trade.
+	TradeRoleClosed
+)
+
+// String returns the role's lowercase name.
+func (r TradeRole) String() string {
+	switch r {
+	case TradeRoleOpened:
+		return "opened"
+	case TradeRoleReduced:
+		return "reduced"
+	case TradeRoleClosed:
+		return "closed"
+	default:
+		return "unknown"
+	}
+}
+
+// Valid reports whether r is opened, reduced or closed.
+func (r TradeRole) Valid() bool {
+	return r == TradeRoleOpened || r == TradeRoleReduced || r == TradeRoleClosed
+}
+
+// TradeLink ties a fill to one broker trade and says how. It is comparable.
+type TradeLink struct {
+	BrokerTradeID string
+	Role          TradeRole
+}

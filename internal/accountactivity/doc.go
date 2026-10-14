@@ -20,7 +20,7 @@
 // Every economic field is a Value: absent, broker-reported, or derived by
 // Trader by a named method. An absent value stays absent. It is never
 // estimated or defaulted, and it is distinct from a reported or derived
-// zero. Spread, commission, financing and other fees are separate fields,
+// zero. Spread cost, commission, financing and other fees are separate fields,
 // not a lump sum. Slippage is never reported by a broker: it is derived, and
 // only against an explicit benchmark price with a stated source.
 //

@@ -58,16 +58,22 @@ type Activity struct {
 	// Price is the execution price.
 	Price Value[num.Price]
 
-	// BrokerOrderID and BrokerTradeID preserve the broker's own links. They
-	// are optional and are not interpreted here; one fill can touch several
-	// trades, and trade linkage is the importer's concern.
+	// BrokerOrderID preserves the broker's order link. It is optional and
+	// not interpreted here.
 	BrokerOrderID string
-	BrokerTradeID string
+	// TradeLinks preserve every broker trade a fill touched, with the
+	// relationship: one OANDA ORDER_FILL can open one trade, reduce
+	// another and close several, all under one provider activity ID.
+	// Order is the provider's and is significant to SameRecord. Fill only.
+	TradeLinks []TradeLink
 
-	// Economics, signed from the account's point of view (a cost is
-	// negative, a credit positive), in the account home currency.
+	// Economics, all monetary fields signed from the account's point of
+	// view (a cost is negative, a credit positive, zero neutral), in the
+	// account home currency. This includes SlippageCost.
 	RealizedPL Value[num.Money]
-	Spread     Value[num.Money]
+	// SpreadCost is the monetary cost of crossing the spread (OANDA
+	// halfSpreadCost), not a bid/ask spread in price units.
+	SpreadCost Value[num.Money]
 	Commission Value[num.Money]
 	Financing  Value[num.Money]
 	OtherFees  Value[num.Money]
@@ -76,12 +82,16 @@ type Activity struct {
 	Cash Value[num.Money]
 
 	// Execution quality. Benchmark is the reference price slippage is
-	// measured against; its source (Value.Source) is required. Slippage is
-	// the signed difference in quote price units and SlippageCost its cost
-	// in account currency, positive meaning worse than the benchmark for
-	// the trader. Both are always derived (the broker does not report
-	// them) and either requires a benchmark. num has no signed price type,
-	// so the price-unit difference is a num.Rate.
+	// measured against; its source (Value.Source) is required and it must
+	// be positive. Slippage is the difference in quote price units and
+	// SlippageCost its monetary effect on the account. Both follow one
+	// sign convention, the account's point of view: negative means the
+	// execution was worse for the trader than the benchmark (a buy filled
+	// above it, a sell below it), positive means better, zero neutral.
+	// Validate rejects the two having strictly opposite signs. Both are
+	// always derived (the broker does not report them) and either requires
+	// a benchmark. num has no signed price type, so the price-unit
+	// difference is a num.Rate. Deriving them is issue #513.
 	Benchmark    Value[num.Price]
 	Slippage     Value[num.Rate]
 	SlippageCost Value[num.Money]
@@ -106,6 +116,9 @@ func (a Activity) SameRecord(o Activity) bool {
 func (a Activity) canonical() Activity {
 	a.ImportedAt = time.Time{}
 	a.OccurredAt = a.OccurredAt.UTC().Round(0)
+	if len(a.TradeLinks) == 0 {
+		a.TradeLinks = nil
+	}
 	return a
 }
 
@@ -118,11 +131,12 @@ type field struct {
 func (a Activity) fields() []field {
 	return []field{
 		{"instrument", !a.Instrument.IsZero()},
+		{"trade_links", len(a.TradeLinks) > 0},
 		{"side", a.Side != 0},
 		{"quantity", a.Quantity.Known()},
 		{"price", a.Price.Known()},
 		{"realized_pl", a.RealizedPL.Known()},
-		{"spread", a.Spread.Known()},
+		{"spread_cost", a.SpreadCost.Known()},
 		{"commission", a.Commission.Known()},
 		{"financing", a.Financing.Known()},
 		{"other_fees", a.OtherFees.Known()},
@@ -139,7 +153,7 @@ func (a Activity) fields() []field {
 var kindRules = map[Kind]struct{ required, allowed []string }{
 	KindFill: {
 		required: []string{"instrument", "side", "quantity", "price"},
-		allowed:  []string{"realized_pl", "spread", "commission", "financing", "other_fees", "benchmark", "slippage", "slippage_cost"},
+		allowed:  []string{"trade_links", "realized_pl", "spread_cost", "commission", "financing", "other_fees", "benchmark", "slippage", "slippage_cost"},
 	},
 	KindFinancing: {
 		required: []string{"financing"},
@@ -188,6 +202,9 @@ func (a Activity) Validate() error {
 	if a.OccurredAt.IsZero() {
 		return bad("occurred_at must be set")
 	}
+	if a.ImportedAt.IsZero() {
+		return bad("imported_at must be set (from an injected clock)")
+	}
 	if a.Side != 0 && !a.Side.Valid() {
 		return bad("side is not buy or sell")
 	}
@@ -226,7 +243,7 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 		name string
 		v    Value[num.Money]
 	}{
-		{"realized_pl", a.RealizedPL}, {"spread", a.Spread}, {"commission", a.Commission},
+		{"realized_pl", a.RealizedPL}, {"spread_cost", a.SpreadCost}, {"commission", a.Commission},
 		{"financing", a.Financing}, {"other_fees", a.OtherFees}, {"cash", a.Cash},
 		{"slippage_cost", a.SlippageCost},
 	}
@@ -252,6 +269,26 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 		}
 	}
 
+	if p, ok := a.Price.Get(); ok && p.IsZero() {
+		return bad("execution price must be positive")
+	}
+	if p, ok := a.Benchmark.Get(); ok && p.IsZero() {
+		return bad("benchmark price must be positive")
+	}
+	seen := map[TradeLink]bool{}
+	for _, l := range a.TradeLinks {
+		if l.BrokerTradeID == "" {
+			return bad("trade link needs a broker trade id")
+		}
+		if !l.Role.Valid() {
+			return bad("trade link %q needs a role", l.BrokerTradeID)
+		}
+		if seen[l] {
+			return bad("trade link %q is listed twice with role %s", l.BrokerTradeID, l.Role)
+		}
+		seen[l] = true
+	}
+
 	// A benchmark needs a stated source, whatever its basis.
 	if a.Benchmark.Known() && strings.TrimSpace(a.Benchmark.Source()) == "" {
 		return bad("benchmark requires a source")
@@ -262,6 +299,11 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 		}
 		if !a.Price.Known() {
 			return bad("slippage requires an execution price")
+		}
+	}
+	if sl, ok := a.Slippage.Get(); ok {
+		if cost, ok := a.SlippageCost.Get(); ok && cost.IsValid() && sl.Sign()*moneySign(cost) < 0 {
+			return bad("slippage and slippage_cost have opposite signs")
 		}
 	}
 	if a.Slippage.Basis() == BasisReported {
@@ -291,20 +333,19 @@ func (a Activity) validateKindSpecific(bad func(string, ...any) error) error {
 	return nil
 }
 
-func isPositive(m num.Money) bool {
+// moneySign returns -1, 0 or 1 for m, and 0 if m cannot be compared.
+func moneySign(m num.Money) int {
 	zero, err := num.ParseMoney("0", m.Currency())
 	if err != nil {
-		return false
+		return 0
 	}
 	c, err := m.Cmp(zero)
-	return err == nil && c > 0
+	if err != nil {
+		return 0
+	}
+	return c
 }
 
-func isNegative(m num.Money) bool {
-	zero, err := num.ParseMoney("0", m.Currency())
-	if err != nil {
-		return false
-	}
-	c, err := m.Cmp(zero)
-	return err == nil && c < 0
-}
+func isPositive(m num.Money) bool { return moneySign(m) > 0 }
+
+func isNegative(m num.Money) bool { return moneySign(m) < 0 }

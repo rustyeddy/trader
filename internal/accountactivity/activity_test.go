@@ -43,11 +43,12 @@ func oandaFill() Activity {
 		Instrument:   eurusd(), Side: order.Buy,
 		Quantity:      Reported(num.MustParseQuantity("1000")),
 		Price:         Reported(num.MustParsePrice("1.08532")),
-		BrokerOrderID: "6359", BrokerTradeID: "6360",
-		RealizedPL: Reported(money("0")),
-		Spread:     must(ReportedFrom(money("-0.25"), "halfSpreadCost")),
-		Financing:  Reported(money("0")),
-		Commission: Reported(money("0")),
+		BrokerOrderID: "6359",
+		TradeLinks:    []TradeLink{{"6360", TradeRoleOpened}},
+		RealizedPL:    Reported(money("0")),
+		SpreadCost:    must(ReportedFrom(money("-0.25"), "halfSpreadCost")),
+		Financing:     Reported(money("0")),
+		Commission:    Reported(money("0")),
 	}
 }
 
@@ -55,7 +56,7 @@ func alpacaFill() Activity {
 	return Activity{
 		Provider: "alpaca", Environment: EnvironmentLive,
 		ProviderAccountID: "acct-9", ProviderActivityID: "20240305143000000::abc",
-		ProviderType: "FILL", Kind: KindFill, OccurredAt: at,
+		ProviderType: "FILL", Kind: KindFill, OccurredAt: at, ImportedAt: at,
 		Instrument: instrument.EquityID("NASDAQ", "AAPL"), Side: order.Sell,
 		Quantity:   Reported(num.MustParseQuantity("10")),
 		Price:      Reported(num.MustParsePrice("182.50")),
@@ -67,14 +68,14 @@ func TestValidate_RepresentativeActivitiesAreValid(t *testing.T) {
 	cases := map[string]Activity{
 		"oanda fill":   oandaFill(),
 		"alpaca fill":  alpacaFill(),
-		"financing":    {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "1", ProviderType: "DAILY_FINANCING", Kind: KindFinancing, OccurredAt: at, Financing: Reported(money("-1.37"))},
-		"fee":          {Provider: "alpaca", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "2", ProviderType: "FEE", Kind: KindFee, OccurredAt: at, OtherFees: Reported(money("-3"))},
-		"deposit":      {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "3", ProviderType: "TRANSFER_FUNDS", Kind: KindDeposit, OccurredAt: at, Cash: Reported(money("500"))},
-		"withdrawal":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "4", ProviderType: "TRANSFER_FUNDS", Kind: KindWithdrawal, OccurredAt: at, Cash: Reported(money("-200"))},
-		"dividend":     {Provider: "alpaca", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "5", ProviderType: "DIV", Kind: KindDividend, OccurredAt: at, Instrument: instrument.EquityID("NASDAQ", "AAPL"), Cash: Reported(money("2.30"))},
-		"adjustment":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "6", ProviderType: "ADJUSTMENT", Kind: KindAdjustment, OccurredAt: at, Cash: Reported(money("-0.01"))},
-		"reported 0":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "7", ProviderType: "DAILY_FINANCING", Kind: KindFinancing, OccurredAt: at, Financing: Reported(money("0"))},
-		"derived cost": {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "8", ProviderType: "ORDER_FILL", Kind: KindFill, OccurredAt: at, Instrument: eurusd(), Side: order.Buy, Quantity: Reported(num.MustParseQuantity("1")), Price: Reported(num.MustParsePrice("1.1")), Spread: must(Derived(money("-0.1"), "ask-bid at fill"))},
+		"financing":    {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "1", ProviderType: "DAILY_FINANCING", Kind: KindFinancing, OccurredAt: at, ImportedAt: at, Financing: Reported(money("-1.37"))},
+		"fee":          {Provider: "alpaca", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "2", ProviderType: "FEE", Kind: KindFee, OccurredAt: at, ImportedAt: at, OtherFees: Reported(money("-3"))},
+		"deposit":      {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "3", ProviderType: "TRANSFER_FUNDS", Kind: KindDeposit, OccurredAt: at, ImportedAt: at, Cash: Reported(money("500"))},
+		"withdrawal":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "4", ProviderType: "TRANSFER_FUNDS", Kind: KindWithdrawal, OccurredAt: at, ImportedAt: at, Cash: Reported(money("-200"))},
+		"dividend":     {Provider: "alpaca", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "5", ProviderType: "DIV", Kind: KindDividend, OccurredAt: at, ImportedAt: at, Instrument: instrument.EquityID("NASDAQ", "AAPL"), Cash: Reported(money("2.30"))},
+		"adjustment":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "6", ProviderType: "ADJUSTMENT", Kind: KindAdjustment, OccurredAt: at, ImportedAt: at, Cash: Reported(money("-0.01"))},
+		"reported 0":   {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "7", ProviderType: "DAILY_FINANCING", Kind: KindFinancing, OccurredAt: at, ImportedAt: at, Financing: Reported(money("0"))},
+		"derived cost": {Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "8", ProviderType: "ORDER_FILL", Kind: KindFill, OccurredAt: at, ImportedAt: at, Instrument: eurusd(), Side: order.Buy, Quantity: Reported(num.MustParseQuantity("1")), Price: Reported(num.MustParsePrice("1.1")), SpreadCost: must(Derived(money("-0.1"), "ask-bid at fill"))},
 	}
 	for name, a := range cases {
 		t.Run(name, func(t *testing.T) { assert.NoError(t, a.Validate()) })
@@ -110,7 +111,11 @@ func TestValidate_PerKindRules(t *testing.T) {
 		"fill without price":      func(a *Activity) { a.Price = Value[num.Price]{} },
 		"fill zero quantity":      func(a *Activity) { a.Quantity = Reported(num.MustParseQuantity("0")) },
 		"fill with cash":          func(a *Activity) { a.Cash = Reported(money("1")) },
-		"fill mixed currency":     func(a *Activity) { a.Spread = Reported(num.MustParseMoney("-0.1", num.MustParseCurrency("EUR"))) },
+		"fill mixed currency":     func(a *Activity) { a.SpreadCost = Reported(num.MustParseMoney("-0.1", num.MustParseCurrency("EUR"))) },
+		"zero execution price":    func(a *Activity) { a.Price = Reported(num.MustParsePrice("0")) },
+		"trade link without id":   func(a *Activity) { a.TradeLinks = []TradeLink{{"", TradeRoleOpened}} },
+		"trade link without role": func(a *Activity) { a.TradeLinks = []TradeLink{{"1", TradeRoleUnknown}} },
+		"duplicate trade link":    func(a *Activity) { a.TradeLinks = []TradeLink{{"1", TradeRoleClosed}, {"1", TradeRoleClosed}} },
 		"money without currency":  func(a *Activity) { a.Commission = Reported(num.Money{}) },
 	}
 	for name, f := range mutate {
@@ -130,19 +135,20 @@ func TestValidate_PerKindRules(t *testing.T) {
 		"deposit zero":             {Kind: KindDeposit, Cash: Reported(money("0"))},
 		"withdrawal positive":      {Kind: KindWithdrawal, Cash: Reported(money("5"))},
 		"deposit without cash":     {Kind: KindDeposit},
+		"deposit with trade links": {Kind: KindDeposit, Cash: Reported(money("1")), TradeLinks: []TradeLink{{"1", TradeRoleOpened}}},
 		"adjustment with side":     {Kind: KindAdjustment, Cash: Reported(money("1")), Side: order.Buy},
 	}
 	for name, a := range nonFill {
 		t.Run(name, func(t *testing.T) {
 			a.Provider, a.Environment, a.ProviderAccountID, a.ProviderActivityID = "oanda", EnvironmentLive, "a", "1"
-			a.ProviderType, a.OccurredAt = "X", at
+			a.ProviderType, a.OccurredAt, a.ImportedAt = "X", at, at
 			assert.ErrorIs(t, a.Validate(), ErrInvalidActivity)
 		})
 	}
 }
 
 func TestSlippage_RequiresABenchmarkWithASource(t *testing.T) {
-	slip := must(Derived(num.MustParseRate("0.00012"), "execution price - benchmark"))
+	slip := must(Derived(num.MustParseRate("-0.00012"), "execution price - benchmark, account sign"))
 	cost := must(Derived(money("-0.12"), "slippage * quantity"))
 	bench := must(ReportedFrom(num.MustParsePrice("1.08520"), "fullPrice.ask"))
 
@@ -176,7 +182,7 @@ func TestSlippage_RequiresABenchmarkWithASource(t *testing.T) {
 		assert.ErrorContains(t, a.Validate(), "derived by Trader")
 	})
 	t.Run("slippage on a non-fill is rejected", func(t *testing.T) {
-		a := Activity{Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "1", ProviderType: "X", Kind: KindDeposit, OccurredAt: at, Cash: Reported(money("1")), Slippage: slip, Benchmark: bench}
+		a := Activity{Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "1", ProviderType: "X", Kind: KindDeposit, OccurredAt: at, ImportedAt: at, Cash: Reported(money("1")), Slippage: slip, Benchmark: bench}
 		assert.Error(t, a.Validate())
 	})
 }
@@ -242,7 +248,7 @@ func TestSameRecord_IgnoresImportTimeOnly(t *testing.T) {
 	assert.False(t, a.SameRecord(changed))
 
 	reclassified := oandaFill()
-	reclassified.Spread = must(Derived(money("-0.25"), "estimate"))
+	reclassified.SpreadCost = must(Derived(money("-0.25"), "estimate"))
 	assert.False(t, a.SameRecord(reclassified), "reported vs derived is a different record")
 }
 
@@ -260,8 +266,65 @@ func TestKindAndEnvironmentStrings(t *testing.T) {
 
 func TestValidate_ErrorsNeverEchoAmounts(t *testing.T) {
 	a := oandaFill()
-	a.Spread = Reported(num.MustParseMoney("-123456.78", num.MustParseCurrency("EUR")))
+	a.SpreadCost = Reported(num.MustParseMoney("-123456.78", num.MustParseCurrency("EUR")))
 	err := a.Validate()
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "123456")
+}
+
+// One OANDA ORDER_FILL can open a trade, reduce another and close several;
+// every link survives with its role and the provider's order.
+func TestTradeLinks_PreserveMultiTradeFills(t *testing.T) {
+	a := oandaFill()
+	a.TradeLinks = []TradeLink{
+		{"6360", TradeRoleOpened},
+		{"6301", TradeRoleReduced},
+		{"6288", TradeRoleClosed},
+		{"6290", TradeRoleClosed},
+	}
+	require.NoError(t, a.Validate())
+	assert.Len(t, a.TradeLinks, 4)
+
+	same := a
+	same.TradeLinks = append([]TradeLink(nil), a.TradeLinks...)
+	assert.True(t, a.SameRecord(same))
+
+	dropped := a
+	dropped.TradeLinks = a.TradeLinks[:3]
+	assert.False(t, a.SameRecord(dropped), "a lost link is a different record")
+
+	none := oandaFill()
+	none.TradeLinks = nil
+	assert.NoError(t, none.Validate(), "links are optional")
+	empty := none
+	empty.TradeLinks = []TradeLink{}
+	assert.True(t, none.SameRecord(empty), "nil and empty are the same")
+	assert.Equal(t, "closed", TradeRoleClosed.String())
+	assert.False(t, TradeRoleUnknown.Valid())
+}
+
+// Money follows the account's point of view: an adverse cost is negative,
+// and slippage in price units shares that sign.
+func TestSlippage_SignConventionIsAccountCentric(t *testing.T) {
+	bench := must(ReportedFrom(num.MustParsePrice("1.08520"), "fullPrice.ask"))
+	build := func(slip, cost string) Activity {
+		a := oandaFill() // a buy filled at 1.08532, above the 1.08520 benchmark
+		a.Benchmark = bench
+		a.Slippage = must(Derived(num.MustParseRate(slip), "execution price - benchmark, account sign"))
+		a.SlippageCost = must(Derived(money(cost), "slippage * quantity"))
+		return a
+	}
+	assert.NoError(t, build("-0.00012", "-0.12").Validate(), "adverse: both negative")
+	assert.NoError(t, build("0.00012", "0.12").Validate(), "favourable: both positive")
+	assert.NoError(t, build("0", "0").Validate(), "neutral")
+	assert.NoError(t, build("-0.00012", "0").Validate(), "cost may round to zero")
+	assert.ErrorContains(t, build("-0.00012", "0.12").Validate(), "opposite signs")
+	assert.ErrorContains(t, build("0.00012", "-0.12").Validate(), "opposite signs")
+}
+
+func TestPrices_MustBePositive(t *testing.T) {
+	a := oandaFill()
+	a.Benchmark = must(ReportedFrom(num.MustParsePrice("0"), "fullPrice.ask"))
+	a.Slippage = must(Derived(num.MustParseRate("-0.1"), "x"))
+	assert.ErrorContains(t, a.Validate(), "benchmark price must be positive")
 }
