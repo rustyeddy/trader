@@ -75,18 +75,28 @@ func TestATR_RollsOverTheLastPeriodTrueRanges(t *testing.T) {
 }
 
 // The value depends only on the last Period+1 bars, however much history
-// came before (the property that distinguishes this from Wilder smoothing).
+// came before: the property that distinguishes this from Wilder smoothing.
+// Non-exact decimals and exact equality (not InDelta) are the point: a
+// running mean that carried rounding from evicted samples would differ in
+// the last bits.
 func TestATR_IsAPureFunctionOfTheLastPeriodPlusOneBars(t *testing.T) {
-	long, err := NewATR(2)
-	require.NoError(t, err)
-	feed(t, long, []ohlc{{100, 1, 50}, {200, 3, 80}})
-	feed(t, long, atrBars)
+	var history []ohlc
+	for i := 0; i < 500; i++ {
+		x := 1.1 + float64(i%37)*0.00137 + float64(i)*0.000013
+		history = append(history, ohlc{x + 0.0043 + float64(i%11)*0.00029, x - 0.0031 - float64(i%7)*0.00017, x + 0.0007*float64(i%5)})
+	}
+	for _, period := range []int{1, 2, 5, 14} {
+		long, err := NewATR(period)
+		require.NoError(t, err)
+		feed(t, long, history)
 
-	short, err := NewATR(2)
-	require.NoError(t, err)
-	feed(t, short, atrBars[len(atrBars)-3:])
+		short, err := NewATR(period)
+		require.NoError(t, err)
+		feed(t, short, history[len(history)-period-1:])
 
-	assert.InDelta(t, short.Value(), long.Value(), 1e-9)
+		require.True(t, short.Ready())
+		assert.Equal(t, short.Value(), long.Value(), "period %d", period)
+	}
 }
 
 func TestATR_RejectsNonFiniteInputAndKeepsState(t *testing.T) {
