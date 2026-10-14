@@ -166,6 +166,7 @@ var kindRules = map[Kind]struct{ required, allowed []string }{
 	KindWithdrawal: {required: []string{"cash"}},
 	KindDividend:   {required: []string{"cash"}, allowed: []string{"instrument"}},
 	KindAdjustment: {required: []string{"cash"}, allowed: []string{"instrument"}},
+	KindOther:      {allowed: []string{"instrument"}},
 }
 
 // Validate checks a's structure. It never rewrites a value. The returned

@@ -26,6 +26,12 @@ const (
 	// KindAdjustment is any other cash adjustment. The provider's type or
 	// code is the only description, so it must be kept.
 	KindAdjustment
+	// KindOther is a provider event Trader does not model economically: an
+	// order created or cancelled, a client-configuration change, anything an
+	// importer does not recognize. It exists so no provider transaction is
+	// lost: identity, time, provider type and broker order ID are kept, and
+	// it carries no economics.
+	KindOther
 )
 
 var kindNames = [...]string{
@@ -37,6 +43,7 @@ var kindNames = [...]string{
 	KindWithdrawal: "withdrawal",
 	KindDividend:   "dividend",
 	KindAdjustment: "adjustment",
+	KindOther:      "other",
 }
 
 // String returns the kind's lowercase name.

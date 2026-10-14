@@ -1,0 +1,92 @@
+#+TITLE: ADR-081: OANDA account activity import
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #510. Builds on ADR-079 (activity model), ADR-080 (store and
+checkpoints) and ADR-078 (secrets). ORDER_FILL execution detail beyond what
+is listed here is issue #511; the Alpaca source is #516; the CLI is #514.
+
+* Context
+
+OANDA history has to reach the activity ledger safely and repeatably. The
+provider-specific part (fetching, paging, normalizing) must be separable from
+the part every provider shares (store, checkpoint, retry), so Alpaca can reuse
+the latter.
+
+* Decision
+
+** Three pieces
+
+- =accountactivity.Source= (domain port): =Stream()= and =Next(ctx, cursor)=,
+  returning a =Page= of normalized activities, the cursor to checkpoint after
+  them, and whether it is done. A Source does no storage and keeps no durable
+  state; =Next= is a pure function of the cursor and the provider's data, so a
+  replay after any failure refetches the same page.
+- =internal/service/accountactivity.Sync=: the provider-neutral loop. Read the
+  checkpoint, fetch a page, stamp =ImportedAt= from the injected clock, =Apply=
+  the batch (activities and cursor together, ADR-080), repeat. It never reads
+  the wall clock and never advances a checkpoint except through =Apply=. A
+  source that neither advances nor finishes is an error, not a spin.
+- =internal/adapters/accountactivity/oanda=: the OANDA Source, with its own
+  small read-only client. It cannot reuse the market-data OANDA client, which
+  is internal to =internal/marketdata=.
+
+** Paging and cursor
+
+OANDA transaction IDs are per-account sequential integers, so the source pages
+by ID range (=idrange=, 500 IDs per page by default, at most 1000). The cursor
+is the last ID of the last page. The end of history is the account summary's
+=lastTransactionID=, read once per Source, so a run covers a stable range
+while the account keeps trading; the next run, with a new Source, picks up
+what arrived since. A bounded bootstrap first resolves a time window to an ID
+window with the transactions list endpoint, then pages that window. A
+checkpoint earlier than the window starts at the window; one past it means
+nothing to do.
+
+** Normalization
+
+Amounts, units and prices are decoded as strings and parsed straight into =num=
+types, never through binary floating point. Money is in the account home
+currency from the summary. Absent fields are unknown; reported zeros are
+reported zeros. Every value carries =ReportedFrom= with OANDA's field name.
+
+- ORDER_FILL -> fill: instrument, side from the sign of units, quantity,
+  price, realized P/L, financing, commission, guaranteed-execution fee,
+  =halfSpreadCost= (broker-reported), order ID, and every trade opened,
+  reduced or closed with its role.
+- DAILY_FINANCING -> financing. TRANSFER_FUNDS -> deposit or withdrawal by the
+  sign of the amount (zero is =KindOther=). DIVIDEND_ADJUSTMENT -> dividend.
+- Anything else, and a fill in an instrument Trader cannot yet identify, ->
+  =KindOther=: ID, time, provider type, order ID and instrument are kept, no
+  economics are claimed. Nothing is dropped. =KindOther= is added to ADR-079's
+  vocabulary for this; it has no required or allowed economic fields.
+- A recognized transaction that fails to parse is an error. The page is not
+  stored, the checkpoint does not move, and the failure is visible.
+
+** Sign convention
+
+OANDA reports commission, guaranteed-execution fee and half-spread cost as
+positive costs that reduce the balance. ADR-079 holds every monetary field
+account-centric, so these three are negated on the way in (a cost is
+negative). Realized P/L and financing are already signed and are not changed.
+This is the one place provider convention is translated and it is covered by
+tests; it should be confirmed against a real practice account before the
+numbers are relied on.
+
+** Credentials and failure
+
+The bearer token comes from a =CredentialProvider= supplied by the
+composition root from the environment or a token file (ADR-078); the package
+reads no configuration and no error contains the token. HTTP failures are
+classified (unauthorized, bad request, rate limited, unavailable) and are not
+retried inside the client: the sync is replay-safe, so a failed run is run
+again.
+
+* Consequences
+
+Order create and cancel events are stored as =KindOther= with the order ID, so
+later order-history semantics can be added without re-importing. CFD and
+metal fills are =KindOther= until instrument mapping exists, which is
+visible in the sync result's =Other= count but loses their economics until
+then. Wiring to configuration and the command line is #514.
