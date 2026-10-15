@@ -788,3 +788,66 @@ func TestRolesWithoutUnitsAreNotOverriddenByTheNetPosition(t *testing.T) {
 	require.Len(t, mixed.Open, 1)
 	assert.Equal(t, "500", mixed.Open[0].Remaining.String())
 }
+
+// Several named effects without units are linkage the broker gave even though
+// the sizes are missing: they limit which trades the fill can touch.
+func TestMultipleRoleOnlyEffectsKeepTheirTradeLinkage(t *testing.T) {
+	noUnits := func(id string, role accountactivity.TradeRole) accountactivity.TradeEffect {
+		return accountactivity.TradeEffect{BrokerTradeID: id, Role: role}
+	}
+	three := func() []spec {
+		var ss []spec
+		for i, id := range []string{"t1", "t2", "t3"} {
+			ss = append(ss, complete(spec{id: "o" + id, at: time.Duration(i) * time.Minute, side: order.Buy, qty: "100", price: "1.10",
+				effects: []accountactivity.TradeEffect{eff(id, accountactivity.TradeRoleOpened, "100", "1.10")}}))
+		}
+		return ss
+	}
+	closeAt := time.Hour
+
+	// Closed t2 and t3: t1, which the broker did not mention, is untouched.
+	r := mustRecon(t, acts(append(three(), complete(spec{id: "c", at: closeAt, side: order.Sell, qty: "200", price: "1.12", pl: "4",
+		effects: []accountactivity.TradeEffect{noUnits("t2", accountactivity.TradeRoleClosed), noUnits("t3", accountactivity.TradeRoleClosed)}}))...))
+	assert.Empty(t, r.Completed)
+	assert.Empty(t, r.Orphans)
+	require.Len(t, r.Open, 1)
+	assert.Equal(t, "100", r.Open[0].Remaining.String(), "t1 was not consumed")
+
+	// Closing t1 afterwards by name completes the trade, proving the lot left
+	// was t1's.
+	r = mustRecon(t, acts(append(three(),
+		complete(spec{id: "c", at: closeAt, side: order.Sell, qty: "200", price: "1.12", pl: "4",
+			effects: []accountactivity.TradeEffect{noUnits("t2", accountactivity.TradeRoleClosed), noUnits("t3", accountactivity.TradeRoleClosed)}}),
+		complete(spec{id: "d", at: 2 * closeAt, side: order.Sell, qty: "100", price: "1.13", pl: "3",
+			effects: []accountactivity.TradeEffect{eff("t1", accountactivity.TradeRoleClosed, "100", "1.13")}}))...))
+	require.Len(t, r.Completed, 1)
+	assert.Empty(t, r.Orphans)
+
+	// More than the named trades hold: the excess is orphan, never charged to
+	// the unmentioned t1.
+	r = mustRecon(t, acts(append(three(), complete(spec{id: "c", at: closeAt, side: order.Sell, qty: "250", price: "1.12", pl: "4",
+		effects: []accountactivity.TradeEffect{noUnits("t2", accountactivity.TradeRoleClosed), noUnits("t3", accountactivity.TradeRoleReduced)}}))...))
+	require.Len(t, r.Orphans, 1)
+	assert.Equal(t, "50", r.Orphans[0].Quantity.String())
+	require.Len(t, r.Open, 1)
+	assert.Equal(t, "100", r.Open[0].Remaining.String())
+
+	// Several unsized opens are one pooled lot that any of their trades can
+	// close, and a trade the broker never named cannot.
+	pool := func(closeID string) Result {
+		return mustRecon(t, acts(
+			complete(spec{id: "o", at: 0, side: order.Buy, qty: "300", price: "1.10",
+				effects: []accountactivity.TradeEffect{noUnits("a", accountactivity.TradeRoleOpened), noUnits("b", accountactivity.TradeRoleOpened)}}),
+			complete(spec{id: "c", at: closeAt, side: order.Sell, qty: "300", price: "1.12", pl: "6",
+				effects: []accountactivity.TradeEffect{eff(closeID, accountactivity.TradeRoleClosed, "300", "1.12")}}),
+		))
+	}
+	r = pool("b")
+	require.Len(t, r.Completed, 1)
+	assert.Empty(t, r.Orphans)
+	r = pool("z")
+	assert.Empty(t, r.Completed)
+	require.Len(t, r.Orphans, 1)
+	require.Len(t, r.Open, 1)
+	assert.Equal(t, "300", r.Open[0].Remaining.String())
+}

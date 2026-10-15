@@ -47,6 +47,15 @@ whole, because a role is a broker fact even when its units are missing; only
 with no usable information does the net position decide, and the leg is then
 flagged =Split=.
 
+Missing sizes do not erase known linkage. When a role-only fill names several
+trades without units, the leg keeps the sorted set of those trade IDs
+(=CandidateTradeIDs=) next to its whole, unapportioned quantity. A closing leg
+consumes only lots reachable from that set, in entry order, and anything the
+set cannot cover is orphan, so a trade the broker did not mention is never
+consumed. An opening leg becomes one pooled lot that remains reachable by any
+of its named trades: the reconstruction does not invent per-ID quantities, so
+a later named close of one of them may take from the pool.
+
 ** Net result and the spread-cost rule
 
 Every amount is signed from the account's point of view.

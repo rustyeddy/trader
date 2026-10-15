@@ -185,9 +185,38 @@ type cycle struct {
 	gross, spread, comm, fin, fees acc
 }
 
+// lot is what is still open of one entry. ids are the broker trades the lot
+// may belong to: one for a named entry, several for a role-only entry whose
+// units the broker did not split, none when the broker named nothing.
 type lot struct {
-	tradeID   string
+	ids       []string
 	remaining num.Quantity
+}
+
+// legIDs is the set of broker trades a leg is limited to; nil means any.
+func legIDs(l Leg) []string {
+	if len(l.CandidateTradeIDs) > 0 {
+		return l.CandidateTradeIDs
+	}
+	if l.BrokerTradeID != "" {
+		return []string{l.BrokerTradeID}
+	}
+	return nil
+}
+
+// reaches reports whether a leg limited to want may close this lot.
+func (l lot) reaches(want []string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	for _, w := range want {
+		for _, id := range l.ids {
+			if id == w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func newCycle(stream accountactivity.SyncKey, a accountactivity.Activity, side order.Side) *cycle {
@@ -212,7 +241,7 @@ func (c *cycle) add(legs []Leg) error {
 			return err
 		}
 		c.entries = append(c.entries, l)
-		c.lots = append(c.lots, lot{tradeID: l.BrokerTradeID, remaining: l.Quantity})
+		c.lots = append(c.lots, lot{ids: legIDs(l), remaining: l.Quantity})
 		c.noteSource(l.Source)
 	}
 	return nil
@@ -223,16 +252,20 @@ func (c *cycle) add(legs []Leg) error {
 // division came from the net position, or the broker gave no ID) closes in
 // entry order. Quantity that cannot be matched, including a named trade the
 // cycle never saw open, comes back as orphan and is never silently dropped or
-// charged to another trade.
+// charged to another trade. A leg that names several trades without sizes
+// closes only within those trades' lots, in entry order; a role-only entry
+// that named several trades is one lot reachable by any of them, since the
+// broker did not say how its units divide.
 func (c *cycle) consume(legs []Leg) (matched, orphan num.Quantity, err error) {
 	for _, l := range legs {
 		var took num.Quantity
 		left := l.Quantity
+		want := legIDs(l)
 		for i := range c.lots {
 			if left.IsZero() {
 				break
 			}
-			if l.BrokerTradeID != "" && c.lots[i].tradeID != l.BrokerTradeID {
+			if !c.lots[i].reaches(want) {
 				continue
 			}
 			take := left

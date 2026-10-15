@@ -276,8 +276,29 @@ func legsFor(a accountactivity.Activity, qty num.Quantity, effects []accountacti
 		if e := effects[0]; e.Price.Known() {
 			leg.Price = e.Price
 		}
+	} else if p.byRole {
+		leg.CandidateTradeIDs = candidateIDs(effects)
 	}
 	return []Leg{leg}
+}
+
+// candidateIDs is the sorted, de-duplicated set of broker trade IDs named by
+// effects, or nil when any effect names none: one unnamed effect means the
+// set is incomplete, and an incomplete set must not restrict matching.
+func candidateIDs(effects []accountactivity.TradeEffect) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, e := range effects {
+		if e.BrokerTradeID == "" {
+			return nil
+		}
+		if !seen[e.BrokerTradeID] {
+			seen[e.BrokerTradeID] = true
+			ids = append(ids, e.BrokerTradeID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // attribute assigns the fill's amounts to the trades it touches.

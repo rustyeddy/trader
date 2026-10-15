@@ -38,6 +38,11 @@ type Leg struct {
 	// BrokerTradeID is the broker's trade the leg belongs to, when the
 	// broker supplied per-trade effects.
 	BrokerTradeID string
+	// CandidateTradeIDs is the sorted set of broker trades a role-only leg
+	// may belong to, set when the broker named several same-direction trades
+	// without saying how many units each took. The leg's quantity is whole
+	// and unapportioned; the set only limits which trades it can touch.
+	CandidateTradeIDs []string
 	// Split is true when the division of a fill between closing and opening
 	// was derived from the net position because the broker gave no per-trade
 	// units, not taken from broker facts.
