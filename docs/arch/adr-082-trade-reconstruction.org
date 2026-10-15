@@ -30,6 +30,23 @@ closing and opening; this also handles a hedging account that holds a long and
 a short in one instrument. Without per-trade units the net position decides,
 and that division is flagged (=Leg.Split=).
 
+** Matching a close to what it closes
+
+A closing leg that names a broker trade closes only that trade's open units.
+A leg that names a trade the cycle never saw open is an orphan, not a claim on
+some other trade's quantity, so a fill that reduces trade 7 and closes two
+unseen trades leaves trade 7's remaining units open and reports the rest as
+orphans. Only a leg with no trade ID (a provider without trade linkage, or a
+division derived from the net position) closes in entry order.
+
+How a fill divides between closing and opening trusts the broker over the net
+position wherever the broker said something: per-trade units that add up to
+the fill's size give the exact division; failing that, a fill whose effects
+all point one way (all opened, or all closed or reduced) goes that way as a
+whole, because a role is a broker fact even when its units are missing; only
+with no usable information does the net position decide, and the leg is then
+flagged =Split=.
+
 ** Net result and the spread-cost rule
 
 Every amount is signed from the account's point of view.
@@ -51,6 +68,11 @@ term.
 
 A component total is known only when every fill that contributes to it
 supplied it; a reported zero is known. No partial sum is shown as complete.
+"Contributes" is role-aware: realized P/L and financing are realized by the
+closing, so a pure entry fill that omits them contributes nothing and does not
+make the trade's totals unknown (a value it does report is kept), whereas a
+closing fill that omits them does. The execution costs are required of every
+fill.
 Net depends only on its four components: an unknown SpreadCost leaves Net
 known, an unknown Commission, Financing or OtherFees makes Net unknown.
 
@@ -86,6 +108,8 @@ currency pairs and unknown otherwise.
 
 Reconstruction is a pure function of the set of activities. Input is
 validated, an identical repeat is dropped and a conflicting one is an error,
+every retained activity's time is canonicalized to UTC so equivalent
+representations cannot change the output,
 and activities are put in the ledger's total order (time, then activity ID,
 numeric for digit IDs) before processing. A trade's ID is its first entry's
 activity key and its side, so a reversal fill that opens a trade is that

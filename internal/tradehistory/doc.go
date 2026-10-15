@@ -31,7 +31,10 @@
 // # Unknown is not zero
 //
 // A component total is known only when every fill that contributes to it
-// supplied it; a reported zero is known. A partial sum is never presented as a
+// supplied it; a reported zero is known. Contribution is role-aware: realized
+// P/L and financing are realized by the closing, so a pure entry that omits
+// them does not make the trade's totals unknown, while a closing fill that
+// omits them does. A partial sum is never presented as a
 // complete one. An unknown SpreadCost does not make Net unknown, because it is
 // not part of Net; an unknown Commission, Financing or OtherFees does.
 //

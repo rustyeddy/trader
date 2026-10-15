@@ -294,9 +294,11 @@ func TestReversalWithBrokerEffectsUsesTheBrokersFactsWhereTheyExist(t *testing.T
 		pl: "20", fin: "-0.30", comm: "-0.15", spread: "-0.30", fee: "-0.60",
 		effects: []accountactivity.TradeEffect{open, closeE}})
 	in := acts(
-		complete(buy("1", 0, "1000", "1.10")),
+		complete(spec{id: "1", at: 0, side: order.Buy, qty: "1000", price: "1.10",
+			effects: []accountactivity.TradeEffect{eff("t1", accountactivity.TradeRoleOpened, "1000", "1.10")}}),
 		rev,
-		complete(spec{id: "3", at: 2 * time.Hour, side: order.Buy, qty: "500", price: "1.1100", pl: "5"}),
+		complete(spec{id: "3", at: 2 * time.Hour, side: order.Buy, qty: "500", price: "1.1100", pl: "5",
+			effects: []accountactivity.TradeEffect{eff("t7", accountactivity.TradeRoleClosed, "500", "1.11")}}),
 	)
 	r := mustRecon(t, in)
 	require.Len(t, r.Completed, 2)
@@ -386,13 +388,14 @@ func TestUnknownPropagation(t *testing.T) {
 	assert.False(t, tr.Net.Known())
 	assert.True(t, tr.GrossPL.Known())
 
-	// Likewise for each Net component.
+	// Likewise for each Net component missing from the closing fill, which
+	// is the fill that realizes P/L and financing and so owes them.
 	for name, drop := range map[string]func(*spec){
 		"financing": func(s *spec) { s.fin = "" }, "other fees": func(s *spec) { s.fee = "" }, "realized P/L": func(s *spec) { s.pl = "" },
 	} {
 		x := complete(buy("1", 0, "1000", "1.10"))
-		drop(&x)
 		y := complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "1000", price: "1.11", pl: "10"})
+		drop(&y)
 		tr = mustRecon(t, acts(x, y)).Completed[0]
 		assert.False(t, tr.Net.Known(), "Net is unknown without %s", name)
 	}
@@ -406,7 +409,12 @@ func TestAverageIsUnknownWithoutPricesAndRoundsHalfEven(t *testing.T) {
 	openPriced := eff("t2", accountactivity.TradeRoleOpened, "500", "1.12")
 	rev := complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "1500", price: "", pl: "5",
 		effects: []accountactivity.TradeEffect{closeNoPrice, openPriced}})
-	r := mustRecon(t, acts(complete(buy("1", 0, "1000", "1.10")), rev, complete(spec{id: "3", at: 2 * time.Hour, side: order.Buy, qty: "500", price: "1.11"})))
+	r := mustRecon(t, acts(
+		complete(spec{id: "1", at: 0, side: order.Buy, qty: "1000", price: "1.10",
+			effects: []accountactivity.TradeEffect{eff("t1", accountactivity.TradeRoleOpened, "1000", "1.10")}}),
+		rev,
+		complete(spec{id: "3", at: 2 * time.Hour, side: order.Buy, qty: "500", price: "1.11",
+			effects: []accountactivity.TradeEffect{eff("t2", accountactivity.TradeRoleClosed, "500", "1.11")}})))
 	require.Len(t, r.Completed, 2)
 	long, short := r.Completed[0], r.Completed[1]
 	assert.Equal(t, "1.1", pstr(t, long.AvgEntryPrice))
@@ -439,9 +447,10 @@ func TestOrphanExitIsListedAndNeverInventsATrade(t *testing.T) {
 	assert.Equal(t, keys("1")[0], r.Orphans[0].Source)
 	assert.Equal(t, "300", r.Orphans[0].Quantity.String())
 
-	// A window that starts mid-trade: the entry is missing, the exit closes more than is open.
+	// A window that starts mid-trade: the exit closes more than is open.
 	in = acts(
-		complete(buy("1", 0, "100", "1.10")),
+		complete(spec{id: "1", at: 0, side: order.Buy, qty: "100", price: "1.10",
+			effects: []accountactivity.TradeEffect{eff("t0", accountactivity.TradeRoleOpened, "100", "1.10")}}),
 		complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "300", price: "1.12", pl: "5",
 			effects: []accountactivity.TradeEffect{eff("t0", accountactivity.TradeRoleClosed, "300", "1.12")}}),
 	)
@@ -571,4 +580,211 @@ func TestSameInstantFillsAreOrderedByActivityID(t *testing.T) {
 	r := mustRecon(t, in)
 	require.Len(t, r.Completed, 1, "9 sorts before 10, so the buy opens before the sell closes")
 	assert.Equal(t, strconv.Itoa(9), r.Completed[0].Entries[0].Source.ProviderActivityID)
+}
+
+// Realized P/L and financing are realized by the closing. A pure entry that
+// omits them says nothing about the trade's totals, so the completed trade is
+// still known when the closing fill reports them; and the converse, a closing
+// fill that omits them, leaves the total unknown.
+func TestAbsentPLAndFinancingOnAPureEntryDoNotMakeTheTradeUnknown(t *testing.T) {
+	entry := spec{id: "1", at: 0, side: order.Buy, qty: "1000", price: "1.10", comm: "-0.05", spread: "-0.25", fee: "0"} // no pl, no financing
+	exit := spec{id: "2", at: time.Hour, side: order.Sell, qty: "1000", price: "1.11", pl: "10", fin: "-0.10", comm: "-0.05", spread: "-0.30", fee: "0"}
+
+	tr := mustRecon(t, acts(entry, exit)).Completed[0]
+	assert.Equal(t, "10 USD", mstr(t, tr.GrossPL), "the closing fill's P/L is the trade's")
+	assert.Equal(t, "-0.1 USD", mstr(t, tr.Financing))
+	assert.Equal(t, "9.8 USD", mstr(t, tr.Net), "10 - 0.1 commission - 0.1 financing")
+	assert.Contains(t, tr.GrossPL.Source(), "over 1 fills", "only the closing fill contributed")
+
+	// An entry that does report them keeps them (a reported zero is a fact).
+	withZero := entry
+	withZero.pl, withZero.fin = "0", "0"
+	tr = mustRecon(t, acts(withZero, exit)).Completed[0]
+	assert.Equal(t, "10 USD", mstr(t, tr.GrossPL))
+	assert.Contains(t, tr.GrossPL.Source(), "over 2 fills")
+
+	// A closing fill that omits them leaves the totals, and Net, unknown.
+	noPL := exit
+	noPL.pl = ""
+	tr = mustRecon(t, acts(entry, noPL)).Completed[0]
+	assert.False(t, tr.GrossPL.Known())
+	assert.False(t, tr.Net.Known())
+	noFin := exit
+	noFin.fin = ""
+	tr = mustRecon(t, acts(entry, noFin)).Completed[0]
+	assert.False(t, tr.Financing.Known())
+	assert.False(t, tr.Net.Known())
+	assert.True(t, tr.GrossPL.Known())
+
+	// The execution costs are still required of an entry.
+	noComm := entry
+	noComm.comm = ""
+	tr = mustRecon(t, acts(noComm, exit)).Completed[0]
+	assert.False(t, tr.Commission.Known(), "an entry that omits commission leaves it unknown")
+}
+
+// A closing leg that names a broker trade closes only that trade. Trade 7 is
+// reduced by 300; trades 8888 and 9999 were never seen opening, so they are
+// orphans and do not consume trade 7's remaining 200 units.
+func TestAClosingLegNamingAnUnseenTradeIsAnOrphanNotAnotherTradesQuantity(t *testing.T) {
+	entry := complete(spec{id: "1", at: 0, side: order.Buy, qty: "500", price: "1.08",
+		effects: []accountactivity.TradeEffect{eff("7", accountactivity.TradeRoleOpened, "500", "1.08")}})
+	reduce := eff("7", accountactivity.TradeRoleReduced, "300", "1.09")
+	c1 := eff("8888", accountactivity.TradeRoleClosed, "100", "1.09")
+	c2 := eff("9999", accountactivity.TradeRoleClosed, "100", "1.09")
+	exit := complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "500", price: "1.09", pl: "1.2",
+		effects: []accountactivity.TradeEffect{reduce, c1, c2}})
+
+	r := mustRecon(t, acts(entry, exit))
+	assert.Empty(t, r.Completed, "trade 7 still has 200 units open")
+	require.Len(t, r.Open, 1)
+	assert.Equal(t, "200", r.Open[0].Remaining.String())
+	require.Len(t, r.Open[0].Exits, 1)
+	assert.Equal(t, "300", r.Open[0].Exits[0].Quantity.String())
+	assert.Equal(t, "7", r.Open[0].Exits[0].BrokerTradeID)
+	require.Len(t, r.Orphans, 1)
+	assert.Equal(t, "200", r.Orphans[0].Quantity.String(), "100 + 100 for the two unseen trades")
+
+	// Closing trade 7's remaining 200 completes the trade, with only the
+	// matched units; the unrelated trades' P/L never entered it.
+	rest := complete(spec{id: "3", at: 2 * time.Hour, side: order.Sell, qty: "200", price: "1.10", pl: "4",
+		effects: []accountactivity.TradeEffect{eff("7", accountactivity.TradeRoleClosed, "200", "1.10")}})
+	r = mustRecon(t, acts(entry, exit, rest))
+	require.Len(t, r.Completed, 1)
+	assert.Equal(t, "500", r.Completed[0].ExitQuantity.String())
+	assert.False(t, r.Completed[0].GrossPL.Known(), "the first exit fill included unattributable P/L, so the total is not claimed")
+}
+
+// Without any broker linkage, matching falls back to quantity in entry order.
+func TestQuantityOnlyMatchingStillWorksWithoutTradeIDs(t *testing.T) {
+	r := mustRecon(t, acts(
+		complete(buy("1", 0, "300", "1.10")),
+		complete(buy("2", time.Minute, "200", "1.11")),
+		complete(spec{id: "3", at: time.Hour, side: order.Sell, qty: "500", price: "1.12", pl: "7"}),
+	))
+	require.Len(t, r.Completed, 1)
+	assert.Empty(t, r.Orphans)
+}
+
+// A cost is divided with one rounding, not two: 1 of 3 units of -3 USD is
+// exactly -1 and -2, not -0.99999999 and -2.00000001.
+func TestApportionRoundsOnceAndTheSharesSumToTheTotal(t *testing.T) {
+	q := func(s string) num.Quantity { return num.MustParseQuantity(s) }
+	cases := []struct {
+		total, part, whole, want string
+	}{
+		{"-3", "1", "3", "-1"},
+		{"-3", "2", "3", "-2"},
+		{"-0.15", "1000", "1500", "-0.1"},
+		{"-0.15", "500", "1500", "-0.05"},
+		{"10", "1", "3", "3.33333333"},
+		{"0.00000001", "1", "2", "0"},          // tie: half to even (0)
+		{"0.00000003", "1", "2", "0.00000002"}, // tie: half to even (2)
+		{"-0.00000003", "1", "2", "-0.00000002"},
+		{"0", "7", "9", "0"},
+		{"123456.78901234", "999999", "1000000", "123456.66555555"}, // 123456.78901234 - 0.12345678901234, rounded once
+	}
+	for _, c := range cases {
+		got, err := apportion(money(c.total), q(c.part), q(c.whole))
+		require.NoError(t, err, "%s * %s / %s", c.total, c.part, c.whole)
+		assert.Equal(t, money(c.want).String(), got.String(), "%s * %s / %s", c.total, c.part, c.whole)
+	}
+	_, err := apportion(money("1"), q("1"), q("0"))
+	assert.Error(t, err)
+
+	// End to end: the closing and opening shares of a split fill sum exactly.
+	in := acts(
+		complete(buy("1", 0, "1", "1.10")),
+		complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "3", price: "1.12", comm: "-3", pl: "1"}),
+		complete(spec{id: "3", at: 2 * time.Hour, side: order.Buy, qty: "2", price: "1.10"}),
+	)
+	r := mustRecon(t, in)
+	require.Len(t, r.Completed, 2)
+	assert.Equal(t, "-1 USD", mstr(t, r.Completed[0].Commission))
+	assert.Equal(t, "-2 USD", mstr(t, r.Completed[1].Commission))
+}
+
+// Repeats of one activity written with equivalent timestamps are the same
+// record, and the output cannot depend on which was seen first.
+func TestEquivalentTimestampRepresentationsGiveIdenticalOutput(t *testing.T) {
+	zone := time.FixedZone("east", 5*3600)
+	a := fillOf(complete(buy("1", 0, "1000", "1.10")))
+	b := fillOf(complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "1000", price: "1.11", pl: "10"}))
+	aZoned, bZoned := a, b
+	aZoned.OccurredAt = a.OccurredAt.In(zone)
+	bZoned.OccurredAt = b.OccurredAt.In(zone)
+
+	want := mustRecon(t, []accountactivity.Activity{a, b})
+	for name, in := range map[string][]accountactivity.Activity{
+		"zoned first":   {aZoned, a, bZoned, b},
+		"utc first":     {a, aZoned, b, bZoned},
+		"only zoned":    {aZoned, bZoned},
+		"mixed reorder": {bZoned, a, b, aZoned},
+	} {
+		got := mustRecon(t, in)
+		assert.Equal(t, want, got, name)
+		require.Len(t, got.Completed, 1)
+		assert.Equal(t, time.UTC, got.Completed[0].OpenedAt.Location(), name)
+		assert.Equal(t, time.UTC, got.Completed[0].Entries[0].At.Location(), name)
+	}
+}
+
+// A broker role is a fact even when the effect's units are missing; the net
+// position must not reverse its meaning.
+func TestRolesWithoutUnitsAreNotOverriddenByTheNetPosition(t *testing.T) {
+	noUnits := func(id string, role accountactivity.TradeRole, price string) accountactivity.TradeEffect {
+		e := accountactivity.TradeEffect{BrokerTradeID: id, Role: role}
+		e.Price = accountactivity.Reported(num.MustParsePrice(price))
+		return e
+	}
+
+	// A sell whose only effect is a close, with nothing open: an orphan exit,
+	// not an invented short.
+	r := mustRecon(t, acts(complete(spec{id: "1", at: 0, side: order.Sell, qty: "300", price: "1.10", pl: "5",
+		effects: []accountactivity.TradeEffect{noUnits("t0", accountactivity.TradeRoleClosed, "1.10")}})))
+	assert.Empty(t, r.Open, "no short was invented")
+	assert.Empty(t, r.Completed)
+	require.Len(t, r.Orphans, 1)
+	assert.Equal(t, "300", r.Orphans[0].Quantity.String())
+
+	// A sell whose only effect is an open, while a long is open (a hedging
+	// account): it opens a short and leaves the long alone.
+	hedged := mustRecon(t, acts(
+		complete(spec{id: "1", at: 0, side: order.Buy, qty: "1000", price: "1.10",
+			effects: []accountactivity.TradeEffect{eff("t1", accountactivity.TradeRoleOpened, "1000", "1.10")}}),
+		complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "400", price: "1.11",
+			effects: []accountactivity.TradeEffect{noUnits("t2", accountactivity.TradeRoleOpened, "1.11")}}),
+	))
+	assert.Empty(t, hedged.Completed)
+	require.Len(t, hedged.Open, 2)
+	byID := map[order.Side]OpenPosition{}
+	for _, o := range hedged.Open {
+		byID[o.Side] = o
+	}
+	assert.Equal(t, "1000", byID[order.Buy].Remaining.String(), "the long was not reduced")
+	assert.Equal(t, "400", byID[order.Sell].Remaining.String())
+	assert.Empty(t, byID[order.Buy].Exits)
+
+	// A role-only close that names its trade closes that trade.
+	closed := mustRecon(t, acts(
+		complete(spec{id: "1", at: 0, side: order.Buy, qty: "400", price: "1.10",
+			effects: []accountactivity.TradeEffect{eff("t1", accountactivity.TradeRoleOpened, "400", "1.10")}}),
+		complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "400", price: "1.12", pl: "8",
+			effects: []accountactivity.TradeEffect{noUnits("t1", accountactivity.TradeRoleClosed, "1.12")}}),
+	))
+	require.Len(t, closed.Completed, 1)
+	assert.Equal(t, "t1", closed.Completed[0].Exits[0].BrokerTradeID)
+	assert.False(t, closed.Completed[0].Exits[0].Split, "the direction was the broker's")
+
+	// With roles in both directions and no units there is nothing to size the
+	// split, so the net position decides and the leg says so.
+	mixed := mustRecon(t, acts(
+		complete(buy("1", 0, "1000", "1.10")),
+		complete(spec{id: "2", at: time.Hour, side: order.Sell, qty: "1500", price: "1.12", pl: "5",
+			effects: []accountactivity.TradeEffect{noUnits("t1", accountactivity.TradeRoleClosed, "1.12"), noUnits("t2", accountactivity.TradeRoleOpened, "1.12")}}),
+	))
+	require.Len(t, mixed.Completed, 1)
+	assert.True(t, mixed.Completed[0].Exits[0].Split)
+	require.Len(t, mixed.Open, 1)
+	assert.Equal(t, "500", mixed.Open[0].Remaining.String())
 }

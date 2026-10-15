@@ -71,6 +71,9 @@ func normalizeInput(in []accountactivity.Activity) ([]accountactivity.Activity, 
 			}
 			continue
 		}
+		// Keep one canonical form of the time so equivalent repeats written
+		// in different zones cannot change the output.
+		a.OccurredAt = a.OccurredAt.UTC().Round(0)
 		byKey[a.Key()] = a
 	}
 	out := make([]accountactivity.Activity, 0, len(byKey))
@@ -100,16 +103,30 @@ type fillParts struct {
 	closeQ, openQ num.Quantity
 	closeEffects  []accountactivity.TradeEffect
 	openEffects   []accountactivity.TradeEffect
-	// fromEffects is true when the division came from broker per-trade
-	// units, false when it was derived from the net position.
+	// fromEffects is true when broker per-trade units gave the division.
 	fromEffects bool
+	// byRole is true when the broker's roles alone decided the direction of
+	// the whole fill (all effects opened, or all closed/reduced) without
+	// per-trade units to size it.
+	byRole bool
 }
 
-// splitFill decides how much of the fill closes and how much opens. Broker
-// per-trade units win when they account for exactly the fill's size (this
-// also handles hedging accounts, where a sell can open a short beside an
-// open long). Otherwise the net position decides: a fill closes up to the
-// open quantity on the opposite side and opens the rest.
+func isClosing(r accountactivity.TradeRole) bool {
+	return r == accountactivity.TradeRoleClosed || r == accountactivity.TradeRoleReduced
+}
+
+// splitFill decides how much of the fill closes and how much opens, trusting
+// the broker over the net position wherever the broker said something:
+//
+//  1. per-trade units that add up to the fill's size give the exact division
+//     (this also handles a hedging account, where a sell can open a short
+//     beside an open long);
+//  2. failing that, if every effect has the same direction (all opened, or
+//     all closed or reduced) the whole fill goes that way, because a role is
+//     a broker fact even when its units are missing;
+//  3. only with no usable broker information does the net position decide: a
+//     fill closes up to the open quantity on the opposite side and opens the
+//     rest.
 func splitFill(a accountactivity.Activity, closeBook *cycle) (fillParts, error) {
 	qty, _ := a.Quantity.Get()
 	var p fillParts
@@ -117,20 +134,23 @@ func splitFill(a accountactivity.Activity, closeBook *cycle) (fillParts, error) 
 	if len(a.TradeEffects) > 0 {
 		var closeQ, openQ num.Quantity
 		usable := true
+		var closing, opening []accountactivity.TradeEffect
 		for _, e := range a.TradeEffects {
+			if isClosing(e.Role) {
+				closing = append(closing, e)
+			} else {
+				opening = append(opening, e)
+			}
 			u, ok := e.Units.Get()
 			if !ok {
 				usable = false
-				break
+				continue
 			}
 			var err error
-			switch e.Role {
-			case accountactivity.TradeRoleOpened:
-				p.openEffects = append(p.openEffects, e)
-				openQ, err = openQ.Add(u)
-			default:
-				p.closeEffects = append(p.closeEffects, e)
+			if isClosing(e.Role) {
 				closeQ, err = closeQ.Add(u)
+			} else {
+				openQ, err = openQ.Add(u)
 			}
 			if err != nil {
 				return p, err
@@ -143,10 +163,18 @@ func splitFill(a accountactivity.Activity, closeBook *cycle) (fillParts, error) 
 			}
 			if total.Equal(qty) {
 				p.closeQ, p.openQ, p.fromEffects = closeQ, openQ, true
+				p.closeEffects, p.openEffects = closing, opening
 				return p, nil
 			}
 		}
-		p.closeEffects, p.openEffects = nil, nil
+		switch {
+		case len(closing) > 0 && len(opening) == 0:
+			p.closeQ, p.byRole, p.closeEffects = qty, true, closing
+			return p, nil
+		case len(opening) > 0 && len(closing) == 0:
+			p.openQ, p.byRole, p.openEffects = qty, true, opening
+			return p, nil
+		}
 	}
 
 	avail := num.Quantity{}
@@ -172,19 +200,19 @@ func (r *reconstructor) fill(a accountactivity.Activity) error {
 	}
 
 	spans := !parts.closeQ.IsZero() && !parts.openQ.IsZero()
-	closeLegs := legsFor(a, parts.closeQ, parts.closeEffects, parts.fromEffects, spans)
-	openLegs := legsFor(a, parts.openQ, parts.openEffects, parts.fromEffects, spans)
+	closeLegs := legsFor(a, parts.closeQ, parts.closeEffects, parts, spans)
+	openLegs := legsFor(a, parts.openQ, parts.openEffects, parts, spans)
 
 	// Close first, then open: a reversal ends one trade and starts the next.
 	var closed *cycle
-	var orphanQ num.Quantity
+	var matched, orphanQ num.Quantity
 	if !parts.closeQ.IsZero() {
 		if closeBook == nil {
 			orphanQ = parts.closeQ
 			r.res.Orphans = append(r.res.Orphans, Orphan{Source: a.Key(), Quantity: orphanQ})
 		} else {
 			var err error
-			_, orphanQ, err = closeBook.consume(closeLegs)
+			matched, orphanQ, err = closeBook.consume(closeLegs)
 			if err != nil {
 				return err
 			}
@@ -208,7 +236,7 @@ func (r *reconstructor) fill(a accountactivity.Activity) error {
 		}
 	}
 
-	if err := r.attribute(a, parts, closed, opened, !orphanQ.IsZero()); err != nil {
+	if err := r.attribute(a, parts, closed, opened, !orphanQ.IsZero(), !matched.IsZero()); err != nil {
 		return err
 	}
 
@@ -224,12 +252,13 @@ func (r *reconstructor) fill(a accountactivity.Activity) error {
 }
 
 // legsFor builds the legs of one portion of a fill: one per broker trade
-// effect when the broker divided the fill, otherwise one for the portion.
-func legsFor(a accountactivity.Activity, qty num.Quantity, effects []accountactivity.TradeEffect, fromEffects, spans bool) []Leg {
+// effect when per-trade units divided the fill, otherwise one for the portion
+// (carrying the broker trade ID when exactly one effect points that way).
+func legsFor(a accountactivity.Activity, qty num.Quantity, effects []accountactivity.TradeEffect, p fillParts, spans bool) []Leg {
 	if qty.IsZero() {
 		return nil
 	}
-	if fromEffects && len(effects) > 0 {
+	if p.fromEffects && len(effects) > 0 {
 		legs := make([]Leg, 0, len(effects))
 		for _, e := range effects {
 			u, _ := e.Units.Get()
@@ -241,15 +270,25 @@ func legsFor(a accountactivity.Activity, qty num.Quantity, effects []accountacti
 		}
 		return legs
 	}
-	return []Leg{{Source: a.Key(), At: a.OccurredAt, Quantity: qty, Price: a.Price, Split: spans && !fromEffects}}
+	leg := Leg{Source: a.Key(), At: a.OccurredAt, Quantity: qty, Price: a.Price, Split: spans && !p.byRole}
+	if p.byRole && len(effects) == 1 {
+		leg.BrokerTradeID = effects[0].BrokerTradeID
+		if e := effects[0]; e.Price.Known() {
+			leg.Price = e.Price
+		}
+	}
+	return []Leg{leg}
 }
 
 // attribute assigns the fill's amounts to the trades it touches.
-func (r *reconstructor) attribute(a accountactivity.Activity, p fillParts, closed, opened *cycle, orphaned bool) error {
+func (r *reconstructor) attribute(a accountactivity.Activity, p fillParts, closed, opened *cycle, orphaned, closedMatched bool) error {
 	if orphaned {
 		// Part of this fill closes something the data never showed opening,
-		// so its amounts cannot be attributed; the trades it touches cannot
-		// claim complete totals.
+		// so its amounts cannot be attributed: a trade it matched, or opened,
+		// cannot claim complete totals. A trade it did not touch is unaffected.
+		if !closedMatched {
+			closed = nil
+		}
 		for _, c := range []*cycle{closed, opened} {
 			if c != nil {
 				c.noteSource(a.Key())
@@ -258,11 +297,14 @@ func (r *reconstructor) attribute(a accountactivity.Activity, p fillParts, close
 		}
 		return nil
 	}
+	if !closedMatched {
+		closed = nil
+	}
 	switch {
 	case closed != nil && opened == nil:
-		return closed.addFill(a, whole(a))
+		return closed.addFill(a, wholeClosing(a))
 	case opened != nil && closed == nil:
-		return opened.addFill(a, whole(a))
+		return opened.addFill(a, wholeOpening(a))
 	case closed == nil && opened == nil:
 		return nil
 	}
