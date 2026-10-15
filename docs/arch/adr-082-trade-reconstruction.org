@@ -1,0 +1,106 @@
+#+TITLE: ADR-082: Trade reconstruction from account activity
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #512. Builds on ADR-079 (the activity model) and ADR-081 (the
+fill representation). Slippage and execution quality are #513; the CLI and
+reporting are #514 and #515; per-position daily financing is #522.
+
+* Context
+
+The ledger holds what the broker reported, fill by fill. Summaries, analysis
+and journal generation need completed trades, and they must stay traceable to
+the activities they came from. Reconstruction must be deterministic and must
+not turn a missing figure into a zero or a broker's number into one of
+Trader's.
+
+* Decision
+
+** A trade is a position cycle
+
+A completed trade is flat, to a position, to flat, for one account,
+instrument and side. Many fills may enter and many may exit: scale-in and
+scale-out stay one trade. A fill that closes a position and opens the opposite
+one belongs to two trades. Provider trade IDs do not define the boundary, so
+the view is broker-neutral (Alpaca has no trade IDs). Where the broker gives
+per-trade effects, they become the legs of the trade, with their exact prices
+and units and the broker trade ID, and they decide how a fill divides between
+closing and opening; this also handles a hedging account that holds a long and
+a short in one instrument. Without per-trade units the net position decides,
+and that division is flagged (=Leg.Split=).
+
+** Net result and the spread-cost rule
+
+Every amount is signed from the account's point of view.
+
+- GrossPL is the sum of broker-reported realized P/L. It is never recomputed
+  from prices; a price-based figure may later be exposed as a labelled check.
+- SpreadCost is a first-class economic cost, aggregated and shown, but it is
+  an attribution already embedded in the broker's realized P/L (a buy
+  executes at the ask, a sell at the bid). Subtracting it again would double
+  count.
+- Net = GrossPL + Commission + Financing + OtherFees, derived, with its source
+  stating that spread cost is already embedded.
+
+A spread-neutral, mid-price P/L is a different starting figure and belongs to
+the execution-quality layer (#513), where spread cost can become an explicit
+term.
+
+** Unknown is not zero
+
+A component total is known only when every fill that contributes to it
+supplied it; a reported zero is known. No partial sum is shown as complete.
+Net depends only on its four components: an unknown SpreadCost leaves Net
+known, an unknown Commission, Financing or OtherFees makes Net unknown.
+
+** Reversals and apportionment
+
+Realized P/L and financing are realized by the closing, so on a fill that
+spans two trades they belong to the closed trade. Execution costs (spread
+cost, guaranteed-execution and other fees, commission) are incurred by both
+portions. Broker per-trade values are used exactly where every effect supplies
+them. Otherwise a known fill-level amount is apportioned by units, the closing
+share rounded and the opening share its exact complement so the parts sum to
+the fill, and the total's method names the fills apportioned. If there is no
+fill-level amount either, the component is unknown on both trades. A
+proportional share is never presented as broker-reported.
+
+** What is outside a completed trade
+
+- Open positions are returned separately with entries so far, partial exits
+  and what remains; they are not dropped or force-closed.
+- Standalone financing and fee activities are listed as unattributed. The
+  ledger does not yet carry OANDA's per-position daily financing, so a day's
+  financing cannot be allocated safely (#522).
+- An exit with no known entry, as when the data window starts mid-trade, is an
+  orphan: it is listed, and the trade it touches cannot claim complete totals.
+
+** Arithmetic and determinism
+
+Quantities and prices are exact. A weighted average price is the sum of each
+leg's notional (price times quantity, rounded half to even to 8 decimals)
+divided by the total quantity, rounded half to even, marked Derived with that
+method; it needs the instrument's quote currency, so it is available for
+currency pairs and unknown otherwise.
+
+Reconstruction is a pure function of the set of activities. Input is
+validated, an identical repeat is dropped and a conflicting one is an error,
+and activities are put in the ledger's total order (time, then activity ID,
+numeric for digit IDs) before processing. A trade's ID is its first entry's
+activity key and its side, so a reversal fill that opens a trade is that
+trade's first entry. Every trade lists the activities it was derived from.
+
+** Package
+
+=internal/tradehistory= imports the standard library and =num=, =instrument=,
+=order= and =internal/accountactivity= only, enforced by an allowlist test. It
+stores nothing and reads no clock; it is a derived view, not the ledger.
+
+* Consequences
+
+The completed-trade view is stable across providers, and OANDA's linkage adds
+legs and precision without shaping the model. Trade financing is only what
+fills realized until #522. Currency conversion is not attempted: all amounts
+are in the account currency, and a mismatch is an error. Open-position cost
+summaries and a price-based P/L check are not provided yet.

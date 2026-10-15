@@ -81,7 +81,7 @@ var _ v1.BarEvent
 	out, err := runGo(t, dir, "build", "-mod=mod", "-o", filepath.Join(dir, "guest"), ".")
 	require.NoError(t, err, "%s", out)
 
-	for _, name := range []string{"account", "accountactivity", "portfolio", "backtest", "broker", "execution", "risk", "pipeline", "strategy", "service", "adapters/strategy/external", "journal", "report", "chart", "config", "logging", "clock", "id", "tradertest", "marketdata", "order"} {
+	for _, name := range []string{"account", "accountactivity", "tradehistory", "portfolio", "backtest", "broker", "execution", "risk", "pipeline", "strategy", "service", "adapters/strategy/external", "journal", "report", "chart", "config", "logging", "clock", "id", "tradertest", "marketdata", "order"} {
 		t.Run("reject/"+name, func(t *testing.T) {
 			path := modulePath + "/internal/" + name
 			source := fmt.Sprintf("package main\nimport _ %q\nfunc main() {}\n", path)
