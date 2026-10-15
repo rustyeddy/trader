@@ -1,5 +1,7 @@
 package accountactivity
 
+import "github.com/rustyeddy/trader/num"
+
 // Kind classifies an Activity. Like journal.Kind it is Trader's own closed
 // vocabulary, not a provider's, so the zero value is invalid. The provider's
 // own type or code is kept verbatim in Activity.ProviderType; Kind is only
@@ -124,8 +126,29 @@ func (r TradeRole) Valid() bool {
 	return r == TradeRoleOpened || r == TradeRoleReduced || r == TradeRoleClosed
 }
 
-// TradeLink ties a fill to one broker trade and says how. It is comparable.
-type TradeLink struct {
+// TradeEffect is what a fill did to one broker trade: it opened it, reduced
+// it, or closed it (a single fill can do several, such as closing two trades
+// and opening a third). Beyond the trade's ID and the role it carries the
+// execution facts the broker embeds for that trade, each with its own
+// provenance and unknown when the broker did not supply it. The per-trade
+// price is the broker's exact, official execution price for that part of the
+// fill (ADR-081); the fill-level Price is not.
+//
+// An effect with only an ID and a role is valid.
+type TradeEffect struct {
 	BrokerTradeID string
 	Role          TradeRole
+
+	// Units is the absolute size of the effect.
+	Units Value[num.Quantity]
+	// Price is the exact execution price for this trade.
+	Price Value[num.Price]
+	// RealizedPL and Financing are realized by a reduce or close, signed from
+	// the account's point of view.
+	RealizedPL Value[num.Money]
+	Financing  Value[num.Money]
+	// SpreadCost keeps the sign the broker reported, like Activity.SpreadCost.
+	SpreadCost Value[num.Money]
+	// GuaranteedExecutionFee is a cost, negative (account-centric).
+	GuaranteedExecutionFee Value[num.Money]
 }

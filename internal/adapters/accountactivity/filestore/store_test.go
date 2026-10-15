@@ -545,3 +545,62 @@ func TestStore_InvalidCheckpointIsCorruption(t *testing.T) {
 		})
 	}
 }
+
+// A ledger written in the interim #510 shape (schema 1) is never read
+// half-way; the error says how to recover.
+func TestStore_InterimSchemaIsRejectedWithRecoveryAdvice(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	_, err := s.Apply(ctx, batch("c", storetest.Deposit("1", 0)))
+	require.NoError(t, err)
+	mutateFirstLine(t, streamDir(t, s), func(m map[string]any) { m["schema"] = 1 })
+
+	_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "re-import")
+	assert.ErrorContains(t, err, "interim")
+
+	// A future schema is an error too, without the rebuild advice.
+	mutateFirstLine(t, streamDir(t, s), func(m map[string]any) { m["schema"] = 99 })
+	_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "re-import")
+}
+
+// A quote snapshot with a missing payload is corruption, like any value.
+func TestStore_QuoteWithoutPayloadIsCorruption(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	_, err := s.Apply(ctx, batch("c", storetest.RichFill("1", 0)))
+	require.NoError(t, err)
+	mutateFirstLine(t, streamDir(t, s), func(m map[string]any) { delete(m["execution_quote"].(map[string]any), "value") })
+	_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.Error(t, err)
+}
+
+// A persisted ladder rung missing its price or liquidity is corruption; an
+// explicit zero is rejected as invalid data, since a rung with no liquidity
+// is not a price anyone could trade at.
+func TestStore_LadderRungWithoutPriceOrLiquidityIsCorruption(t *testing.T) {
+	ctx := context.Background()
+	mutate := map[string]func(rung map[string]any){
+		"missing liquidity": func(r map[string]any) { delete(r, "liquidity") },
+		"null liquidity":    func(r map[string]any) { r["liquidity"] = nil },
+		"missing price":     func(r map[string]any) { delete(r, "price") },
+		"null price":        func(r map[string]any) { r["price"] = nil },
+		"explicit zero":     func(r map[string]any) { r["liquidity"] = "0" },
+	}
+	for name, f := range mutate {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			_, err := s.Apply(ctx, batch("c", storetest.RichFill("1", 0)))
+			require.NoError(t, err)
+			mutateFirstLine(t, streamDir(t, s), func(m map[string]any) {
+				q := m["execution_quote"].(map[string]any)["value"].(map[string]any)
+				f(q["bids"].([]any)[0].(map[string]any))
+			})
+			_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+			assert.Error(t, err)
+		})
+	}
+}

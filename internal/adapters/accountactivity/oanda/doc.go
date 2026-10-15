@@ -26,9 +26,14 @@
 //
 //   - ORDER_FILL becomes a fill, with realized P/L, half-spread cost
 //     (broker-reported, with OANDA's own sign), commission, financing,
-//     guaranteed-execution fee, the order and batch IDs and every trade the
-//     fill opened, reduced or closed. Commission and the fee are positive costs
-//     in OANDA's data and are negated to Trader's account-centric sign.
+//     guaranteed-execution fee, the order and batch IDs, fullVWAP, the
+//     fullPrice liquidity snapshot, and a TradeEffect per trade opened,
+//     reduced or closed carrying that trade's units, exact price, realized
+//     P/L, financing, spread cost and fee. Commission and the fees are
+//     positive costs in OANDA's data and are negated to Trader's
+//     account-centric sign. The top-level price is OANDA-deprecated and kept
+//     only as a non-authoritative figure; the per-trade prices are the exact
+//     ones, and fullVWAP is a reference, not the actual price.
 //   - DAILY_FINANCING becomes financing.
 //   - TRANSFER_FUNDS becomes a deposit or withdrawal by the sign of the amount.
 //   - DIVIDEND_ADJUSTMENT becomes a dividend.
@@ -39,9 +44,6 @@
 //
 // A recognized transaction that fails to parse is an error, not a skip: the
 // page fails, the checkpoint does not move, and the problem is visible.
-//
-// ORDER_FILL execution detail beyond this (fullVWAP, fullPrice, per-trade
-// amounts) is issue #511.
 //
 // # Credentials and network
 //

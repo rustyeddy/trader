@@ -268,3 +268,36 @@ func TestSync_BatchIDsAndProviderInstrumentsRoundTripThroughTheStore(t *testing.
 	assert.Equal(t, "SPX500_USD", byID["10"].ProviderInstrument, "the unmapped instrument is kept for later re-normalization")
 	assert.Equal(t, accountactivity.KindOther, byID["10"].Kind)
 }
+
+// The per-trade facts, fullVWAP and the quote ladder survive import and the
+// real file store exactly.
+func TestSync_FillDetailRoundTripsThroughTheStore(t *testing.T) {
+	store, _ := newFileStore(t)
+	f := loadFixture(t)
+	_, err := run(t, store, f)
+	require.NoError(t, err)
+
+	byID := map[string]accountactivity.Activity{}
+	for _, a := range query(t, store) {
+		byID[a.ProviderActivityID] = a
+	}
+	direct := norm(t, f, 7)
+	assert.True(t, direct.SameRecord(byID["7"]), "a reversal comes back from the store exactly as imported")
+	assert.True(t, norm(t, f, 3).SameRecord(byID["3"]), "so does a fill with a quote ladder")
+	assert.True(t, norm(t, f, 12).SameRecord(byID["12"]), "and a multi-trade close")
+	assert.Equal(t, []string{"7:opened", "3:closed"}, effectKeys(byID["7"]))
+	assert.Equal(t, "5.8 USD", money(t, byID["7"].TradeEffects[1].RealizedPL))
+
+	assert.Equal(t, []string{"7:reduced", "8888:closed", "9999:closed"}, effectKeys(byID["12"]))
+	assert.Equal(t, "0.3 USD", money(t, byID["12"].TradeEffects[1].RealizedPL))
+
+	q, ok := byID["3"].ExecutionQuote.Get()
+	require.True(t, ok)
+	require.Len(t, q.Bids, 2)
+	assert.Equal(t, "2000000", q.Bids[1].Liquidity.String())
+	assert.Equal(t, "1.08534", price(t, byID["3"].FullVWAP))
+	assert.Equal(t, "price (deprecated aggregate)", byID["3"].Price.Source())
+	for _, id := range []string{"3", "7", "12"} {
+		assert.Empty(t, reconcile(byID[id]), "fill %s reconciles after storage", id)
+	}
+}

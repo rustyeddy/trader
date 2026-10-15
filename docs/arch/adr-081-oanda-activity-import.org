@@ -3,7 +3,8 @@
 
 * Status
 
-Accepted. Issue #510. Builds on ADR-079 (activity model), ADR-080 (store and
+Accepted. Issue #510; amended by issue #511 (the final fill representation,
+below). Builds on ADR-079 (activity model), ADR-080 (store and
 checkpoints) and ADR-078 (secrets). ORDER_FILL execution detail beyond what
 is listed here is issue #511; the Alpaca source is #516; the CLI is #514.
 
@@ -52,9 +53,10 @@ currency from the summary. Absent fields are unknown; reported zeros are
 reported zeros. Every value carries =ReportedFrom= with OANDA's field name.
 
 - ORDER_FILL -> fill: instrument, side from the sign of units, quantity,
-  price, realized P/L, financing, commission, guaranteed-execution fee,
-  =halfSpreadCost= (broker-reported), order ID, and every trade opened,
-  reduced or closed with its role.
+  realized P/L, financing, commission, guaranteed-execution fee,
+  =halfSpreadCost= (broker-reported), order and batch IDs, =fullVWAP=, the
+  =fullPrice= snapshot, and a =TradeEffect= for every trade opened, reduced or
+  closed (see "Fill representation").
 - DAILY_FINANCING -> financing. TRANSFER_FUNDS -> deposit or withdrawal by the
   sign of the amount (zero is =KindOther=). DIVIDEND_ADJUSTMENT -> dividend.
 - Anything else, and a fill in an instrument Trader cannot yet identify, ->
@@ -109,11 +111,71 @@ classified (unauthorized, bad request, rate limited, unavailable) and are not
 retried inside the client: the sync is replay-safe, so a failed run is run
 again.
 
+** Fill representation (issue #511)
+
+An ORDER_FILL is stored as the broker's execution facts at the finest grain
+OANDA supplies, with nothing relabelled as slippage:
+
+- *Per-trade effects.* Each of =tradeOpened=, =tradeReduced= and every
+  =tradesClosed= entry becomes a =TradeEffect=: trade ID, role, units, the
+  exact price, realized P/L, financing, half-spread cost and guaranteed-
+  execution fee, each a reported value with its OANDA field as the source and
+  unknown when OANDA omitted it. OANDA documents these embedded prices as the
+  exact, official execution prices. Units are sizes; the sign of the fill's
+  units is the side.
+- *The top-level =price= is not authoritative.* OANDA deprecates it. It is
+  kept as the fill-level =Price=, with its source recorded as
+  "price (deprecated aggregate)", and is optional when per-trade prices exist
+  (a fill needs a price from somewhere). No fill-level canonical VWAP is
+  invented; if one is wanted later it is derived from the per-trade prices and
+  units and marked Derived with a named method.
+- *=fullVWAP= is kept separately, as reported.* It is the price the units
+  should have been filled at absent guaranteed-price execution, so it differs
+  from the actual price when guaranteed execution applies. It does not replace
+  =Price= or any per-trade price.
+- *=fullPrice= is kept whole.* The bid and ask ladders with the liquidity at
+  each rung, the closeout bid and ask, and the quote time are stored as one
+  reported =ExecutionQuote=. The ladders are not cut to the top of the book:
+  a fill larger than the first rung walks the ladder, and its cost cannot be
+  reproduced later without it. It is a market snapshot and a benchmark
+  candidate for #513, which records its own derivation method; deprecated
+  status and conversion fields are not carried. It is preserved whole or not
+  at all: a snapshot missing its time, either ladder (an explicit empty array
+  is valid) or either closeout price is malformed provider data and fails the
+  page, as with the list and idrange schemas. Every rung needs a positive price
+  and positive liquidity. A quote compares equal to itself however it was
+  written (time zone, empty versus absent ladder), so a replay is never a
+  false conflict.
+- *Slippage needs the fill-level price.* A scalar slippage is measured from a
+  scalar execution price. Per-trade prices do not supply one: which trade, or
+  what units-weighted aggregate, would be an unstated derivation. A fill is
+  valid on per-trade prices alone, but slippage validates only against the
+  fill-level =Price=. Deriving a fill-level VWAP from the trade effects, or
+  modelling execution quality per effect, is #513's decision.
+- *Guaranteed execution* is captured as the per-trade
+  =guaranteedExecutionFee= (a positive cost in OANDA's data, negated). No
+  boolean is invented from a field the v20 schema does not document, and none
+  is inferred from a nonzero fee.
+- *Aggregates reconcile, tests say so.* OANDA defines the fill-level half-
+  spread cost as the sum of the embedded values; tests check that spread
+  cost, realized P/L, financing, the fee and units reconcile with their
+  per-trade parts on every fill fixture, including a reversal (closes one trade
+  and opens another) and a partial reduce with a multi-trade close. A
+  mismatch is visible and the stored data is never corrected.
+
+** Ledger compatibility before the CLI
+
+#510 stored a smaller form of the same provider activities, and ADR-080 makes a
+differing record under the same key a conflict. Nothing user-facing writes a
+ledger until #514, so #511 is the final canonical v1 form: the file schema is
+bumped to 2, a schema-1 ledger is refused with instructions to delete the
+stream directory and re-import, and the store keeps its append-only rule
+without a quiet "unknown to known" upgrade. Once #514 ships, persisted
+compatibility is a stricter matter.
+
 * Consequences
 
-The top-level fill =price= is marked deprecated by OANDA in favour of the
-per-trade opened, closed and reduced prices; #511 must not treat it as the
-final authoritative execution price. Order create and cancel events are stored as =KindOther= with the order ID, so
+Order create and cancel events are stored as =KindOther= with the order ID, so
 later order-history semantics can be added without re-importing. CFD and
 metal fills are =KindOther= until instrument mapping exists, which is
 visible in the sync result's =Other= count but loses their economics until

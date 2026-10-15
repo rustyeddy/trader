@@ -44,7 +44,7 @@ func oandaFill() Activity {
 		Quantity:      Reported(num.MustParseQuantity("1000")),
 		Price:         Reported(num.MustParsePrice("1.08532")),
 		BrokerOrderID: "6359",
-		TradeLinks:    []TradeLink{{"6360", TradeRoleOpened}},
+		TradeEffects:  []TradeEffect{{BrokerTradeID: "6360", Role: TradeRoleOpened}},
 		RealizedPL:    Reported(money("0")),
 		SpreadCost:    must(ReportedFrom(money("-0.25"), "halfSpreadCost")),
 		Financing:     Reported(money("0")),
@@ -114,10 +114,12 @@ func TestValidate_PerKindRules(t *testing.T) {
 		"fill with cash":          func(a *Activity) { a.Cash = Reported(money("1")) },
 		"fill mixed currency":     func(a *Activity) { a.SpreadCost = Reported(num.MustParseMoney("-0.1", num.MustParseCurrency("EUR"))) },
 		"zero execution price":    func(a *Activity) { a.Price = Reported(num.MustParsePrice("0")) },
-		"trade link without id":   func(a *Activity) { a.TradeLinks = []TradeLink{{"", TradeRoleOpened}} },
-		"trade link without role": func(a *Activity) { a.TradeLinks = []TradeLink{{"1", TradeRoleUnknown}} },
-		"duplicate trade link":    func(a *Activity) { a.TradeLinks = []TradeLink{{"1", TradeRoleClosed}, {"1", TradeRoleClosed}} },
-		"money without currency":  func(a *Activity) { a.Commission = Reported(num.Money{}) },
+		"trade link without id":   func(a *Activity) { a.TradeEffects = []TradeEffect{{BrokerTradeID: "", Role: TradeRoleOpened}} },
+		"trade link without role": func(a *Activity) { a.TradeEffects = []TradeEffect{{BrokerTradeID: "1", Role: TradeRoleUnknown}} },
+		"duplicate trade link": func(a *Activity) {
+			a.TradeEffects = []TradeEffect{{BrokerTradeID: "1", Role: TradeRoleClosed}, {BrokerTradeID: "1", Role: TradeRoleClosed}}
+		},
+		"money without currency": func(a *Activity) { a.Commission = Reported(num.Money{}) },
 	}
 	for name, f := range mutate {
 		t.Run(name, func(t *testing.T) {
@@ -136,7 +138,7 @@ func TestValidate_PerKindRules(t *testing.T) {
 		"deposit zero":             {Kind: KindDeposit, Cash: Reported(money("0"))},
 		"withdrawal positive":      {Kind: KindWithdrawal, Cash: Reported(money("5"))},
 		"deposit without cash":     {Kind: KindDeposit},
-		"deposit with trade links": {Kind: KindDeposit, Cash: Reported(money("1")), TradeLinks: []TradeLink{{"1", TradeRoleOpened}}},
+		"deposit with trade links": {Kind: KindDeposit, Cash: Reported(money("1")), TradeEffects: []TradeEffect{{BrokerTradeID: "1", Role: TradeRoleOpened}}},
 		"other with economics":     {Kind: KindOther, Cash: Reported(money("1"))},
 		"other with a fill price":  {Kind: KindOther, Price: Reported(num.MustParsePrice("1"))},
 		"adjustment with side":     {Kind: KindAdjustment, Cash: Reported(money("1")), Side: order.Buy},
@@ -277,30 +279,30 @@ func TestValidate_ErrorsNeverEchoAmounts(t *testing.T) {
 
 // One OANDA ORDER_FILL can open a trade, reduce another and close several;
 // every link survives with its role and the provider's order.
-func TestTradeLinks_PreserveMultiTradeFills(t *testing.T) {
+func TestTradeEffects_PreserveMultiTradeFills(t *testing.T) {
 	a := oandaFill()
-	a.TradeLinks = []TradeLink{
-		{"6360", TradeRoleOpened},
-		{"6301", TradeRoleReduced},
-		{"6288", TradeRoleClosed},
-		{"6290", TradeRoleClosed},
+	a.TradeEffects = []TradeEffect{
+		{BrokerTradeID: "6360", Role: TradeRoleOpened},
+		{BrokerTradeID: "6301", Role: TradeRoleReduced},
+		{BrokerTradeID: "6288", Role: TradeRoleClosed},
+		{BrokerTradeID: "6290", Role: TradeRoleClosed},
 	}
 	require.NoError(t, a.Validate())
-	assert.Len(t, a.TradeLinks, 4)
+	assert.Len(t, a.TradeEffects, 4)
 
 	same := a
-	same.TradeLinks = append([]TradeLink(nil), a.TradeLinks...)
+	same.TradeEffects = append([]TradeEffect(nil), a.TradeEffects...)
 	assert.True(t, a.SameRecord(same))
 
 	dropped := a
-	dropped.TradeLinks = a.TradeLinks[:3]
+	dropped.TradeEffects = a.TradeEffects[:3]
 	assert.False(t, a.SameRecord(dropped), "a lost link is a different record")
 
 	none := oandaFill()
-	none.TradeLinks = nil
+	none.TradeEffects = nil
 	assert.NoError(t, none.Validate(), "links are optional")
 	empty := none
-	empty.TradeLinks = []TradeLink{}
+	empty.TradeEffects = []TradeEffect{}
 	assert.True(t, none.SameRecord(empty), "nil and empty are the same")
 	assert.Equal(t, "closed", TradeRoleClosed.String())
 	assert.False(t, TradeRoleUnknown.Valid())
@@ -353,4 +355,145 @@ func TestSameRecord_BatchIDAndProviderInstrumentAreSignificant(t *testing.T) {
 	// A provider event with no canonical instrument still keeps the raw name.
 	other := Activity{Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "10", ProviderType: "ORDER_FILL", Kind: KindOther, OccurredAt: at, ImportedAt: at, ProviderInstrument: "SPX500_USD", BrokerBatchID: "9"}
 	assert.NoError(t, other.Validate())
+}
+
+func effect(id string, role TradeRole) TradeEffect { return TradeEffect{BrokerTradeID: id, Role: role} }
+
+// A trade effect carries the broker's per-trade execution facts, each with
+// its own provenance; an ID and a role alone stay valid.
+func TestTradeEffects_CarryPerTradeExecutionFacts(t *testing.T) {
+	a := oandaFill()
+	a.Price = Value[num.Price]{} // the deprecated aggregate may be absent
+	a.TradeEffects = []TradeEffect{
+		{
+			BrokerTradeID: "6360", Role: TradeRoleOpened,
+			Units:                  Reported(num.MustParseQuantity("500")),
+			Price:                  must(ReportedFrom(num.MustParsePrice("1.08532"), "tradeOpened.price")),
+			SpreadCost:             must(ReportedFrom(money("0.10"), "halfSpreadCost")),
+			GuaranteedExecutionFee: must(ReportedFrom(money("-0.50"), "guaranteedExecutionFee")),
+		},
+		{
+			BrokerTradeID: "6301", Role: TradeRoleClosed,
+			Units:      Reported(num.MustParseQuantity("500")),
+			Price:      Reported(num.MustParsePrice("1.08540")),
+			RealizedPL: Reported(money("4.00")),
+			Financing:  Reported(money("-0.10")),
+		},
+		effect("6290", TradeRoleReduced),
+	}
+	require.NoError(t, a.Validate(), "per-trade prices stand in for the deprecated fill-level price")
+
+	changed := a
+	changed.TradeEffects = append([]TradeEffect(nil), a.TradeEffects...)
+	changed.TradeEffects[1].Price = Reported(num.MustParsePrice("1.08541"))
+	assert.False(t, a.SameRecord(changed), "a per-trade price is part of the record")
+}
+
+func TestTradeEffects_ValidationRejectsMalformedDetail(t *testing.T) {
+	mutate := map[string]func(e *TradeEffect){
+		"zero units":           func(e *TradeEffect) { e.Units = Reported(num.MustParseQuantity("0")) },
+		"zero price":           func(e *TradeEffect) { e.Price = Reported(num.MustParsePrice("0")) },
+		"other currency money": func(e *TradeEffect) { e.RealizedPL = Reported(num.MustParseMoney("1", num.MustParseCurrency("EUR"))) },
+		"money without ccy":    func(e *TradeEffect) { e.Financing = Reported(num.Money{}) },
+	}
+	for name, f := range mutate {
+		t.Run(name, func(t *testing.T) {
+			a := oandaFill()
+			e := effect("1", TradeRoleClosed)
+			f(&e)
+			a.TradeEffects = []TradeEffect{e}
+			assert.ErrorIs(t, a.Validate(), ErrInvalidActivity)
+		})
+	}
+	// The same trade may be opened and closed by different fills, but not
+	// listed twice for the same role within one.
+	a := oandaFill()
+	a.TradeEffects = []TradeEffect{effect("1", TradeRoleOpened), effect("1", TradeRoleClosed)}
+	assert.NoError(t, a.Validate())
+}
+
+// FullVWAP and the quote snapshot are broker references kept separate from
+// the actual execution price; neither is slippage.
+func TestFullVWAPAndExecutionQuote(t *testing.T) {
+	quote := ExecutionQuote{
+		At:          at,
+		Bids:        []PriceLevel{{Price: num.MustParsePrice("1.08530"), Liquidity: num.MustParseQuantity("1000000")}, {Price: num.MustParsePrice("1.08528"), Liquidity: num.MustParseQuantity("2000000")}},
+		Asks:        []PriceLevel{{Price: num.MustParsePrice("1.08534"), Liquidity: num.MustParseQuantity("1000000")}},
+		CloseoutBid: Reported(num.MustParsePrice("1.08520")),
+		CloseoutAsk: Reported(num.MustParsePrice("1.08544")),
+	}
+	a := oandaFill()
+	a.FullVWAP = must(ReportedFrom(num.MustParsePrice("1.08534"), "fullVWAP"))
+	a.ExecutionQuote = must(ReportedFrom(quote, "fullPrice"))
+	require.NoError(t, a.Validate())
+	assert.Equal(t, BasisReported, a.FullVWAP.Basis())
+	p, _ := a.Price.Get()
+	assert.Equal(t, "1.08532", p.String(), "FullVWAP does not replace the execution price")
+
+	bad := map[string]func(*Activity){
+		"zero vwap":   func(a *Activity) { a.FullVWAP = Reported(num.MustParsePrice("0")) },
+		"empty quote": func(a *Activity) { a.ExecutionQuote = Reported(ExecutionQuote{At: at}) },
+		"zero bid level": func(a *Activity) {
+			a.ExecutionQuote = Reported(ExecutionQuote{Bids: []PriceLevel{{Price: num.MustParsePrice("0")}}})
+		},
+		"zero ask level": func(a *Activity) {
+			a.ExecutionQuote = Reported(ExecutionQuote{Asks: []PriceLevel{{Price: num.MustParsePrice("0")}}})
+		},
+		"zero closeout": func(a *Activity) {
+			a.ExecutionQuote = Reported(ExecutionQuote{CloseoutBid: Reported(num.MustParsePrice("0"))})
+		},
+	}
+	for name, f := range bad {
+		t.Run(name, func(t *testing.T) {
+			b := oandaFill()
+			f(&b)
+			assert.ErrorIs(t, b.Validate(), ErrInvalidActivity)
+		})
+	}
+
+	dep := Activity{Provider: "oanda", Environment: EnvironmentLive, ProviderAccountID: "a", ProviderActivityID: "1", ProviderType: "TRANSFER_FUNDS", Kind: KindDeposit, OccurredAt: at, ImportedAt: at, Cash: Reported(money("1"))}
+	dep.FullVWAP = Reported(num.MustParsePrice("1"))
+	assert.Error(t, dep.Validate(), "fill-only field on a deposit")
+}
+
+// A fill needs an execution price from somewhere, but the fill-level figure
+// is optional when per-trade prices exist.
+func TestFill_NeedsAnExecutionPriceFromSomewhere(t *testing.T) {
+	a := oandaFill()
+	a.Price = Value[num.Price]{}
+	a.TradeEffects = []TradeEffect{effect("1", TradeRoleOpened)}
+	assert.ErrorIs(t, a.Validate(), ErrInvalidActivity, "no price anywhere")
+
+	a.TradeEffects[0].Price = Reported(num.MustParsePrice("1.1"))
+	assert.NoError(t, a.Validate())
+
+}
+
+// A scalar slippage is measured from a scalar execution price. Per-trade
+// prices do not supply one (which trade? what units-weighted aggregate?), so
+// they never satisfy the slippage rule; defining an aggregate, or modelling
+// execution quality per trade effect, is #513's decision.
+func TestSlippage_NeedsTheFillLevelPriceNotJustPerTradePrices(t *testing.T) {
+	a := oandaFill()
+	a.Benchmark = must(ReportedFrom(num.MustParsePrice("1.0852"), "fullPrice.ask"))
+	a.Slippage = must(Derived(num.MustParseRate("-0.0001"), "execution price - benchmark"))
+	require.NoError(t, a.Validate(), "with the fill-level price it is valid")
+
+	// The fill is valid on per-trade prices alone, but slippage is not.
+	a.Price = Value[num.Price]{}
+	a.TradeEffects = []TradeEffect{
+		{BrokerTradeID: "1", Role: TradeRoleOpened, Price: Reported(num.MustParsePrice("1.08530")), Units: Reported(num.MustParseQuantity("400"))},
+		{BrokerTradeID: "2", Role: TradeRoleClosed, Price: Reported(num.MustParsePrice("1.08545")), Units: Reported(num.MustParseQuantity("600"))},
+	}
+	err := a.Validate()
+	require.ErrorIs(t, err, ErrInvalidActivity)
+	assert.ErrorContains(t, err, "fill-level execution price")
+
+	a.Slippage, a.SlippageCost = Value[num.Rate]{}, Value[num.Money]{}
+	a.Benchmark = Value[num.Price]{}
+	assert.NoError(t, a.Validate(), "without slippage the per-trade prices make a valid fill")
+
+	a.SlippageCost = must(Derived(money("-0.05"), "x"))
+	a.Benchmark = must(ReportedFrom(num.MustParsePrice("1.0852"), "fullPrice.ask"))
+	assert.ErrorIs(t, a.Validate(), ErrInvalidActivity, "slippage cost alone is the same")
 }
