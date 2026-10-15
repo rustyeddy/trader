@@ -264,6 +264,35 @@ func Run(t *testing.T, newStore Factory) {
 		assert.Equal(t, []string{"1", "2"}, ids(got))
 	})
 
+	t.Run("replaying an unchanged record written another way is Unchanged", func(t *testing.T) {
+		s := newStore(t)
+		first := RichFill("1", 0)
+		_, err := s.Apply(ctx, batch("c", first))
+		require.NoError(t, err)
+
+		// The same quote with its time in another zone and an empty,
+		// non-nil ladder in place of an absent one.
+		again := RichFill("1", 0)
+		q, _ := again.ExecutionQuote.Get()
+		q.At = q.At.In(time.FixedZone("x", 3600))
+		q.Bids, q.Asks = []accountactivity.PriceLevel{}, nil
+		first2 := RichFill("1", 0)
+		fq, _ := first2.ExecutionQuote.Get()
+		fq.Bids, fq.Asks = nil, nil
+		var err2 error
+		again.ExecutionQuote, err2 = accountactivity.ReportedFrom(q, "fullPrice")
+		require.NoError(t, err2)
+		first2.ExecutionQuote, err2 = accountactivity.ReportedFrom(fq, "fullPrice")
+		require.NoError(t, err2)
+
+		s2 := newStore(t)
+		_, err = s2.Apply(ctx, batch("c", first2))
+		require.NoError(t, err)
+		res, err := s2.Apply(ctx, batch("c2", again))
+		require.NoError(t, err, "an unchanged quote written with another zone or an empty ladder is not a conflict")
+		assert.Equal(t, accountactivity.ApplyResult{Unchanged: 1}, res)
+	})
+
 	t.Run("a repeat inside one batch is harmless", func(t *testing.T) {
 		s := newStore(t)
 		res, err := s.Apply(ctx, batch("c", Deposit("1", 0), Deposit("1", 0)))

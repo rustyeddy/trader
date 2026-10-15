@@ -73,7 +73,9 @@ appears outside adapters.
   liquidity snapshot are broker-reported references kept beside the actual
   execution facts; neither is the actual price and neither is relabelled as
   slippage. The fill-level =Price= is the provider's aggregate figure and is
-  not authoritative where per-trade prices exist (ADR-081).
+  not authoritative where per-trade prices exist (ADR-081), but it is what a
+  scalar slippage is measured from: per-trade prices alone never satisfy that
+  rule.
 - *Identity is provider-native.* The durable key is provider, environment
   (practice or live), provider account ID and provider activity ID. The
   environment is a small enum, not a URL; connection details stay in adapter

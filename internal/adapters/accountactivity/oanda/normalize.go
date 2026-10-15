@@ -30,19 +30,23 @@ type tradeRef struct {
 	HalfSpreadCost         *string `json:"halfSpreadCost"`
 }
 
+// bucketWire's fields are pointers: a rung with no price or no liquidity is
+// malformed, not a rung of zero.
 type bucketWire struct {
-	Price     string      `json:"price"`
-	Liquidity json.Number `json:"liquidity"`
+	Price     *string      `json:"price"`
+	Liquidity *json.Number `json:"liquidity"`
 }
 
 // fullPriceWire is OANDA's ClientPrice snapshot. Deprecated status and
-// conversion fields are not carried.
+// conversion fields are not carried. Every field is required when a
+// fullPrice is present; presence is tracked so that missing is never taken
+// for explicitly empty (a ladder may legitimately be an empty array).
 type fullPriceWire struct {
-	Time        string       `json:"time"`
-	Bids        []bucketWire `json:"bids"`
-	Asks        []bucketWire `json:"asks"`
-	CloseoutBid *string      `json:"closeoutBid"`
-	CloseoutAsk *string      `json:"closeoutAsk"`
+	Time        *string       `json:"time"`
+	Bids        *[]bucketWire `json:"bids"`
+	Asks        *[]bucketWire `json:"asks"`
+	CloseoutBid *string       `json:"closeoutBid"`
+	CloseoutAsk *string       `json:"closeoutAsk"`
 }
 
 type txWire struct {
@@ -346,48 +350,64 @@ func tradeEffect(t tradeRef, role accountactivity.TradeRole, section string, cur
 }
 
 // quoteFrom converts OANDA's fullPrice snapshot, keeping both ladders whole.
+// A snapshot missing its time, either ladder (an explicit empty array is
+// fine) or either closeout price is malformed provider data, not a partial
+// quote: normalizing it would present an incomplete snapshot as the whole.
 func quoteFrom(w fullPriceWire) (accountactivity.ExecutionQuote, error) {
 	var q accountactivity.ExecutionQuote
-	if w.Time != "" {
-		at, err := time.Parse(time.RFC3339Nano, w.Time)
-		if err != nil {
-			return q, fmt.Errorf("time %q: %w", w.Time, err)
-		}
-		q.At = at.UTC()
+	switch {
+	case w.Time == nil:
+		return q, fmt.Errorf("no time")
+	case w.Bids == nil:
+		return q, fmt.Errorf("no bids array")
+	case w.Asks == nil:
+		return q, fmt.Errorf("no asks array")
+	case w.CloseoutBid == nil:
+		return q, fmt.Errorf("no closeoutBid")
+	case w.CloseoutAsk == nil:
+		return q, fmt.Errorf("no closeoutAsk")
 	}
+	at, err := time.Parse(time.RFC3339Nano, *w.Time)
+	if err != nil {
+		return q, fmt.Errorf("time %q: %w", *w.Time, err)
+	}
+	q.At = at.UTC()
+
 	levels := func(side string, in []bucketWire) ([]accountactivity.PriceLevel, error) {
 		var out []accountactivity.PriceLevel
 		for _, b := range in {
-			p, err := num.ParsePrice(b.Price)
+			if b.Price == nil || b.Liquidity == nil {
+				return nil, fmt.Errorf("%s level is missing its price or liquidity", side)
+			}
+			p, err := num.ParsePrice(*b.Price)
 			if err != nil {
-				return nil, fmt.Errorf("%s price %q: %w", side, b.Price, err)
+				return nil, fmt.Errorf("%s price %q: %w", side, *b.Price, err)
 			}
 			l, err := num.ParseQuantity(b.Liquidity.String())
 			if err != nil {
-				return nil, fmt.Errorf("%s liquidity %q: %w", side, b.Liquidity, err)
+				return nil, fmt.Errorf("%s liquidity %q: %w", side, b.Liquidity.String(), err)
+			}
+			if p.IsZero() || l.IsZero() {
+				return nil, fmt.Errorf("%s level needs a positive price and liquidity", side)
 			}
 			out = append(out, accountactivity.PriceLevel{Price: p, Liquidity: l})
 		}
 		return out, nil
 	}
-	var err error
-	if q.Bids, err = levels("bid", w.Bids); err != nil {
+	if q.Bids, err = levels("bid", *w.Bids); err != nil {
 		return q, err
 	}
-	if q.Asks, err = levels("ask", w.Asks); err != nil {
+	if q.Asks, err = levels("ask", *w.Asks); err != nil {
 		return q, err
 	}
 	for _, c := range []struct {
 		dst   *accountactivity.Value[num.Price]
-		src   *string
+		src   string
 		field string
-	}{{&q.CloseoutBid, w.CloseoutBid, "closeoutBid"}, {&q.CloseoutAsk, w.CloseoutAsk, "closeoutAsk"}} {
-		if c.src == nil {
-			continue
-		}
-		p, err := num.ParsePrice(*c.src)
+	}{{&q.CloseoutBid, *w.CloseoutBid, "closeoutBid"}, {&q.CloseoutAsk, *w.CloseoutAsk, "closeoutAsk"}} {
+		p, err := num.ParsePrice(c.src)
 		if err != nil {
-			return q, fmt.Errorf("%s %q: %w", c.field, *c.src, err)
+			return q, fmt.Errorf("%s %q: %w", c.field, c.src, err)
 		}
 		if *c.dst, err = accountactivity.ReportedFrom(p, "fullPrice."+c.field); err != nil {
 			return q, err

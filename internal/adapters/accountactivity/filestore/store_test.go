@@ -577,3 +577,30 @@ func TestStore_QuoteWithoutPayloadIsCorruption(t *testing.T) {
 	_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
 	require.Error(t, err)
 }
+
+// A persisted ladder rung missing its price or liquidity is corruption; an
+// explicit zero is rejected as invalid data, since a rung with no liquidity
+// is not a price anyone could trade at.
+func TestStore_LadderRungWithoutPriceOrLiquidityIsCorruption(t *testing.T) {
+	ctx := context.Background()
+	mutate := map[string]func(rung map[string]any){
+		"missing liquidity": func(r map[string]any) { delete(r, "liquidity") },
+		"null liquidity":    func(r map[string]any) { r["liquidity"] = nil },
+		"missing price":     func(r map[string]any) { delete(r, "price") },
+		"null price":        func(r map[string]any) { r["price"] = nil },
+		"explicit zero":     func(r map[string]any) { r["liquidity"] = "0" },
+	}
+	for name, f := range mutate {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			_, err := s.Apply(ctx, batch("c", storetest.RichFill("1", 0)))
+			require.NoError(t, err)
+			mutateFirstLine(t, streamDir(t, s), func(m map[string]any) {
+				q := m["execution_quote"].(map[string]any)["value"].(map[string]any)
+				f(q["bids"].([]any)[0].(map[string]any))
+			})
+			_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+			assert.Error(t, err)
+		})
+	}
+}

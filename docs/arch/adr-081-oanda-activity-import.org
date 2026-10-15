@@ -139,7 +139,19 @@ OANDA supplies, with nothing relabelled as slippage:
   a fill larger than the first rung walks the ladder, and its cost cannot be
   reproduced later without it. It is a market snapshot and a benchmark
   candidate for #513, which records its own derivation method; deprecated
-  status and conversion fields are not carried.
+  status and conversion fields are not carried. It is preserved whole or not
+  at all: a snapshot missing its time, either ladder (an explicit empty array
+  is valid) or either closeout price is malformed provider data and fails the
+  page, as with the list and idrange schemas. Every rung needs a positive price
+  and positive liquidity. A quote compares equal to itself however it was
+  written (time zone, empty versus absent ladder), so a replay is never a
+  false conflict.
+- *Slippage needs the fill-level price.* A scalar slippage is measured from a
+  scalar execution price. Per-trade prices do not supply one: which trade, or
+  what units-weighted aggregate, would be an unstated derivation. A fill is
+  valid on per-trade prices alone, but slippage validates only against the
+  fill-level =Price=. Deriving a fill-level VWAP from the trade effects, or
+  modelling execution quality per effect, is #513's decision.
 - *Guaranteed execution* is captured as the per-trade
   =guaranteedExecutionFee= (a positive cost in OANDA's data, negated). No
   boolean is invented from a field the v20 schema does not document, and none

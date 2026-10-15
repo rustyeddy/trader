@@ -282,7 +282,9 @@ func TestSync_FillDetailRoundTripsThroughTheStore(t *testing.T) {
 		byID[a.ProviderActivityID] = a
 	}
 	direct := norm(t, f, 7)
-	assert.True(t, direct.SameRecord(withImported(byID["7"], direct)), "a reversal comes back unchanged")
+	assert.True(t, direct.SameRecord(byID["7"]), "a reversal comes back from the store exactly as imported")
+	assert.True(t, norm(t, f, 3).SameRecord(byID["3"]), "so does a fill with a quote ladder")
+	assert.True(t, norm(t, f, 12).SameRecord(byID["12"]), "and a multi-trade close")
 	assert.Equal(t, []string{"7:opened", "3:closed"}, effectKeys(byID["7"]))
 	assert.Equal(t, "5.8 USD", money(t, byID["7"].TradeEffects[1].RealizedPL))
 
@@ -298,9 +300,4 @@ func TestSync_FillDetailRoundTripsThroughTheStore(t *testing.T) {
 	for _, id := range []string{"3", "7", "12"} {
 		assert.Empty(t, reconcile(byID[id]), "fill %s reconciles after storage", id)
 	}
-}
-
-func withImported(stored, like accountactivity.Activity) accountactivity.Activity {
-	like.ImportedAt = stored.ImportedAt
-	return like
 }

@@ -81,9 +81,22 @@ type tradeEffectWire struct {
 	GuaranteedExecutionFee *valueWire[num.Money]    `json:"guaranteed_execution_fee,omitempty"`
 }
 
+// priceLevelWire's fields are pointers so a missing price or liquidity is
+// corruption, not a level of zero.
 type priceLevelWire struct {
-	Price     num.Price    `json:"price"`
-	Liquidity num.Quantity `json:"liquidity"`
+	Price     *num.Price    `json:"price"`
+	Liquidity *num.Quantity `json:"liquidity"`
+}
+
+func toLevelWire(l accountactivity.PriceLevel) priceLevelWire {
+	return priceLevelWire{Price: &l.Price, Liquidity: &l.Liquidity}
+}
+
+func fromLevelWire(side string, l priceLevelWire) (accountactivity.PriceLevel, error) {
+	if l.Price == nil || l.Liquidity == nil {
+		return accountactivity.PriceLevel{}, fmt.Errorf("%s level is missing its price or liquidity", side)
+	}
+	return accountactivity.PriceLevel{Price: *l.Price, Liquidity: *l.Liquidity}, nil
 }
 
 // quoteWire is the payload of an execution quote value; presence of the
@@ -103,10 +116,10 @@ func toQuoteWire(q accountactivity.ExecutionQuote) quoteWire {
 		w.At = &at
 	}
 	for _, l := range q.Bids {
-		w.Bids = append(w.Bids, priceLevelWire{Price: l.Price, Liquidity: l.Liquidity})
+		w.Bids = append(w.Bids, toLevelWire(l))
 	}
 	for _, l := range q.Asks {
-		w.Asks = append(w.Asks, priceLevelWire{Price: l.Price, Liquidity: l.Liquidity})
+		w.Asks = append(w.Asks, toLevelWire(l))
 	}
 	return w
 }
@@ -118,10 +131,18 @@ func fromQuoteWire(w quoteWire) (accountactivity.ExecutionQuote, error) {
 		q.At = w.At.UTC()
 	}
 	for _, l := range w.Bids {
-		q.Bids = append(q.Bids, accountactivity.PriceLevel{Price: l.Price, Liquidity: l.Liquidity})
+		lv, err := fromLevelWire("bid", l)
+		if err != nil {
+			return q, err
+		}
+		q.Bids = append(q.Bids, lv)
 	}
 	for _, l := range w.Asks {
-		q.Asks = append(q.Asks, accountactivity.PriceLevel{Price: l.Price, Liquidity: l.Liquidity})
+		lv, err := fromLevelWire("ask", l)
+		if err != nil {
+			return q, err
+		}
+		q.Asks = append(q.Asks, lv)
 	}
 	if q.CloseoutBid, err = fromValueWire(w.CloseoutBid); err != nil {
 		return q, fmt.Errorf("closeout bid: %w", err)

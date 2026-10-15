@@ -450,3 +450,49 @@ func TestNormalize_MalformedPerTradeDetailIsAnError(t *testing.T) {
 		})
 	}
 }
+
+// fullPrice is preserved whole or not at all: a snapshot missing its time,
+// either ladder or either closeout is malformed provider data, and missing
+// is not the same as an explicitly empty ladder.
+func TestNormalize_AnIncompleteFullPriceIsMalformedNotPartial(t *testing.T) {
+	fill := func(fullPrice string) json.RawMessage {
+		return json.RawMessage(`{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","instrument":"EUR_USD","units":"1","price":"1.1","fullPrice":` + fullPrice + `}`)
+	}
+	complete := `{"time":"2024-03-05T14:30:00Z","bids":[{"price":"1.1","liquidity":100}],"asks":[{"price":"1.2","liquidity":100}],"closeoutBid":"1.09","closeoutAsk":"1.21"}`
+	_, err := normalize(fill(complete), stream, usd)
+	require.NoError(t, err)
+
+	for name, body := range map[string]string{
+		"no time":            `{"bids":[],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"null time":          `{"time":null,"bids":[],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"no bids":            `{"time":"2024-03-05T14:30:00Z","asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"null bids":          `{"time":"2024-03-05T14:30:00Z","bids":null,"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"no asks":            `{"time":"2024-03-05T14:30:00Z","bids":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"null asks":          `{"time":"2024-03-05T14:30:00Z","bids":[],"asks":null,"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"no closeout bid":    `{"time":"2024-03-05T14:30:00Z","bids":[],"asks":[],"closeoutAsk":"1.21"}`,
+		"null closeout bid":  `{"time":"2024-03-05T14:30:00Z","bids":[],"asks":[],"closeoutBid":null,"closeoutAsk":"1.21"}`,
+		"no closeout ask":    `{"time":"2024-03-05T14:30:00Z","bids":[],"asks":[],"closeoutBid":"1.09"}`,
+		"only a bid":         `{"bids":[{"price":"1.1","liquidity":100}]}`,
+		"rung without price": `{"time":"2024-03-05T14:30:00Z","bids":[{"liquidity":100}],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"rung without liq":   `{"time":"2024-03-05T14:30:00Z","bids":[{"price":"1.1"}],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"rung null liq":      `{"time":"2024-03-05T14:30:00Z","bids":[{"price":"1.1","liquidity":null}],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"rung zero liq":      `{"time":"2024-03-05T14:30:00Z","bids":[{"price":"1.1","liquidity":0}],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+		"rung zero price":    `{"time":"2024-03-05T14:30:00Z","bids":[{"price":"0","liquidity":5}],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := normalize(fill(body), stream, usd)
+			assert.Error(t, err)
+		})
+	}
+
+	// Explicitly empty ladders are a legitimate snapshot (a closed market).
+	a, err := normalize(fill(`{"time":"2024-03-05T14:30:00Z","bids":[],"asks":[],"closeoutBid":"1.09","closeoutAsk":"1.21"}`), stream, usd)
+	require.NoError(t, err)
+	q, ok := a.ExecutionQuote.Get()
+	require.True(t, ok)
+	assert.Empty(t, q.Bids)
+	assert.Empty(t, q.Asks)
+	assert.Equal(t, "1.09", price(t, q.CloseoutBid))
+	a.ImportedAt = time.Now()
+	assert.NoError(t, a.Validate())
+}

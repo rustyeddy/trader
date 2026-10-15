@@ -467,8 +467,33 @@ func TestFill_NeedsAnExecutionPriceFromSomewhere(t *testing.T) {
 	a.TradeEffects[0].Price = Reported(num.MustParsePrice("1.1"))
 	assert.NoError(t, a.Validate())
 
-	// Slippage's execution price may come from the per-trade prices too.
+}
+
+// A scalar slippage is measured from a scalar execution price. Per-trade
+// prices do not supply one (which trade? what units-weighted aggregate?), so
+// they never satisfy the slippage rule; defining an aggregate, or modelling
+// execution quality per trade effect, is #513's decision.
+func TestSlippage_NeedsTheFillLevelPriceNotJustPerTradePrices(t *testing.T) {
+	a := oandaFill()
 	a.Benchmark = must(ReportedFrom(num.MustParsePrice("1.0852"), "fullPrice.ask"))
-	a.Slippage = must(Derived(num.MustParseRate("-0.0001"), "x"))
-	assert.NoError(t, a.Validate())
+	a.Slippage = must(Derived(num.MustParseRate("-0.0001"), "execution price - benchmark"))
+	require.NoError(t, a.Validate(), "with the fill-level price it is valid")
+
+	// The fill is valid on per-trade prices alone, but slippage is not.
+	a.Price = Value[num.Price]{}
+	a.TradeEffects = []TradeEffect{
+		{BrokerTradeID: "1", Role: TradeRoleOpened, Price: Reported(num.MustParsePrice("1.08530")), Units: Reported(num.MustParseQuantity("400"))},
+		{BrokerTradeID: "2", Role: TradeRoleClosed, Price: Reported(num.MustParsePrice("1.08545")), Units: Reported(num.MustParseQuantity("600"))},
+	}
+	err := a.Validate()
+	require.ErrorIs(t, err, ErrInvalidActivity)
+	assert.ErrorContains(t, err, "fill-level execution price")
+
+	a.Slippage, a.SlippageCost = Value[num.Rate]{}, Value[num.Money]{}
+	a.Benchmark = Value[num.Price]{}
+	assert.NoError(t, a.Validate(), "without slippage the per-trade prices make a valid fill")
+
+	a.SlippageCost = must(Derived(money("-0.05"), "x"))
+	a.Benchmark = must(ReportedFrom(num.MustParsePrice("1.0852"), "fullPrice.ask"))
+	assert.ErrorIs(t, a.Validate(), ErrInvalidActivity, "slippage cost alone is the same")
 }

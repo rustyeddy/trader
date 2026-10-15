@@ -7,7 +7,8 @@ import (
 )
 
 // PriceLevel is one rung of a quoted liquidity ladder: a price and the
-// quantity available at it.
+// quantity available at it. Both must be positive in a valid quote: a rung
+// with no liquidity is not a price anyone could trade at.
 type PriceLevel struct {
 	Price     num.Price
 	Liquidity num.Quantity

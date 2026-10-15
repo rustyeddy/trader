@@ -146,6 +146,19 @@ func (a Activity) canonical() Activity {
 	if len(a.TradeEffects) == 0 {
 		a.TradeEffects = nil
 	}
+	// The same quote must compare equal however it was written: time as an
+	// instant, an empty ladder the same as an absent one. Basis and source
+	// are kept as they are.
+	if q, ok := a.ExecutionQuote.Get(); ok {
+		q.At = q.At.UTC().Round(0)
+		if len(q.Bids) == 0 {
+			q.Bids = nil
+		}
+		if len(q.Asks) == 0 {
+			q.Asks = nil
+		}
+		a.ExecutionQuote = Value[ExecutionQuote]{v: q, basis: a.ExecutionQuote.basis, source: a.ExecutionQuote.source}
+	}
 	return a
 }
 
@@ -345,8 +358,13 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 		if !a.Benchmark.Known() {
 			return bad("slippage requires a benchmark price and its source")
 		}
-		if !a.hasExecutionPrice() {
-			return bad("slippage requires an execution price")
+		// A scalar slippage needs a scalar execution price to be measured
+		// from. Per-trade prices do not supply one: which trade, or what
+		// units-weighted aggregate, would be a derivation this record does
+		// not state. Aggregating, or modelling execution quality per trade
+		// effect, is issue #513's decision.
+		if !a.Price.Known() {
+			return bad("slippage requires the fill-level execution price")
 		}
 	}
 	if sl, ok := a.Slippage.Get(); ok {
@@ -449,13 +467,13 @@ func (q ExecutionQuote) validate(bad func(string, ...any) error) error {
 		return bad("execution quote is empty")
 	}
 	for _, l := range q.Bids {
-		if l.Price.IsZero() {
-			return bad("execution quote bid level price must be positive")
+		if l.Price.IsZero() || l.Liquidity.IsZero() {
+			return bad("execution quote bid level needs a positive price and liquidity")
 		}
 	}
 	for _, l := range q.Asks {
-		if l.Price.IsZero() {
-			return bad("execution quote ask level price must be positive")
+		if l.Price.IsZero() || l.Liquidity.IsZero() {
+			return bad("execution quote ask level needs a positive price and liquidity")
 		}
 	}
 	if p, ok := q.CloseoutBid.Get(); ok && p.IsZero() {
