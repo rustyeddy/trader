@@ -64,6 +64,24 @@ func RichFill(activityID string, offset time.Duration) accountactivity.Activity 
 	if err != nil {
 		panic(err)
 	}
+	vwap, err := accountactivity.ReportedFrom(num.MustParsePrice("1.08534"), "fullVWAP")
+	if err != nil {
+		panic(err)
+	}
+	quote, err := accountactivity.ReportedFrom(accountactivity.ExecutionQuote{
+		At:          base,
+		Bids:        []accountactivity.PriceLevel{{Price: num.MustParsePrice("1.08530"), Liquidity: num.MustParseQuantity("1000000")}, {Price: num.MustParsePrice("1.08528"), Liquidity: num.MustParseQuantity("2000000")}},
+		Asks:        []accountactivity.PriceLevel{{Price: num.MustParsePrice("1.08534"), Liquidity: num.MustParseQuantity("1000000")}},
+		CloseoutBid: accountactivity.Reported(num.MustParsePrice("1.08520")),
+		CloseoutAsk: accountactivity.Reported(num.MustParsePrice("1.08544")),
+	}, "fullPrice")
+	if err != nil {
+		panic(err)
+	}
+	effPrice, err := accountactivity.ReportedFrom(num.MustParsePrice("1.08533"), "tradeOpened.price")
+	if err != nil {
+		panic(err)
+	}
 	return accountactivity.Activity{
 		Provider: Sync.Provider, Environment: Sync.Environment, ProviderAccountID: Sync.ProviderAccountID,
 		ProviderActivityID: activityID, ProviderType: "ORDER_FILL", Kind: accountactivity.KindFill,
@@ -72,7 +90,22 @@ func RichFill(activityID string, offset time.Duration) accountactivity.Activity 
 		Quantity:      accountactivity.Reported(num.MustParseQuantity("1000")),
 		Price:         accountactivity.Reported(num.MustParsePrice("1.08532")),
 		BrokerOrderID: "6359", BrokerBatchID: "6359", ProviderInstrument: "EUR_USD",
-		TradeLinks:   []accountactivity.TradeLink{{BrokerTradeID: "6360", Role: accountactivity.TradeRoleOpened}, {BrokerTradeID: "6301", Role: accountactivity.TradeRoleClosed}},
+		FullVWAP:       vwap,
+		ExecutionQuote: quote,
+		TradeEffects: []accountactivity.TradeEffect{
+			{
+				BrokerTradeID: "6360", Role: accountactivity.TradeRoleOpened,
+				Units: accountactivity.Reported(num.MustParseQuantity("500")), Price: effPrice,
+				SpreadCost:             accountactivity.Reported(money("0.10")),
+				GuaranteedExecutionFee: accountactivity.Reported(money("0")),
+			},
+			{
+				BrokerTradeID: "6301", Role: accountactivity.TradeRoleClosed,
+				Units: accountactivity.Reported(num.MustParseQuantity("500")), Price: accountactivity.Reported(num.MustParsePrice("1.08540")),
+				RealizedPL: accountactivity.Reported(money("4.25")), Financing: accountactivity.Reported(money("-0.10")),
+			},
+			{BrokerTradeID: "6290", Role: accountactivity.TradeRoleReduced}, // an effect with no detail
+		},
 		RealizedPL:   accountactivity.Reported(money("0")),
 		SpreadCost:   spread,
 		Commission:   accountactivity.Reported(money("-0.05")),
@@ -127,7 +160,25 @@ func Run(t *testing.T, newStore Factory) {
 		assert.Equal(t, accountactivity.BasisDerived, got[0].Slippage.Basis())
 		assert.Equal(t, "halfSpreadCost", got[0].SpreadCost.Source())
 		assert.Equal(t, accountactivity.BasisReported, got[0].Financing.Basis())
-		assert.Len(t, got[0].TradeLinks, 2)
+		require.Len(t, got[0].TradeEffects, 3)
+		assert.Equal(t, "tradeOpened.price", got[0].TradeEffects[0].Price.Source(), "per-trade provenance survives")
+		cl, ok := got[0].TradeEffects[1].RealizedPL.Get()
+		require.True(t, ok)
+		assert.Equal(t, "4.25 USD", cl.String())
+		assert.False(t, got[0].TradeEffects[2].Units.Known(), "an effect with no detail stays bare")
+		ge, ok := got[0].TradeEffects[0].GuaranteedExecutionFee.Get()
+		require.True(t, ok, "a reported zero fee is not unknown")
+		assert.True(t, ge.IsZero())
+		vw, _ := got[0].FullVWAP.Get()
+		assert.Equal(t, "1.08534", vw.String())
+		q, ok := got[0].ExecutionQuote.Get()
+		require.True(t, ok)
+		require.Len(t, q.Bids, 2, "the whole ladder is stored, not just the top of the book")
+		assert.Equal(t, "2000000", q.Bids[1].Liquidity.String())
+		cb, ok := q.CloseoutBid.Get()
+		require.True(t, ok)
+		assert.Equal(t, "1.0852", cb.String())
+		assert.True(t, base.Equal(q.At))
 		assert.Equal(t, "6359", got[0].BrokerBatchID, "the broker's batch grouping is stored")
 		assert.Equal(t, "EUR_USD", got[0].ProviderInstrument, "the provider-native instrument is stored")
 	})

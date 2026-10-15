@@ -53,7 +53,7 @@ func TestNormalize_OrderFillPreservesIdentityTimeAndCosts(t *testing.T) {
 	assert.Equal(t, "1000", q.String())
 	assert.Equal(t, "1.08532", p.String())
 	assert.Equal(t, accountactivity.BasisReported, a.Price.Basis())
-	assert.Equal(t, "price", a.Price.Source())
+	assert.Equal(t, "price (deprecated aggregate)", a.Price.Source(), "the top-level price is recorded as non-authoritative")
 
 	// halfSpreadCost keeps the sign OANDA reports (it can be either).
 	assert.Equal(t, "0.25 USD", money(t, a.SpreadCost))
@@ -66,10 +66,10 @@ func TestNormalize_OrderFillPreservesIdentityTimeAndCosts(t *testing.T) {
 		require.True(t, ok, name)
 		assert.True(t, got.IsZero(), name)
 	}
-	assert.Equal(t, []accountactivity.TradeLink{{BrokerTradeID: "3", Role: accountactivity.TradeRoleOpened}}, a.TradeLinks)
+	assert.Equal(t, []string{"3:opened"}, effectKeys(a))
 }
 
-func TestNormalize_SellFillWithMixedCostSignsAndTradeLinks(t *testing.T) {
+func TestNormalize_SellFillWithMixedCostSignsAndTradeEffects(t *testing.T) {
 	a := norm(t, loadFixture(t), 7)
 	assert.Equal(t, order.Sell, a.Side, "negative units sell")
 	q, _ := a.Quantity.Get()
@@ -82,18 +82,12 @@ func TestNormalize_SellFillWithMixedCostSignsAndTradeLinks(t *testing.T) {
 	assert.False(t, a.OtherFees.Known(), "an absent field is unknown, not zero")
 
 	// A single fill can close one trade and open another.
-	assert.Equal(t, []accountactivity.TradeLink{
-		{BrokerTradeID: "7", Role: accountactivity.TradeRoleOpened},
-		{BrokerTradeID: "3", Role: accountactivity.TradeRoleClosed},
-	}, a.TradeLinks)
+	assert.Equal(t, []string{"7:opened", "3:closed"}, effectKeys(a))
 }
 
-func TestNormalize_ReducedAndClosedTradesAndMissingFieldsStayUnknown(t *testing.T) {
+func TestNormalize_ReduceAndMultiTradeCloseWithMissingFieldsStayUnknown(t *testing.T) {
 	a := norm(t, loadFixture(t), 12)
-	assert.Equal(t, []accountactivity.TradeLink{
-		{BrokerTradeID: "7", Role: accountactivity.TradeRoleReduced},
-		{BrokerTradeID: "8888", Role: accountactivity.TradeRoleClosed},
-	}, a.TradeLinks)
+	assert.Equal(t, []string{"7:reduced", "8888:closed", "9999:closed"}, effectKeys(a))
 	assert.Equal(t, "1.2 USD", money(t, a.RealizedPL))
 	for name, v := range map[string]accountactivity.Value[num.Money]{"financing": a.Financing, "commission": a.Commission, "spread": a.SpreadCost} {
 		assert.False(t, v.Known(), name)
@@ -234,5 +228,225 @@ func TestNormalize_OnlyFiatPairsAreForexAndTheRawInstrumentIsAlwaysKept(t *testi
 		assert.Equal(t, inst, a.ProviderInstrument, "the provider-native name survives for later re-normalization")
 		assert.Equal(t, "ORDER_FILL", a.ProviderType)
 		assert.False(t, a.Price.Known())
+	}
+}
+
+// effectKeys lists a fill's trade effects as "id:role" in the provider's order.
+func effectKeys(a accountactivity.Activity) []string {
+	var out []string
+	for _, e := range a.TradeEffects {
+		out = append(out, e.BrokerTradeID+":"+e.Role.String())
+	}
+	return out
+}
+
+func qty(t *testing.T, v accountactivity.Value[num.Quantity]) string {
+	t.Helper()
+	q, ok := v.Get()
+	require.True(t, ok, "units unknown")
+	return q.String()
+}
+
+func price(t *testing.T, v accountactivity.Value[num.Price]) string {
+	t.Helper()
+	p, ok := v.Get()
+	require.True(t, ok, "price unknown")
+	return p.String()
+}
+
+// reconcile checks that a fill's aggregates equal the sums of its embedded
+// per-trade values, where both sides were supplied. It reports mismatches; it
+// never alters the data (broker data is never "corrected" in the ledger).
+func reconcile(a accountactivity.Activity) []string {
+	var problems []string
+	sum := func(pick func(accountactivity.TradeEffect) accountactivity.Value[num.Money]) (num.Money, bool) {
+		var total num.Money
+		any := false
+		for _, e := range a.TradeEffects {
+			v, ok := pick(e).Get()
+			if !ok {
+				continue
+			}
+			if !any {
+				total, any = v, true
+				continue
+			}
+			var err error
+			if total, err = total.Add(v); err != nil {
+				problems = append(problems, err.Error())
+			}
+		}
+		return total, any
+	}
+	check := func(name string, agg accountactivity.Value[num.Money], pick func(accountactivity.TradeEffect) accountactivity.Value[num.Money]) {
+		want, hasAgg := agg.Get()
+		got, hasSum := sum(pick)
+		if hasAgg && hasSum && !want.Equal(got) {
+			problems = append(problems, name+": fill "+want.String()+" != sum of trades "+got.String())
+		}
+	}
+	check("halfSpreadCost", a.SpreadCost, func(e accountactivity.TradeEffect) accountactivity.Value[num.Money] { return e.SpreadCost })
+	check("realized P/L", a.RealizedPL, func(e accountactivity.TradeEffect) accountactivity.Value[num.Money] { return e.RealizedPL })
+	check("financing", a.Financing, func(e accountactivity.TradeEffect) accountactivity.Value[num.Money] { return e.Financing })
+	check("guaranteed execution fee", a.OtherFees, func(e accountactivity.TradeEffect) accountactivity.Value[num.Money] {
+		return e.GuaranteedExecutionFee
+	})
+
+	// Units: the effects together account for the fill's size.
+	if q, ok := a.Quantity.Get(); ok {
+		var total num.Quantity
+		units := false
+		for _, e := range a.TradeEffects {
+			if u, ok := e.Units.Get(); ok {
+				var err error
+				if total, err = total.Add(u); err != nil {
+					problems = append(problems, err.Error())
+				}
+				units = true
+			}
+		}
+		if units && !total.Equal(q) {
+			problems = append(problems, "units: fill "+q.String()+" != sum of trades "+total.String())
+		}
+	}
+	return problems
+}
+
+// OANDA says the fill-level halfSpreadCost is the sum of the embedded trade
+// values; P/L, financing, fee and size reconcile the same way. Every fill
+// fixture, including a reversal and a multi-trade close, must reconcile.
+func TestNormalize_FillAggregatesReconcileWithPerTradeValues(t *testing.T) {
+	f := loadFixture(t)
+	for _, id := range []int{3, 7, 12} {
+		a := norm(t, f, id)
+		assert.Empty(t, reconcile(a), "fill %d", id)
+	}
+}
+
+// A mismatch is visible and is never corrected: the aggregate and the parts
+// are stored exactly as the broker sent them.
+func TestNormalize_AMismatchIsVisibleAndNeverCorrected(t *testing.T) {
+	a, err := normalize(json.RawMessage(`{"id":"7","type":"ORDER_FILL","time":"2024-03-06T10:00:00Z","instrument":"EUR_USD","units":"-1500","price":"1.087",
+		"pl":"9.9000","halfSpreadCost":"0.3000",
+		"tradeOpened":{"tradeID":"7","units":"-500","price":"1.087","halfSpreadCost":"0.1000"},
+		"tradesClosed":[{"tradeID":"3","units":"-1000","price":"1.087","realizedPL":"5.8000","halfSpreadCost":"0.2000"}]}`), stream, usd)
+	require.NoError(t, err)
+
+	assert.Equal(t, "9.9 USD", money(t, a.RealizedPL), "the broker's aggregate is kept as sent")
+	m, _ := a.TradeEffects[1].RealizedPL.Get()
+	assert.Equal(t, "5.8 USD", m.String())
+	problems := reconcile(a)
+	require.Len(t, problems, 1)
+	assert.Contains(t, problems[0], "realized P/L")
+}
+
+func TestNormalize_ReversalCarriesPerTradeExecutionFacts(t *testing.T) {
+	a := norm(t, loadFixture(t), 7)
+	require.Equal(t, []string{"7:opened", "3:closed"}, effectKeys(a))
+	opened, closed := a.TradeEffects[0], a.TradeEffects[1]
+
+	assert.Equal(t, "500", qty(t, opened.Units), "units are sizes, the sign is the fill's side")
+	assert.Equal(t, "1.087", price(t, opened.Price))
+	assert.Equal(t, "tradeOpened.price", opened.Price.Source())
+	assert.False(t, opened.RealizedPL.Known(), "nothing is realized on open")
+	assert.Equal(t, "0.1 USD", money(t, opened.SpreadCost))
+
+	assert.Equal(t, "1000", qty(t, closed.Units))
+	assert.Equal(t, "5.8 USD", money(t, closed.RealizedPL))
+	assert.Equal(t, "-0.1 USD", money(t, closed.Financing))
+	assert.Equal(t, "0.2 USD", money(t, closed.SpreadCost))
+	assert.Equal(t, "tradesClosed.realizedPL", closed.RealizedPL.Source())
+}
+
+func TestNormalize_PartialReduceAndMultiTradeCloseAreEachPreserved(t *testing.T) {
+	a := norm(t, loadFixture(t), 12)
+	require.Equal(t, []string{"7:reduced", "8888:closed", "9999:closed"}, effectKeys(a))
+	assert.Equal(t, "300", qty(t, a.TradeEffects[0].Units))
+	assert.Equal(t, "0.7 USD", money(t, a.TradeEffects[0].RealizedPL))
+	assert.Equal(t, "100", qty(t, a.TradeEffects[1].Units))
+	assert.Equal(t, "0.3 USD", money(t, a.TradeEffects[1].RealizedPL))
+	assert.Equal(t, "0.2 USD", money(t, a.TradeEffects[2].RealizedPL))
+	assert.False(t, a.TradeEffects[0].Financing.Known(), "absent per-trade fields are unknown")
+	assert.Equal(t, "1.09", price(t, a.TradeEffects[2].Price))
+}
+
+// The guaranteed-execution fee is a positive cost in OANDA's data, per trade
+// as at the fill level, and is negated to Trader's sign. fullVWAP is the
+// reference price "absent guaranteed execution", so it differs from the
+// actual per-trade price and must not replace it.
+func TestNormalize_GuaranteedExecutionFeeAndFullVWAPStaySeparateFromTheActualPrice(t *testing.T) {
+	a, err := normalize(json.RawMessage(`{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","instrument":"EUR_USD","units":"1000","price":"1.08540","fullVWAP":"1.08534",
+		"guaranteedExecutionFee":"0.5000","halfSpreadCost":"0.2500",
+		"tradeOpened":{"tradeID":"3","units":"1000","price":"1.08540","guaranteedExecutionFee":"0.5000","halfSpreadCost":"0.2500"}}`), stream, usd)
+	require.NoError(t, err)
+	a.ImportedAt = time.Now()
+	require.NoError(t, a.Validate())
+
+	assert.Equal(t, "-0.5 USD", money(t, a.OtherFees), "a fee is a cost: negative")
+	assert.Equal(t, "-0.5 USD", money(t, a.TradeEffects[0].GuaranteedExecutionFee))
+	assert.Equal(t, "1.0854", price(t, a.TradeEffects[0].Price), "the actual price is the per-trade price")
+	assert.Equal(t, "1.08534", price(t, a.FullVWAP), "fullVWAP is kept separately")
+	assert.Equal(t, "fullVWAP", a.FullVWAP.Source())
+	assert.Equal(t, accountactivity.BasisReported, a.FullVWAP.Basis())
+	assert.Empty(t, reconcile(a))
+	assert.False(t, a.Slippage.Known(), "nothing is relabelled as slippage")
+	assert.False(t, a.Benchmark.Known())
+}
+
+func TestNormalize_FullPriceKeepsTheWholeLadderAndCloseouts(t *testing.T) {
+	a := norm(t, loadFixture(t), 3)
+	q, ok := a.ExecutionQuote.Get()
+	require.True(t, ok)
+	assert.Equal(t, "fullPrice", a.ExecutionQuote.Source())
+	assert.Equal(t, accountactivity.BasisReported, a.ExecutionQuote.Basis())
+	assert.Equal(t, time.Date(2024, 3, 5, 14, 30, 0, 150_000_000, time.UTC), q.At)
+
+	require.Len(t, q.Bids, 2, "the ladder is not truncated to the top of the book")
+	assert.Equal(t, "1.0853", q.Bids[0].Price.String())
+	assert.Equal(t, "1000000", q.Bids[0].Liquidity.String())
+	assert.Equal(t, "1.08528", q.Bids[1].Price.String())
+	assert.Equal(t, "2000000", q.Bids[1].Liquidity.String())
+	require.Len(t, q.Asks, 1)
+	assert.Equal(t, "1.08534", q.Asks[0].Price.String())
+	assert.Equal(t, "1.0852", price(t, q.CloseoutBid))
+	assert.Equal(t, "1.08544", price(t, q.CloseoutAsk))
+	assert.Equal(t, "fullPrice.closeoutBid", q.CloseoutBid.Source())
+	assert.Equal(t, "1.08534", price(t, a.FullVWAP))
+}
+
+// The deprecated top-level price is optional once per-trade prices exist,
+// and a fill with no price anywhere is an error.
+func TestNormalize_ThePriceMayComeFromTheTradesAlone(t *testing.T) {
+	a, err := normalize(json.RawMessage(`{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","instrument":"EUR_USD","units":"1000",
+		"tradeOpened":{"tradeID":"3","units":"1000","price":"1.0854"}}`), stream, usd)
+	require.NoError(t, err)
+	assert.False(t, a.Price.Known(), "the deprecated aggregate is not invented")
+	assert.Equal(t, "1.0854", price(t, a.TradeEffects[0].Price))
+
+	_, err = normalize(json.RawMessage(`{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","instrument":"EUR_USD","units":"1000",
+		"tradeOpened":{"tradeID":"3","units":"1000"}}`), stream, usd)
+	assert.Error(t, err)
+}
+
+func TestNormalize_MalformedPerTradeDetailIsAnError(t *testing.T) {
+	base := func(trade string) json.RawMessage {
+		return json.RawMessage(`{"id":"3","type":"ORDER_FILL","time":"2024-03-05T14:30:00Z","instrument":"EUR_USD","units":"1","price":"1.1",` + trade + `}`)
+	}
+	for name, trade := range map[string]string{
+		"units":           `"tradeOpened":{"tradeID":"3","units":"x"}`,
+		"price":           `"tradeOpened":{"tradeID":"3","price":"1.1234567891"}`,
+		"realizedPL":      `"tradesClosed":[{"tradeID":"3","realizedPL":"q"}]`,
+		"no trade id":     `"tradeOpened":{"units":"1"}`,
+		"fee":             `"tradeReduced":{"tradeID":"3","guaranteedExecutionFee":"?"}`,
+		"vwap":            `"fullVWAP":"zz"`,
+		"quote price":     `"fullPrice":{"bids":[{"price":"zz","liquidity":1}]}`,
+		"quote liquidity": `"fullPrice":{"asks":[{"price":"1.1","liquidity":-5}]}`,
+		"quote closeout":  `"fullPrice":{"closeoutBid":"zz"}`,
+		"quote time":      `"fullPrice":{"time":"yesterday"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := normalize(base(trade), stream, usd)
+			assert.Error(t, err)
+		})
 	}
 }

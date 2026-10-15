@@ -62,14 +62,18 @@ appears outside adapters.
   OANDA's =halfSpreadCost= is signed either way (ADR-081). Price-unit
   slippage shares the sign (negative means worse for the trader than the
   benchmark) and Validate rejects the two having strictly opposite signs.
-- *Trade links keep cardinality and role.* A fill carries =TradeLinks=, each a
-  broker trade ID with a role (opened, reduced, closed), because one OANDA
-  =ORDER_FILL= can open one trade, reduce another and close several under a
-  single provider activity ID. Nothing is flattened to one ID.
-- *Slippage is derived and needs a benchmark.* A broker does not report
-  slippage. Slippage and slippage cost are valid only with a positive benchmark price
-  that names its source, and are never marked reported. A fill with no
-  defensible benchmark has no slippage.
+- *Trade effects keep cardinality, role and per-trade facts.* A fill carries
+  =TradeEffects=, each a broker trade ID with a role (opened, reduced, closed)
+  and, where the broker supplies them, the trade's units, exact price,
+  realized P/L, financing, spread cost and guaranteed-execution fee, each with
+  its own provenance. One OANDA =ORDER_FILL= can open one trade, reduce another
+  and close several under a single provider activity ID, and nothing is
+  flattened to one ID or to fill-level totals.
+- *Reference prices stay references.* =FullVWAP= and the =ExecutionQuote=
+  liquidity snapshot are broker-reported references kept beside the actual
+  execution facts; neither is the actual price and neither is relabelled as
+  slippage. The fill-level =Price= is the provider's aggregate figure and is
+  not authoritative where per-trade prices exist (ADR-081).
 - *Identity is provider-native.* The durable key is provider, environment
   (practice or live), provider account ID and provider activity ID. The
   environment is a small enum, not a URL; connection details stay in adapter

@@ -1,14 +1,14 @@
 [
   {"id":"1","type":"TRANSFER_FUNDS","time":"2024-03-01T09:00:00.000000000Z","amount":"10000.0000","accountBalance":"10000.0000"},
   {"id":"2","type":"MARKET_ORDER","batchID":"2","time":"2024-03-05T14:30:00.100000000Z","instrument":"EUR_USD","units":"1000"},
-  {"id":"3","type":"ORDER_FILL","batchID":"2","time":"2024-03-05T14:30:00.200000000Z","orderID":"2","instrument":"EUR_USD","units":"1000","price":"1.08532","pl":"0.0000","financing":"0.0000","commission":"0.0000","guaranteedExecutionFee":"0.0000","halfSpreadCost":"0.2500","tradeOpened":{"tradeID":"3","units":"1000"}},
+  {"id":"3","type":"ORDER_FILL","batchID":"2","time":"2024-03-05T14:30:00.200000000Z","orderID":"2","instrument":"EUR_USD","units":"1000","price":"1.08532","fullVWAP":"1.08534","fullPrice":{"type":"PRICE","time":"2024-03-05T14:30:00.150000000Z","bids":[{"price":"1.08530","liquidity":1000000},{"price":"1.08528","liquidity":2000000}],"asks":[{"price":"1.08534","liquidity":1000000}],"closeoutBid":"1.08520","closeoutAsk":"1.08544"},"pl":"0.0000","financing":"0.0000","commission":"0.0000","guaranteedExecutionFee":"0.0000","halfSpreadCost":"0.2500","tradeOpened":{"tradeID":"3","units":"1000","price":"1.08533","guaranteedExecutionFee":"0.0000","halfSpreadCost":"0.2500"}},
   {"id":"4","type":"CLIENT_CONFIGURE","time":"2024-03-05T15:00:00.000000000Z"},
   {"id":"5","type":"DAILY_FINANCING","time":"2024-03-05T22:00:00.000000000Z","financing":"-1.3700"},
   {"id":"6","type":"MARKET_ORDER","batchID":"6","time":"2024-03-06T10:00:00.100000000Z","instrument":"EUR_USD","units":"-1500"},
-  {"id":"7","type":"ORDER_FILL","batchID":"6","time":"2024-03-06T10:00:00.200000000Z","orderID":"6","instrument":"EUR_USD","units":"-1500","price":"1.08700","pl":"5.8000","financing":"-0.1000","commission":"0.0500","halfSpreadCost":"0.3000","tradesClosed":[{"tradeID":"3","units":"-1000"}],"tradeOpened":{"tradeID":"7","units":"-500"}},
+  {"id":"7","type":"ORDER_FILL","batchID":"6","time":"2024-03-06T10:00:00.200000000Z","orderID":"6","instrument":"EUR_USD","units":"-1500","price":"1.08700","pl":"5.8000","financing":"-0.1000","commission":"0.0500","halfSpreadCost":"0.3000","tradeOpened":{"tradeID":"7","units":"-500","price":"1.08700","halfSpreadCost":"0.1000"},"tradesClosed":[{"tradeID":"3","units":"-1000","price":"1.08700","realizedPL":"5.8000","financing":"-0.1000","halfSpreadCost":"0.2000"}]},
   {"id":"8","type":"TRANSFER_FUNDS","time":"2024-03-07T08:00:00.000000000Z","amount":"-500.0000"},
   {"id":"9","type":"LIMIT_ORDER","time":"2024-03-07T09:00:00.000000000Z","instrument":"EUR_USD","units":"500"},
   {"id":"10","type":"ORDER_FILL","time":"2024-03-07T09:30:00.000000000Z","orderID":"9","instrument":"SPX500_USD","units":"2","price":"5200.5","pl":"0.0000"},
   {"id":"11","type":"DIVIDEND_ADJUSTMENT","time":"2024-03-07T10:00:00.000000000Z","instrument":"SPX500_USD","dividendAdjustment":"2.3000"},
-  {"id":"12","type":"ORDER_FILL","time":"2024-03-07T11:00:00.000000000Z","orderID":"9","instrument":"EUR_USD","units":"500","price":"1.09000","pl":"1.2000","tradeReduced":{"tradeID":"7","units":"500"},"tradesClosed":[{"tradeID":"8888","units":"-100"}]}
+  {"id":"12","type":"ORDER_FILL","time":"2024-03-07T11:00:00.000000000Z","orderID":"9","instrument":"EUR_USD","units":"500","price":"1.09000","pl":"1.2000","tradeReduced":{"tradeID":"7","units":"300","price":"1.09000","realizedPL":"0.7000"},"tradesClosed":[{"tradeID":"8888","units":"-100","price":"1.09000","realizedPL":"0.3000"},{"tradeID":"9999","units":"-100","price":"1.09000","realizedPL":"0.2000"}]}
 ]

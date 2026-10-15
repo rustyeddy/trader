@@ -55,8 +55,21 @@ type Activity struct {
 	Side       order.Side
 
 	Quantity Value[num.Quantity]
-	// Price is the execution price.
+	// Price is the provider's fill-level price figure. For OANDA it is the
+	// deprecated aggregate top-level price and is not authoritative: the
+	// exact prices are on TradeEffects. It is optional if the effects carry
+	// prices.
 	Price Value[num.Price]
+
+	// FullVWAP is the broker's price the units should have been filled at
+	// absent guaranteed-price execution (OANDA fullVWAP). It is a broker
+	// reference, not the actual execution price, and is never relabelled as
+	// slippage. Fill only.
+	FullVWAP Value[num.Price]
+	// ExecutionQuote is the broker's quote and liquidity snapshot the fill
+	// was priced from (OANDA fullPrice). It is a reported market snapshot:
+	// a benchmark candidate for later analysis, not slippage. Fill only.
+	ExecutionQuote Value[ExecutionQuote]
 
 	// BrokerOrderID preserves the broker's order link. It is optional and
 	// not interpreted here.
@@ -71,11 +84,12 @@ type Activity struct {
 	// identify the instrument, so an event can be re-normalized later
 	// without going back to the provider. Optional on every kind.
 	ProviderInstrument string
-	// TradeLinks preserve every broker trade a fill touched, with the
-	// relationship: one OANDA ORDER_FILL can open one trade, reduce
-	// another and close several, all under one provider activity ID.
-	// Order is the provider's and is significant to SameRecord. Fill only.
-	TradeLinks []TradeLink
+	// TradeEffects preserve every broker trade a fill touched, with the
+	// relationship and the per-trade execution facts: one OANDA ORDER_FILL
+	// can open one trade, reduce another and close several, all under one
+	// provider activity ID. Order is the provider's and is significant to
+	// SameRecord. Fill only.
+	TradeEffects []TradeEffect
 
 	// Economics, all monetary fields signed from the account's point of
 	// view (a cost is negative, a credit positive, zero neutral), in the
@@ -129,8 +143,8 @@ func (a Activity) SameRecord(o Activity) bool {
 func (a Activity) canonical() Activity {
 	a.ImportedAt = time.Time{}
 	a.OccurredAt = a.OccurredAt.UTC().Round(0)
-	if len(a.TradeLinks) == 0 {
-		a.TradeLinks = nil
+	if len(a.TradeEffects) == 0 {
+		a.TradeEffects = nil
 	}
 	return a
 }
@@ -144,10 +158,12 @@ type field struct {
 func (a Activity) fields() []field {
 	return []field{
 		{"instrument", !a.Instrument.IsZero()},
-		{"trade_links", len(a.TradeLinks) > 0},
+		{"trade_effects", len(a.TradeEffects) > 0},
 		{"side", a.Side != 0},
 		{"quantity", a.Quantity.Known()},
 		{"price", a.Price.Known()},
+		{"full_vwap", a.FullVWAP.Known()},
+		{"execution_quote", a.ExecutionQuote.Known()},
 		{"realized_pl", a.RealizedPL.Known()},
 		{"spread_cost", a.SpreadCost.Known()},
 		{"commission", a.Commission.Known()},
@@ -165,8 +181,8 @@ func (a Activity) fields() []field {
 // becoming an unvalidated bag of optionals.
 var kindRules = map[Kind]struct{ required, allowed []string }{
 	KindFill: {
-		required: []string{"instrument", "side", "quantity", "price"},
-		allowed:  []string{"trade_links", "realized_pl", "spread_cost", "commission", "financing", "other_fees", "benchmark", "slippage", "slippage_cost"},
+		required: []string{"instrument", "side", "quantity"},
+		allowed:  []string{"price", "full_vwap", "execution_quote", "trade_effects", "realized_pl", "spread_cost", "commission", "financing", "other_fees", "benchmark", "slippage", "slippage_cost"},
 	},
 	KindFinancing: {
 		required: []string{"financing"},
@@ -261,6 +277,26 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 		{"financing", a.Financing}, {"other_fees", a.OtherFees}, {"cash", a.Cash},
 		{"slippage_cost", a.SlippageCost},
 	}
+	for _, e := range a.TradeEffects {
+		moneys = append(moneys,
+			struct {
+				name string
+				v    Value[num.Money]
+			}{"trade effect " + e.BrokerTradeID + " realized_pl", e.RealizedPL},
+			struct {
+				name string
+				v    Value[num.Money]
+			}{"trade effect " + e.BrokerTradeID + " financing", e.Financing},
+			struct {
+				name string
+				v    Value[num.Money]
+			}{"trade effect " + e.BrokerTradeID + " spread_cost", e.SpreadCost},
+			struct {
+				name string
+				v    Value[num.Money]
+			}{"trade effect " + e.BrokerTradeID + " guaranteed_execution_fee", e.GuaranteedExecutionFee},
+		)
+	}
 	var currency num.Currency
 	for _, m := range moneys {
 		amount, ok := m.v.Get()
@@ -289,18 +325,16 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 	if p, ok := a.Benchmark.Get(); ok && p.IsZero() {
 		return bad("benchmark price must be positive")
 	}
-	seen := map[TradeLink]bool{}
-	for _, l := range a.TradeLinks {
-		if l.BrokerTradeID == "" {
-			return bad("trade link needs a broker trade id")
+	if err := a.validateTradeEffects(bad); err != nil {
+		return err
+	}
+	if p, ok := a.FullVWAP.Get(); ok && p.IsZero() {
+		return bad("full_vwap must be positive")
+	}
+	if q, ok := a.ExecutionQuote.Get(); ok {
+		if err := q.validate(bad); err != nil {
+			return err
 		}
-		if !l.Role.Valid() {
-			return bad("trade link %q needs a role", l.BrokerTradeID)
-		}
-		if seen[l] {
-			return bad("trade link %q is listed twice with role %s", l.BrokerTradeID, l.Role)
-		}
-		seen[l] = true
 	}
 
 	// A benchmark needs a stated source, whatever its basis.
@@ -311,7 +345,7 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 		if !a.Benchmark.Known() {
 			return bad("slippage requires a benchmark price and its source")
 		}
-		if !a.Price.Known() {
+		if !a.hasExecutionPrice() {
 			return bad("slippage requires an execution price")
 		}
 	}
@@ -331,6 +365,10 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 
 func (a Activity) validateKindSpecific(bad func(string, ...any) error) error {
 	switch a.Kind {
+	case KindFill:
+		if !a.hasExecutionPrice() {
+			return bad("fill requires an execution price (fill-level or per-trade)")
+		}
 	case KindFee:
 		if !a.Commission.Known() && !a.OtherFees.Known() {
 			return bad("fee requires commission or other_fees")
@@ -363,3 +401,68 @@ func moneySign(m num.Money) int {
 func isPositive(m num.Money) bool { return moneySign(m) > 0 }
 
 func isNegative(m num.Money) bool { return moneySign(m) < 0 }
+
+// hasExecutionPrice reports whether the fill carries any execution price:
+// the fill-level figure or a per-trade one.
+func (a Activity) hasExecutionPrice() bool {
+	if a.Price.Known() {
+		return true
+	}
+	for _, e := range a.TradeEffects {
+		if e.Price.Known() {
+			return true
+		}
+	}
+	return false
+}
+
+func (a Activity) validateTradeEffects(bad func(string, ...any) error) error {
+	type key struct {
+		id   string
+		role TradeRole
+	}
+	seen := map[key]bool{}
+	for _, e := range a.TradeEffects {
+		if e.BrokerTradeID == "" {
+			return bad("trade effect needs a broker trade id")
+		}
+		if !e.Role.Valid() {
+			return bad("trade effect %q needs a role", e.BrokerTradeID)
+		}
+		k := key{e.BrokerTradeID, e.Role}
+		if seen[k] {
+			return bad("trade effect %q is listed twice with role %s", e.BrokerTradeID, e.Role)
+		}
+		seen[k] = true
+		if u, ok := e.Units.Get(); ok && u.IsZero() {
+			return bad("trade effect %q units must be positive", e.BrokerTradeID)
+		}
+		if p, ok := e.Price.Get(); ok && p.IsZero() {
+			return bad("trade effect %q price must be positive", e.BrokerTradeID)
+		}
+	}
+	return nil
+}
+
+func (q ExecutionQuote) validate(bad func(string, ...any) error) error {
+	if len(q.Bids) == 0 && len(q.Asks) == 0 && !q.CloseoutBid.Known() && !q.CloseoutAsk.Known() {
+		return bad("execution quote is empty")
+	}
+	for _, l := range q.Bids {
+		if l.Price.IsZero() {
+			return bad("execution quote bid level price must be positive")
+		}
+	}
+	for _, l := range q.Asks {
+		if l.Price.IsZero() {
+			return bad("execution quote ask level price must be positive")
+		}
+	}
+	if p, ok := q.CloseoutBid.Get(); ok && p.IsZero() {
+		return bad("execution quote closeout bid must be positive")
+	}
+	if p, ok := q.CloseoutAsk.Get(); ok && p.IsZero() {
+		return bad("execution quote closeout ask must be positive")
+	}
+	return nil
+}

@@ -16,8 +16,33 @@ import (
 // Money, units and prices are decoded as strings and parsed by num, so no
 // provider value passes through binary floating point. Optional amounts are
 // pointers: absent means unknown, "0.0000" means a reported zero.
+//
+// tradeRef is the part of tradeOpened, tradeReduced and each tradesClosed
+// entry the importer keeps. OANDA documents their prices as the exact,
+// official execution prices.
 type tradeRef struct {
-	TradeID string `json:"tradeID"`
+	TradeID                string  `json:"tradeID"`
+	Units                  *string `json:"units"`
+	Price                  *string `json:"price"`
+	RealizedPL             *string `json:"realizedPL"`
+	Financing              *string `json:"financing"`
+	GuaranteedExecutionFee *string `json:"guaranteedExecutionFee"`
+	HalfSpreadCost         *string `json:"halfSpreadCost"`
+}
+
+type bucketWire struct {
+	Price     string      `json:"price"`
+	Liquidity json.Number `json:"liquidity"`
+}
+
+// fullPriceWire is OANDA's ClientPrice snapshot. Deprecated status and
+// conversion fields are not carried.
+type fullPriceWire struct {
+	Time        string       `json:"time"`
+	Bids        []bucketWire `json:"bids"`
+	Asks        []bucketWire `json:"asks"`
+	CloseoutBid *string      `json:"closeoutBid"`
+	CloseoutAsk *string      `json:"closeoutAsk"`
 }
 
 type txWire struct {
@@ -29,7 +54,14 @@ type txWire struct {
 	Instrument string `json:"instrument"`
 
 	Units string `json:"units"`
+	// Price is the deprecated aggregate top-level price. It is kept as a
+	// non-authoritative fact; the per-trade prices are the exact ones.
 	Price string `json:"price"`
+
+	// FullVWAP is the price the units should have been filled at absent
+	// guaranteed-price execution: a broker reference, not the actual price.
+	FullVWAP  *string        `json:"fullVWAP"`
+	FullPrice *fullPriceWire `json:"fullPrice"`
 
 	PL                     *string `json:"pl"`
 	Financing              *string `json:"financing"`
@@ -185,12 +217,32 @@ func fillFields(a *accountactivity.Activity, w txWire, cur num.Currency) error {
 	if err != nil {
 		return err
 	}
-	p, err := num.ParsePrice(w.Price)
-	if err != nil {
-		return fmt.Errorf("price %q: %w", w.Price, err)
+	var p num.Price
+	if w.Price != "" {
+		if p, err = num.ParsePrice(w.Price); err != nil {
+			return fmt.Errorf("price %q: %w", w.Price, err)
+		}
+		if a.Price, err = accountactivity.ReportedFrom(p, priceDeprecated); err != nil {
+			return err
+		}
 	}
-	if a.Price, err = accountactivity.ReportedFrom(p, "price"); err != nil {
-		return err
+	if w.FullVWAP != nil {
+		v, err := num.ParsePrice(*w.FullVWAP)
+		if err != nil {
+			return fmt.Errorf("fullVWAP %q: %w", *w.FullVWAP, err)
+		}
+		if a.FullVWAP, err = accountactivity.ReportedFrom(v, "fullVWAP"); err != nil {
+			return err
+		}
+	}
+	if w.FullPrice != nil {
+		q, err := quoteFrom(*w.FullPrice)
+		if err != nil {
+			return fmt.Errorf("fullPrice: %w", err)
+		}
+		if a.ExecutionQuote, err = accountactivity.ReportedFrom(q, "fullPrice"); err != nil {
+			return err
+		}
 	}
 
 	for _, f := range []struct {
@@ -211,15 +263,137 @@ func fillFields(a *accountactivity.Activity, w txWire, cur num.Currency) error {
 	}
 
 	if w.TradeOpened != nil {
-		a.TradeLinks = append(a.TradeLinks, accountactivity.TradeLink{BrokerTradeID: w.TradeOpened.TradeID, Role: accountactivity.TradeRoleOpened})
+		e, err := tradeEffect(*w.TradeOpened, accountactivity.TradeRoleOpened, "tradeOpened", cur)
+		if err != nil {
+			return err
+		}
+		a.TradeEffects = append(a.TradeEffects, e)
 	}
 	if w.TradeReduced != nil {
-		a.TradeLinks = append(a.TradeLinks, accountactivity.TradeLink{BrokerTradeID: w.TradeReduced.TradeID, Role: accountactivity.TradeRoleReduced})
+		e, err := tradeEffect(*w.TradeReduced, accountactivity.TradeRoleReduced, "tradeReduced", cur)
+		if err != nil {
+			return err
+		}
+		a.TradeEffects = append(a.TradeEffects, e)
 	}
 	for _, c := range w.TradesClosed {
-		a.TradeLinks = append(a.TradeLinks, accountactivity.TradeLink{BrokerTradeID: c.TradeID, Role: accountactivity.TradeRoleClosed})
+		e, err := tradeEffect(c, accountactivity.TradeRoleClosed, "tradesClosed", cur)
+		if err != nil {
+			return err
+		}
+		a.TradeEffects = append(a.TradeEffects, e)
+	}
+	if !a.Price.Known() {
+		priced := false
+		for _, e := range a.TradeEffects {
+			priced = priced || e.Price.Known()
+		}
+		if !priced {
+			return fmt.Errorf("no execution price: neither price nor any per-trade price")
+		}
 	}
 	return nil
+}
+
+// priceDeprecated is the recorded source of the top-level price, so no reader
+// mistakes it for the authoritative per-trade figure.
+const priceDeprecated = "price (deprecated aggregate)"
+
+// tradeEffect converts one embedded trade record. Absent fields stay unknown.
+// guaranteedExecutionFee is a positive cost in OANDA's data and is negated;
+// halfSpreadCost keeps OANDA's sign; realizedPL and financing are signed.
+func tradeEffect(t tradeRef, role accountactivity.TradeRole, section string, cur num.Currency) (accountactivity.TradeEffect, error) {
+	e := accountactivity.TradeEffect{BrokerTradeID: t.TradeID, Role: role}
+	if t.TradeID == "" {
+		return e, fmt.Errorf("%s has no tradeID", section)
+	}
+	var err error
+	if t.Units != nil {
+		abs := strings.TrimPrefix(strings.TrimPrefix(*t.Units, "-"), "+")
+		q, err := num.ParseQuantity(abs)
+		if err != nil {
+			return e, fmt.Errorf("%s %s units %q: %w", section, t.TradeID, *t.Units, err)
+		}
+		if e.Units, err = accountactivity.ReportedFrom(q, section+".units"); err != nil {
+			return e, err
+		}
+	}
+	if t.Price != nil {
+		p, err := num.ParsePrice(*t.Price)
+		if err != nil {
+			return e, fmt.Errorf("%s %s price %q: %w", section, t.TradeID, *t.Price, err)
+		}
+		if e.Price, err = accountactivity.ReportedFrom(p, section+".price"); err != nil {
+			return e, err
+		}
+	}
+	for _, f := range []struct {
+		dst   *accountactivity.Value[num.Money]
+		src   *string
+		field string
+		sign  int
+	}{
+		{&e.RealizedPL, t.RealizedPL, "realizedPL", +1},
+		{&e.Financing, t.Financing, "financing", +1},
+		{&e.SpreadCost, t.HalfSpreadCost, "halfSpreadCost", +1},
+		{&e.GuaranteedExecutionFee, t.GuaranteedExecutionFee, "guaranteedExecutionFee", -1},
+	} {
+		if *f.dst, err = reportedMoney(f.src, section+"."+f.field, f.sign, cur); err != nil {
+			return e, fmt.Errorf("%s %s: %w", section, t.TradeID, err)
+		}
+	}
+	return e, nil
+}
+
+// quoteFrom converts OANDA's fullPrice snapshot, keeping both ladders whole.
+func quoteFrom(w fullPriceWire) (accountactivity.ExecutionQuote, error) {
+	var q accountactivity.ExecutionQuote
+	if w.Time != "" {
+		at, err := time.Parse(time.RFC3339Nano, w.Time)
+		if err != nil {
+			return q, fmt.Errorf("time %q: %w", w.Time, err)
+		}
+		q.At = at.UTC()
+	}
+	levels := func(side string, in []bucketWire) ([]accountactivity.PriceLevel, error) {
+		var out []accountactivity.PriceLevel
+		for _, b := range in {
+			p, err := num.ParsePrice(b.Price)
+			if err != nil {
+				return nil, fmt.Errorf("%s price %q: %w", side, b.Price, err)
+			}
+			l, err := num.ParseQuantity(b.Liquidity.String())
+			if err != nil {
+				return nil, fmt.Errorf("%s liquidity %q: %w", side, b.Liquidity, err)
+			}
+			out = append(out, accountactivity.PriceLevel{Price: p, Liquidity: l})
+		}
+		return out, nil
+	}
+	var err error
+	if q.Bids, err = levels("bid", w.Bids); err != nil {
+		return q, err
+	}
+	if q.Asks, err = levels("ask", w.Asks); err != nil {
+		return q, err
+	}
+	for _, c := range []struct {
+		dst   *accountactivity.Value[num.Price]
+		src   *string
+		field string
+	}{{&q.CloseoutBid, w.CloseoutBid, "closeoutBid"}, {&q.CloseoutAsk, w.CloseoutAsk, "closeoutAsk"}} {
+		if c.src == nil {
+			continue
+		}
+		p, err := num.ParsePrice(*c.src)
+		if err != nil {
+			return q, fmt.Errorf("%s %q: %w", c.field, *c.src, err)
+		}
+		if *c.dst, err = accountactivity.ReportedFrom(p, "fullPrice."+c.field); err != nil {
+			return q, err
+		}
+	}
+	return q, nil
 }
 
 func financingFields(a *accountactivity.Activity, w txWire, cur num.Currency) error {

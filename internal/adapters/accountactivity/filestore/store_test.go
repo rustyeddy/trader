@@ -545,3 +545,35 @@ func TestStore_InvalidCheckpointIsCorruption(t *testing.T) {
 		})
 	}
 }
+
+// A ledger written in the interim #510 shape (schema 1) is never read
+// half-way; the error says how to recover.
+func TestStore_InterimSchemaIsRejectedWithRecoveryAdvice(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	_, err := s.Apply(ctx, batch("c", storetest.Deposit("1", 0)))
+	require.NoError(t, err)
+	mutateFirstLine(t, streamDir(t, s), func(m map[string]any) { m["schema"] = 1 })
+
+	_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "re-import")
+	assert.ErrorContains(t, err, "interim")
+
+	// A future schema is an error too, without the rebuild advice.
+	mutateFirstLine(t, streamDir(t, s), func(m map[string]any) { m["schema"] = 99 })
+	_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "re-import")
+}
+
+// A quote snapshot with a missing payload is corruption, like any value.
+func TestStore_QuoteWithoutPayloadIsCorruption(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	_, err := s.Apply(ctx, batch("c", storetest.RichFill("1", 0)))
+	require.NoError(t, err)
+	mutateFirstLine(t, streamDir(t, s), func(m map[string]any) { delete(m["execution_quote"].(map[string]any), "value") })
+	_, err = s.Query(ctx, accountactivity.Query{Sync: storetest.Sync})
+	require.Error(t, err)
+}

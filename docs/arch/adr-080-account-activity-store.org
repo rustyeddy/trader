@@ -88,6 +88,15 @@ are unexported. A value object must carry a payload (an explicit zero is
 valid) and a checkpoint must carry a cursor and a time, mirroring what the
 write path validates.
 
+** Schema versions
+
+The wire schema is versioned. Schema 2 (issue #511) is the canonical v1
+representation; schema 1 was an interim development shape that no shipped
+importer wrote. A stream in an older schema is not read half-way: the error
+says to delete the stream directory and re-import. In-place migration is
+deferred until a user-facing importer exists (#514), at which point stored
+data compatibility becomes a stricter requirement.
+
 * Consequences
 
 Writes rewrite a stream's activity file, which is O(activities) per batch.

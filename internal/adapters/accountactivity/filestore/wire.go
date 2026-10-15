@@ -18,7 +18,20 @@ import (
 // provenance this ledger exists to keep (the same discipline as the journal
 // adapter's wire.go).
 
-const schemaVersion = 1
+// schemaVersion 2 is the canonical v1 execution representation (#511):
+// per-trade effects, fullVWAP and the quote snapshot. Schema 1 was the
+// interim #510 shape (trade effects with no detail), never exposed by a
+// shipped importer; a ledger written in it is rebuilt by re-importing, not
+// migrated in place.
+const schemaVersion = 2
+
+// errOldSchema explains how to recover from a ledger in an older schema.
+func schemaError(got int) error {
+	if got < schemaVersion {
+		return fmt.Errorf("schema %d is from an interim development format and is not read; delete the stream directory and re-import (want schema %d)", got, schemaVersion)
+	}
+	return fmt.Errorf("unsupported schema %d (want %d)", got, schemaVersion)
+}
 
 // valueWire's Value is a pointer so presence is explicit: a value object
 // with no "value" (or a null one) is corruption, not a known zero, while an
@@ -57,9 +70,66 @@ func fromValueWire[T any](w *valueWire[T]) (accountactivity.Value[T], error) {
 	}
 }
 
-type tradeLinkWire struct {
-	BrokerTradeID string `json:"broker_trade_id"`
-	Role          string `json:"role"`
+type tradeEffectWire struct {
+	BrokerTradeID          string                   `json:"broker_trade_id"`
+	Role                   string                   `json:"role"`
+	Units                  *valueWire[num.Quantity] `json:"units,omitempty"`
+	Price                  *valueWire[num.Price]    `json:"price,omitempty"`
+	RealizedPL             *valueWire[num.Money]    `json:"realized_pl,omitempty"`
+	Financing              *valueWire[num.Money]    `json:"financing,omitempty"`
+	SpreadCost             *valueWire[num.Money]    `json:"spread_cost,omitempty"`
+	GuaranteedExecutionFee *valueWire[num.Money]    `json:"guaranteed_execution_fee,omitempty"`
+}
+
+type priceLevelWire struct {
+	Price     num.Price    `json:"price"`
+	Liquidity num.Quantity `json:"liquidity"`
+}
+
+// quoteWire is the payload of an execution quote value; presence of the
+// closeout prices is explicit like every other value.
+type quoteWire struct {
+	At          *time.Time            `json:"at,omitempty"`
+	Bids        []priceLevelWire      `json:"bids,omitempty"`
+	Asks        []priceLevelWire      `json:"asks,omitempty"`
+	CloseoutBid *valueWire[num.Price] `json:"closeout_bid,omitempty"`
+	CloseoutAsk *valueWire[num.Price] `json:"closeout_ask,omitempty"`
+}
+
+func toQuoteWire(q accountactivity.ExecutionQuote) quoteWire {
+	w := quoteWire{CloseoutBid: toValueWire(q.CloseoutBid), CloseoutAsk: toValueWire(q.CloseoutAsk)}
+	if !q.At.IsZero() {
+		at := q.At.UTC()
+		w.At = &at
+	}
+	for _, l := range q.Bids {
+		w.Bids = append(w.Bids, priceLevelWire{Price: l.Price, Liquidity: l.Liquidity})
+	}
+	for _, l := range q.Asks {
+		w.Asks = append(w.Asks, priceLevelWire{Price: l.Price, Liquidity: l.Liquidity})
+	}
+	return w
+}
+
+func fromQuoteWire(w quoteWire) (accountactivity.ExecutionQuote, error) {
+	var q accountactivity.ExecutionQuote
+	var err error
+	if w.At != nil {
+		q.At = w.At.UTC()
+	}
+	for _, l := range w.Bids {
+		q.Bids = append(q.Bids, accountactivity.PriceLevel{Price: l.Price, Liquidity: l.Liquidity})
+	}
+	for _, l := range w.Asks {
+		q.Asks = append(q.Asks, accountactivity.PriceLevel{Price: l.Price, Liquidity: l.Liquidity})
+	}
+	if q.CloseoutBid, err = fromValueWire(w.CloseoutBid); err != nil {
+		return q, fmt.Errorf("closeout bid: %w", err)
+	}
+	if q.CloseoutAsk, err = fromValueWire(w.CloseoutAsk); err != nil {
+		return q, fmt.Errorf("closeout ask: %w", err)
+	}
+	return q, nil
 }
 
 type accountRefWire struct {
@@ -81,15 +151,17 @@ type activityWire struct {
 	OccurredAt time.Time `json:"occurred_at"`
 	ImportedAt time.Time `json:"imported_at"`
 
-	Instrument         string          `json:"instrument,omitempty"`
-	Side               string          `json:"side,omitempty"`
-	BrokerOrderID      string          `json:"broker_order_id,omitempty"`
-	BrokerBatchID      string          `json:"broker_batch_id,omitempty"`
-	ProviderInstrument string          `json:"provider_instrument,omitempty"`
-	TradeLinks         []tradeLinkWire `json:"trade_links,omitempty"`
+	Instrument         string            `json:"instrument,omitempty"`
+	Side               string            `json:"side,omitempty"`
+	BrokerOrderID      string            `json:"broker_order_id,omitempty"`
+	BrokerBatchID      string            `json:"broker_batch_id,omitempty"`
+	ProviderInstrument string            `json:"provider_instrument,omitempty"`
+	TradeEffects       []tradeEffectWire `json:"trade_effects,omitempty"`
 
 	Quantity     *valueWire[num.Quantity] `json:"quantity,omitempty"`
 	Price        *valueWire[num.Price]    `json:"price,omitempty"`
+	FullVWAP     *valueWire[num.Price]    `json:"full_vwap,omitempty"`
+	Quote        *valueWire[quoteWire]    `json:"execution_quote,omitempty"`
 	RealizedPL   *valueWire[num.Money]    `json:"realized_pl,omitempty"`
 	SpreadCost   *valueWire[num.Money]    `json:"spread_cost,omitempty"`
 	Commission   *valueWire[num.Money]    `json:"commission,omitempty"`
@@ -126,6 +198,7 @@ func toWire(a accountactivity.Activity) activityWire {
 		ProviderInstrument: a.ProviderInstrument,
 		Quantity:           toValueWire(a.Quantity),
 		Price:              toValueWire(a.Price),
+		FullVWAP:           toValueWire(a.FullVWAP),
 		RealizedPL:         toValueWire(a.RealizedPL),
 		SpreadCost:         toValueWire(a.SpreadCost),
 		Commission:         toValueWire(a.Commission),
@@ -136,14 +209,22 @@ func toWire(a accountactivity.Activity) activityWire {
 		Slippage:           toValueWire(a.Slippage),
 		SlippageCost:       toValueWire(a.SlippageCost),
 	}
+	if q, ok := a.ExecutionQuote.Get(); ok {
+		w.Quote = &valueWire[quoteWire]{Value: ptr(toQuoteWire(q)), Basis: a.ExecutionQuote.Basis().String(), Source: a.ExecutionQuote.Source()}
+	}
 	if a.Side.Valid() {
 		w.Side = a.Side.String()
 	}
 	if a.Account != (account.Reference{}) {
 		w.Account = &accountRefWire{AccountID: a.Account.AccountID.String(), Broker: a.Account.Broker}
 	}
-	for _, l := range a.TradeLinks {
-		w.TradeLinks = append(w.TradeLinks, tradeLinkWire{BrokerTradeID: l.BrokerTradeID, Role: l.Role.String()})
+	for _, e := range a.TradeEffects {
+		w.TradeEffects = append(w.TradeEffects, tradeEffectWire{
+			BrokerTradeID: e.BrokerTradeID, Role: e.Role.String(),
+			Units: toValueWire(e.Units), Price: toValueWire(e.Price),
+			RealizedPL: toValueWire(e.RealizedPL), Financing: toValueWire(e.Financing),
+			SpreadCost: toValueWire(e.SpreadCost), GuaranteedExecutionFee: toValueWire(e.GuaranteedExecutionFee),
+		})
 	}
 	return w
 }
@@ -154,7 +235,7 @@ var roleByName = map[string]accountactivity.TradeRole{
 
 func fromWire(w activityWire) (accountactivity.Activity, error) {
 	if w.Schema != schemaVersion {
-		return accountactivity.Activity{}, fmt.Errorf("unsupported schema %d (want %d)", w.Schema, schemaVersion)
+		return accountactivity.Activity{}, schemaError(w.Schema)
 	}
 	a := accountactivity.Activity{
 		Provider:           w.Provider,
@@ -203,12 +284,32 @@ func fromWire(w activityWire) (accountactivity.Activity, error) {
 		}
 		a.Account = account.Reference{AccountID: aid, Broker: w.Account.Broker}
 	}
-	for _, l := range w.TradeLinks {
+	for _, l := range w.TradeEffects {
 		role, ok := roleByName[l.Role]
 		if !ok {
-			return a, fmt.Errorf("trade link role %q is unknown", l.Role)
+			return a, fmt.Errorf("trade effect role %q is unknown", l.Role)
 		}
-		a.TradeLinks = append(a.TradeLinks, accountactivity.TradeLink{BrokerTradeID: l.BrokerTradeID, Role: role})
+		e := accountactivity.TradeEffect{BrokerTradeID: l.BrokerTradeID, Role: role}
+		var err error
+		if e.Units, err = fromValueWire(l.Units); err != nil {
+			return a, fmt.Errorf("trade effect %s units: %w", l.BrokerTradeID, err)
+		}
+		if e.Price, err = fromValueWire(l.Price); err != nil {
+			return a, fmt.Errorf("trade effect %s price: %w", l.BrokerTradeID, err)
+		}
+		for _, f := range []struct {
+			name string
+			src  *valueWire[num.Money]
+			dst  *accountactivity.Value[num.Money]
+		}{
+			{"realized_pl", l.RealizedPL, &e.RealizedPL}, {"financing", l.Financing, &e.Financing},
+			{"spread_cost", l.SpreadCost, &e.SpreadCost}, {"guaranteed_execution_fee", l.GuaranteedExecutionFee, &e.GuaranteedExecutionFee},
+		} {
+			if *f.dst, err = fromValueWire(f.src); err != nil {
+				return a, fmt.Errorf("trade effect %s %s: %w", l.BrokerTradeID, f.name, err)
+			}
+		}
+		a.TradeEffects = append(a.TradeEffects, e)
 	}
 
 	var err error
@@ -217,6 +318,32 @@ func fromWire(w activityWire) (accountactivity.Activity, error) {
 	}
 	if a.Price, err = fromValueWire(w.Price); err != nil {
 		return a, fmt.Errorf("price: %w", err)
+	}
+	if a.FullVWAP, err = fromValueWire(w.FullVWAP); err != nil {
+		return a, fmt.Errorf("full_vwap: %w", err)
+	}
+	if w.Quote != nil {
+		if w.Quote.Value == nil {
+			return a, fmt.Errorf("execution_quote: value object has no value")
+		}
+		q, err := fromQuoteWire(*w.Quote.Value)
+		if err != nil {
+			return a, fmt.Errorf("execution_quote: %w", err)
+		}
+		switch w.Quote.Basis {
+		case "reported":
+			if w.Quote.Source == "" {
+				a.ExecutionQuote = accountactivity.Reported(q)
+			} else if a.ExecutionQuote, err = accountactivity.ReportedFrom(q, w.Quote.Source); err != nil {
+				return a, fmt.Errorf("execution_quote: %w", err)
+			}
+		case "derived":
+			if a.ExecutionQuote, err = accountactivity.Derived(q, w.Quote.Source); err != nil {
+				return a, fmt.Errorf("execution_quote: %w", err)
+			}
+		default:
+			return a, fmt.Errorf("execution_quote: basis %q is not reported or derived", w.Quote.Basis)
+		}
 	}
 	for _, f := range []struct {
 		name string
@@ -263,7 +390,7 @@ func toCheckpointWire(cp accountactivity.Checkpoint) checkpointWire {
 
 func fromCheckpointWire(w checkpointWire) (accountactivity.Checkpoint, error) {
 	if w.Schema != schemaVersion {
-		return accountactivity.Checkpoint{}, fmt.Errorf("unsupported schema %d (want %d)", w.Schema, schemaVersion)
+		return accountactivity.Checkpoint{}, schemaError(w.Schema)
 	}
 	var env accountactivity.Environment
 	switch w.Environment {
@@ -291,3 +418,5 @@ func fromCheckpointWire(w checkpointWire) (accountactivity.Checkpoint, error) {
 	}
 	return cp, nil
 }
+
+func ptr[T any](v T) *T { return &v }
