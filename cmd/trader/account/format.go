@@ -11,6 +11,7 @@ import (
 const (
 	formatTable = "table"
 	formatJSON  = "json"
+	formatOrg   = "org"
 )
 
 // Formatter renders one response to w. The handlers call it and never format
@@ -29,10 +30,26 @@ func formatterFor(name string) (Formatter, error) {
 		return tableFormatter{}, nil
 	case formatJSON:
 		return jsonFormatter{}, nil
+	case formatOrg:
+		return orgFormatter{}, nil
 	default:
-		return nil, fmt.Errorf("--format %q: want %s or %s", name, formatTable, formatJSON)
+		return nil, fmt.Errorf("--format %q: want %s, %s or %s", name, formatTable, formatJSON, formatOrg)
 	}
 }
+
+// requireActivityFormat rejects, before any work is done, a format that
+// cannot render activity. The org journal renders completed trades only, so
+// `sync` must not run and then fail to print its result.
+func requireActivityFormat(f Formatter) error {
+	if _, ok := f.(orgFormatter); ok {
+		return errOrgTradesOnly
+	}
+	return nil
+}
+
+// errOrgTradesOnly is the one message for every org request that is not a
+// completed trade.
+var errOrgTradesOnly = fmt.Errorf("--format %s renders completed trades only (trades, trades show <id>)", formatOrg)
 
 // errWriter remembers the first write error so a broken pipe is reported
 // instead of looking like success.

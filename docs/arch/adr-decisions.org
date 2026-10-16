@@ -192,6 +192,7 @@ the original decided, use full supersession instead.
 | 082 | Trade reconstruction from account activity (in adr-082-trade-reconstruction.org) | Accepted |
 | 083 | Execution quality and slippage (in adr-083-execution-quality.org) | Accepted |
 | 084 | Account activity CLI (in adr-084-account-cli.org) | Accepted |
+| 085 | Trading journal rendering (in adr-085-trading-journal.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

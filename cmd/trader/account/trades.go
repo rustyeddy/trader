@@ -28,7 +28,9 @@ func newTradesCmd(d deps, flags *groupFlags) *cobra.Command {
 			"--open lists positions still open instead (it cannot be combined with --benchmark). Exits with no known entry and activity that belongs " +
 			"to no trade are reported, never dropped.\n\n" +
 			"Execution quality appears only with --benchmark broker-vwap or broker-quote. Without it no " +
-			"slippage column exists; with it, a figure that cannot be measured prints as unknown.",
+			"slippage column exists; with it, a figure that cannot be measured prints as unknown.\n\n" +
+			"--format org writes a trading journal: one Org entry per completed trade, headed by its open time, " +
+			"with the objective facts filled in and an empty Review scaffold for you. It cannot be combined with --open.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, t, err := parseRange(from, to)

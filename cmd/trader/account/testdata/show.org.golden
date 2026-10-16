@@ -1,0 +1,55 @@
+# trader account journal: oanda/practice/acct/2#long
+# stream: oanda/practice/acct
+# account currency: USD (ledger money fields)
+
+* 2024-03-01T10:00:00Z fx:EUR/USD long
+:PROPERTIES:
+:TRADE_ID: oanda/practice/acct/2#long
+:INSTRUMENT: fx:EUR/USD
+:SIDE: long
+:OPENED: 2024-03-01T10:00:00Z
+:CLOSED: 2024-03-03T09:00:00Z
+:QUANTITY: 1000
+:AVG_ENTRY: 1.101 (derived)
+:AVG_EXIT: 1.109 (derived)
+:GROSS_PL: 8.00 USD (derived)
+:SPREAD_COST: unknown
+:COMMISSION: unknown
+:FINANCING: 0.00 USD (derived)
+:OTHER_FEES: unknown
+:NET: unknown
+:BENCHMARK: broker-quote
+:SLIPPAGE_COST: unknown
+:SOURCES_FIRST: oanda/practice/acct/2
+:SOURCES_LAST: oanda/practice/acct/3
+:SOURCES_COUNT: 2
+:END:
+
+** Execution
+Spread cost is already inside GROSS_PL and is not added to NET. NET is GROSS_PL + COMMISSION + FINANCING + OTHER_FEES, known only when all four are.
+
+| Leg | Time | Quantity | Price | Broker trade | Division | Source |
+|-
+| entry | 2024-03-01T10:00:00Z | 1000 | 1.101 | t1 | broker | oanda/practice/acct/2 |
+| exit | 2024-03-03T09:00:00Z | 1000 | 1.109 | t1 | broker | oanda/practice/acct/3 |
+
+*** Execution quality
+Benchmark: broker-quote. Slippage is account-centric: negative is worse for the trader.
+
+| Fill | Execution price | Benchmark | Age | Slippage | Slippage cost |
+|-
+| oanda/practice/acct/2 | unknown | unknown | unknown | unknown | unknown |
+| oanda/practice/acct/3 | unknown | unknown | unknown | unknown | unknown |
+
+- oanda/practice/acct/2: unmeasured: executionquality: invalid benchmark: the fill reports no execution quote
+- oanda/practice/acct/3: unmeasured: executionquality: invalid benchmark: the fill reports no execution quote
+
+Trade slippage cost: unknown
+Why unknown: fill oanda/practice/acct/2: executionquality: invalid benchmark: the fill reports no execution quote; fill oanda/practice/acct/3: executionquality: invalid benchmark: the fill reports no execution quote
+
+** Review
+- Setup:
+- What went well:
+- What went wrong:
+- Screenshot:
+- Notes:
