@@ -105,9 +105,10 @@ type Options struct {
 	// AccountCurrency is the currency SlippageCost is expressed in.
 	// Required.
 	AccountCurrency num.Currency
-	// Conversion is used only when the instrument's quote currency differs
-	// from AccountCurrency. It must run from the quote currency to the
-	// account currency.
+	// Conversion is applied only when the instrument's quote currency differs
+	// from AccountCurrency, and then it must run from the quote currency to
+	// the account currency. A supplied Conversion is validated either way:
+	// Options must be internally valid even where a fill does not need them.
 	Conversion *Conversion
 }
 

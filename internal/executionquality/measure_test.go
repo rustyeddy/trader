@@ -1,6 +1,7 @@
 package executionquality
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -396,4 +397,72 @@ func TestMeasureIsDeterministic(t *testing.T) {
 	a := fill(order.Sell, "750", "1.0987")
 	b := bench("1.1000")
 	assert.Equal(t, measure(t, a, b, usdOpts), measure(t, a, b, usdOpts))
+}
+
+// The cost is rounded once, half to even, from the exact product of slippage,
+// units and any conversion rate. A test that only converts whole numbers
+// cannot tell that from rounding an intermediate, so these use amounts that
+// fall below the 8-decimal scale.
+func TestCostRoundsOnceHalfEven(t *testing.T) {
+	three := &Conversion{Rate: num.MustParseRate("3"), From: usd, To: eur, Source: "test"}
+	one := &Conversion{Rate: num.MustParseRate("1"), From: usd, To: eur, Source: "test"}
+
+	for _, c := range []struct {
+		name  string
+		slip  string // price-unit slippage magnitude, e-8 steps
+		conv  *Conversion
+		acct  num.Currency
+		want  string // magnitude of the cost
+		other string // what rounding an intermediate, or half-up, would give
+	}{
+		// 1e-8 x 0.5 x 3 = 1.5e-8: rounds to 2e-8. Rounding 0.5e-8 first
+		// would give 0 and then 0 x 3 = 0.
+		{"fractional x conversion", "0.00000001", three, eur, "0.00000002", "0"},
+		// 1e-8 x 0.5 x 1 = 0.5e-8: an exact tie, to the even 0 (half-up: 1e-8).
+		{"tie to even zero, rate 1", "0.00000001", one, eur, "0", "0.00000001"},
+		// 3e-8 x 0.5 = 1.5e-8: a tie to the even 2e-8.
+		{"tie to even two", "0.00000003", one, eur, "0.00000002", "0.00000001"},
+		// 5e-8 x 0.5 = 2.5e-8: a tie to the even 2e-8 (half-up: 3e-8).
+		{"tie down to even", "0.00000005", one, eur, "0.00000002", "0.00000003"},
+		// The same ties with no conversion at all.
+		{"tie to even zero, no conversion", "0.00000001", nil, usd, "0", "0.00000001"},
+		{"tie down to even, no conversion", "0.00000005", nil, usd, "0.00000002", "0.00000003"},
+	} {
+		// Each row is checked for both signs: a buy below the benchmark or a
+		// sell above it is favorable (+), the reverse adverse (-).
+		base := num.MustParsePrice("1")
+		step := num.MustParsePrice(c.slip)
+		hi, err := base.Add(step)
+		require.NoError(t, err)
+
+		opts := Options{AccountCurrency: c.acct, Conversion: c.conv}
+		cur := c.acct.String()
+		mag := func(m string) string {
+			if m == "0" {
+				return "0 " + cur
+			}
+			return m + " " + cur
+		}
+
+		for name, tc := range map[string]struct {
+			a    accountactivity.Activity
+			b    *Benchmark
+			want string
+		}{
+			"favorable buy":  {fill(order.Buy, "0.5", "1"), bench(hi.String()), mag(c.want)},
+			"adverse sell":   {fill(order.Sell, "0.5", "1"), bench(hi.String()), negate(mag(c.want))},
+			"adverse buy":    {fill(order.Buy, "0.5", hi.String()), bench("1"), negate(mag(c.want))},
+			"favorable sell": {fill(order.Sell, "0.5", hi.String()), bench("1"), mag(c.want)},
+		} {
+			r := measure(t, tc.a, tc.b, opts)
+			assert.Equal(t, tc.want, cost(t, r), "%s %s (an intermediate or half-up rounding would give %s)", c.name, name, c.other)
+		}
+	}
+}
+
+func negate(m string) string {
+	if strings.HasPrefix(m, "0 ") {
+		return m
+	}
+	return "-" + m
 }
