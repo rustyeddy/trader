@@ -1,0 +1,53 @@
+# trader account journal: completed trades closed in all
+# stream: oanda/practice/acct
+# benchmark: broker-vwap
+# account currency: USD (ledger money fields)
+
+* 2024-03-01T09:00:00Z fx:EUR/USD long
+:PROPERTIES:
+:TRADE_ID: oanda/practice/acct/10#long
+:INSTRUMENT: fx:EUR/USD
+:SIDE: long
+:OPENED: 2024-03-01T09:00:00Z
+:CLOSED: 2024-03-01T10:00:00.25Z
+:QUANTITY: 100
+:AVG_ENTRY: 1.10 (derived)
+:AVG_EXIT: 1.11 (derived)
+:GROSS_PL: 10.00 USD (derived)
+:SPREAD_COST: unknown
+:COMMISSION: unknown
+:FINANCING: -0.40 USD (derived)
+:OTHER_FEES: unknown
+:NET: unknown
+:BENCHMARK: broker-vwap
+:SLIPPAGE_COST: unknown
+:SOURCES_FIRST: oanda/practice/acct/10
+:SOURCES_LAST: oanda/practice/acct/11
+:SOURCES_COUNT: 2
+:END:
+
+** Execution
+Spread cost is already inside GROSS_PL and is not added to NET. NET is GROSS_PL + COMMISSION + FINANCING + OTHER_FEES, known only when all four are.
+
+| Leg | Time | Quantity | Price | Broker trade | Division | Source |
+|-
+| entry | 2024-03-01T09:00:00Z | 100 | 1.10 | t1 | broker | oanda/practice/acct/10 |
+| exit | 2024-03-01T10:00:00.25Z | 100 | 1.11 | t1 | broker | oanda/practice/acct/11 |
+
+*** Execution quality
+Benchmark: broker-vwap. Slippage is account-centric: negative is worse for the trader.
+
+| Fill | Execution price | Benchmark | Age | Slippage | Slippage cost |
+|-
+| oanda/practice/acct/10 | 1.10 (derived) | broker_full_vwap 1.10 (oanda fullVWAP) | 0s | 0.00 (derived) | 0.00 USD (derived) |
+| oanda/practice/acct/11 | 1.11 (derived) | broker_full_vwap 1.1101 (oanda fullVWAP) | 0s | -0.0001 (derived) | -0.015 USD (derived) |
+
+Trade slippage cost: unknown
+Why unknown: fill oanda/practice/acct/11 is shared with another trade
+
+** Review
+- Setup:
+- What went well:
+- What went wrong:
+- Screenshot:
+- Notes:

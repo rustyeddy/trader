@@ -29,6 +29,7 @@ compatibility facade for removed import paths.
 | internal/service/accountactivity | service/accountactivity | No | Provider-neutral account-activity import loop (fetch page, stamp, Apply, repeat); depends on the Source and Store ports only (ADR-081) |
 | internal/service/accountreport | service/accountreport | No | Application service behind the account CLI's trade views: reconstructs the whole stream, then filters by close time; optional per-fill execution quality (ADR-084). Depends on the Store port, tradehistory and executionquality only |
 | cmd/internal/accountactivitycfg | cmd/internal/accountactivitycfg | No | Composition root for the account CLI: TRADER_ACCOUNTACTIVITY_* configuration, env-only OANDA token, default ledger root, and the broker registry, the only place provider names appear (ADR-084) |
+| internal/tradejournal | tradejournal | No | Pure Org-mode renderer of completed trades with optional execution quality: facts only, unknown never zero, empty Review scaffold, deterministic (ADR-085). Unrelated to internal/journal, the run journal. Imports only num, instrument, order, internal/accountactivity, tradehistory, executionquality |
 | internal/tradehistory | tradehistory | No | Derived, broker-neutral completed-trade view over account activities: position cycles, traceable to source activities, no storage or I/O (ADR-082). Imports only num, instrument, order, internal/accountactivity |
 | internal/executionquality | executionquality | No | Pure slippage and execution-quality derivation over a fill and an explicit benchmark; writes nothing back to the ledger (ADR-083). Imports only num, instrument, order, internal/accountactivity |
 | internal/accountactivity | accountactivity | No | Provider-neutral broker account activity model: fills, costs, cash events, with per-value provenance (ADR-079). Imports only num, instrument, order, internal/account |
@@ -68,7 +69,7 @@ external guest executable
 
 cmd/trader -> internal/service -> internal/backtest / internal/pipeline
 cmd/trader, cmd/trader-mcp -> cmd/internal/marketdatacfg -> internal/service/marketdata
-cmd/trader -> cmd/trader/account -> cmd/internal/accountactivitycfg, internal/service/accountactivity, internal/service/accountreport
+cmd/trader -> cmd/trader/account -> cmd/internal/accountactivitycfg, internal/service/accountactivity, internal/service/accountreport, internal/tradejournal
 cmd/internal/accountactivitycfg -> internal/adapters/accountactivity/*, internal/clock, internal/config, cmd/internal/marketdatacfg
 internal/service/accountreport -> internal/accountactivity, internal/tradehistory, internal/executionquality
 cmd/trader, cmd/trader-mcp -> cmd/internal/backtestcfg -> internal/service/backtest, cmd/internal/marketdatacfg
@@ -78,6 +79,7 @@ internal/pipeline -> internal/execution, risk, broker
 internal/accountactivity -> num, instrument, order, internal/account
 internal/tradehistory -> internal/accountactivity, num, instrument, order
 internal/executionquality -> internal/accountactivity, num, instrument, order
+internal/tradejournal -> internal/accountactivity, internal/tradehistory, internal/executionquality, num, instrument, order
 internal/marketdata -> public marketdata, instrument, num
                     -> internal/marketdata/internal/provider/*
 internal/order -> public order, instrument, num, internal/id

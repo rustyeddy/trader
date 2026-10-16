@@ -53,6 +53,9 @@ func newSyncCmd(d deps, flags *groupFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := requireActivityFormat(s.formatter); err != nil {
+				return err
+			}
 			src, err := d.newSource(s.cfg, s.stream, accountactivitycfg.Bounds{From: f, To: t}, d.clock)
 			if err != nil {
 				return err
@@ -97,6 +100,9 @@ func newListCmd(d deps, flags *groupFlags) *cobra.Command {
 			}
 			s, err := d.open(cmd, flags)
 			if err != nil {
+				return err
+			}
+			if err := requireActivityFormat(s.formatter); err != nil {
 				return err
 			}
 			res, err := svc.List(cmd.Context(), svc.ListParams{Store: s.store, Stream: s.stream, From: f, To: t, Kinds: ks, Limit: limit})

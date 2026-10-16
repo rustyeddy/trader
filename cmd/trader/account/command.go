@@ -62,7 +62,7 @@ func newCommand(d deps) *cobra.Command {
 		"account-activity ledger root (default $XDG_DATA_HOME/trader/accountactivity, or ~/.local/share/trader/accountactivity)")
 	pf.StringVar(&flags.accountCurrency, "account-currency", "",
 		"account currency, overriding the one found in the ledger (used only for slippage cost)")
-	pf.StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+" or "+formatJSON)
+	pf.StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+" or "+formatOrg+" (a trading journal of completed trades)")
 
 	cmd.AddCommand(newActivityCmd(d, &flags))
 	cmd.AddCommand(newTradesCmd(d, &flags))

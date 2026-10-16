@@ -303,6 +303,32 @@ Slippage appears **only** with `--benchmark broker-vwap` or `broker-quote`
 is no slippage column; with it, a figure that cannot be measured prints as
 `unknown` and the reason is listed.
 
+### Trading journal: `--format org`
+
+```
+trader account trades --format org --from 2024-03-01 --to 2024-04-01 >> journal.org
+trader account trades show <id> --format org --benchmark broker-vwap
+```
+
+One Org entry per completed trade, headed by its **open** time. The property
+drawer holds the objective facts: trade ID, instrument, side, open and close
+times, quantity, average entry and exit, gross P/L, and spread cost,
+commission, financing, other fees and net as separate figures (spread is
+already inside gross P/L and is not added to net). With `--benchmark` it adds
+the benchmark and the trade's slippage cost, and the Execution section a
+per-fill table. A figure that is not known reads `unknown`, never `0.00`; one
+derived from other figures is marked `(derived)`. `SOURCES_FIRST`,
+`SOURCES_LAST` and `SOURCES_COUNT` trace the trade to its broker activities;
+`trades show <id>` gives the full audit.
+
+Each entry ends with an empty **Review** scaffold (Setup, What went well, What
+went wrong, Screenshot, Notes) that Trader never fills in. Output is
+deterministic and has no timestamp of its own, so the same ledger renders the
+same text. Re-running is a fresh render, not a merge: append with `>>` as above
+and mind that you will duplicate entries you already have. The journal covers
+completed trades only; `activity sync`, `activity list` and `--open` refuse
+`--format org`. Nothing is written to Trader's run journal.
+
 ### `trader account trades show <id>`
 
 The audit view of one trade, completed or open: every leg with its price,

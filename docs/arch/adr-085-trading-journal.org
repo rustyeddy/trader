@@ -1,0 +1,83 @@
+#+TITLE: ADR-085: Trading journal rendering
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #515. Builds on ADR-082 (trade reconstruction), ADR-083
+(execution quality) and ADR-084 (the account CLI).
+
+* Context
+
+A trader keeps a journal of trades. Trader holds the objective facts about every
+completed trade, reconstructed from the broker's own activity, and none of the
+subjective ones. The journal has to be useful without inventing anything, and
+without making the canonical model depend on a note-taking format.
+
+* Decision
+
+** A renderer, not a store
+
+=internal/tradejournal= renders =tradehistory.Trade= (and, when the caller
+measured it, =executionquality.Result=) as Org-mode text. It performs no I/O,
+reads no clock and parses no provider data; the ledger and the reconstructed
+trade remain the only source. Markdown, JSON or HTML later are sibling
+renderers over the same input, not changes to this one. It is deliberately not
+=internal/journal=, which records what a Trader run did; imported broker history
+is never written there, and a boundary test keeps this package off it.
+
+** Reached as =--format org=
+
+=trader account trades --format org= and =trader account trades show <id>
+--format org= use the existing =Formatter= seam. The journal is about completed
+trades, so =activity sync=, =activity list=, =trades --open= and =show= of an
+open position refuse the format with one error. =sync= refuses it before it
+fetches or stores anything, rather than running and then failing to print.
+
+** One entry per completed trade
+
+The heading is the trade's open time, the instrument and the side. A property
+drawer carries the trade ID, instrument, side, open and close times, quantity,
+average entry and exit, gross P/L, and spread cost, commission, financing,
+other fees and net as separate figures. Spread cost is already inside gross
+P/L and is not added to net (ADR-082); the entry says so. With a benchmark it
+adds =BENCHMARK= and =SLIPPAGE_COST=; without one there is no slippage field at
+all, so "not requested" is never mistaken for "unknown".
+
+An Execution section tabulates the legs and, with a benchmark, each fill's
+execution price, benchmark, age, slippage and cost, and lists why anything is
+unmeasured.
+
+** Honest values
+
+An unknown figure is the word =unknown=, a known zero is =0.00=, and a derived
+figure is marked =(derived)=. How it was derived is the audit view's business
+(=trades show=); the journal stays readable.
+
+** Provenance without bulk
+
+=SOURCES_FIRST=, =SOURCES_LAST= and =SOURCES_COUNT= name the first and last
+broker activity and how many the trade used, enough to find it with =trades
+show <id>= or in the ledger. The legs table names the source of each leg.
+
+** Subjective fields are the trader's
+
+Every entry ends with a Review section: Setup, What went well, What went wrong,
+Screenshot, Notes. They are empty. The renderer writes nothing into them, and a
+test fails if it does.
+
+** Deterministic and structure-safe
+
+Nothing in the output depends on when it is rendered or on map order, so the
+same ledger and flags produce the same bytes. Free text from outside
+(identifiers, benchmark sources, reasons) is flattened to one line, and a bar
+in a table cell is escaped, so such text cannot start a heading, close the
+property drawer or split a cell.
+
+* Consequences
+
+- Re-running is a fresh render, not a merge into an existing journal. The user
+  appends with the shell; an =--append= mode would need a stable entry identity
+  and merge rules, and is not part of this decision.
+- Org is the first format. The input is canonical history, so another format
+  adds a renderer, not a change to reconstruction.
+- Aggregate totals across trades are not part of this decision.
