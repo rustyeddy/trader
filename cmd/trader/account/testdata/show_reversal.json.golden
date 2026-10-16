@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "stream": {
+    "provider": "oanda",
+    "environment": "practice",
+    "account": "acct"
+  },
+  "account_currency": {
+    "state": "known",
+    "code": "USD",
+    "source": "ledger money fields"
+  },
+  "status": "completed",
+  "trade": {
+    "id": "oanda/practice/acct/10#long",
+    "instrument": "fx:EUR/USD",
+    "side": "buy",
+    "opened_at": "2024-03-01T09:00:00Z",
+    "closed_at": "2024-03-01T10:00:00.25Z",
+    "quantity": "100",
+    "avg_entry_price": {
+      "state": "known",
+      "value": "1.10",
+      "basis": "derived",
+      "source": "sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals"
+    },
+    "avg_exit_price": {
+      "state": "known",
+      "value": "1.11",
+      "basis": "derived",
+      "source": "sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals"
+    },
+    "gross_pl": {
+      "state": "known",
+      "value": "10.00",
+      "currency": "USD",
+      "basis": "derived",
+      "source": "sum of broker-reported realized P/L over 1 fills"
+    },
+    "spread_cost": {
+      "state": "unknown"
+    },
+    "commission": {
+      "state": "unknown"
+    },
+    "financing": {
+      "state": "known",
+      "value": "-0.40",
+      "currency": "USD",
+      "basis": "derived",
+      "source": "sum of broker-reported financing over 1 fills"
+    },
+    "other_fees": {
+      "state": "unknown"
+    },
+    "net": {
+      "state": "unknown"
+    },
+    "entries": [
+      {
+        "source": "oanda/practice/acct/10",
+        "at": "2024-03-01T09:00:00Z",
+        "quantity": "100",
+        "price": {
+          "state": "known",
+          "value": "1.10",
+          "basis": "reported"
+        },
+        "broker_trade_id": "t1",
+        "division_derived": false
+      }
+    ],
+    "exits": [
+      {
+        "source": "oanda/practice/acct/11",
+        "at": "2024-03-01T10:00:00.25Z",
+        "quantity": "100",
+        "price": {
+          "state": "known",
+          "value": "1.11",
+          "basis": "reported"
+        },
+        "broker_trade_id": "t1",
+        "division_derived": false
+      }
+    ],
+    "sources": [
+      "oanda/practice/acct/10",
+      "oanda/practice/acct/11"
+    ]
+  },
+  "source_activities": [
+    {
+      "key": "oanda/practice/acct/10",
+      "activity_id": "10",
+      "provider_type": "ORDER_FILL",
+      "kind": "fill",
+      "occurred_at": "2024-03-01T09:00:00Z",
+      "instrument": "fx:EUR/USD",
+      "side": "buy",
+      "quantity": {
+        "state": "known",
+        "value": "100",
+        "basis": "reported"
+      },
+      "price": {
+        "state": "known",
+        "value": "1.10",
+        "basis": "reported"
+      },
+      "full_vwap": {
+        "state": "known",
+        "value": "1.10",
+        "basis": "reported"
+      },
+      "realized_pl": {
+        "state": "unknown"
+      },
+      "spread_cost": {
+        "state": "unknown"
+      },
+      "commission": {
+        "state": "unknown"
+      },
+      "financing": {
+        "state": "unknown"
+      },
+      "other_fees": {
+        "state": "unknown"
+      },
+      "trade_effects": [
+        {
+          "broker_trade_id": "t1",
+          "role": "opened",
+          "units": {
+            "state": "known",
+            "value": "100",
+            "basis": "reported"
+          },
+          "price": {
+            "state": "known",
+            "value": "1.10",
+            "basis": "reported"
+          },
+          "realized_pl": {
+            "state": "unknown"
+          },
+          "financing": {
+            "state": "unknown"
+          },
+          "spread_cost": {
+            "state": "unknown"
+          },
+          "guaranteed_execution_fee": {
+            "state": "unknown"
+          }
+        }
+      ]
+    },
+    {
+      "key": "oanda/practice/acct/11",
+      "activity_id": "11",
+      "provider_type": "ORDER_FILL",
+      "kind": "fill",
+      "occurred_at": "2024-03-01T10:00:00.25Z",
+      "instrument": "fx:EUR/USD",
+      "side": "sell",
+      "quantity": {
+        "state": "known",
+        "value": "150",
+        "basis": "reported"
+      },
+      "price": {
+        "state": "known",
+        "value": "1.11",
+        "basis": "reported"
+      },
+      "full_vwap": {
+        "state": "known",
+        "value": "1.1101",
+        "basis": "reported"
+      },
+      "realized_pl": {
+        "state": "known",
+        "value": "10.00",
+        "currency": "USD",
+        "basis": "reported"
+      },
+      "spread_cost": {
+        "state": "known",
+        "value": "0.30",
+        "currency": "USD",
+        "basis": "reported"
+      },
+      "commission": {
+        "state": "known",
+        "value": "-0.60",
+        "currency": "USD",
+        "basis": "reported"
+      },
+      "financing": {
+        "state": "known",
+        "value": "-0.40",
+        "currency": "USD",
+        "basis": "reported"
+      },
+      "other_fees": {
+        "state": "known",
+        "value": "0.00",
+        "currency": "USD",
+        "basis": "reported"
+      },
+      "trade_effects": [
+        {
+          "broker_trade_id": "t1",
+          "role": "closed",
+          "units": {
+            "state": "known",
+            "value": "100",
+            "basis": "reported"
+          },
+          "price": {
+            "state": "known",
+            "value": "1.11",
+            "basis": "reported"
+          },
+          "realized_pl": {
+            "state": "known",
+            "value": "10.00",
+            "currency": "USD",
+            "basis": "reported"
+          },
+          "financing": {
+            "state": "known",
+            "value": "-0.40",
+            "currency": "USD",
+            "basis": "reported"
+          },
+          "spread_cost": {
+            "state": "known",
+            "value": "0.20",
+            "currency": "USD",
+            "basis": "reported"
+          },
+          "guaranteed_execution_fee": {
+            "state": "known",
+            "value": "-0.10",
+            "currency": "USD",
+            "basis": "reported"
+          }
+        },
+        {
+          "broker_trade_id": "t2",
+          "role": "opened",
+          "units": {
+            "state": "known",
+            "value": "50",
+            "basis": "reported"
+          },
+          "price": {
+            "state": "known",
+            "value": "1.11",
+            "basis": "reported"
+          },
+          "realized_pl": {
+            "state": "known",
+            "value": "0.00",
+            "currency": "USD",
+            "basis": "reported"
+          },
+          "financing": {
+            "state": "known",
+            "value": "0.00",
+            "currency": "USD",
+            "basis": "reported"
+          },
+          "spread_cost": {
+            "state": "known",
+            "value": "0.10",
+            "currency": "USD",
+            "basis": "reported"
+          },
+          "guaranteed_execution_fee": {
+            "state": "known",
+            "value": "0.00",
+            "currency": "USD",
+            "basis": "reported"
+          }
+        }
+      ],
+      "execution_quote": {
+        "basis": "reported",
+        "at": "2024-03-01T10:00:00.2495Z",
+        "bids": [
+          {
+            "price": "1.1099",
+            "liquidity": "100"
+          },
+          {
+            "price": "1.1098",
+            "liquidity": "500"
+          }
+        ],
+        "asks": [
+          {
+            "price": "1.1101",
+            "liquidity": "100"
+          }
+        ],
+        "closeout_bid": {
+          "state": "known",
+          "value": "1.109",
+          "basis": "reported"
+        },
+        "closeout_ask": {
+          "state": "known",
+          "value": "1.111",
+          "basis": "reported"
+        }
+      }
+    }
+  ]
+}

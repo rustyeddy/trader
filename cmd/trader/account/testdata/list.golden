@@ -1,0 +1,11 @@
+stream: oanda/practice/acct
+range:  all
+synced: cursor end at 2024-04-01T12:00:00Z
+
+TIME                  KIND     ID  TYPE            INSTRUMENT  SIDE  QUANTITY  PRICE  AMOUNTS
+2024-03-01T09:00:00Z  deposit  1   TRANSFER_FUNDS                                     cash=10000.00 USD
+2024-03-01T10:00:00Z  fill     2   ORDER_FILL      fx:EUR/USD  buy   1000      1.101  realized_pl=unknown spread_cost=unknown commission=unknown financing=unknown other_fees=unknown
+2024-03-03T09:00:00Z  fill     3   ORDER_FILL      fx:EUR/USD  sell  1000      1.109  realized_pl=8.00 USD spread_cost=unknown commission=-1.00 USD financing=0.00 USD other_fees=unknown
+2024-03-06T09:00:00Z  fill     4   ORDER_FILL      fx:EUR/USD  buy   500       1.12   realized_pl=unknown spread_cost=0.15 USD commission=-0.50 USD financing=unknown other_fees=0.00 USD
+2024-03-07T09:00:00Z  fill     5   ORDER_FILL      fx:EUR/USD  sell  500       1.13   realized_pl=5.00 USD spread_cost=0.15 USD commission=-0.50 USD financing=-0.25 USD other_fees=0.00 USD
+2024-03-09T09:00:00Z  fill     6   ORDER_FILL      fx:EUR/USD  buy   200       1.14   realized_pl=unknown spread_cost=unknown commission=unknown financing=unknown other_fees=unknown

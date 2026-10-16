@@ -1,0 +1,151 @@
+#+TITLE: ADR-084: Account activity CLI
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #514. Builds on ADR-078 (secrets are environment-only), ADR-080
+(the file ledger and its layout), ADR-081 (the OANDA source and sync loop),
+ADR-082 (trade reconstruction) and ADR-083 (execution quality). Reporting
+totals are #515, Alpaca is #516, reconciliation is #517.
+
+* Context
+
+The account-activity pipeline had no operator interface. The CLI had to stay a
+thin transport so a later transport (trader-mcp) can reuse the same behavior,
+and it had to keep the distinctions the model works to preserve: unknown is not
+zero, a reported figure is not a derived one, and a measurement not requested
+is not a measurement that failed.
+
+* Decision
+
+** A new top-level =account= group
+
+#+begin_example
+trader account activity sync  --environment E --account A [--from T] [--to T]
+trader account activity list  [--from T] [--to T] [--kind K,...] [--limit N]
+trader account trades         [--from T] [--to T] [--open] [--benchmark B]
+trader account trades show <id> [--benchmark B]
+#+end_example
+
+It is separate from =broker=, which is the simulated broker. Ranges are
+half-open =[from, to)= and accept RFC 3339 or a UTC date. =list= defaults to 100
+rows and says when more matched.
+
+** Handlers are transports; services own behavior
+
+Handlers parse flags, call a service, and pass the structured result to a
+=Formatter= (=table= or =json=). =internal/service/accountactivity= gained
+=List= beside =Sync=; the new =internal/service/accountreport= composes the
+store query, =tradehistory.Reconstruct= and =executionquality.Measure=. No
+handler reconstructs a trade, measures a fill or names a provider; boundary
+tests enforce it. The services return values with no knowledge of Cobra, so
+trader-mcp can use them as they are.
+
+** The stream is named, never defaulted
+
+=--environment= (=practice= or =live=) and =--account= are required, with no
+default, so a mistyped command cannot quietly read or sync a live account. The
+broker defaults to =oanda= and is looked up in a registry in
+=cmd/internal/accountactivitycfg=, the only place provider names appear;
+Alpaca (#516) is one more entry.
+
+Configuration uses the shared loader (flags over environment over config
+file). The stream, root and currency variables are in a
+=TRADER_ACCOUNTACTIVITY_*= family, deliberately not =TRADER_ACCOUNT_ID=, which
+the simulated broker already reads for a simulator account. The OANDA token is
+environment-only (=TRADER_OANDA_TOKEN= or =oanda_token_file=), has no flag, is
+refused in the config file, and appears in no error.
+
+The ledger root defaults to =$XDG_DATA_HOME/trader/accountactivity= (else
+=~/.local/share/trader/accountactivity=), beside the market-data store, with
+=--ledger-root= and =TRADER_ACCOUNTACTIVITY_ROOT= to override. The layout under
+it is ADR-080's.
+
+** Reconstruct the whole stream, then filter
+
+A position cycle may open before a requested range and close inside it, so
+filtering activities first would manufacture orphans. =trades= reconstructs
+from the entire stream and then keeps completed trades whose *close time* is
+in the range. An "open at any point in the range" query is a different
+question and would be an explicit flag, not an overload of this one. Open
+positions are a separate view (=--open=) and are not range-filtered. Orphan
+exits and unattributed financing and fees are reported, never dropped.
+
+** Execution quality only when asked
+
+Without =--benchmark= there is no slippage column, and the JSON has no
+=execution_quality= object, so "not requested" cannot be read as "unknown".
+With =--benchmark broker-vwap= or =broker-quote= the benchmark is built from
+each fill's own reported data (ADR-083) and a figure that cannot be measured
+is =unknown= with a reason. =trades show= keeps the per-fill granularity:
+benchmark kind, source and age, the execution-price method, price-unit
+slippage and cost. A trade's total slippage cost is the sum of its fills' costs
+and is unknown unless every fill was measured, because a fill shared by two
+trades (a reversal) would otherwise be counted twice.
+
+=--open= cannot be combined with =--benchmark=: execution quality is measured
+on completed trades, and ignoring the flag would make "requested" look like
+"not requested". The command says so and points to =trades show <id>
+--benchmark=, which measures an open position's fills.
+
+The account currency is, in order: =--account-currency=, else the single
+currency every monetary figure in the stream shares (activity-level and
+per-trade-effect amounts alike, the set =Activity.Moneys= returns and
+validation checks), else unknown. It is never
+assumed; when it is unknown, price-unit slippage is still shown and the cost is
+unknown.
+
+** Output contract
+
+Times are RFC 3339 in UTC at full stored precision (=RFC3339Nano=: only trailing
+zeros are dropped), because fills and quotes differ within a second and a
+benchmark age or a range echo must describe the instant the query used.
+
+Table: an unknown figure is the word =unknown=; a known zero is =0.00=;
+nothing is blank or a dash where it could be read as zero. A figure that
+applies to an activity but was not supplied is =unknown=; one that does not
+apply to its kind is not printed.
+
+JSON is an API from day one. =schema_version= is 1; keys are snake_case; times
+are RFC 3339 UTC; every financial figure is a decimal string, never a number;
+slices are =[]=, never =null=; each figure is
+={"state":"known","value":"..","currency":"..","basis":"reported|derived","source":".."}=
+or ={"state":"unknown"}=. Adding a field does not change the version; renaming
+or re-meaning one does. Golden files cover both formats.
+
+=trades show= is the forensic view, and it is not a lossy summary. Each source
+activity carries every recorded monetary figure, including each trade effect's
+units, price, realized P/L, financing, spread cost and guaranteed-execution
+fee, and the broker's whole execution quote (time, both ladders with their
+liquidity, closeout bid and ask), each with its basis and source, because
+reversal cost allocation and execution-quality interpretation rest on them. A
+fee activity shows both its commission and its other fees. The list command
+uses the same JSON projection.
+
+=trades show= also gives: every leg with price, units, broker trade
+ID and whether its closing/opening division was the broker's or derived from
+the net position; the source activities in full; and the basis and source of
+every figure. =trades= is the operational summary.
+
+** Trade IDs
+
+A trade ID is the first entry's activity key and the side, deterministic and
+stable. =show= takes a full ID or a unique prefix. No match is an error; a
+prefix that matches several is an error listing every candidate, and one is
+never chosen. JSON always carries full IDs.
+
+** Sync
+
+stdout is a stable result: stream, pages, fetched, new, unchanged, other
+events, cursor and checkpoint time. Per-page detail goes to the structured
+logger. A rerun is idempotent and says so (=new: 0=). An interrupted run keeps
+the last durable checkpoint (ADR-080) and exits non-zero with the progress it
+made.
+
+* Consequences
+
+- A later transport calls =List=, =Trades= and =Trade= directly.
+- Reports (#515) can reuse the same service responses and JSON shapes.
+- A second provider is a registry entry plus a Source, with no handler change.
+- Every command requires =--environment= and =--account=; scripts set them
+  once through the =TRADER_ACCOUNTACTIVITY_*= variables.

@@ -1,0 +1,5 @@
+stream:           oanda/practice/acct
+view:             open positions
+
+ID                          INSTRUMENT  SIDE  OPENED                REMAINING  AVG_ENTRY
+oanda/practice/acct/6#long  fx:EUR/USD  buy   2024-03-09T09:00:00Z  200        1.14

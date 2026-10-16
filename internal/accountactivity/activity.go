@@ -282,35 +282,47 @@ func (a Activity) Validate() error {
 	return a.validateKindSpecific(bad)
 }
 
-func (a Activity) validateValues(bad func(string, ...any) error) error {
-	moneys := []struct {
-		name string
-		v    Value[num.Money]
-	}{
+// namedMoney is one monetary value with the name validation reports it by.
+type namedMoney struct {
+	name string
+	v    Value[num.Money]
+}
+
+// namedMoneys lists every monetary value the activity can carry, including
+// the amounts on its trade effects. It is the one list both validation and
+// Moneys use, so "every monetary field" cannot mean two things.
+func (a Activity) namedMoneys() []namedMoney {
+	moneys := []namedMoney{
 		{"realized_pl", a.RealizedPL}, {"spread_cost", a.SpreadCost}, {"commission", a.Commission},
 		{"financing", a.Financing}, {"other_fees", a.OtherFees}, {"cash", a.Cash},
 		{"slippage_cost", a.SlippageCost},
 	}
 	for _, e := range a.TradeEffects {
+		prefix := "trade effect " + e.BrokerTradeID + " "
 		moneys = append(moneys,
-			struct {
-				name string
-				v    Value[num.Money]
-			}{"trade effect " + e.BrokerTradeID + " realized_pl", e.RealizedPL},
-			struct {
-				name string
-				v    Value[num.Money]
-			}{"trade effect " + e.BrokerTradeID + " financing", e.Financing},
-			struct {
-				name string
-				v    Value[num.Money]
-			}{"trade effect " + e.BrokerTradeID + " spread_cost", e.SpreadCost},
-			struct {
-				name string
-				v    Value[num.Money]
-			}{"trade effect " + e.BrokerTradeID + " guaranteed_execution_fee", e.GuaranteedExecutionFee},
+			namedMoney{prefix + "realized_pl", e.RealizedPL},
+			namedMoney{prefix + "financing", e.Financing},
+			namedMoney{prefix + "spread_cost", e.SpreadCost},
+			namedMoney{prefix + "guaranteed_execution_fee", e.GuaranteedExecutionFee},
 		)
 	}
+	return moneys
+}
+
+// Moneys returns every monetary value on the activity, activity-level and
+// per-trade-effect alike, known or not. All of them are in the account home
+// currency, so a reader that needs that currency must consult all of them.
+func (a Activity) Moneys() []Value[num.Money] {
+	named := a.namedMoneys()
+	out := make([]Value[num.Money], len(named))
+	for i, m := range named {
+		out[i] = m.v
+	}
+	return out
+}
+
+func (a Activity) validateValues(bad func(string, ...any) error) error {
+	moneys := a.namedMoneys()
 	var currency num.Currency
 	for _, m := range moneys {
 		amount, ok := m.v.Get()

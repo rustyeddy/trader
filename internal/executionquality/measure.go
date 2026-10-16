@@ -32,9 +32,6 @@ func Measure(a accountactivity.Activity, bench *Benchmark, o Options) (Result, e
 			return Result{}, err
 		}
 	}
-	if !o.AccountCurrency.IsValid() {
-		return Result{}, fmt.Errorf("%w: account currency is required", ErrInvalidConversion)
-	}
 	if o.Conversion != nil {
 		if err := o.Conversion.validate(); err != nil {
 			return Result{}, err
@@ -96,6 +93,10 @@ func slippageMethod(k BenchmarkKind) string {
 
 // costInto fills SlippageCost and Conversion, or records why it cannot.
 func (r *Result) costInto(a accountactivity.Activity, slip *big.Int, qty num.Quantity, o Options) {
+	if !o.AccountCurrency.IsValid() {
+		r.Unresolved = append(r.Unresolved, "slippage cost unknown: the account currency is not known")
+		return
+	}
 	quote, ok := quoteCurrency(a.Instrument)
 	if !ok {
 		r.Unresolved = append(r.Unresolved, "slippage cost unknown: the instrument's quote currency is not known")

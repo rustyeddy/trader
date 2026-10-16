@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "stream": {
+    "provider": "oanda",
+    "environment": "practice",
+    "account": "acct"
+  },
+  "pages": 0,
+  "fetched": 0,
+  "new": 0,
+  "unchanged": 0,
+  "other_events": 0,
+  "cursor": "end",
+  "checkpoint_at": "2024-04-01T12:00:00Z"
+}
