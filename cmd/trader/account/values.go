@@ -53,9 +53,11 @@ func qtyValueText(v accountactivity.Value[num.Quantity]) string {
 	return q.String()
 }
 
+// timeText renders the stored instant in UTC at full precision. RFC3339Nano
+// drops only trailing zeros, so a whole second still reads 2024-03-01T10:00:00Z.
 func timeText(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format(time.RFC3339)
+	return t.UTC().Format(time.RFC3339Nano)
 }

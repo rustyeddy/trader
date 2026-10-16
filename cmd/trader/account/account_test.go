@@ -132,14 +132,18 @@ type env struct {
 	d    deps
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvWith(t, fixture()) }
+
+// newEnvWith serves the given activities as the broker's history, in two
+// pages, with the checkpoint cursor "end" after the last.
+func newEnvWith(t *testing.T, acts []accountactivity.Activity) *env {
 	t.Helper()
 	root := t.TempDir()
 	e := &env{root: root}
-	acts := fixture()
+	half := len(acts) / 2
 	e.src = &scripted{pages: map[string]accountactivity.Page{
-		"":  {Activities: acts[:3], Cursor: "3"},
-		"3": {Activities: acts[3:], Cursor: "6", Done: true},
+		"":    {Activities: acts[:half], Cursor: "mid"},
+		"mid": {Activities: acts[half:], Cursor: "end", Done: true},
 	}}
 	e.d = deps{
 		environ: func() []string { return []string{"TRADER_ACCOUNTACTIVITY_ROOT=" + root} },
@@ -213,7 +217,7 @@ func TestSync_ImportsAndIsIdempotent(t *testing.T) {
 	out, err = e.run(t, "activity", "sync")
 	require.NoError(t, err)
 	assert.Regexp(t, `new:\s+0`, out, "a rerun adds nothing")
-	assert.Regexp(t, `cursor:\s+6`, out)
+	assert.Regexp(t, `cursor:\s+end`, out)
 
 	out, err = e.run(t, "activity", "sync", "--format", "json")
 	require.NoError(t, err)
@@ -611,4 +615,146 @@ func TestSimulatedBrokerAccountIDIsNotTheBrokerAccount(t *testing.T) {
 	}
 	_, err := e.runRaw(t, "--environment", "practice", "activity", "list")
 	assert.ErrorContains(t, err, "--account is required")
+}
+
+// ---- audit fidelity ----
+
+func eurMoney(s string) accountactivity.Value[num.Money] {
+	return accountactivity.Reported(num.MustParseMoney(s, usd))
+}
+
+// feeOnly is a valid fee activity that carries a commission and no other fee.
+func feeOnly() accountactivity.Activity {
+	return accountactivity.Activity{
+		Provider: stream.Provider, Environment: stream.Environment, ProviderAccountID: stream.ProviderAccountID,
+		ProviderActivityID: "20", ProviderType: "TRANSFER_FUNDS", Kind: accountactivity.KindFee,
+		OccurredAt: t0.Add(time.Hour), Commission: eurMoney("-2.5"),
+	}
+}
+
+func TestFeeCommissionIsNotDropped(t *testing.T) {
+	e := newEnvWith(t, []accountactivity.Activity{deposit("1", 0, "100"), feeOnly()}).synced(t)
+
+	out, err := e.run(t, "activity", "list", "--kind", "fee")
+	require.NoError(t, err)
+	assert.Contains(t, out, "commission=-2.50 USD")
+	assert.Contains(t, out, "other_fees=unknown", "the absent component is still shown, as unknown")
+
+	out, err = e.run(t, "activity", "list", "--kind", "fee", "--format", "json")
+	require.NoError(t, err)
+	fee := decode(t, out)["activities"].([]any)[0].(map[string]any)
+	commission := fee["commission"].(map[string]any)
+	assert.Equal(t, "known", commission["state"])
+	assert.Equal(t, "-2.50", commission["value"])
+	assert.Equal(t, "reported", commission["basis"])
+	assert.Equal(t, "unknown", fee["other_fees"].(map[string]any)["state"])
+}
+
+// reversalFill sells 150 while 100 is long: it closes trade t1 and opens a
+// short t2, carrying per-trade amounts and the broker's whole quote snapshot.
+func reversalFixture() []accountactivity.Activity {
+	open := withEffect(fill(fillSpec{id: "10", at: 0, side: order.Buy, qty: "100", price: "1.1000", vwap: "1.1000"}), accountactivity.TradeRoleOpened, "100", "1.1000")
+	rev := fill(fillSpec{id: "11", at: time.Hour + 250*time.Millisecond, side: order.Sell, qty: "150", price: "1.1100", vwap: "1.1101"})
+	rev.TradeEffects = []accountactivity.TradeEffect{
+		{BrokerTradeID: "t1", Role: accountactivity.TradeRoleClosed,
+			Units: accountactivity.Reported(num.MustParseQuantity("100")), Price: accountactivity.Reported(num.MustParsePrice("1.1100")),
+			RealizedPL: eurMoney("10"), Financing: eurMoney("-0.4"), SpreadCost: eurMoney("0.2"), GuaranteedExecutionFee: eurMoney("-0.1")},
+		{BrokerTradeID: "t2", Role: accountactivity.TradeRoleOpened,
+			Units: accountactivity.Reported(num.MustParseQuantity("50")), Price: accountactivity.Reported(num.MustParsePrice("1.1100")),
+			RealizedPL: eurMoney("0"), Financing: eurMoney("0"), SpreadCost: eurMoney("0.1"), GuaranteedExecutionFee: eurMoney("0")},
+	}
+	rev.ExecutionQuote = accountactivity.Reported(accountactivity.ExecutionQuote{
+		At:          t0.Add(time.Hour + 249*time.Millisecond + 500*time.Microsecond),
+		Bids:        []accountactivity.PriceLevel{{Price: num.MustParsePrice("1.1099"), Liquidity: num.MustParseQuantity("100")}, {Price: num.MustParsePrice("1.1098"), Liquidity: num.MustParseQuantity("500")}},
+		Asks:        []accountactivity.PriceLevel{{Price: num.MustParsePrice("1.1101"), Liquidity: num.MustParseQuantity("100")}},
+		CloseoutBid: accountactivity.Reported(num.MustParsePrice("1.1090")), CloseoutAsk: accountactivity.Reported(num.MustParsePrice("1.1110")),
+	})
+	rev.Commission, rev.OtherFees, rev.RealizedPL, rev.Financing, rev.SpreadCost = eurMoney("-0.6"), eurMoney("0"), eurMoney("10"), eurMoney("-0.4"), eurMoney("0.3")
+	return []accountactivity.Activity{open, rev}
+}
+
+func TestShowKeepsEffectAmountsAndTheWholeQuote(t *testing.T) {
+	e := newEnvWith(t, reversalFixture()).synced(t)
+	out, err := e.run(t, "trades", "show", "oanda/practice/acct/10#long", "--format", "json")
+	require.NoError(t, err)
+	golden(t, "show_reversal.json.golden", out)
+
+	m := decode(t, out)
+	fills := m["source_activities"].([]any)
+	require.Len(t, fills, 2)
+	rev := fills[1].(map[string]any)
+
+	effects := rev["trade_effects"].([]any)
+	require.Len(t, effects, 2)
+	t1 := effects[0].(map[string]any)
+	assert.Equal(t, "t1", t1["broker_trade_id"])
+	for field, want := range map[string]string{"realized_pl": "10.00", "financing": "-0.40", "spread_cost": "0.20", "guaranteed_execution_fee": "-0.10"} {
+		v := t1[field].(map[string]any)
+		assert.Equal(t, "known", v["state"], field)
+		assert.Equal(t, want, v["value"], field)
+		assert.Equal(t, "reported", v["basis"], field)
+	}
+	assert.Equal(t, "0.00", effects[1].(map[string]any)["realized_pl"].(map[string]any)["value"], "a reported zero is a known zero")
+
+	q := rev["execution_quote"].(map[string]any)
+	assert.Equal(t, "reported", q["basis"])
+	assert.Equal(t, "2024-03-01T10:00:00.2495Z", q["at"], "the quote's sub-second instant is kept")
+	assert.Len(t, q["bids"], 2, "the whole ladder, not the touch")
+	assert.Equal(t, map[string]any{"price": "1.1098", "liquidity": "500"}, q["bids"].([]any)[1])
+	assert.Equal(t, "1.111", q["closeout_ask"].(map[string]any)["value"])
+	assert.Equal(t, "1.109", q["closeout_bid"].(map[string]any)["value"])
+
+	tab, err := e.run(t, "trades", "show", "oanda/practice/acct/10#long")
+	require.NoError(t, err)
+	golden(t, "show_reversal.golden", tab)
+	for _, want := range []string{
+		"trade effect:", "t1 (closed)", "t2 (opened)", "guaranteed exec fee", "-0.10 USD [reported]",
+		"execution quote:", "quoted at", "2024-03-01T10:00:00.2495Z", "1.1099@100 1.1098@500", "1.1101@100", "closeout bid", "closeout ask",
+	} {
+		assert.Contains(t, tab, want)
+	}
+}
+
+func TestTimestampsKeepSubsecondPrecision(t *testing.T) {
+	a := deposit("1", 0, "100")
+	a.OccurredAt = t0.Add(123456789 * time.Nanosecond)
+	b := deposit("2", 0, "100")
+	b.OccurredAt = t0.Add(123456790 * time.Nanosecond)
+	e := newEnvWith(t, []accountactivity.Activity{a, b}).synced(t)
+
+	out, err := e.run(t, "activity", "list", "--format", "json")
+	require.NoError(t, err)
+	acts := decode(t, out)["activities"].([]any)
+	assert.Equal(t, "2024-03-01T09:00:00.123456789Z", acts[0].(map[string]any)["occurred_at"])
+	assert.Equal(t, "2024-03-01T09:00:00.12345679Z", acts[1].(map[string]any)["occurred_at"], "two fills in one second stay distinguishable")
+
+	tab, err := e.run(t, "activity", "list")
+	require.NoError(t, err)
+	assert.Contains(t, tab, "2024-03-01T09:00:00.123456789Z")
+
+	// The range echoed back is the instant the query used.
+	out, err = e.run(t, "activity", "list", "--from", "2024-03-01T09:00:00.123456790Z", "--format", "json")
+	require.NoError(t, err)
+	m := decode(t, out)
+	assert.Equal(t, "2024-03-01T09:00:00.12345679Z", m["range"].(map[string]any)["from"])
+	assert.EqualValues(t, 1, m["matched"], "the range excludes the earlier nanosecond")
+
+	// Whole seconds stay short.
+	assert.Equal(t, "2024-03-01T09:00:00Z", timeText(t0))
+}
+
+func TestOpenCannotBeCombinedWithBenchmark(t *testing.T) {
+	e := newEnv(t).synced(t)
+	for _, b := range []string{"broker-vwap", "broker-quote"} {
+		_, err := e.run(t, "trades", "--open", "--benchmark", b)
+		require.Error(t, err, "a requested benchmark must not be silently ignored")
+		assert.ErrorContains(t, err, "--benchmark does not apply to --open")
+		assert.ErrorContains(t, err, "trades show")
+	}
+	// Each flag alone still works; an open position's fills are measured via show.
+	_, err := e.run(t, "trades", "--open")
+	assert.NoError(t, err)
+	out, err := e.run(t, "trades", "show", "oanda/practice/acct/6#long", "--benchmark", "broker-vwap")
+	require.NoError(t, err)
+	assert.Contains(t, out, "execution quality")
 }

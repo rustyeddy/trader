@@ -1,6 +1,7 @@
 package account
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -24,7 +25,7 @@ func newTradesCmd(d deps, flags *groupFlags) *cobra.Command {
 		Long: "List completed trades. Trades are reconstructed from the whole ledger first and the range is " +
 			"applied afterwards, so --from/--to select trades by when they closed: [from, to). " +
 			"A trade that opened before the range is still a whole trade.\n\n" +
-			"--open lists positions still open instead. Exits with no known entry and activity that belongs " +
+			"--open lists positions still open instead (it cannot be combined with --benchmark). Exits with no known entry and activity that belongs " +
 			"to no trade are reported, never dropped.\n\n" +
 			"Execution quality appears only with --benchmark broker-vwap or broker-quote. Without it no " +
 			"slippage column exists; with it, a figure that cannot be measured prints as unknown.",
@@ -37,6 +38,13 @@ func newTradesCmd(d deps, flags *groupFlags) *cobra.Command {
 			b, err := rpt.ParseBenchmark(benchmark)
 			if err != nil {
 				return fmt.Errorf("--benchmark: %w", err)
+			}
+			if open && b != rpt.BenchmarkNone {
+				// Open positions have no completed-trade accounting to measure
+				// against, and silently ignoring the flag would make "requested"
+				// look like "not requested".
+				return errors.New("--benchmark does not apply to --open: execution quality is measured on completed trades; " +
+					"use `trader account trades show <id> --benchmark ...` for an open position's fills")
 			}
 			s, err := d.open(cmd, flags)
 			if err != nil {

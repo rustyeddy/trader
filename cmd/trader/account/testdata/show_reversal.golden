@@ -1,0 +1,74 @@
+stream:           oanda/practice/acct
+trade:            oanda/practice/acct/10#long
+status:           completed
+instrument:       fx:EUR/USD
+side:             buy
+opened:           2024-03-01T09:00:00Z
+closed:           2024-03-01T10:00:00.25Z
+quantity:         100
+avg entry price:  1.10 [derived: sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals]
+avg exit price:   1.11 [derived: sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals]
+gross p/l:        10.00 USD [derived: sum of broker-reported realized P/L over 1 fills]
+spread cost:      unknown  (already inside gross p/l; not added to net)
+commission:       unknown
+financing:        -0.40 USD [derived: sum of broker-reported financing over 1 fills]
+other fees:       unknown
+net:              unknown
+
+legs:
+  LEG    TIME                     QUANTITY  PRICE            BROKER_TRADE  DIVISION  SOURCE
+  entry  2024-03-01T09:00:00Z     100       1.10 [reported]  t1            broker    oanda/practice/acct/10
+  exit   2024-03-01T10:00:00.25Z  100       1.11 [reported]  t1            broker    oanda/practice/acct/11
+
+source activities:
+  oanda/practice/acct/10
+    time:                   2024-03-01T09:00:00Z
+    type:                   ORDER_FILL
+    side:                   buy
+    quantity:               100
+    fill price:             1.10 [reported]
+    full vwap:              1.10 [reported]
+    realized p/l:           unknown
+    spread cost:            unknown
+    commission:             unknown
+    financing:              unknown
+    other fees:             unknown
+    trade effect:           t1 (opened)
+      units:                100 [reported]
+      price:                1.10 [reported]
+      realized p/l:         unknown
+      financing:            unknown
+      spread cost:          unknown
+      guaranteed exec fee:  unknown
+  oanda/practice/acct/11
+    time:                   2024-03-01T10:00:00.25Z
+    type:                   ORDER_FILL
+    side:                   sell
+    quantity:               150
+    fill price:             1.11 [reported]
+    full vwap:              1.1101 [reported]
+    realized p/l:           10.00 USD [reported]
+    spread cost:            0.30 USD [reported]
+    commission:             -0.60 USD [reported]
+    financing:              -0.40 USD [reported]
+    other fees:             0.00 USD [reported]
+    trade effect:           t1 (closed)
+      units:                100 [reported]
+      price:                1.11 [reported]
+      realized p/l:         10.00 USD [reported]
+      financing:            -0.40 USD [reported]
+      spread cost:          0.20 USD [reported]
+      guaranteed exec fee:  -0.10 USD [reported]
+    trade effect:           t2 (opened)
+      units:                50 [reported]
+      price:                1.11 [reported]
+      realized p/l:         0.00 USD [reported]
+      financing:            0.00 USD [reported]
+      spread cost:          0.10 USD [reported]
+      guaranteed exec fee:  0.00 USD [reported]
+    execution quote:        [reported]
+      quoted at:            2024-03-01T10:00:00.2495Z
+      bids:                 1.1099@100 1.1098@500
+      asks:                 1.1101@100
+      closeout bid:         1.109 [reported]
+      closeout ask:         1.111 [reported]

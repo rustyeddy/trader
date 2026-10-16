@@ -141,6 +141,18 @@
             "state": "known",
             "value": "1.101",
             "basis": "reported"
+          },
+          "realized_pl": {
+            "state": "unknown"
+          },
+          "financing": {
+            "state": "unknown"
+          },
+          "spread_cost": {
+            "state": "unknown"
+          },
+          "guaranteed_execution_fee": {
+            "state": "unknown"
           }
         }
       ]
@@ -205,6 +217,18 @@
             "state": "known",
             "value": "1.109",
             "basis": "reported"
+          },
+          "realized_pl": {
+            "state": "unknown"
+          },
+          "financing": {
+            "state": "unknown"
+          },
+          "spread_cost": {
+            "state": "unknown"
+          },
+          "guaranteed_execution_fee": {
+            "state": "unknown"
           }
         }
       ]

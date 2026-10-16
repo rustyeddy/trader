@@ -298,7 +298,8 @@ func load(ctx context.Context, p Params) (loaded, error) {
 }
 
 // accountCurrency is the override if given, else the one currency every
-// monetary figure in the stream shares, else unknown. The ledger requires
+// monetary figure in the stream shares, else unknown. "Every" is the set
+// validation checks: activity-level amounts and per-trade-effect amounts alike. The ledger requires
 // money in the account home currency, so agreement is expected; disagreement
 // or no money at all leaves it unknown rather than guessed.
 func accountCurrency(all []accountactivity.Activity, override num.Currency) Currency {
@@ -307,7 +308,7 @@ func accountCurrency(all []accountactivity.Activity, override num.Currency) Curr
 	}
 	var found num.Currency
 	for _, a := range all {
-		for _, v := range []accountactivity.Value[num.Money]{a.RealizedPL, a.SpreadCost, a.Commission, a.Financing, a.OtherFees, a.Cash} {
+		for _, v := range a.Moneys() {
 			m, ok := v.Get()
 			if !ok || !m.IsValid() {
 				continue

@@ -97,7 +97,7 @@ func amounts(a accountactivity.Activity) string {
 	case accountactivity.KindFinancing:
 		fields = []f{{"financing", a.Financing}}
 	case accountactivity.KindFee:
-		fields = []f{{"other_fees", a.OtherFees}}
+		fields = []f{{"commission", a.Commission}, {"other_fees", a.OtherFees}}
 	case accountactivity.KindOther:
 		return ""
 	default:
@@ -348,8 +348,27 @@ func writeActivityDetail(w io.Writer, a accountactivity.Activity) {
 	if a.BrokerOrderID != "" {
 		line("broker order", a.BrokerOrderID)
 	}
+	if a.Benchmark.Known() || a.Slippage.Known() || a.SlippageCost.Known() {
+		line("recorded benchmark", prov(a.Benchmark, priceText(a.Benchmark)))
+		line("recorded slippage", prov(a.Slippage, rateText(a.Slippage)))
+		line("recorded slippage cost", prov(a.SlippageCost, moneyText(a.SlippageCost)))
+	}
 	for _, e := range a.TradeEffects {
-		line("trade effect", fmt.Sprintf("%s %s units=%s price=%s", e.BrokerTradeID, e.Role, qtyValueText(e.Units), priceText(e.Price)))
+		line("trade effect", fmt.Sprintf("%s (%s)", e.BrokerTradeID, e.Role))
+		line("  units", prov(e.Units, qtyValueText(e.Units)))
+		line("  price", prov(e.Price, priceText(e.Price)))
+		line("  realized p/l", prov(e.RealizedPL, moneyText(e.RealizedPL)))
+		line("  financing", prov(e.Financing, moneyText(e.Financing)))
+		line("  spread cost", prov(e.SpreadCost, moneyText(e.SpreadCost)))
+		line("  guaranteed exec fee", prov(e.GuaranteedExecutionFee, moneyText(e.GuaranteedExecutionFee)))
+	}
+	if q, ok := a.ExecutionQuote.Get(); ok {
+		line("execution quote", "["+a.ExecutionQuote.Basis().String()+sourceSuffix(a.ExecutionQuote.Source())+"]")
+		line("  quoted at", timeText(q.At))
+		line("  bids", ladderText(q.Bids))
+		line("  asks", ladderText(q.Asks))
+		line("  closeout bid", prov(q.CloseoutBid, priceText(q.CloseoutBid)))
+		line("  closeout ask", prov(q.CloseoutAsk, priceText(q.CloseoutAsk)))
 	}
 	_ = tw.Flush()
 }
@@ -384,4 +403,23 @@ func writeQualityDetail(w io.Writer, d rpt.Detail) {
 	if !q.SlippageCost.Known() {
 		pf(w, "    why unknown: %s\n", q.Reason)
 	}
+}
+
+func sourceSuffix(s string) string {
+	if s == "" {
+		return ""
+	}
+	return ": " + s
+}
+
+// ladderText lists a quote ladder in the broker's order, price@liquidity.
+func ladderText(ls []accountactivity.PriceLevel) string {
+	if len(ls) == 0 {
+		return "none"
+	}
+	parts := make([]string, len(ls))
+	for i, l := range ls {
+		parts[i] = decimal(l.Price.String()) + "@" + l.Liquidity.String()
+	}
+	return strings.Join(parts, " ")
 }

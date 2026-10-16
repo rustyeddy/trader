@@ -139,13 +139,52 @@ type jActivity struct {
 	BrokerOrderID string `json:"broker_order_id,omitempty"`
 	BrokerBatchID string `json:"broker_batch_id,omitempty"`
 	TradeEffects  []jEff `json:"trade_effects"`
+	// ExecutionQuote is the broker's whole quote snapshot, present only when
+	// the fill recorded one.
+	ExecutionQuote *jQuote `json:"execution_quote,omitempty"`
+	// Recorded* are slippage fields stored on the activity itself, present only
+	// when it carries them. The values execution quality derives on demand are
+	// under execution_quality, not here.
+	RecordedBenchmark    *jval `json:"recorded_benchmark,omitempty"`
+	RecordedSlippage     *jval `json:"recorded_slippage,omitempty"`
+	RecordedSlippageCost *jval `json:"recorded_slippage_cost,omitempty"`
 }
 
+type jLevel struct {
+	Price     string `json:"price"`
+	Liquidity string `json:"liquidity"`
+}
+
+type jQuote struct {
+	Basis       string   `json:"basis"`
+	Source      string   `json:"source,omitempty"`
+	At          string   `json:"at,omitempty"`
+	Bids        []jLevel `json:"bids"`
+	Asks        []jLevel `json:"asks"`
+	CloseoutBid jval     `json:"closeout_bid"`
+	CloseoutAsk jval     `json:"closeout_ask"`
+}
+
+func jLevels(ls []accountactivity.PriceLevel) []jLevel {
+	out := make([]jLevel, 0, len(ls))
+	for _, l := range ls {
+		out = append(out, jLevel{Price: decimal(l.Price.String()), Liquidity: l.Liquidity.String()})
+	}
+	return out
+}
+
+// jEff is one broker trade a fill touched, with every recorded fact and its
+// provenance: reversal cost allocation and execution-quality interpretation
+// rest on these.
 type jEff struct {
-	BrokerTradeID string `json:"broker_trade_id"`
-	Role          string `json:"role"`
-	Units         jval   `json:"units"`
-	Price         jval   `json:"price"`
+	BrokerTradeID          string `json:"broker_trade_id"`
+	Role                   string `json:"role"`
+	Units                  jval   `json:"units"`
+	Price                  jval   `json:"price"`
+	RealizedPL             jval   `json:"realized_pl"`
+	Financing              jval   `json:"financing"`
+	SpreadCost             jval   `json:"spread_cost"`
+	GuaranteedExecutionFee jval   `json:"guaranteed_execution_fee"`
 }
 
 func ptr(v jval) *jval { return &v }
@@ -171,13 +210,32 @@ func jActivityOf(a accountactivity.Activity) jActivity {
 	case accountactivity.KindFinancing:
 		j.Financing = ptr(jMoney(a.Financing))
 	case accountactivity.KindFee:
-		j.OtherFees = ptr(jMoney(a.OtherFees))
+		j.Commission, j.OtherFees = ptr(jMoney(a.Commission)), ptr(jMoney(a.OtherFees))
 	case accountactivity.KindOther:
 	default:
 		j.Cash = ptr(jMoney(a.Cash))
 	}
 	for _, e := range a.TradeEffects {
-		j.TradeEffects = append(j.TradeEffects, jEff{BrokerTradeID: e.BrokerTradeID, Role: e.Role.String(), Units: jQty(e.Units), Price: jPrice(e.Price)})
+		j.TradeEffects = append(j.TradeEffects, jEff{
+			BrokerTradeID: e.BrokerTradeID, Role: e.Role.String(), Units: jQty(e.Units), Price: jPrice(e.Price),
+			RealizedPL: jMoney(e.RealizedPL), Financing: jMoney(e.Financing), SpreadCost: jMoney(e.SpreadCost),
+			GuaranteedExecutionFee: jMoney(e.GuaranteedExecutionFee),
+		})
+	}
+	if q, ok := a.ExecutionQuote.Get(); ok {
+		j.ExecutionQuote = &jQuote{
+			Basis: a.ExecutionQuote.Basis().String(), Source: a.ExecutionQuote.Source(), At: tstr(q.At),
+			Bids: jLevels(q.Bids), Asks: jLevels(q.Asks), CloseoutBid: jPrice(q.CloseoutBid), CloseoutAsk: jPrice(q.CloseoutAsk),
+		}
+	}
+	if a.Benchmark.Known() {
+		j.RecordedBenchmark = ptr(jPrice(a.Benchmark))
+	}
+	if a.Slippage.Known() {
+		j.RecordedSlippage = ptr(jRate(a.Slippage))
+	}
+	if a.SlippageCost.Known() {
+		j.RecordedSlippageCost = ptr(jMoney(a.SlippageCost))
 	}
 	return j
 }

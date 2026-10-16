@@ -283,7 +283,7 @@ the output says when more matched. Each fill shows `realized_pl`, `spread_cost`,
 ```
 trader account trades                          # completed trades
 trader account trades --from 2024-03-01 --to 2024-04-01
-trader account trades --open                   # positions still open
+trader account trades --open                   # positions still open (not with --benchmark)
 trader account trades --benchmark broker-vwap  # add execution quality
 ```
 
@@ -294,6 +294,9 @@ belong to no trade are listed at the end, never dropped.
 
 Spread cost is shown beside net but is not added to it: it is already inside
 the broker's realized P/L (`net = gross P/L + commission + financing + other fees`).
+
+`--open` cannot be combined with `--benchmark`; use `trades show <id> --benchmark ...`
+for an open position's fills.
 
 Slippage appears **only** with `--benchmark broker-vwap` or `broker-quote`
 (the benchmark comes from each fill's own broker data). Without the flag there
@@ -312,7 +315,7 @@ prefix; a prefix matching several trades lists them rather than choosing.
 
 In the table, an unknown figure is the word `unknown` and a known zero is
 `0.00`. In JSON (`--format json`), `schema_version` is `1`, times are RFC 3339
-UTC, every financial figure is a decimal string, and each figure is either
+UTC at full precision, every financial figure is a decimal string, and each figure is either
 `{"state":"known","value":"...","basis":"reported|derived","source":"..."}` or
 `{"state":"unknown"}`.
 

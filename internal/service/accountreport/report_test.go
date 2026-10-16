@@ -338,3 +338,59 @@ func commonPrefix(a, b string) string {
 	}
 	return a[:n]
 }
+
+// effectMoney carries a fill's only monetary evidence on its trade effect.
+func effectMoney(a accountactivity.Activity, amount, currency string) accountactivity.Activity {
+	a.TradeEffects = []accountactivity.TradeEffect{{
+		BrokerTradeID: "t1", Role: accountactivity.TradeRoleClosed,
+		RealizedPL: accountactivity.Reported(num.MustParseMoney(amount, num.MustParseCurrency(currency))),
+	}}
+	return a
+}
+
+func currencyOf(t *testing.T, store accountactivity.Store, override num.Currency) svc.Currency {
+	t.Helper()
+	p := params(store)
+	p.AccountCurrency = override
+	r, err := svc.Trades(context.Background(), p)
+	require.NoError(t, err)
+	return r.AccountCurrency
+}
+
+// The account currency is the one every monetary figure agrees on, and
+// "every" includes the amounts on trade effects, as validation counts them.
+func TestAccountCurrency_CountsTradeEffectMoney(t *testing.T) {
+
+	// Effect-only evidence is evidence.
+	only := ledger(t,
+		fill(fillSpec{id: "1", at: 0, side: order.Buy, qty: "100", price: "1.1"}),
+		effectMoney(fill(fillSpec{id: "2", at: day(1), side: order.Sell, qty: "100", price: "1.2"}), "7", "EUR"),
+	)
+	c := currencyOf(t, only, num.Currency{})
+	require.True(t, c.Known)
+	assert.Equal(t, "EUR", c.Code.String())
+
+	// USD at the activity level and EUR on another activity's effect disagree,
+	// so the currency is unknown, not quietly USD.
+	mixed := ledger(t,
+		fill(fillSpec{id: "1", at: 0, side: order.Buy, qty: "100", price: "1.1", pl: "1"}),
+		effectMoney(fill(fillSpec{id: "2", at: day(1), side: order.Sell, qty: "100", price: "1.2"}), "7", "EUR"),
+	)
+	assert.False(t, currencyOf(t, mixed, num.Currency{}).Known)
+
+	// An explicit override is the caller's decision and wins over a ledger that
+	// disagrees with itself; it is labelled as configured.
+	c = currencyOf(t, mixed, num.MustParseCurrency("USD"))
+	require.True(t, c.Known)
+	assert.Equal(t, "USD", c.Code.String())
+	assert.Equal(t, "configured", c.Source)
+
+	// A slippage cost is therefore not made known by a disagreeing ledger.
+	p := params(mixed)
+	p.Benchmark = svc.BenchmarkBrokerVWAP
+	r, err := svc.Trades(context.Background(), p)
+	require.NoError(t, err)
+	for _, row := range r.Trades {
+		assert.False(t, row.Quality.SlippageCost.Known())
+	}
+}

@@ -83,12 +83,23 @@ slippage and cost. A trade's total slippage cost is the sum of its fills' costs
 and is unknown unless every fill was measured, because a fill shared by two
 trades (a reversal) would otherwise be counted twice.
 
+=--open= cannot be combined with =--benchmark=: execution quality is measured
+on completed trades, and ignoring the flag would make "requested" look like
+"not requested". The command says so and points to =trades show <id>
+--benchmark=, which measures an open position's fills.
+
 The account currency is, in order: =--account-currency=, else the single
-currency every monetary figure in the stream shares, else unknown. It is never
+currency every monetary figure in the stream shares (activity-level and
+per-trade-effect amounts alike, the set =Activity.Moneys= returns and
+validation checks), else unknown. It is never
 assumed; when it is unknown, price-unit slippage is still shown and the cost is
 unknown.
 
 ** Output contract
+
+Times are RFC 3339 in UTC at full stored precision (=RFC3339Nano=: only trailing
+zeros are dropped), because fills and quotes differ within a second and a
+benchmark age or a range echo must describe the instant the query used.
 
 Table: an unknown figure is the word =unknown=; a known zero is =0.00=;
 nothing is blank or a dash where it could be read as zero. A figure that
@@ -102,7 +113,16 @@ slices are =[]=, never =null=; each figure is
 or ={"state":"unknown"}=. Adding a field does not change the version; renaming
 or re-meaning one does. Golden files cover both formats.
 
-=trades show= is the forensic view: every leg with price, units, broker trade
+=trades show= is the forensic view, and it is not a lossy summary. Each source
+activity carries every recorded monetary figure, including each trade effect's
+units, price, realized P/L, financing, spread cost and guaranteed-execution
+fee, and the broker's whole execution quote (time, both ladders with their
+liquidity, closeout bid and ask), each with its basis and source, because
+reversal cost allocation and execution-quality interpretation rest on them. A
+fee activity shows both its commission and its other fees. The list command
+uses the same JSON projection.
+
+=trades show= also gives: every leg with price, units, broker trade
 ID and whether its closing/opening division was the broker's or derived from
 the net position; the source activities in full; and the basis and source of
 every figure. =trades= is the operational summary.

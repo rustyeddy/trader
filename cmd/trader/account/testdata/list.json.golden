@@ -7,7 +7,7 @@
   },
   "range": {},
   "checkpoint": {
-    "cursor": "6",
+    "cursor": "end",
     "updated_at": "2024-04-01T12:00:00Z"
   },
   "matched": 6,
@@ -79,6 +79,18 @@
             "state": "known",
             "value": "1.101",
             "basis": "reported"
+          },
+          "realized_pl": {
+            "state": "unknown"
+          },
+          "financing": {
+            "state": "unknown"
+          },
+          "spread_cost": {
+            "state": "unknown"
+          },
+          "guaranteed_execution_fee": {
+            "state": "unknown"
           }
         }
       ]
@@ -143,6 +155,18 @@
             "state": "known",
             "value": "1.109",
             "basis": "reported"
+          },
+          "realized_pl": {
+            "state": "unknown"
+          },
+          "financing": {
+            "state": "unknown"
+          },
+          "spread_cost": {
+            "state": "unknown"
+          },
+          "guaranteed_execution_fee": {
+            "state": "unknown"
           }
         }
       ]
