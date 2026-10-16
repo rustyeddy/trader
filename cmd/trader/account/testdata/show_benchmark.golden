@@ -1,0 +1,64 @@
+stream:           oanda/practice/acct
+trade:            oanda/practice/acct/2#long
+status:           completed
+instrument:       fx:EUR/USD
+side:             buy
+opened:           2024-03-01T10:00:00Z
+closed:           2024-03-03T09:00:00Z
+quantity:         1000
+avg entry price:  1.101 [derived: sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals]
+avg exit price:   1.109 [derived: sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals]
+gross p/l:        8.00 USD [derived: sum of broker-reported realized P/L over 1 fills]
+spread cost:      unknown  (already inside gross p/l; not added to net)
+commission:       unknown
+financing:        0.00 USD [derived: sum of broker-reported financing over 1 fills]
+other fees:       unknown
+net:              unknown
+
+legs:
+  LEG    TIME                  QUANTITY  PRICE             BROKER_TRADE  DIVISION  SOURCE
+  entry  2024-03-01T10:00:00Z  1000      1.101 [reported]  t1            broker    oanda/practice/acct/2
+  exit   2024-03-03T09:00:00Z  1000      1.109 [reported]  t1            broker    oanda/practice/acct/3
+
+source activities:
+  oanda/practice/acct/2
+    time:          2024-03-01T10:00:00Z
+    type:          ORDER_FILL
+    side:          buy
+    quantity:      1000
+    fill price:    1.101 [reported]
+    full vwap:     1.10 [reported]
+    realized p/l:  unknown
+    spread cost:   unknown
+    commission:    unknown
+    financing:     unknown
+    other fees:    unknown
+    trade effect:  t1 opened units=1000 price=1.101
+  oanda/practice/acct/3
+    time:          2024-03-03T09:00:00Z
+    type:          ORDER_FILL
+    side:          sell
+    quantity:      1000
+    fill price:    1.109 [reported]
+    full vwap:     1.11 [reported]
+    realized p/l:  8.00 USD [reported]
+    spread cost:   unknown
+    commission:    -1.00 USD [reported]
+    financing:     0.00 USD [reported]
+    other fees:    unknown
+    trade effect:  t1 closed units=1000 price=1.109
+
+execution quality (benchmark broker-vwap, account currency USD (ledger money fields)):
+  oanda/practice/acct/2
+    execution price:  1.101 [derived: units-weighted broker trade-effect prices]
+    benchmark:        broker_full_vwap 1.10 (oanda fullVWAP)
+    benchmark age:    0s
+    slippage:         -0.001 [derived: side-signed (execution - benchmark), benchmark broker_full_vwap]
+    slippage cost:    -1.00 USD [derived: slippage x units in the quote currency]
+  oanda/practice/acct/3
+    execution price:  1.109 [derived: units-weighted broker trade-effect prices]
+    benchmark:        broker_full_vwap 1.11 (oanda fullVWAP)
+    benchmark age:    0s
+    slippage:         -0.001 [derived: side-signed (execution - benchmark), benchmark broker_full_vwap]
+    slippage cost:    -1.00 USD [derived: slippage x units in the quote currency]
+  trade slippage cost: -2.00 USD [derived: sum of the trade's fill slippage costs (broker-vwap)]

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "view": "open",
+  "stream": {
+    "provider": "oanda",
+    "environment": "practice",
+    "account": "acct"
+  },
+  "account_currency": {
+    "state": "known",
+    "code": "USD",
+    "source": "ledger money fields"
+  },
+  "open_positions": [
+    {
+      "id": "oanda/practice/acct/6#long",
+      "instrument": "fx:EUR/USD",
+      "side": "buy",
+      "opened_at": "2024-03-09T09:00:00Z",
+      "remaining": "200",
+      "avg_entry_price": {
+        "state": "known",
+        "value": "1.14",
+        "basis": "derived",
+        "source": "sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals"
+      },
+      "entries": [
+        {
+          "source": "oanda/practice/acct/6",
+          "at": "2024-03-09T09:00:00Z",
+          "quantity": "200",
+          "price": {
+            "state": "known",
+            "value": "1.14",
+            "basis": "reported"
+          },
+          "division_derived": false
+        }
+      ],
+      "exits": [],
+      "sources": [
+        "oanda/practice/acct/6"
+      ]
+    }
+  ],
+  "orphans": [],
+  "unattributed": []
+}

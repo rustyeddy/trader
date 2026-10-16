@@ -363,3 +363,12 @@ func newBundle(cfg Config, logger *slog.Logger, writeLock *marketruntime.WriteLo
 
 	return Bundle{Service: service, Manager: manager, Resolver: resolver, Provider: cfg.Provider, ArchiveRoot: cfg.ArchiveRoot, writeLock: writeLock}, nil
 }
+
+// ConfigFile returns the config file the TRADER_CONFIG variable or
+// DefaultConfigPath selects, or "" for none, so another composition root
+// reads the same file by the same rule.
+func ConfigFile(environ []string) (string, error) { return configFile(environ) }
+
+// ReadTokenFile reads a secret from a token file, expanding a leading ~/.
+// Errors name the path, never the contents.
+func ReadTokenFile(path string) (string, error) { return readTokenFile(path) }

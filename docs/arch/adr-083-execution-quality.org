@@ -78,8 +78,8 @@ is expressed in the account currency only when the quote currency already is
 the account currency, or when the caller passes an explicit =Conversion= (rate,
 from, to, time, source) running from the quote currency to the account
 currency. The conversion multiplies in before a single half-even rounding, and
-its provenance is kept on the result and in the cost's method. A cross rate is
-never inferred; a missing or mismatched conversion, or an instrument whose
+its provenance is kept on the result and in the cost's method. If the account currency is not known at all, the cost is unknown too. A cross
+rate is never inferred; a missing or mismatched conversion, or an instrument whose
 quote currency is not known, leaves the cost unknown while the price-unit
 slippage stays known.
 

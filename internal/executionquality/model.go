@@ -102,8 +102,9 @@ func (c Conversion) validate() error {
 
 // Options are the account facts a measurement needs.
 type Options struct {
-	// AccountCurrency is the currency SlippageCost is expressed in.
-	// Required.
+	// AccountCurrency is the currency SlippageCost is expressed in. When it
+	// is the zero value the account currency is unknown: price-unit slippage
+	// is still measured and the cost is unknown, never guessed.
 	AccountCurrency num.Currency
 	// Conversion is applied only when the instrument's quote currency differs
 	// from AccountCurrency, and then it must run from the quote currency to

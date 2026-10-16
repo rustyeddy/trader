@@ -1,0 +1,338 @@
+{
+  "schema_version": 1,
+  "view": "completed",
+  "stream": {
+    "provider": "oanda",
+    "environment": "practice",
+    "account": "acct"
+  },
+  "range": {},
+  "benchmark": "broker-vwap",
+  "account_currency": {
+    "state": "known",
+    "code": "USD",
+    "source": "ledger money fields"
+  },
+  "trades": [
+    {
+      "id": "oanda/practice/acct/2#long",
+      "instrument": "fx:EUR/USD",
+      "side": "buy",
+      "opened_at": "2024-03-01T10:00:00Z",
+      "closed_at": "2024-03-03T09:00:00Z",
+      "quantity": "1000",
+      "avg_entry_price": {
+        "state": "known",
+        "value": "1.101",
+        "basis": "derived",
+        "source": "sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals"
+      },
+      "avg_exit_price": {
+        "state": "known",
+        "value": "1.109",
+        "basis": "derived",
+        "source": "sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals"
+      },
+      "gross_pl": {
+        "state": "known",
+        "value": "8.00",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "sum of broker-reported realized P/L over 1 fills"
+      },
+      "spread_cost": {
+        "state": "unknown"
+      },
+      "commission": {
+        "state": "unknown"
+      },
+      "financing": {
+        "state": "known",
+        "value": "0.00",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "sum of broker-reported financing over 1 fills"
+      },
+      "other_fees": {
+        "state": "unknown"
+      },
+      "net": {
+        "state": "unknown"
+      },
+      "entries": [
+        {
+          "source": "oanda/practice/acct/2",
+          "at": "2024-03-01T10:00:00Z",
+          "quantity": "1000",
+          "price": {
+            "state": "known",
+            "value": "1.101",
+            "basis": "reported"
+          },
+          "broker_trade_id": "t1",
+          "division_derived": false
+        }
+      ],
+      "exits": [
+        {
+          "source": "oanda/practice/acct/3",
+          "at": "2024-03-03T09:00:00Z",
+          "quantity": "1000",
+          "price": {
+            "state": "known",
+            "value": "1.109",
+            "basis": "reported"
+          },
+          "broker_trade_id": "t1",
+          "division_derived": false
+        }
+      ],
+      "sources": [
+        "oanda/practice/acct/2",
+        "oanda/practice/acct/3"
+      ],
+      "execution_quality": {
+        "benchmark": "broker-vwap",
+        "slippage_cost": {
+          "state": "known",
+          "value": "-2.00",
+          "currency": "USD",
+          "basis": "derived",
+          "source": "sum of the trade's fill slippage costs (broker-vwap)"
+        },
+        "fills": [
+          {
+            "source": "oanda/practice/acct/2",
+            "state": "measured",
+            "execution_price": {
+              "state": "known",
+              "value": "1.101",
+              "basis": "derived",
+              "source": "units-weighted broker trade-effect prices"
+            },
+            "benchmark": {
+              "kind": "broker_full_vwap",
+              "price": "1.10",
+              "at": "2024-03-01T10:00:00Z",
+              "source": "oanda fullVWAP"
+            },
+            "benchmark_age_ms": 0,
+            "slippage": {
+              "state": "known",
+              "value": "-0.001",
+              "basis": "derived",
+              "source": "side-signed (execution - benchmark), benchmark broker_full_vwap"
+            },
+            "slippage_cost": {
+              "state": "known",
+              "value": "-1.00",
+              "currency": "USD",
+              "basis": "derived",
+              "source": "slippage x units in the quote currency"
+            },
+            "unresolved": []
+          },
+          {
+            "source": "oanda/practice/acct/3",
+            "state": "measured",
+            "execution_price": {
+              "state": "known",
+              "value": "1.109",
+              "basis": "derived",
+              "source": "units-weighted broker trade-effect prices"
+            },
+            "benchmark": {
+              "kind": "broker_full_vwap",
+              "price": "1.11",
+              "at": "2024-03-03T09:00:00Z",
+              "source": "oanda fullVWAP"
+            },
+            "benchmark_age_ms": 0,
+            "slippage": {
+              "state": "known",
+              "value": "-0.001",
+              "basis": "derived",
+              "source": "side-signed (execution - benchmark), benchmark broker_full_vwap"
+            },
+            "slippage_cost": {
+              "state": "known",
+              "value": "-1.00",
+              "currency": "USD",
+              "basis": "derived",
+              "source": "slippage x units in the quote currency"
+            },
+            "unresolved": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "oanda/practice/acct/4#long",
+      "instrument": "fx:EUR/USD",
+      "side": "buy",
+      "opened_at": "2024-03-06T09:00:00Z",
+      "closed_at": "2024-03-07T09:00:00Z",
+      "quantity": "500",
+      "avg_entry_price": {
+        "state": "known",
+        "value": "1.12",
+        "basis": "derived",
+        "source": "sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals"
+      },
+      "avg_exit_price": {
+        "state": "known",
+        "value": "1.13",
+        "basis": "derived",
+        "source": "sum(price*quantity)/sum(quantity) over 1 legs; each notional and the quotient rounded half-even to 8 decimals"
+      },
+      "gross_pl": {
+        "state": "known",
+        "value": "5.00",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "sum of broker-reported realized P/L over 1 fills"
+      },
+      "spread_cost": {
+        "state": "known",
+        "value": "0.30",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "sum of broker-reported half-spread cost over 2 fills"
+      },
+      "commission": {
+        "state": "known",
+        "value": "-1.00",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "sum of broker-reported commission over 2 fills"
+      },
+      "financing": {
+        "state": "known",
+        "value": "-0.25",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "sum of broker-reported financing over 1 fills"
+      },
+      "other_fees": {
+        "state": "known",
+        "value": "0.00",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "sum of broker-reported other fees over 2 fills"
+      },
+      "net": {
+        "state": "known",
+        "value": "3.75",
+        "currency": "USD",
+        "basis": "derived",
+        "source": "broker realized P/L + commission + financing + other fees; spread cost already embedded in realized P/L"
+      },
+      "entries": [
+        {
+          "source": "oanda/practice/acct/4",
+          "at": "2024-03-06T09:00:00Z",
+          "quantity": "500",
+          "price": {
+            "state": "known",
+            "value": "1.12",
+            "basis": "reported"
+          },
+          "division_derived": false
+        }
+      ],
+      "exits": [
+        {
+          "source": "oanda/practice/acct/5",
+          "at": "2024-03-07T09:00:00Z",
+          "quantity": "500",
+          "price": {
+            "state": "known",
+            "value": "1.13",
+            "basis": "reported"
+          },
+          "division_derived": false
+        }
+      ],
+      "sources": [
+        "oanda/practice/acct/4",
+        "oanda/practice/acct/5"
+      ],
+      "execution_quality": {
+        "benchmark": "broker-vwap",
+        "slippage_cost": {
+          "state": "known",
+          "value": "0.00",
+          "currency": "USD",
+          "basis": "derived",
+          "source": "sum of the trade's fill slippage costs (broker-vwap)"
+        },
+        "fills": [
+          {
+            "source": "oanda/practice/acct/4",
+            "state": "measured",
+            "execution_price": {
+              "state": "known",
+              "value": "1.12",
+              "basis": "derived",
+              "source": "provider fill-level aggregate fallback (non-authoritative)"
+            },
+            "benchmark": {
+              "kind": "broker_full_vwap",
+              "price": "1.12",
+              "at": "2024-03-06T09:00:00Z",
+              "source": "oanda fullVWAP"
+            },
+            "benchmark_age_ms": 0,
+            "slippage": {
+              "state": "known",
+              "value": "0.00",
+              "basis": "derived",
+              "source": "side-signed (execution - benchmark), benchmark broker_full_vwap"
+            },
+            "slippage_cost": {
+              "state": "known",
+              "value": "0.00",
+              "currency": "USD",
+              "basis": "derived",
+              "source": "slippage x units in the quote currency"
+            },
+            "unresolved": []
+          },
+          {
+            "source": "oanda/practice/acct/5",
+            "state": "measured",
+            "execution_price": {
+              "state": "known",
+              "value": "1.13",
+              "basis": "derived",
+              "source": "provider fill-level aggregate fallback (non-authoritative)"
+            },
+            "benchmark": {
+              "kind": "broker_full_vwap",
+              "price": "1.13",
+              "at": "2024-03-07T09:00:00Z",
+              "source": "oanda fullVWAP"
+            },
+            "benchmark_age_ms": 0,
+            "slippage": {
+              "state": "known",
+              "value": "0.00",
+              "basis": "derived",
+              "source": "side-signed (execution - benchmark), benchmark broker_full_vwap"
+            },
+            "slippage_cost": {
+              "state": "known",
+              "value": "0.00",
+              "currency": "USD",
+              "basis": "derived",
+              "source": "slippage x units in the quote currency"
+            },
+            "unresolved": []
+          }
+        ]
+      }
+    }
+  ],
+  "orphans": [],
+  "unattributed": []
+}

@@ -79,6 +79,11 @@ trader
 │   ├── plan        report the work required to make a dataset available
 │   ├── sync        acquire raw data required to make a dataset available
 │   └── update      plan, sync, and build a dataset in one step
+├── account     broker account activity and the trades reconstructed from it
+│   ├── activity    sync and list broker account activity
+│   │   ├── sync        import new activity into the ledger
+│   │   └── list        list stored activity
+│   └── trades      list completed trades (show: inspect one)
 ├── broker      simulated broker account inspection and order submission
 │   ├── accounts    list the simulated broker's accounts
 │   ├── snapshot    show the simulated account's current snapshot
@@ -215,6 +220,101 @@ is empty rather than an error.
 ```sh
 trader data coverage EURUSD H1          # the whole canonical span
 ```
+
+---
+
+## `trader account` — Broker Account Activity and Trades
+
+Imports a broker account's history into a local ledger, lists it, and
+shows the trades reconstructed from it (ADR-079 to ADR-084). Today the broker
+is OANDA.
+
+Every command names its stream explicitly. There is **no default environment**,
+so a mistyped command cannot read or sync a live account:
+
+```
+trader account --environment practice --account 101-001-1234567-001 activity sync
+```
+
+### Shared `account` flags
+
+| Flag | Environment | Meaning |
+|------|-------------|---------|
+| `--environment` | `TRADER_ACCOUNTACTIVITY_ENVIRONMENT` | `practice` or `live` (required) |
+| `--account` | `TRADER_ACCOUNTACTIVITY_ACCOUNT` | the broker's account ID (required) |
+| `--broker` | `TRADER_ACCOUNTACTIVITY_BROKER` | broker, default `oanda` |
+| `--ledger-root` | `TRADER_ACCOUNTACTIVITY_ROOT` | ledger root, default `$XDG_DATA_HOME/trader/accountactivity` (else `~/.local/share/trader/accountactivity`) |
+| `--account-currency` | `TRADER_ACCOUNTACTIVITY_CURRENCY` | account currency, used only for slippage cost; default is the currency found in the ledger |
+| `--format` | | `table` (default) or `json` |
+
+The OANDA token is environment-only: `TRADER_OANDA_TOKEN`, or
+`oanda_token_file` in the config file naming a file that holds it. There is no
+token flag, and a token in the config file is refused.
+
+These variables are deliberately not `TRADER_ACCOUNT_ID`, which `trader broker`
+uses for a simulated account.
+
+### `trader account activity sync`
+
+Imports everything beyond the stream's checkpoint. A rerun is safe: activity
+already stored is counted as `unchanged`, and an interrupted run resumes from
+the last durable page.
+
+```
+trader account activity sync --environment practice --account 101-001-1234567-001
+trader account activity sync ... --from 2024-01-01 --to 2024-04-01   # bootstrap a window
+```
+
+It prints the stream, pages, fetched, new, unchanged, other events, cursor and
+checkpoint time.
+
+### `trader account activity list`
+
+```
+trader account activity list --from 2024-03-01 --to 2024-04-01 --kind fill,financing --limit 50
+```
+
+Half-open `[from, to)`; the earliest `--limit` rows (default 100) are shown, and
+the output says when more matched. Each fill shows `realized_pl`, `spread_cost`,
+`commission`, `financing` and `other_fees`, each either a value or `unknown`.
+
+### `trader account trades`
+
+```
+trader account trades                          # completed trades
+trader account trades --from 2024-03-01 --to 2024-04-01
+trader account trades --open                   # positions still open
+trader account trades --benchmark broker-vwap  # add execution quality
+```
+
+Trades are reconstructed from the whole ledger first, and the range then
+selects trades by **close time**, so a trade that opened before the range is
+still a whole trade. Exits with no known entry and financing or fees that
+belong to no trade are listed at the end, never dropped.
+
+Spread cost is shown beside net but is not added to it: it is already inside
+the broker's realized P/L (`net = gross P/L + commission + financing + other fees`).
+
+Slippage appears **only** with `--benchmark broker-vwap` or `broker-quote`
+(the benchmark comes from each fill's own broker data). Without the flag there
+is no slippage column; with it, a figure that cannot be measured prints as
+`unknown` and the reason is listed.
+
+### `trader account trades show <id>`
+
+The audit view of one trade, completed or open: every leg with its price,
+units and broker trade ID, whether the division between closing and opening was
+the broker's or derived, the source activities in full, and whether each figure
+was reported or derived and from what. `<id>` is a full trade ID or a unique
+prefix; a prefix matching several trades lists them rather than choosing.
+
+### Output
+
+In the table, an unknown figure is the word `unknown` and a known zero is
+`0.00`. In JSON (`--format json`), `schema_version` is `1`, times are RFC 3339
+UTC, every financial figure is a decimal string, and each figure is either
+`{"state":"known","value":"...","basis":"reported|derived","source":"..."}` or
+`{"state":"unknown"}`.
 
 ---
 
@@ -902,7 +1002,7 @@ These credentials are environment-only and have no flag at all:
 
 | Variable                   | Meaning                                                          |
 |-----------------------------|-------------------------------------------------------------------|
-| `TRADER_OANDA_TOKEN`        | OANDA API token, required for `trader data sync`/`update`       |
+| `TRADER_OANDA_TOKEN`        | OANDA API token, required for `trader data sync`/`update` and `trader account activity sync` |
 | `TRADER_ALPACA_KEY_ID`      | Alpaca API key ID, required (with the secret key below) for `trader data sync`/`update --provider alpaca` |
 | `TRADER_ALPACA_SECRET_KEY`  | Alpaca API secret key, required (with the key ID above) for `trader data sync`/`update --provider alpaca` |
 

@@ -1,0 +1,8 @@
+stream:           oanda/practice/acct
+view:             completed trades
+benchmark:        broker-vwap
+account currency: USD (ledger money fields)
+
+ID                          INSTRUMENT  SIDE  OPENED                CLOSED                QUANTITY  ENTRY  EXIT   GROSS_PL  SPREAD_COST  COMMISSION  FINANCING  OTHER_FEES  NET       SLIPPAGE_COST
+oanda/practice/acct/2#long  fx:EUR/USD  buy   2024-03-01T10:00:00Z  2024-03-03T09:00:00Z  1000      1.101  1.109  8.00 USD  unknown      unknown     0.00 USD   unknown     unknown   -2.00 USD
+oanda/practice/acct/4#long  fx:EUR/USD  buy   2024-03-06T09:00:00Z  2024-03-07T09:00:00Z  500       1.12   1.13   5.00 USD  0.30 USD     -1.00 USD   -0.25 USD  0.00 USD    3.75 USD  0.00 USD

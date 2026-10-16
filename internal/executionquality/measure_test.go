@@ -188,8 +188,12 @@ func TestOnlyFillsAreMeasured(t *testing.T) {
 	_, err = Measure(noQty, bench("1.1"), usdOpts)
 	assert.ErrorIs(t, err, ErrNotAFill)
 
-	_, err = Measure(fill(order.Buy, "1000", "1.1"), bench("1.1"), Options{})
-	assert.Error(t, err, "an account currency is required")
+	// An unknown account currency is not an error: the price-unit slippage is
+	// measured and the cost stays unknown, never guessed.
+	r := measure(t, fill(order.Buy, "1000", "1.101"), bench("1.1"), Options{})
+	assert.Equal(t, "-0.001", slip(t, r))
+	assert.False(t, r.SlippageCost.Known())
+	assert.Contains(t, r.Unresolved[0], "account currency is not known")
 }
 
 // Per-trade prices give the units-weighted fill price, preferred over the

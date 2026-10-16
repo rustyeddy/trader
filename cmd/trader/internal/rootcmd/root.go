@@ -30,6 +30,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/cmd/trader/account"
 	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
 	"github.com/rustyeddy/trader/cmd/trader/broker"
 	"github.com/rustyeddy/trader/cmd/trader/data"
@@ -156,6 +157,7 @@ func New() (*cobra.Command, func() error) {
 		"log output: stderr, stdout, or a file path (default stderr)")
 
 	cmd.AddCommand(data.New())
+	cmd.AddCommand(account.New())
 	cmd.AddCommand(broker.New())
 	cmd.AddCommand(execution.New())
 	cmd.AddCommand(cmdbacktest.New())
