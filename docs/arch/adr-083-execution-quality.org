@@ -1,0 +1,108 @@
+#+TITLE: ADR-083: Execution quality and slippage
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #513. Builds on ADR-079 (the sign convention and the unused
+benchmark and slippage fields), ADR-081 (per-trade prices, =fullVWAP=,
+=fullPrice=) and ADR-082 (spread cost stays out of net). Capturing Trader's own
+order reference at submit time is #524; loading historical quote and mid
+benchmarks is #525.
+
+* Context
+
+The ledger records what the broker reported. How an execution compared with a
+reference is a different question, and the answer depends on a reference the
+broker does not provide: a Trader order price, a quote at submit time, a
+trigger, a historical mid. Mutating the append-only ledger (ADR-080) each time
+a different reference is chosen would be the wrong trade.
+
+* Decision
+
+** A pure derivation, not a ledger write
+
+=internal/executionquality.Measure(fill, benchmark, options)= reads an
+=accountactivity.Activity= and returns a =Result=. It stores nothing, reads no
+clock and does not write slippage back to the activity. The =Benchmark=,
+=Slippage= and =SlippageCost= fields on =Activity= stay valid for a future
+persisted-derivation model; #513 does not populate them.
+
+** The benchmark is explicit and typed
+
+The caller supplies the benchmark; Measure never picks one. A benchmark has a
+kind, a positive price, a required source, and optionally the time it was
+taken. The kinds answer different questions and survive into the result:
+
+| Kind | Answers |
+|---|---|
+| order_reference | execution against what Trader requested |
+| submit_quote_mid | decision-to-fill, implementation shortfall |
+| trigger_price | execution against the semantic stop or limit trigger |
+| historical_mid | retrospective approximation, weaker precision |
+| broker_full_vwap | execution against the broker's no-guaranteed-execution counterfactual |
+| broker_quote | execution against the touch of the broker's own execution quote |
+
+A =historical_mid= must state its bar interval, and no other kind may: a mid
+taken from bars is a bar-level approximation and is never presented as a quote.
+Quote-level precision is not inferred from bars. Helpers build the two broker
+benchmarks from a fill's own reported =fullVWAP= and execution quote (best
+ask for a buy, best bid for a sell); they are labelled broker-sourced and an
+absent field is an error, not a guess. No benchmark at all gives unknown
+slippage, never zero.
+
+** Execution price and its provenance
+
+Precedence, recorded in the value's source:
+
+1. the units-weighted average of the broker's per-trade effect prices, when
+   every effect has units and an exact price and the units add up to the fill:
+   =sum(price x units) / sum(units)= with exact integers and one half-even
+   rounding to 8 decimals;
+2. the provider's fill-level price, labelled a non-authoritative fallback (for
+   OANDA the top-level =price= is deprecated);
+3. unknown.
+
+A partial set of effects is never partly averaged. This resolves the
+aggregation ADR-081 deferred.
+
+** Signs
+
+Account-centric, the ADR-079 convention: negative is worse for the trader,
+positive better, zero neutral. With =d = execution - benchmark=, a buy has
+slippage =-d= and a sell =+d=. A measured zero is a known zero.
+
+** Cost and currency
+
+Slippage multiplied by units is money in the instrument's quote currency. It
+is expressed in the account currency only when the quote currency already is
+the account currency, or when the caller passes an explicit =Conversion= (rate,
+from, to, time, source) running from the quote currency to the account
+currency. The conversion multiplies in before a single half-even rounding, and
+its provenance is kept on the result and in the cost's method. A cross rate is
+never inferred; a missing or mismatched conversion, or an instrument whose
+quote currency is not known, leaves the cost unknown while the price-unit
+slippage stays known.
+
+** Benchmark age
+
+The result carries =BenchmarkAge = fill time - benchmark time= when the
+benchmark has a time. It is negative for a benchmark taken after the fill and
+is reported, not hidden. Milliseconds before execution and a one-minute-old
+midpoint are different claims even at the same price.
+
+** Per fill, kept out of net
+
+One fill, one execution decision, one benchmark. Per-effect execution quality
+would need a benchmark per effect, which no source supplies; the trade
+effects stay available for audit. Slippage is an analytical dimension beside
+profitability: =SpreadCost= is neither added to nor subtracted from it, and it
+is not a term of =tradehistory.Net=.
+
+* Consequences
+
+- Choosing another benchmark is another call, not a ledger change.
+- Reports (#515) can show the benchmark kind, its age and the price method
+  beside each figure.
+- The most useful benchmarks need an order ledger (#524) and stored market
+  data with precision metadata (#525); until then the caller supplies them.
+- Where a conversion rate comes from remains the caller's responsibility.

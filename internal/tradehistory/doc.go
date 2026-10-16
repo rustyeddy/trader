@@ -25,7 +25,7 @@
 //	Net = GrossPL + Commission + Financing + OtherFees
 //
 // A spread-neutral, mid-price P/L would be a different starting point and
-// belongs to execution-quality analysis (#513), where spread cost can become
+// belongs to execution-quality analysis (ADR-083), where spread cost can become
 // an explicit term.
 //
 // # Unknown is not zero
