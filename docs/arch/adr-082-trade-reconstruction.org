@@ -4,7 +4,7 @@
 * Status
 
 Accepted. Issue #512. Builds on ADR-079 (the activity model) and ADR-081 (the
-fill representation). Slippage and execution quality are #513; the CLI and
+fill representation). Slippage and execution quality are ADR-083 (#513); the CLI and
 reporting are #514 and #515; per-position daily financing is #522.
 
 * Context

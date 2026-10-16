@@ -118,7 +118,8 @@ type Activity struct {
 	// Validate rejects the two having strictly opposite signs. Both are
 	// always derived (the broker does not report them) and either requires
 	// a benchmark. num has no signed price type, so the price-unit
-	// difference is a num.Rate. Deriving them is issue #513.
+	// difference is a num.Rate. internal/executionquality derives them on demand
+	// (ADR-083); the importer does not populate them.
 	Benchmark    Value[num.Price]
 	Slippage     Value[num.Rate]
 	SlippageCost Value[num.Money]
@@ -361,8 +362,8 @@ func (a Activity) validateValues(bad func(string, ...any) error) error {
 		// A scalar slippage needs a scalar execution price to be measured
 		// from. Per-trade prices do not supply one: which trade, or what
 		// units-weighted aggregate, would be a derivation this record does
-		// not state. Aggregating, or modelling execution quality per trade
-		// effect, is issue #513's decision.
+		// not state. internal/executionquality aggregates the per-trade prices into
+		// a labelled fill price (ADR-083) without writing it back here.
 		if !a.Price.Known() {
 			return bad("slippage requires the fill-level execution price")
 		}
