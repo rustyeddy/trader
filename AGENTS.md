@@ -54,14 +54,15 @@ Prefer review comments over exercising merge authority unless explicitly asked t
 
 Major subsystems should be capable of becoming separate services without requiring them to be separate services today.
 
-Preferred layering:
+Preferred layering. An arrow means "imports", as in `docs/arch/package-boundaries.org`:
 
 ```text
-domain/package
+transport (CLI, MCP, REST)
     -> application service
-    -> executable composition
-    -> transport
+    -> domain package
 ```
+
+Executable composition roots (for example `cmd/internal/*cfg`) wire adapters, services and transports together; they are not a layer in this chain. Domain packages never import services, and services never import transports or composition roots.
 
 CLI, MCP, REST, and other transports stay thin: parse input, call services, and format results. Do not put provider-domain logic, trade reconstruction, or financial derivation in command handlers when a service/domain boundary exists.
 
