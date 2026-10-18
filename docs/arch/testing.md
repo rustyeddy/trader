@@ -10,6 +10,8 @@ Use a **hybrid** layout:
 - Package-local `testdata/`: fixtures owned and consumed by one package.
 - Small unit-test inputs: prefer inline Go values or table-driven cases over external files.
 
+**Market-data fixtures** must also obey [the provider-first storage contract](market-data-storage.md) beneath their own `data/` root (for example `testdata/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-H1.csv`). This replaces the legacy `testdata/raw/oanda` layout once migration is implemented; do not silently support both layouts.
+
 Keep a fixture at the narrowest location that avoids duplication. Do not copy shared fixture files into several packages merely to simplify relative paths. Do not reorganize existing fixtures solely to make the tree uniform.
 
 Go excludes directories named `testdata` from package discovery; they are not automatically found from every package's working directory. Tests must resolve paths deliberately and portably, without depending on the shell's current directory or developer-specific absolute paths.
@@ -29,7 +31,9 @@ Proposed fixture layout:
 
 ```text
 testdata/
-├── raw/oanda/                 # Existing synthetic market-data fixture
+├── data/oanda/               # Synthetic market-data fixture (migration required)
+│   ├── raw/EURUSD/2024/03/...
+│   └── canonical/EURUSD/2024/03/EURUSD-2024-03-H1.csv
 └── backtest/ema-cross/
     ├── config.yml            # Complete regression run configuration
     └── expected.json         # Stable, verified baseline expectations
