@@ -113,6 +113,15 @@ coverage-html: coverage
 # check is the canonical verification command: it runs every gate CI
 # runs (tidy-check, fmt-check, vet, lint, test, race). Run it before
 # pushing; see docs/workflows/testing.org.
+# test-backtest runs the one-config EMA-cross regression (issue #542) and fails
+# if its stable trading and financial results differ from
+# testdata/backtest/ema-cross/expected.json. After an approved behaviour
+# change, refresh the baseline with
+#   go test ./cmd/trader/backtest -run EMACrossRegression_MatchesExpected -update
+# and review the diff; see docs/arch/testing.md.
+test-backtest:
+	go test -count=1 -run 'TestEMACrossRegression' ./cmd/trader/backtest
+
 check: tidy-check fmt-check vet lint test race
 
-.PHONY: all build install gen-proto fmt fmt-check tidy-check vet test race lint coverage coverage-html check
+.PHONY: all build install gen-proto fmt fmt-check tidy-check vet test test-backtest race lint coverage coverage-html check

@@ -125,7 +125,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.provider, "provider", "", "market data provider name (default: oanda, or market.provider from --config)")
 
 	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "", "directory run snapshots are written to and 'show' reads from (default: backtest.output_dir, TRADER_BACKTEST_OUTPUT_DIR, or "+backtestcfg.DefaultOutputDir+")")
-	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg)
+	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg+" (default: backtest.output_format, TRADER_BACKTEST_OUTPUT_FORMAT, or "+backtestcfg.DefaultOutputFormat+")")
 	cmd.Flags().StringVar(&flags.journal, "journal", "", "optional path to write a durable JSONL journal of this run (adapters/journal/jsonl); path must not already exist")
 
 	// --symbol/--from/--to/--adverse-distance/--data-raw-root are no longer cobra-required:
@@ -231,7 +231,8 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	if err := validateStrategySelection(cmd, flags, cfg, symbols); err != nil {
 		return err
 	}
-	outputDir, err := backtestcfg.LoadOutputDir(os.Environ(), flags.config, changedFlag(cmd, "output-dir", flags.outputDir))
+	out, err := backtestcfg.LoadOutput(os.Environ(), flags.config,
+		changedFlag(cmd, "output-dir", flags.outputDir), changedFlag(cmd, "format", flags.format))
 	if err != nil {
 		return err
 	}
@@ -302,13 +303,13 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		}
 	}
 
-	if err := svcbacktest.NewRunStore(outputDir).Save(rep); err != nil {
+	if err := svcbacktest.NewRunStore(out.Dir).Save(rep); err != nil {
 		return err
 	}
 	if counter != nil {
-		return renderStudy(cmd.OutOrStdout(), flags.format, newStudySummary(rep, counter.signals, flags.journal))
+		return renderStudy(cmd.OutOrStdout(), out.Format, newStudySummary(rep, counter.signals, flags.journal))
 	}
-	return render(cmd.OutOrStdout(), flags.format, rep)
+	return render(cmd.OutOrStdout(), out.Format, rep)
 }
 
 // changedFlag returns value if the flag name was set on cmd, else "".

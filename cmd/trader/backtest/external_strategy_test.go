@@ -116,7 +116,7 @@ func TestVerticalSlice_RunWithStrategyExec(t *testing.T) {
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -182,7 +182,7 @@ func TestVerticalSlice_RunWithStrategyExec_RecordsProvenance(t *testing.T) {
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -270,7 +270,7 @@ func TestVerticalSlice_RunWithStrategyExec_ProcessCrashReportedAsFailure(t *test
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", t.TempDir(),
 	})
@@ -296,7 +296,7 @@ func writeExternalConfig(t *testing.T, extra string) string {
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
-  data_raw_root: testdata/raw/oanda
+  data_raw_root: ` + rawFixtureAbs + `
 ` + market.String() + `backtest:
   currency: USD
   starting_capital: 10000
@@ -405,7 +405,7 @@ func TestRun_StrategyArgsWithoutStrategyExecRejected(t *testing.T) {
 		"run",
 		"--strategy-args", "--verbose",
 		"--symbol", "EURUSD",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 	})
 	err := runCmd.Execute()
 	require.Error(t, err)
@@ -435,7 +435,7 @@ func TestRun_StrategyExecLaunchFailureReportedClearly(t *testing.T) {
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", t.TempDir(),
 	})
@@ -450,7 +450,7 @@ func TestRun_StrategyConfigWithoutStrategyExecRejected(t *testing.T) {
 		"run",
 		"--strategy-config", "strategy.yaml",
 		"--symbol", "EURUSD",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 	})
 	err := runCmd.Execute()
 	require.Error(t, err)
@@ -471,7 +471,7 @@ market:
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
-  data_raw_root: testdata/raw/oanda
+  data_raw_root: ` + rawFixtureAbs + `
 study:
   name: flip-flop
   exec: ` + flipFlopPath + "\n"
@@ -499,7 +499,7 @@ market:
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
-  data_raw_root: testdata/raw/oanda
+  data_raw_root: ` + rawFixtureAbs + `
 study:
   name: study-scanner
   exec: ` + studyScannerPath + "\n"
@@ -575,7 +575,7 @@ market:
   interval: H1
   from: 2024-01-08T00:00:00Z
   to: 2024-01-08T04:00:00Z
-  data_raw_root: testdata/raw/oanda
+  data_raw_root: ` + rawFixtureAbs + `
 study:
   name: from-file
   exec: ` + flipFlopPath + "\n"

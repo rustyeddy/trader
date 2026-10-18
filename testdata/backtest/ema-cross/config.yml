@@ -1,0 +1,37 @@
+# One-config EMA-cross regression baseline (issue #542).
+#
+# Run from the repository root with this file as the only argument:
+#
+#   go run ./cmd/trader backtest run --config ./testdata/backtest/ema-cross/config.yml
+#
+# Every path below is relative to this file, so the run is the same from any
+# working directory. It reads only the repository's synthetic fixture and
+# never touches /srv/trading. See docs/arch/testing.md.
+kind: backtest
+
+market:
+  symbols: EURUSD
+  interval: H1
+  from: 2024-03-04T00:00:00Z
+  to: 2024-03-04T14:00:00Z
+  provider: oanda
+  # The shared synthetic raw archive (provider-first layout).
+  data_raw_root: ../../data/oanda/raw
+  # Empty means a fresh temporary canonical store for every run, so no state
+  # survives between runs. Omitting this key would select the production default.
+  data_store_root: ""
+
+backtest:
+  starting_capital: 10000
+  currency: USD
+  risk_fraction: 0.01
+  adverse_distance: 0.01000
+  initial_margin_ratio: 0.25
+  # Run snapshots; gitignored, never committed.
+  output_dir: out
+  output_format: json
+
+strategy:
+  name: ema-cross
+  fast_period: 3
+  slow_period: 5

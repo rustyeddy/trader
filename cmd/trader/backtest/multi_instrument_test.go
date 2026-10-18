@@ -43,7 +43,7 @@ func runMultiInstrumentBacktest(t *testing.T, outputDir, dataStoreRoot string, s
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", dataStoreRoot,
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -141,7 +141,7 @@ func TestVerticalSlice_MultiInstrumentRun_RejectsDuplicateSymbol(t *testing.T) {
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--output-dir", t.TempDir(),
 	})
 
@@ -169,7 +169,7 @@ func TestVerticalSlice_MultiInstrumentRun_RejectsCaseInsensitiveDuplicate(t *tes
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--output-dir", t.TempDir(),
 	})
 

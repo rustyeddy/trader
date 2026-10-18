@@ -1,0 +1,311 @@
+{
+  "account": {
+    "as_of": "2024-03-04T13:00:00Z",
+    "broker": "sim",
+    "buying_power": {
+      "amount": "29038.38",
+      "currency": "USD"
+    },
+    "cash_balances": [
+      {
+        "amount": "9996",
+        "currency": "USD"
+      }
+    ],
+    "currency": "USD",
+    "equity": {
+      "amount": "10005.996",
+      "currency": "USD"
+    },
+    "fees": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "financing": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "margin_available": {
+      "amount": "7259.595",
+      "currency": "USD"
+    },
+    "margin_used": {
+      "amount": "2746.401",
+      "currency": "USD"
+    },
+    "open_order_count": 0,
+    "open_positions": [
+      {
+        "avg_price": "1.1",
+        "instrument": "fx:EUR/USD",
+        "provider": "sim",
+        "quantity": "9996",
+        "side": "short"
+      }
+    ],
+    "realized_pnl": {
+      "amount": "-4",
+      "currency": "USD"
+    },
+    "unrealized_pnl": {
+      "amount": "9.996",
+      "currency": "USD"
+    }
+  },
+  "by_side": [
+    {
+      "costs": {
+        "amount": "0",
+        "currency": "USD"
+      },
+      "count": 1,
+      "gross_pnl": {
+        "amount": "-4",
+        "currency": "USD"
+      },
+      "losses": 1,
+      "net_pnl": {
+        "amount": "-4",
+        "currency": "USD"
+      },
+      "side": "long",
+      "wins": 0
+    }
+  ],
+  "closed_trades": [
+    {
+      "closed_at": "2024-03-04T12:00:00Z",
+      "costs": {
+        "amount": "0",
+        "currency": "USD"
+      },
+      "instrument": "fx:EUR/USD",
+      "opened_at": "2024-03-04T07:00:00Z",
+      "provider": "sim",
+      "realized_pnl": {
+        "amount": "-4",
+        "currency": "USD"
+      },
+      "side": "long"
+    }
+  ],
+  "dataset": [
+    {
+      "instrument": "fx:EUR/USD",
+      "interval": "H1",
+      "provider": "oanda",
+      "span_end": "2024-04-01T00:00:00Z",
+      "span_start": "2024-03-01T00:00:00Z"
+    }
+  ],
+  "equity_curve": [
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T00:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T00:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T01:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T02:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T03:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T04:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T05:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T06:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10004",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T07:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10008",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T08:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10006",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T09:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10001",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T10:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "9996",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T11:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10000.998",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T12:00:00Z"
+    },
+    {
+      "equity": {
+        "amount": "10005.996",
+        "currency": "USD"
+      },
+      "timestamp": "2024-03-04T13:00:00Z"
+    }
+  ],
+  "margin": {
+    "admission_rejection_count": 0,
+    "fill_rejection_count": 0,
+    "initial_margin_ratio": "0.25",
+    "margin_rejection_count": 0,
+    "peak_gross_leverage": "1.10044018",
+    "peak_gross_notional": {
+      "amount": "11012",
+      "currency": "USD"
+    }
+  },
+  "open_trades": [
+    {
+      "costs": {
+        "amount": "0",
+        "currency": "USD"
+      },
+      "instrument": "fx:EUR/USD",
+      "opened_at": "2024-03-04T12:00:00Z",
+      "provider": "sim",
+      "realized_pnl": {
+        "amount": "0",
+        "currency": "USD"
+      },
+      "side": "short"
+    }
+  ],
+  "per_instrument": [
+    {
+      "costs": {
+        "amount": "0",
+        "currency": "USD"
+      },
+      "count": 1,
+      "gross_pnl": {
+        "amount": "-4",
+        "currency": "USD"
+      },
+      "instrument": "fx:EUR/USD",
+      "losses": 1,
+      "net_pnl": {
+        "amount": "-4",
+        "currency": "USD"
+      },
+      "provider": "sim",
+      "wins": 0
+    }
+  ],
+  "performance": {
+    "final_equity": {
+      "amount": "10005.996",
+      "currency": "USD"
+    },
+    "max_drawdown": "0.00119904",
+    "net_return": "0.0005996",
+    "starting_capital": {
+      "amount": "10000",
+      "currency": "USD"
+    }
+  },
+  "run": {
+    "span_end": "2024-03-04T14:00:00Z",
+    "span_start": "2024-03-04T00:00:00Z",
+    "strategy_name": "ema-cross",
+    "strategy_parameters": {
+      "allowed_side": "both",
+      "fast_period": 3,
+      "slow_period": 5
+    },
+    "strategy_version": "v0"
+  },
+  "trade_stats": {
+    "account_fees": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "average_loss": {
+      "amount": "-4",
+      "currency": "USD"
+    },
+    "average_win": null,
+    "closed_trade_costs": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "expectancy": {
+      "amount": "-4",
+      "currency": "USD"
+    },
+    "gross_pnl": {
+      "amount": "-4",
+      "currency": "USD"
+    },
+    "losses": 1,
+    "net_pnl": {
+      "amount": "-4",
+      "currency": "USD"
+    },
+    "profit_factor": "0",
+    "trade_count": 1,
+    "win_rate": "0",
+    "wins": 0
+  }
+}

@@ -27,7 +27,7 @@ Go excludes directories named `testdata` from package discovery; they are not au
 
 The EMA-cross regression is the reference example; see [issue #542](https://github.com/rustyeddy/trader/issues/542).
 
-Proposed fixture layout:
+Fixture layout:
 
 ```text
 testdata/
@@ -47,7 +47,7 @@ go run ./cmd/trader backtest run --config ./testdata/backtest/ema-cross/config.y
 
 For this regression, **`--config` is the only CLI flag**: strategy, period, account/risk settings, fixture paths, output location/format, and other required settings come from the YAML. Paths must resolve consistently and remain portable; the run must not fall back to production data roots.
 
-The intended `make test-backtest` target runs the regression unattended and compares actual results against `expected.json`. These files/target are **requirements of #542**, not claims that they already exist.
+`make test-backtest` runs the regression unattended and compares the run's stable results against `expected.json`. The shared raw fixture is `testdata/data/oanda/raw`, which the loader reads directly as a raw root. No canonical fixture is checked in: the config selects a fresh temporary canonical store (`data_store_root: ""`), because the canonical store's own layout is still the legacy one and moves with the storage migration. Paths written in a config file resolve against that file, and the config's snapshots go to a gitignored `out/` beside it; the automated test stages a copy so even those land in a temporary directory.
 
 ## Baseline assertions and updates
 

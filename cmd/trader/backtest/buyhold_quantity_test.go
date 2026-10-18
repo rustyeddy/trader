@@ -27,7 +27,7 @@ func buyHoldArgs(t *testing.T, journalPath string, extra ...string) []string {
 		"--starting-cash", "10000",
 		"--currency", "USD",
 		"--adverse-distance", "0.01000", // required by config; unused in quantity mode
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", t.TempDir(),
 		"--format", "json",
@@ -105,8 +105,8 @@ func TestBuyHoldQuantity_BaselineOpensUnleveredAndHoldsToRunEnd(t *testing.T) {
 
 	// Decided on the 00:00 bar, filled at the 01:00 open; valued at the
 	// last bar's (11:00) close.
-	fill := fillBarFor(t, "testdata/raw/oanda", "2024-01-08T01:00:00Z").Open
-	last := fillBarFor(t, "testdata/raw/oanda", "2024-01-08T11:00:00Z").Close
+	fill := fillBarFor(t, rawFixtureRoot, "2024-01-08T01:00:00Z").Open
+	last := fillBarFor(t, rawFixtureRoot, "2024-01-08T11:00:00Z").Close
 	qty := num.MustParseQuantity("8500")
 	cost, err := fill.MulQuantity(qty, num.MustParseCurrency("USD"))
 	require.NoError(t, err)
@@ -129,8 +129,8 @@ func TestBuyHoldQuantity_SellDateExits(t *testing.T) {
 	// Exit decided on the 06:00 bar, filled at the 07:00 open.
 	assert.True(t, r.ClosedTrades[0].ClosedAt.Equal(time.Date(2024, 1, 8, 7, 0, 0, 0, time.UTC)))
 
-	entry := fillBarFor(t, "testdata/raw/oanda", "2024-01-08T01:00:00Z").Open
-	exit := fillBarFor(t, "testdata/raw/oanda", "2024-01-08T07:00:00Z").Open
+	entry := fillBarFor(t, rawFixtureRoot, "2024-01-08T01:00:00Z").Open
+	exit := fillBarFor(t, rawFixtureRoot, "2024-01-08T07:00:00Z").Open
 	qty := num.MustParseQuantity("8500")
 	in, err := entry.MulQuantity(qty, num.MustParseCurrency("USD"))
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ strategy:
   buy_date: 2024-01-08T02:00:00Z
   sell_date: 2024-01-08T08:00:00Z
 `)
-	r := runBuyHold(t, []string{"run", "--config", configPath, "--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir(), "--format", "json"})
+	r := runBuyHold(t, []string{"run", "--config", configPath, "--data-raw-root", rawFixtureRoot, "--data-store-root", t.TempDir(), "--output-dir", t.TempDir(), "--format", "json"})
 	assert.JSONEq(t, `{"name":"buy-and-hold","mode":"quantity","quantity":"8500","buy_date":"2024-01-08T02:00:00Z","sell_date":"2024-01-08T08:00:00Z"}`, string(r.Run.StrategyParameters))
 	require.Len(t, r.ClosedTrades, 1)
 	assert.True(t, r.ClosedTrades[0].OpenedAt.Equal(time.Date(2024, 1, 8, 3, 0, 0, 0, time.UTC)))
@@ -278,7 +278,7 @@ strategy:
   name: buy-and-hold
   quantity: 0
 `)
-		_, err := runReport(t, []string{"run", "--config", configPath, "--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir()})
+		_, err := runReport(t, []string{"run", "--config", configPath, "--data-raw-root", rawFixtureRoot, "--data-store-root", t.TempDir(), "--output-dir", t.TempDir()})
 		require.ErrorContains(t, err, "strategy.quantity must be positive")
 	})
 	t.Run("environment", func(t *testing.T) {

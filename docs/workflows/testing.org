@@ -18,6 +18,10 @@ CI (=.github/workflows/ci.yml=) runs each of these targets as a separate step
 so a failure names the gate; it must stay equivalent to =make check=.  Add new
 gates to the Makefile first, then to =check= and CI together.
 
+=make test-backtest= runs the one-config EMA-cross regression
+(=testdata/backtest/ema-cross=, [[../arch/testing.md][docs/arch/testing.md]]).  It is part of =make test=; run it alone while
+refactoring backtest orchestration.
+
 *** When to run what
 
 - Before pushing, and before saying work is done: run full =make check=.

@@ -56,7 +56,7 @@ backtest:
 	runCmd.SetArgs([]string{
 		"run",
 		"--config", configPath,
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -97,7 +97,7 @@ backtest:
 		"run",
 		"--config", configPath,
 		"--starting-cash", "10000", // overrides the file's starting_capital: 1
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -147,7 +147,7 @@ strategy:
 	runCmd.SetArgs([]string{
 		"run",
 		"--config", configPath,
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 	})
 	err := runCmd.Execute()
@@ -177,7 +177,7 @@ backtest:
 		"--config", configPath,
 		"--symbol", "EURUSD",
 		"--symbol", "GBPUSD",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 	})
 	err := runCmd.Execute()
@@ -222,7 +222,7 @@ strategy:
 	runCmd.SetArgs([]string{
 		"run",
 		"--config", configPath,
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -277,7 +277,7 @@ strategy:
 	runCmd.SetArgs([]string{
 		"run",
 		"--config", configPath,
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 	})
 	err := runCmd.Execute()
@@ -319,7 +319,7 @@ backtest:
 	runCmd.SetArgs([]string{
 		"run",
 		"--config", configPath,
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -385,7 +385,7 @@ strategy:
 	runCmd.SetArgs([]string{
 		"run",
 		"--config", configPath,
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -421,7 +421,7 @@ func TestRunCLI_StrategyNameFlagSelectsStrategyWithoutConfig(t *testing.T) {
 		"--from", "2024-03-04T00:00:00Z", "--to", "2024-03-04T14:00:00Z",
 		"--adverse-distance", "0.01000", "--initial-margin-ratio", "0.25",
 		"--strategy-name", "ema-cross", "--fast-period", "3", "--slow-period", "5",
-		"--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(),
+		"--data-raw-root", rawFixtureRoot, "--data-store-root", t.TempDir(),
 		"--output-dir", t.TempDir(), "--format", "json",
 	})
 	require.NoError(t, runCmd.Execute())
@@ -446,7 +446,7 @@ func TestRunCLI_EMACrossRejectsSeveralSymbols(t *testing.T) {
 		"run", "--symbol", "EURUSD", "--symbol", "GBPUSD", "--interval", "H1",
 		"--from", "2024-01-08T00:00:00Z", "--to", "2024-01-08T04:00:00Z",
 		"--adverse-distance", "0.01000", "--strategy-name", "ema-cross", "--fast-period", "3", "--slow-period", "5",
-		"--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
+		"--data-raw-root", rawFixtureRoot, "--data-store-root", t.TempDir(), "--output-dir", t.TempDir(),
 	})
 	assert.ErrorContains(t, runCmd.Execute(), "ema-cross trades exactly one instrument; got 2 symbols")
 }
