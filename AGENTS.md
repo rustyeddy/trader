@@ -68,6 +68,13 @@ CLI, MCP, REST, and other transports stay thin: parse input, call services, and 
 
 Provider-specific behavior belongs in adapters/configuration boundaries, not provider-neutral domain packages.
 
+## Market data storage
+
+- **Mandatory:** use the provider-first path contract in `docs/arch/market-data-storage.md` for all persisted price data, including test fixtures: `data/<source>/{raw,canonical}/<instrument>/<YYYY>/<MM>/...`.
+- Raw is the original downloaded provider payload; canonical means normalized format, **not** interchangeable price values across providers.
+- Use the shared resolver when available; never construct competing layouts or silently fall back to another source or the old stage-first layout.
+- See `docs/arch/testing.md` for fixture ownership and regression conventions.
+
 ## Financial and provenance rules
 
 - Never use binary floating point for canonical financial values.
