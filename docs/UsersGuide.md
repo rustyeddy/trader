@@ -567,6 +567,13 @@ working directory as before. An explicitly empty `market.data_store_root: ""`
 means a fresh temporary store for each run; leaving it out selects the
 production default.
 
+**`isolate_environment: true`** (a top-level key) makes a config mean exactly
+what it says: no `TRADER_*` environment variable is consulted for that run, so
+nothing exported can redirect its fixture, store, output directory or format.
+Flags typed on the command line still apply. Ordinary configs leave it out and
+keep the usual precedence of flag over environment over file. It is meant for
+self-contained regressions such as `testdata/backtest/ema-cross/config.yml`.
+
 `strategy.name` (or `--strategy-name`, or `TRADER_STRATEGY_NAME`) selects the
 strategy however it is supplied; `--config` is not required to choose
 `ema-cross`. The market data a run builds and reads uses the provider's own

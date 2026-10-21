@@ -49,6 +49,10 @@ For this regression, **`--config` is the only CLI flag**: strategy, period, acco
 
 `make test-backtest` runs the regression unattended and compares the run's stable results against `expected.json`. The shared raw fixture is `testdata/data/oanda/raw`, which the loader reads directly as a raw root. No canonical fixture is checked in: the config selects a fresh temporary canonical store (`data_store_root: ""`), because the canonical store's own layout is still the legacy one and moves with the storage migration. Paths written in a config file resolve against that file, and the config's snapshots go to a gitignored `out/` beside it; the automated test stages a copy so even those land in a temporary directory.
 
+The config declares `isolate_environment: true`, so the documented `--config`-only invocation ignores every `TRADER_*` variable (a different raw root, the production store, another output directory or format) without changing the precedence of ordinary runs; flags typed on the command line still apply. The tests export hostile variables and run both in-process and through `go run`, and assert none of them is used.
+
+`expected.json` is a **behavioural regression snapshot of the current execution model, not evidence that its fill prices are economically realistic**. It is the safety net for #539 and #531, where an intended change shows up as a reviewed diff.
+
 ## Baseline assertions and updates
 
 Assert behavior, not just successful execution. Include strategy identity, ordered trade direction and counts, fill prices, position sizes, realized P/L, and final equity where available. Capture expected financial numbers from a verified pre-refactor execution; never invent them.

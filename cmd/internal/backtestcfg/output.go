@@ -54,11 +54,16 @@ func LoadOutput(environ []string, filePath, dirOverride, formatOverride string) 
 		FilePath:  filePath,
 		Overrides: overrides,
 	}
+	doc := readDocument(opts)
+	opts, err := withIsolation(opts, doc)
+	if err != nil {
+		return Output{}, err
+	}
 	cfg, err := config.Load[outputConfig](opts)
 	if err != nil {
 		return Output{}, err
 	}
-	dir := fileRelative(opts, readDocument(opts), "backtest", "output_dir", "output-dir", cfg.Backtest.OutputDir)
+	dir := fileRelative(opts, doc, "backtest", "output_dir", "output-dir", cfg.Backtest.OutputDir)
 	return Output{Dir: dir, Format: cfg.Backtest.OutputFormat}, nil
 }
 

@@ -109,6 +109,10 @@ func LoadRunConfig(opts config.Options) (RunConfig, error) {
 	if err := rejectLegacyKeys(doc); err != nil {
 		return RunConfig{}, err
 	}
+	opts, err := withIsolation(opts, doc)
+	if err != nil {
+		return RunConfig{}, err
+	}
 	kind := effectiveKind(opts, doc)
 	if kind == KindStudy {
 		opts.Overrides = routeStudyOverrides(opts.Overrides)

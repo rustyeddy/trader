@@ -7,7 +7,18 @@
 # Every path below is relative to this file, so the run is the same from any
 # working directory. It reads only the repository's synthetic fixture and
 # never touches /srv/trading. See docs/arch/testing.md.
+#
+# expected.json is a behavioural regression snapshot of the current execution
+# model, not evidence that these fill prices are economically realistic. It
+# exists so refactors (#539) and deliberate execution changes (#531) show up
+# as a reviewed diff.
 kind: backtest
+
+# This document means what it says whatever the developer has exported: no
+# TRADER_* variable can redirect its fixture, store, output or format (for
+# example to production storage). Ordinary configs omit this and keep the usual
+# flag > environment > file precedence.
+isolate_environment: true
 
 market:
   symbols: EURUSD

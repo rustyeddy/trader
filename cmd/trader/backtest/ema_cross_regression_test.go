@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,28 +70,12 @@ func copyTree(t *testing.T, from, to string) {
 // "backtest run --config <file>" and nothing else.
 func runRegression(t *testing.T, configPath string) []byte {
 	t.Helper()
-	isolateEnvironment(t)
 	cmd := cmdbacktest.New()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"run", "--config", configPath})
 	require.NoError(t, cmd.Execute())
 	return out.Bytes()
-}
-
-// isolateEnvironment removes every TRADER_* variable for the test, so a
-// developer's own settings (a raw root, a store root, an output directory)
-// cannot change what the regression reads or writes. They come back afterwards.
-func isolateEnvironment(t *testing.T) {
-	t.Helper()
-	for _, kv := range os.Environ() {
-		name, value, _ := strings.Cut(kv, "=")
-		if !strings.HasPrefix(name, "TRADER_") {
-			continue
-		}
-		require.NoError(t, os.Unsetenv(name))
-		t.Cleanup(func() { _ = os.Setenv(name, value) })
-	}
 }
 
 // stable projects a run report onto the figures that must not change: what
@@ -200,7 +185,7 @@ func TestEMACrossRegression_BaselineCoversTheRequiredFacts(t *testing.T) {
 // to a directory beside itself.
 func TestEMACrossRegression_ConfigIsSelfContained(t *testing.T) {
 	configPath := filepath.Join(regressionDir, "config.yml")
-	cfg, err := backtestcfg.LoadRunConfig(config.Options{EnvPrefix: "TRADER", Environ: nil, FilePath: configPath})
+	cfg, err := backtestcfg.LoadRunConfig(config.Options{EnvPrefix: "TRADER", Environ: []string{}, FilePath: configPath})
 	require.NoError(t, err)
 
 	want, err := filepath.Abs(rawFixtureRoot)
@@ -210,7 +195,7 @@ func TestEMACrossRegression_ConfigIsSelfContained(t *testing.T) {
 	assert.Equal(t, want, gotRaw, "data_raw_root must resolve to the shared fixture")
 	assert.Empty(t, cfg.Market.DataStoreRoot, "an empty store root means a fresh temporary store; a value or the default would persist state")
 
-	out, err := backtestcfg.LoadOutput(nil, configPath, "", "")
+	out, err := backtestcfg.LoadOutput([]string{}, configPath, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "json", out.Format)
 	assert.Equal(t, filepath.Join(regressionDir, "out"), out.Dir)
@@ -222,13 +207,63 @@ func TestEMACrossRegression_ConfigIsSelfContained(t *testing.T) {
 }
 
 // Running the regression leaves the source tree as it found it.
-// A developer's TRADER_* settings must not leak into the regression.
-func TestEMACrossRegression_IgnoresTheDevelopersEnvironment(t *testing.T) {
-	want := stable(t, runRegression(t, stagedRegression(t)))
-	t.Setenv("TRADER_MARKET_DATA_RAW_ROOT", "/nonexistent")
-	t.Setenv("TRADER_MARKET_DATA_STORE_ROOT", "/srv/trading/data/canonical")
+// hostileEnvironment is what a developer might have exported: a different raw
+// root, the production canonical store, another output directory and format.
+// None of it may reach the regression, and it is not removed for the test: the
+// config's own isolation is what is being proved.
+func hostileEnvironment(t *testing.T) (rawRoot, storeRoot, outDir string) {
+	t.Helper()
+	base := t.TempDir()
+	rawRoot, storeRoot, outDir = filepath.Join(base, "hostile-raw"), filepath.Join(base, "hostile-store"), filepath.Join(base, "hostile-out")
+	t.Setenv("TRADER_MARKET_DATA_RAW_ROOT", rawRoot)
+	t.Setenv("TRADER_MARKET_DATA_STORE_ROOT", storeRoot)
+	t.Setenv("TRADER_BACKTEST_OUTPUT_DIR", outDir)
 	t.Setenv("TRADER_BACKTEST_OUTPUT_FORMAT", "table")
-	assert.Equal(t, string(want), string(stable(t, runRegression(t, stagedRegression(t)))))
+	t.Setenv("TRADER_BACKTEST_INITIAL_MARGIN_RATIO", "1")
+	t.Setenv("TRADER_STRATEGY_FAST_PERIOD", "7")
+	return rawRoot, storeRoot, outDir
+}
+
+func assertUntouched(t *testing.T, paths ...string) {
+	t.Helper()
+	for _, p := range paths {
+		_, err := os.Stat(p)
+		assert.True(t, os.IsNotExist(err), "%s was created: the environment reached the regression", p)
+	}
+}
+
+// The advertised invocation is "backtest run --config <file>" and nothing
+// else, so it must give the same results, and touch only the same places,
+// with hostile TRADER_* variables exported.
+func TestEMACrossRegression_HostileEnvironmentDoesNotReachTheRun(t *testing.T) {
+	raw, store, out := hostileEnvironment(t)
+	got := stable(t, runRegression(t, stagedRegression(t)))
+	want, err := os.ReadFile(filepath.Join(regressionDir, "expected.json"))
+	require.NoError(t, err)
+	assert.Equal(t, string(want), string(got))
+	assertUntouched(t, raw, store, out)
+}
+
+// The same through the real binary, the way a developer runs it, so no
+// in-process shortcut can stand in for the advertised command.
+func TestEMACrossRegression_RealCommandWithHostileEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the real command")
+	}
+	raw, store, out := hostileEnvironment(t)
+	staged := stagedRegression(t)
+
+	cmd := exec.Command("go", "run", "./cmd/trader", "backtest", "run", "--config", staged)
+	cmd.Dir = "../../.."
+	cmd.Env = os.Environ()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	require.NoError(t, cmd.Run(), stderr.String())
+
+	want, err := os.ReadFile(filepath.Join(regressionDir, "expected.json"))
+	require.NoError(t, err)
+	assert.Equal(t, string(want), string(stable(t, stdout.Bytes())))
+	assertUntouched(t, raw, store, out)
 }
 
 func TestEMACrossRegression_DoesNotWriteIntoTheSourceTree(t *testing.T) {
