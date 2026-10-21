@@ -26,7 +26,7 @@ import (
 // happens to have entry-bar-close == fill-bar-open (a continuous
 // synthetic series), which let an earlier version of this file's bug
 // — pricing every fill at the entry bar's own Close — pass unnoticed.
-// This fixture (testdata/raw/oanda/EURUSD/2024/02) is deliberately
+// This fixture (testdata/data/oanda/raw/EURUSD/2024/02) is deliberately
 // gapped: 2024-02-01T00:00's bid close (1.20010) differs from
 // 2024-02-01T01:00's bid open (1.21000), so a wrong implementation
 // returning the entry bar's Close is distinguishable from the correct
@@ -88,7 +88,7 @@ func TestNextBarOpenAfterEntry_AccountsForWarmupBars(t *testing.T) {
 }
 
 // newGappedFixtureManager returns a *marketdata.Manager over
-// testdata/raw/oanda's deliberately gapped February fixture.
+// testdata/data/oanda/raw's deliberately gapped February fixture.
 func newGappedFixtureManager(t *testing.T) (*marketruntime.Manager, instrument.ID) {
 	t.Helper()
 
@@ -343,4 +343,4 @@ func TestFileContentDigest_CanceledContextFailsFast(t *testing.T) {
 // cliTestdataRaw is the backtest CLI's committed raw fixture archive,
 // shared by these tests (which moved here from cmd/trader/backtest with
 // the code they test, issue #453) rather than copied.
-const cliTestdataRaw = "../../trader/backtest/testdata/raw/oanda"
+const cliTestdataRaw = "../../../testdata/data/oanda/raw"

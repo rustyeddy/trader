@@ -487,7 +487,7 @@ There are three strategy paths:
 | `--strategy-config`  | —                               | path to a config file for the external executable (see below); or `strategy.config` in `--config` |
 | `--journal`          | —                               | optional path to write a durable JSONL audit trail; path must not already exist        |
 | `--output-dir`       | `./backtest-runs`               | where run snapshots are written / `show` reads from; also `TRADER_BACKTEST_OUTPUT_DIR` or `backtest.output_dir` in `--config` (the flag wins, then the environment, then the file). `trader-mcp` resolves the same setting, so either can read the other's runs |
-| `--format`           | `table`                         | `table`, `json`, or `org`                                                              |
+| `--format`           | `table`                         | `table`, `json`, or `org`; also `TRADER_BACKTEST_OUTPUT_FORMAT` or `backtest.output_format` in `--config` (the flag wins, then the environment, then the file) |
 
 \* The `/srv/trading/data/canonical` default is this repository's own local
 operational choice (issue #268) — a fresh clone on another machine should
@@ -553,10 +553,26 @@ tag backing them — see [Environment Variables](#environment-variables))
 is: explicit CLI flag > `TRADER_*` environment variable (`TRADER_MARKET_*`,
 `TRADER_BACKTEST_*`, `TRADER_STUDY_*`, `TRADER_STRATEGY_*`, `TRADER_KIND`) >
 `--config` file value > the default shown above.
-`--journal`, `--format`, and `--warmup-bars` are plain CLI flags with no
+`--journal` and `--warmup-bars` are plain CLI flags with no
 `--config`/environment-variable backing at all — see the flag table above
 for which is which. `--output-dir` is shared with `show` and `trader-mcp`:
 see its row in the flag table.
+
+**Paths in a config file are relative to that file.** `market.data_raw_root`,
+`market.data_store_root` and `backtest.output_dir`, when written in the config
+file, resolve against the file's own directory, so a checked-in config runs the
+same from any working directory. Absolute paths are used as written, and a
+value from a flag, an environment variable or a default is relative to the
+working directory as before. An explicitly empty `market.data_store_root: ""`
+means a fresh temporary store for each run; leaving it out selects the
+production default.
+
+**`isolate_environment: true`** (a top-level key) makes a config mean exactly
+what it says: no `TRADER_*` environment variable is consulted for that run, so
+nothing exported can redirect its fixture, store, output directory or format.
+Flags typed on the command line still apply. Ordinary configs leave it out and
+keep the usual precedence of flag over environment over file. It is meant for
+self-contained regressions such as `testdata/backtest/ema-cross/config.yml`.
 
 `strategy.name` (or `--strategy-name`, or `TRADER_STRATEGY_NAME`) selects the
 strategy however it is supplied; `--config` is not required to choose

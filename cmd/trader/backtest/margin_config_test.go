@@ -33,7 +33,7 @@ func marginRunArgs(t *testing.T, journalPath string, extra ...string) []string {
 		"--starting-cash", "10000",
 		"--currency", "USD",
 		"--adverse-distance", "0.01000",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", t.TempDir(),
 		"--format", "json",
@@ -197,7 +197,7 @@ backtest:
   initial_margin_ratio: 0
 
 `)
-		_, err := runReport(t, []string{"run", "--config", configPath, "--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(), "--output-dir", t.TempDir()})
+		_, err := runReport(t, []string{"run", "--config", configPath, "--data-raw-root", rawFixtureRoot, "--data-store-root", t.TempDir(), "--output-dir", t.TempDir()})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "backtest.initial_margin_ratio must be positive")
 	})

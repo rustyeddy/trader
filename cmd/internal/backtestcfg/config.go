@@ -109,6 +109,10 @@ func LoadRunConfig(opts config.Options) (RunConfig, error) {
 	if err := rejectLegacyKeys(doc); err != nil {
 		return RunConfig{}, err
 	}
+	opts, err := withIsolation(opts, doc)
+	if err != nil {
+		return RunConfig{}, err
+	}
 	kind := effectiveKind(opts, doc)
 	if kind == KindStudy {
 		opts.Overrides = routeStudyOverrides(opts.Overrides)
@@ -120,6 +124,8 @@ func LoadRunConfig(opts config.Options) (RunConfig, error) {
 	if err := checkSections(kind, presentKeys(opts, doc)); err != nil {
 		return cfg, err
 	}
+	cfg.Market.DataRawRoot = fileRelative(opts, doc, "market", "data_raw_root", "data-raw-root", cfg.Market.DataRawRoot)
+	cfg.Market.DataStoreRoot = fileRelative(opts, doc, "market", "data_store_root", "data-store-root", cfg.Market.DataStoreRoot)
 	if cfg.IsStudy() && cfg.Study.Config == "" {
 		cfg.Study.Config = opts.FilePath
 	}

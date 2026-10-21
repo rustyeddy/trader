@@ -63,7 +63,7 @@ func TestVerticalSlice_RunThenShow(t *testing.T) {
 		// 0.01 adverse distance); it tests pipeline mechanics, not
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -141,7 +141,7 @@ func TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar(t
 		// margin, so it opts into leverage explicitly (ADR-066).
 		"--initial-margin-ratio", "0.25",
 		"--warmup-bars", "1",
-		"--data-raw-root", "testdata/raw/oanda",
+		"--data-raw-root", rawFixtureRoot,
 		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
@@ -162,7 +162,7 @@ func TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar(t
 	require.Len(t, doc.OpenTrades, 1, "the demo strategy must still trade once warm-up has cleared:\n%s", runOut.String())
 	require.Len(t, doc.Account.OpenPositions, 1)
 
-	expectedFillBar := fillBarFor(t, "testdata/raw/oanda", "2024-02-01T02:00:00Z")
+	expectedFillBar := fillBarFor(t, rawFixtureRoot, "2024-02-01T02:00:00Z")
 
 	assert.True(t, doc.OpenTrades[0].OpenedAt.Equal(expectedFillBar.Time),
 		"expected the fill to be timestamped at bar index 2 (%s), got %s", expectedFillBar.Time, doc.OpenTrades[0].OpenedAt)
@@ -257,7 +257,7 @@ func TestVerticalSlice_OutputDirFromEnvironment(t *testing.T) {
 		"run", "--symbol", "EURUSD", "--interval", "H1",
 		"--from", "2024-01-08T00:00:00Z", "--to", "2024-01-08T04:00:00Z",
 		"--adverse-distance", "0.01000", "--initial-margin-ratio", "0.25",
-		"--data-raw-root", "testdata/raw/oanda", "--data-store-root", t.TempDir(),
+		"--data-raw-root", rawFixtureRoot, "--data-store-root", t.TempDir(),
 		"--format", "json",
 	})
 	require.NoError(t, runCmd.Execute())

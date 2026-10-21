@@ -32,6 +32,42 @@ func readDocument(opts config.Options) map[string]any {
 	return doc
 }
 
+// isolateKey is the top-level key with which a document opts out of the
+// process environment. It exists for a self-contained regression whose config
+// must mean the same thing whatever the developer has exported: a value in the
+// file then cannot be redirected by a TRADER_* variable (for example to
+// production storage). Ordinary configs do not set it and keep the usual
+// precedence, flag over environment over file. Flags typed on the command line
+// still apply, since the caller wrote them for this run.
+const isolateKey = "isolate_environment"
+
+// isolation reports whether doc opts out of the environment, and rejects a
+// value that is not a boolean rather than treating it as off.
+func isolation(doc map[string]any) (bool, error) {
+	v, ok := doc[isolateKey]
+	if !ok {
+		return false, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s must be true or false, got %v", isolateKey, v)
+	}
+	return b, nil
+}
+
+// withIsolation returns opts with an empty environment when doc opted out of
+// it, so config.Load and every provenance check see no TRADER_* variables.
+func withIsolation(opts config.Options, doc map[string]any) (config.Options, error) {
+	on, err := isolation(doc)
+	if err != nil {
+		return opts, err
+	}
+	if on {
+		opts.Environ = []string{}
+	}
+	return opts, nil
+}
+
 // legacyMarketKeys are the pre-#474 backtest.* keys that moved to market.*.
 var legacyMarketKeys = []string{
 	"symbol", "symbols", "interval", "from", "to", "provider", "data_raw_root", "data_store_root",
@@ -174,9 +210,17 @@ func presentKeys(opts config.Options, doc map[string]any) map[string]bool {
 	return out
 }
 
+// environ is the environment the loader will actually consult: opts.Environ,
+// or the process environment when it is nil, exactly as config.Load decides.
+// An explicitly empty, non-nil slice is an empty environment, so provenance
+// checks and loading always agree on what the environment was.
 func environ(opts config.Options) map[string]string {
-	out := make(map[string]string, len(opts.Environ))
-	for _, kv := range opts.Environ {
+	kv := opts.Environ
+	if kv == nil {
+		kv = os.Environ()
+	}
+	out := make(map[string]string, len(kv))
+	for _, kv := range kv {
 		if name, value, ok := strings.Cut(kv, "="); ok {
 			out[name] = value
 		}

@@ -17,7 +17,7 @@ import (
 )
 
 // cliFixtureRaw is the backtest CLI's committed EURUSD raw fixture.
-const cliFixtureRaw = "../trader/backtest/testdata/raw/oanda"
+const cliFixtureRaw = "../../testdata/data/oanda/raw"
 
 // backtestServer serves trader-mcp over storeRoot, the CLI's raw fixture,
 // and outputDir, returning a client session.
