@@ -1,0 +1,105 @@
+#+title: Trader — Architecture North Star
+#+startup: overview
+
+* Purpose and Principles
+
+Trader is a personal trading system for historical data, strategy research,
+backtesting, paper/live execution, and reviewing trades. Preserve working
+functionality while making it understandable and maintainable by one Go
+developer.
+
+- Design package APIs and GoDoc examples *before* refactoring implementations.
+  A developer should be able to use a package without reading its source.
+- Favor a few cohesive packages, concrete types, ordinary functions, and
+  explicit errors. Introduce interfaces only for demonstrated boundaries.
+- Prefer removing indirection to moving it. No gratuitous factories,
+  registries, managers, or forwarding service layers.
+- CLI, gRPC, REST, WebSocket/SSE, and MCP transports stay thin: parse input,
+  call an API, render output. No application logic.
+- Services exist only where cross-package coordination warrants them;
+  do not add a service layer by default.
+- Preserve exact financial arithmetic, data provenance, deterministic
+  backtests, and current behavior during structural changes.
+- Use diagrams when a workflow crosses several packages. Keep documentation
+  short; prune obsolete architecture documents after migration.
+
+* Functional Model and Proposed APIs
+
+These are cohesive responsibilities, *not* a mandate for one package per
+feature. Package names and signatures are provisional until reviewed.
+
+- =marketdata=: download from providers; normalize OHLCV and bid/ask where
+  available; validate gaps; store/cache; query bars and stream observations.
+- =strategy=: consume one or more instruments' bars; use indicators
+  (MA, RSI, patterns); produce trade intents or no action. Strategies may
+  have their own configuration and run externally when needed.
+- =account=: account/portfolio state, balances, positions, open/closed
+  trades, P&L, margin, exposure, position sizing, and risk policies.
+  Keep accounting facts distinct from risk decisions within the package.
+- =broker=: submit/cancel orders and report acceptance, rejection, partial
+  fills, fills, and account activity. Real and simulated brokers implement
+  execution mechanics; simulated bid/ask, spread, slippage, and commission
+  belong here, not in a CLI or strategy.
+- =trader=: minimal orchestration. Turn a strategy intent into an
+  account-checked order, submit it, process broker events, and reconcile
+  account state. It does not implement strategy, risk math, or fills.
+- =backtest=: replay historical observations causally using strategy,
+  trader, account, and simulated broker; produce results and reports.
+  Reuse the same trading-decision path as live execution.
+- Reporting/journaling and configuration/logging are supporting concerns,
+  not automatically major subsystems. Record trades, setups, reflections,
+  execution details, and enough audit data to reconstruct outcomes.
+
+#+begin_src text
+Market data -> Strategy -> Intent -> Trader -> Account (size/check)
+                                          |
+                                          v
+                                      Broker (submit)
+                                          |
+                                    execution events
+                                          |
+                                          v
+                                   Trader -> Account
+
+Backtest = historical replay + simulated broker + results
+Live     = live data         + real broker      + same trade workflow
+#+end_src
+
+Target experience (illustrative, not a committed Go API):
+
+#+begin_src go
+result, err := backtest.Run(ctx, cfg)
+#+end_src
+
+Each major package must document its purpose, key types/functions,
+dependencies, invariants, and a short, realistic Go usage example. If an
+example needs elaborate assembly, redesign the API.
+
+* TODO Plan
+
+** TODO A. Inventory the current architecture
+- Map major packages, exported APIs, interfaces, implementations, and imports.
+- Trace three workflows end-to-end: backtest, simulated trade, live order.
+- Identify needless pass-through layers and CLI-owned application logic.
+- Count boundaries and indirections along the common backtest path.
+
+** TODO B. Design and approve the strawman
+- Write GoDoc-first APIs and example programs for marketdata, strategy,
+  account (portfolio/risk), broker, trader, and backtest.
+- Design =trader= / =account= / =broker= boundaries together.
+- Exercise long, close, reversal, rejection, partial fill, and restart
+  reconciliation; compare simulated and live usage.
+- Draw package dependencies and sequence diagrams. Challenge every interface.
+- Review the design before assigning implementation issues.
+
+** TODO C. Compare and simplify
+- For each existing package: keep, merge, simplify, or delete.
+- Specify API migrations and quantify removed interfaces, factories, and
+  forwarding layers; assess config tooling (including Viper) only afterward.
+- Preserve useful code and tests. Do not redesign trading behavior in this pass.
+
+** TODO D. Retrofit incrementally
+- Start with one complete backtest workflow; keep CLI commands thin.
+- Use deterministic regression baselines to guard trading and financial results.
+- Separate architectural refactors from behavior changes (e.g. FX fills).
+- Repeat for simulated and live paths; replace/prune superseded documentation.
