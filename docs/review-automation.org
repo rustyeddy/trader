@@ -1,0 +1,678 @@
+#+TITLE: Trader Review Automation
+#+SUBTITLE: GitHub-driven AI implementation and independent review workflow
+#+AUTHOR: Rusty Eddy
+#+DATE: 2026-10-14
+#+STARTUP: overview indent
+
+* Purpose
+
+Automate the repetitive handoffs in Trader's AI development workflow while
+preserving clear ownership and independent review.
+
+Target workflow:
+
+1. Rusty asks Claude to work on an issue.
+2. Claude posts its implementation plan to the issue.
+3. An independent reviewer reviews the plan and either approves it or requests changes.
+4. Claude implements the approved plan, pushes a branch, and creates a PR.
+5. The independent reviewer reviews the PR and either approves it or requests changes.
+6. Rusty performs the final human review and either approves it or requests changes.
+7. Claude responds to review comments and may merge only when every required gate is satisfied.
+
+GitHub is the source of truth and the workflow state machine.
+
+* Principles
+
+** GitHub owns workflow state
+
+Agents should not infer workflow state from prose. The current workflow stage
+should be represented explicitly by GitHub labels, review state, checks,
+issue/PR links, and machine-readable comments.
+
+** One implementer owns the branch
+
+Claude is the implementation agent. The independent reviewer does not modify
+Claude's branch. Rusty remains the repository owner and final human approval
+authority.
+
+** Independent review remains independent
+
+The same agent that writes the implementation should not be the sole reviewer
+of that implementation. The reviewer may approve, request changes, post plan
+feedback, post PR findings, verify fixes, and resolve addressed threads when
+appropriate. The reviewer does not implement fixes.
+
+** Evidence over claims
+
+Approval is tied to evidence:
+
+- exact current head SHA;
+- linked issue and acceptance criteria;
+- relevant ADRs;
+- complete diff;
+- current CI/check status;
+- unresolved review threads;
+- regression evidence for important fixes.
+
+An approval of an older commit must never authorize a newer commit.
+
+** Human merge authority remains explicit
+
+Claude must never decide that "everyone seems happy" and merge. Merge
+permission should be the result of explicit machine-checkable gates.
+
+* Workflow State Machine
+
+Use a minimal label set:
+
+- =ai:plan=
+- =ai:plan-review=
+- =ai:implementation=
+- =ai:pr-review=
+- =ai:changes-requested=
+- =ai:human-review=
+- =ai:merge-ready=
+
+** High-level flow
+
+#+begin_example
+Rusty
+  |
+  | assign work / add ai:plan
+  v
+Issue
+  |
+  +-- Claude writes implementation plan
+  |      |
+  |      v
+  |   ai:plan-review
+  |
+  +-- Independent reviewer reviews plan
+  |      |
+  |      +-- changes requested --> Claude revises plan
+  |      |
+  |      +-- approved ----------> ai:implementation
+  |
+  +-- Claude implements
+  |      |
+  |      v
+  |   pushes branch + opens PR
+  |
+  v
+PR
+  |
+  +-- CI / make check
+  |
+  +-- Independent PR review
+  |      |
+  |      +-- comments ----------> Claude fixes
+  |      |
+  |      +-- clean -------------> ai:human-review
+  |
+  +-- Rusty review
+  |      |
+  |      +-- comments ----------> Claude fixes
+  |      |
+  |      +-- approve -----------> merge gate
+  |
+  +-- all gates satisfied
+         |
+         v
+      ai:merge-ready
+         |
+         v
+      Claude merges
+#+end_example
+
+* Stage 1: Rusty Starts Work
+
+Rusty may initiate work manually:
+
+#+begin_example
+@claude work on #508
+#+end_example
+
+or by applying:
+
+#+begin_example
+ai:plan
+#+end_example
+
+The label-driven form is preferred for automation because it produces an
+explicit state transition.
+
+Claude's responsibility at this stage is planning only. Claude should read:
+
+- =AGENTS.md=;
+- the issue;
+- relevant ADRs;
+- applicable architecture/process documentation;
+- linked prerequisite issues or PRs.
+
+Claude then posts an implementation plan to the issue and transitions the
+issue to =ai:plan-review=. Claude must not begin implementation before plan
+approval.
+
+* Stage 2: Independent Plan Review
+
+When =ai:plan-review= is applied, request an independent review. The reviewer
+receives the issue, latest implementation-plan comment, =AGENTS.md=, relevant
+ADRs, and architecture docs.
+
+Suggested reviewer instruction:
+
+#+begin_example
+Review only. Do not implement.
+
+Review the proposed plan against:
+- issue acceptance criteria;
+- current architecture;
+- relevant ADRs;
+- package boundaries;
+- testing requirements;
+- determinism/reproducibility requirements;
+- security and numeric invariants.
+
+If acceptable, return plan approval tied to this plan revision.
+If not acceptable, post concrete changes requested.
+#+end_example
+
+A successful review produces a machine-readable marker:
+
+#+begin_example
+<!-- trader-ai
+state: plan-approved
+issue: 508
+plan-revision: 3
+reviewer: independent
+-->
+#+end_example
+
+A rejection produces:
+
+#+begin_example
+<!-- trader-ai
+state: plan-changes-requested
+issue: 508
+plan-revision: 3
+reviewer: independent
+-->
+#+end_example
+
+* Stage 3: Claude Implements Approved Plan
+
+When the plan is approved:
+
+#+begin_example
+ai:plan-review -> ai:implementation
+#+end_example
+
+Claude is invoked with instructions similar to:
+
+#+begin_example
+The implementation plan on issue #508 has been independently approved.
+
+Implement exactly the approved plan.
+
+Follow:
+- AGENTS.md
+- relevant ADRs
+- package-boundary rules
+- canonical make check
+
+Do not merge.
+
+When complete:
+- push the branch;
+- create a PR with "Closes #508";
+- include verification evidence;
+- include exact commands/checks run;
+- disclose anything not run.
+#+end_example
+
+Claude owns the implementation branch.
+
+* Stage 4: PR Opens and Review Begins
+
+When Claude creates the PR:
+
+1. GitHub CI runs the canonical checks.
+2. The PR is linked to the issue.
+3. The workflow waits for required CI to complete.
+4. Independent PR review begins.
+
+The review request should include:
+
+- linked issue;
+- approved plan;
+- relevant ADRs;
+- exact current head SHA;
+- full diff;
+- existing review comments;
+- unresolved review threads;
+- current CI/check status.
+
+* Stage 5: Independent PR Review
+
+The independent reviewer verifies:
+
+- implementation matches the linked issue;
+- implementation matches the approved plan;
+- architecture/package boundaries are respected;
+- tests cover intended semantics;
+- current CI applies to the reviewed head SHA;
+- earlier findings are actually fixed;
+- no unresolved blocking review threads remain.
+
+A clean review posts:
+
+#+begin_example
+<!-- trader-ai
+state: pr-approved
+reviewer: independent
+pr: 518
+head: 7706fd2644d59c20bf91f7a7266b54705c070cc8
+-->
+#+end_example
+
+A changes-requested review posts:
+
+#+begin_example
+<!-- trader-ai
+state: pr-changes-requested
+reviewer: independent
+pr: 518
+head: 7706fd2644d59c20bf91f7a7266b54705c070cc8
+-->
+#+end_example
+
+The head SHA is mandatory. If another commit is pushed, the prior approval is
+stale.
+
+* Stage 6: Claude Responds to Review Findings
+
+When review comments are posted, Claude wakes automatically. For every
+unresolved thread Claude should:
+
+1. determine whether the finding is valid;
+2. fix it if valid;
+3. add regression evidence where appropriate;
+4. reply with what changed;
+5. include the fixing commit SHA;
+6. leave the merge decision to workflow gates.
+
+After Claude pushes fixes:
+
+- CI runs again;
+- prior SHA-bound approval becomes stale;
+- independent re-review is requested automatically.
+
+* Stage 7: Rusty Human Review
+
+When required CI is green, independent review is clean for the current head,
+and no blocking review threads remain, transition the PR to:
+
+#+begin_example
+ai:human-review
+#+end_example
+
+GitHub may post:
+
+#+begin_example
+@rustyeddy Ready for owner review.
+
+- CI: green
+- independent review: clean
+- reviewed head: 7706fd2
+- unresolved blocking threads: 0
+- linked issue: #508
+#+end_example
+
+If Rusty requests changes, Claude fixes them and the PR returns through CI and
+independent re-review before coming back to Rusty.
+
+If Rusty approves the current head, evaluate the merge gate.
+
+* Merge Gate
+
+Merge readiness must be mechanical rather than interpretive.
+
+#+begin_example
+canMerge =
+    ownerApprovedCurrentSHA &&
+    independentReviewApprovedCurrentSHA &&
+    requiredChecksGreen &&
+    unresolvedBlockingThreads == 0 &&
+    branchMergeable &&
+    linkedIssuePresent
+#+end_example
+
+If all conditions are true, apply =ai:merge-ready=.
+
+Claude may then receive:
+
+#+begin_example
+Verify the PR is still at the approved SHA.
+
+Verify:
+- owner approval applies to the current SHA;
+- independent review approval applies to the current SHA;
+- required checks are green;
+- no unresolved blocking review threads remain;
+- the branch is mergeable.
+
+If every gate passes, merge using the repository's normal merge method.
+Otherwise stop and report the failed gate.
+#+end_example
+
+GitHub auto-merge could eventually replace Claude in this final step.
+
+* Machine-readable Handoff Comments
+
+Actions should not parse free-form English to infer state. Use small HTML
+comments embedded in normal issue/PR comments.
+
+** Plan approval
+
+#+begin_example
+<!-- trader-ai
+state: plan-approved
+issue: 508
+plan-revision: 3
+reviewer: independent
+-->
+#+end_example
+
+** PR approval
+
+#+begin_example
+<!-- trader-ai
+state: pr-approved
+reviewer: independent
+pr: 518
+head: 7706fd2644d59c20bf91f7a7266b54705c070cc8
+-->
+#+end_example
+
+** Changes requested
+
+#+begin_example
+<!-- trader-ai
+state: pr-changes-requested
+reviewer: independent
+pr: 518
+head: 7706fd2644d59c20bf91f7a7266b54705c070cc8
+-->
+#+end_example
+
+* Proposed GitHub Actions
+
+Keep the automation small. Do not build a separate orchestration framework
+until actual usage proves one is necessary.
+
+** =.github/workflows/ai-issue.yml=
+
+Responsibilities:
+
+- react to =ai:plan=;
+- invoke Claude planning;
+- wait for plan comment;
+- apply =ai:plan-review=;
+- invoke independent plan review;
+- transition to =ai:implementation= after approval;
+- return to Claude when plan changes are requested.
+
+** =.github/workflows/ai-pr.yml=
+
+Responsibilities:
+
+- react to PR opened/synchronized;
+- run or wait for canonical CI;
+- request independent review;
+- detect stale review SHA after new pushes;
+- react to independent review findings;
+- wake Claude when fixes are required;
+- transition clean PRs to =ai:human-review=.
+
+** =.github/workflows/ai-merge.yml=
+
+Responsibilities:
+
+- react to Rusty's submitted review;
+- wake Claude when Rusty requests changes;
+- verify current-SHA independent approval;
+- verify current-SHA owner approval;
+- verify required checks;
+- verify unresolved blocking review threads;
+- verify mergeability;
+- apply =ai:merge-ready=;
+- merge automatically or invoke Claude to perform the merge.
+
+* GitHub Events
+
+Likely useful GitHub Actions events include:
+
+- =issues=: labeled, unlabeled, assigned;
+- =issue_comment=: created, edited;
+- =pull_request=: opened, synchronize, reopened, ready_for_review;
+- =pull_request_review=: submitted, edited, dismissed;
+- =pull_request_review_comment=: created, edited;
+- =workflow_run=: completed.
+
+Every agent invocation should be idempotent.
+
+* Idempotency
+
+Before invoking an agent or changing state:
+
+- inspect current labels;
+- inspect current head SHA;
+- inspect existing machine-readable handoff comments;
+- avoid duplicate runs for the same issue/plan revision or PR SHA.
+
+Suggested logical keys:
+
+#+begin_example
+plan-review: issue + plan-revision
+pr-review:   PR + head-SHA
+human-gate:  PR + head-SHA
+merge-gate:  PR + head-SHA
+#+end_example
+
+* Review SHA Rules
+
+A PR approval is valid only for the exact head SHA reviewed.
+
+#+begin_example
+reviewed:
+b9fb0de
+
+Claude pushes:
+7706fd2
+
+result:
+old review is stale
+#+end_example
+
+The workflow must automatically request a new independent review after any
+new commit. Rusty's approval should be handled the same way unless repository
+branch protection already dismisses stale approvals.
+
+* Suggested Reviewer Inputs
+
+The independent reviewer should receive:
+
+1. repository + PR number;
+2. exact current head SHA;
+3. linked issue;
+4. approved plan;
+5. full current diff;
+6. relevant ADRs;
+7. =AGENTS.md=;
+8. current review threads;
+9. current CI/check status;
+10. prior review and claimed fixes.
+
+* Claude Review-Fix Instructions
+
+#+begin_example
+Read every unresolved review thread on the current PR.
+
+For each thread:
+1. determine whether the finding is valid;
+2. if valid, fix the root cause;
+3. add regression evidence when appropriate;
+4. run relevant focused tests;
+5. run make check before final handoff;
+6. reply with what changed and the commit SHA.
+
+Do not merge.
+Do not dismiss a finding merely because CI is green.
+
+If a finding conflicts with an accepted ADR or approved issue decision,
+explain the conflict in the thread rather than silently changing architecture.
+#+end_example
+
+* Independent Reviewer Instructions
+
+#+begin_example
+Review only. Do not modify the implementation branch.
+
+Review the exact current PR head SHA.
+
+Read:
+- linked issue and acceptance criteria;
+- approved implementation plan;
+- relevant ADRs;
+- full diff;
+- existing review threads;
+- current CI/check status.
+
+Verify claimed fixes directly in the current code.
+
+If there are blocking findings, request concrete changes.
+
+If there are no blocking findings:
+- confirm the reviewed head SHA;
+- confirm CI state;
+- confirm unresolved blocking thread count;
+- post machine-readable approval tied to that SHA.
+
+Never claim merge-ready if CI for the reviewed head is still running.
+#+end_example
+
+* Human Review Boundary
+
+The automation should remove clerical handoffs, not human ownership.
+
+Rusty remains responsible for:
+
+- product direction;
+- architectural judgment when overriding/amending decisions;
+- final acceptance of behavior;
+- approving the current PR head;
+- exceptional workflow overrides.
+
+Overrides should be explicit and recorded in GitHub.
+
+* Phased Rollout
+
+** Phase 1: automate state and Claude handoffs
+
+Automate:
+
+- workflow labels;
+- plan handoff;
+- Claude planning;
+- Claude implementation;
+- PR creation;
+- CI;
+- Claude reaction to review comments;
+- Rusty-review readiness;
+- merge-gate checks.
+
+Keep the independent ChatGPT review trigger manual initially.
+
+** Phase 2: automate independent review
+
+After several substantive PRs demonstrate the workflow is stable, replace the
+manual independent-review trigger with an automated OpenAI reviewer.
+
+Invoke it only when:
+
+- an issue reaches =ai:plan-review=;
+- a PR head is ready for review;
+- a new head SHA appears after fixes.
+
+The reviewer remains read-only with respect to the implementation branch.
+
+** Phase 3: optional GitHub auto-merge
+
+Once the gates are proven reliable, GitHub auto-merge may replace Claude's
+final merge step.
+
+* Security and Permissions
+
+Claude implementation agent needs permission to:
+
+- read repository;
+- create/update its branch;
+- create/update PRs;
+- comment on issues/PRs.
+
+Independent reviewer needs permission to:
+
+- read repository;
+- read issues/PRs/checks;
+- post comments/reviews;
+- optionally resolve verified review threads.
+
+The independent reviewer should not need permission to:
+
+- push implementation commits;
+- merge;
+- modify protected branches.
+
+Merge automation should be separately permissioned.
+
+* Minimal Initial Implementation
+
+The smallest useful implementation is:
+
+1. define the seven workflow labels;
+2. add =ai-issue.yml=;
+3. add =ai-pr.yml=;
+4. add =ai-merge.yml=;
+5. define machine-readable review markers;
+6. define SHA-bound independent approval;
+7. automate Claude wakeups after changes requested;
+8. automate transition to Rusty's review;
+9. implement the merge gate;
+10. leave independent-review invocation manual temporarily.
+
+This removes most repetitive handoffs without building a general multi-agent
+orchestration platform.
+
+* Desired End State
+
+Rusty's routine becomes approximately:
+
+#+begin_example
+1. "Claude, work on #508."
+
+                [automation]
+
+2. GitHub notifies:
+   "PR #518 ready for owner review."
+
+3. Rusty reviews:
+   - approve; or
+   - request changes.
+
+                [automation]
+
+4. PR merges when every gate is satisfied.
+#+end_example
+
+Everything between those human decisions should be reproducible, visible in
+GitHub, SHA-bound, and independently reviewable.

@@ -1,30 +1,58 @@
 # Trader Agent Instructions
 
-These instructions apply to Claude Code, GitHub Copilot, ChatGPT, and other contributors. Keep task context small: **do not read the entire architecture or ADR registry by default**.
+These instructions apply to Claude Code, GitHub Copilot, ChatGPT, and
+other contributors. Keep task context small: **do not read the entire
+architecture or ADR registry by default**.
 
 ## Before changing code
 
 1. Read the linked GitHub issue and its acceptance criteria.
-2. Read this file and `CONTRIBUTING.org` for the workflow and Definition of Done.
+2. Read this file and `CONTRIBUTING.org` for the workflow and
+   Definition of Done.
 3. Inspect the affected packages and nearby tests.
-4. **Selectively** consult architecture documentation and ADRs relevant to the change. Search the headings/index of `docs/arch/adr-decisions.org` by package, subject, or ADR number; read only matching sections. Consult `docs/arch/package-boundaries.org` when changing imports or public APIs, and the relevant sections of `docs/arch/trader-framework-architecture.org` or requirements when changing design or behavior.
-5. Expand the reading scope only when dependencies, conflicts, or unresolved decisions require it. If design remains unclear, stop and flag `needs-design` rather than guessing.
+4. **Selectively** consult architecture documentation and ADRs
+   relevant to the change. Search the headings/index of
+   `docs/arch/adr-decisions.org` by package, subject, or ADR number;
+   read only matching sections. Consult
+   `docs/arch/package-boundaries.org` when changing imports or public
+   APIs, and the relevant sections of
+   `docs/arch/trader-framework-architecture.org` or requirements when
+   changing design or behavior.
+5. Expand the reading scope only when dependencies, conflicts, or
+   unresolved decisions require it. If design remains unclear, stop
+   and flag `needs-design` rather than guessing.
 
-Example: a historical-bar normalization change should inspect `marketdata`, `internal/marketdata`, their tests, and the relevant ADR-020 sections; it need not load broker or logging decisions.
+Example: a historical-bar normalization change should inspect
+`marketdata`, `internal/marketdata`, their tests, and the relevant
+ADR-020 sections; it need not load broker or logging decisions.
 
 ## Development workflow
 
 - Write idiomatic Go. Every change must correspond to a GitHub issue.
-- For non-trivial work, post the implementation plan on the issue before coding when the issue workflow calls for plan review.
-- Use a short-lived branch and open a PR; all changes require review before merge.
-- Keep changes focused; document architecture changes and do not silently contradict accepted ADRs.
-- Run `make check` (the canonical verification: tidy, fmt, vet, lint, test, race — same gates as CI) before pushing, or explicitly disclose any checks you could not run. Use narrower targets such as `go test ./pkg` only while iterating. Record each command and its exit status in the PR/handoff. See `docs/workflows/testing.org`. CI must pass.
-- Preserve deterministic behavior and paper-trading-by-default safety. Strategies emit intents, not broker orders; risk and execution remain separate.
-- See `CONTRIBUTING.org` for branch naming, testing, documentation, review, and Definition of Done. For multi-assistant handoffs and review roles, see `docs/workflows/ai-development.org`.
+- For non-trivial work, post the implementation plan on the issue
+  before coding when the issue workflow calls for plan review.
+- Use a short-lived branch and open a PR; all changes require review
+  before merge.
+- Keep changes focused; document architecture changes and do not
+  silently contradict accepted ADRs.
+- Run `make check` (the canonical verification: tidy, fmt, vet, lint,
+  test, race — same gates as CI) before pushing, or explicitly
+  disclose any checks you could not run. Use narrower targets such as
+  `go test ./pkg` only while iterating. Record each command and its
+  exit status in the PR/handoff. See `docs/workflows/testing.org`. CI
+  must pass.
+- Preserve deterministic behavior and paper-trading-by-default
+  safety. Strategies emit intents, not broker orders; risk and
+  execution remain separate.
+- See `CONTRIBUTING.org` for branch naming, testing, documentation,
+  review, and Definition of Done. For multi-assistant handoffs and
+  review roles, see `docs/workflows/ai-development.org`.
 
 ## GitHub issue and PR reviews
 
-When asked to review a GitHub issue or pull request, **post the review/comments back to GitHub unless the user explicitly says not to**. Do not leave the substantive review only in chat.
+When asked to review a GitHub issue or pull request, **post the
+review/comments back to GitHub unless the user explicitly says not
+to**. Do not leave the substantive review only in chat.
 
 For PR reviews:
 
@@ -48,11 +76,13 @@ A PR is merge-ready only when all applicable gates pass:
 
 Do not call a PR merge-ready while required CI is still running.
 
-Prefer review comments over exercising merge authority unless explicitly asked to merge.
+Prefer review comments over exercising merge authority unless
+explicitly asked to merge.
 
 ## Architecture and boundaries
 
-Major subsystems should be capable of becoming separate services without requiring them to be separate services today.
+Major subsystems should be capable of becoming separate services
+without requiring them to be separate services today.
 
 Preferred layering. An arrow means "imports", as in `docs/arch/package-boundaries.org`:
 
@@ -62,11 +92,18 @@ transport (CLI, MCP, REST)
     -> domain package
 ```
 
-Executable composition roots (for example `cmd/internal/*cfg`) wire adapters, services and transports together; they are not a layer in this chain. Domain packages never import services, and services never import transports or composition roots.
+Executable composition roots (for example `cmd/internal/*cfg`) wire
+adapters, services and transports together; they are not a layer in
+this chain. Domain packages never import services, and services never
+import transports or composition roots.
 
-CLI, MCP, REST, and other transports stay thin: parse input, call services, and format results. Do not put provider-domain logic, trade reconstruction, or financial derivation in command handlers when a service/domain boundary exists.
+CLI, MCP, REST, and other transports stay thin: parse input, call
+services, and format results. Do not put provider-domain logic, trade
+reconstruction, or financial derivation in command handlers when a
+service/domain boundary exists.
 
-Provider-specific behavior belongs in adapters/configuration boundaries, not provider-neutral domain packages.
+Provider-specific behavior belongs in adapters/configuration
+boundaries, not provider-neutral domain packages.
 
 ## Market data storage
 
@@ -82,10 +119,15 @@ Provider-specific behavior belongs in adapters/configuration boundaries, not pro
 - Derived values must identify how they were derived.
 - Unknown is not zero; reported zero is known zero.
 - Do not return a partial sum as a complete total.
-- Use exact arithmetic where possible and round once using the documented rule.
-- Tests for financial arithmetic must detect the bug they claim to prevent, including rounding-order and tie cases where relevant.
-- Keep execution-quality/slippage analysis separate from realized trade P/L unless an ADR explicitly changes that rule.
-- Spread cost is a first-class economic attribution but must not be double-counted when already embedded in broker-reported realized P/L.
+- Use exact arithmetic where possible and round once using the
+  documented rule.
+- Tests for financial arithmetic must detect the bug they claim to
+  prevent, including rounding-order and tie cases where relevant.
+- Keep execution-quality/slippage analysis separate from realized
+  trade P/L unless an ADR explicitly changes that rule.
+- Spread cost is a first-class economic attribution but must not be
+  double-counted when already embedded in broker-reported realized
+  P/L.
 
 ## Review priorities
 
@@ -103,14 +145,37 @@ Prioritize, in order:
 
 ## Logging
 
-- Use structured `log/slog` with standard levels error, warn, info, debug; no fatal logging helper. Process termination belongs to the composition root after logging.
+- Use structured `log/slog` with standard levels error, warn, info,
+  debug; no fatal logging helper. Process termination belongs to the
+  composition root after logging.
 - Default to stderr. Operator flags control destination (stderr, stdout, file), level, and text/JSON output.
 
 ## Testing
 
-- New or changed behavior requires tests, including edge and failure cases; use Go `testify`.
-- Target at least 85% coverage; exercise concurrency changes with the race detector.
-- See `docs/workflows/workflows.org` for workflow details. `docs/workflows/testing.org` documents the verification commands.
+- New or changed behavior requires tests, including edge and failure
+  cases; use Go `testify`.
+- Target at least 85% coverage; exercise concurrency changes with the
+  race detector.
+- See `docs/workflows/workflows.org` for workflow
+  details. `docs/workflows/testing.org` documents the verification
+  commands.
+
+### Test Data Organization
+
+Trader uses a hybrid test-data architecture.
+
+- Root-level `testdata/` contains shared integration fixtures,
+  end-to-end regression scenarios, and data used across packages.
+- Package-local `testdata/` contains fixtures owned exclusively
+  by that package.
+- Small unit-test datasets should generally be constructed
+  directly in Go.
+- Do not duplicate shared fixtures across packages.
+- Do not relocate existing fixtures solely for consistency.
+- Tests must not depend on production data under `/srv/trading`.
+- Tests must be deterministic, self-contained, and runnable in CI.
+
+See [Testing Architecture](docs/arch/testing.md).
 
 ## Reusable workflows
 
