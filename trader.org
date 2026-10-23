@@ -30,22 +30,28 @@ feature. Package names and signatures are provisional until reviewed.
 
 - =marketdata=: download from providers; normalize OHLCV and bid/ask where
   available; validate gaps; store/cache; query bars and stream observations.
+
 - =strategy=: consume one or more instruments' bars; use indicators
   (MA, RSI, patterns); produce trade intents or no action. Strategies may
   have their own configuration and run externally when needed.
+
 - =account=: account/portfolio state, balances, positions, open/closed
   trades, P&L, margin, exposure, position sizing, and risk policies.
   Keep accounting facts distinct from risk decisions within the package.
+
 - =broker=: submit/cancel orders and report acceptance, rejection, partial
   fills, fills, and account activity. Real and simulated brokers implement
   execution mechanics; simulated bid/ask, spread, slippage, and commission
   belong here, not in a CLI or strategy.
+
 - =trader=: minimal orchestration. Turn a strategy intent into an
   account-checked order, submit it, process broker events, and reconcile
   account state. It does not implement strategy, risk math, or fills.
+
 - =backtest=: replay historical observations causally using strategy,
   trader, account, and simulated broker; produce results and reports.
   Reuse the same trading-decision path as live execution.
+
 - Reporting/journaling and configuration/logging are supporting concerns,
   not automatically major subsystems. Record trades, setups, reflections,
   execution details, and enough audit data to reconstruct outcomes.
