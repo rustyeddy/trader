@@ -1,22 +1,25 @@
-package design
+package main
 
 import "context"
 
 type backtest struct {
-	strategy
-	prices *marketData
 }
 
-func (bt *backtest) Run(ctx context.Context, intentQ chan intent) (result, error) {
+func (bt *backtest) run(ctx context.Context, priceQ <-chan ohlc, strat strategy, tr *trader) error {
 	for {
-		if bar, ok := bt.prices.nextBar(); ok {
-			intent := bt.strategy.onBar(ctx, bar)
-			intentQ <- intent
-		} else {
-			return result{}, nil
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case bar, ok := <-priceQ:
+			if !ok {
+				return nil
+			}
+			intent := strat.onBar(ctx, bar)
+			tr.handleIntent(ctx, intent)
 		}
 	}
-	return result{}, nil
+	return nil
 }
 
 type result struct {

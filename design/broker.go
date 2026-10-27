@@ -1,14 +1,14 @@
-package design
+package main
 
 type broker struct {
 	id       string
 	accounts map[string]*account
 }
 
-func getBroker(id string) *broker {
+func getBroker(id string) (*broker, bool) {
 	return &broker{
 		id: id,
-	}
+	}, true
 }
 
 func (b *broker) addAccount(id string, balance money) *account {

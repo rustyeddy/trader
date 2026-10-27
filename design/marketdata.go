@@ -1,6 +1,8 @@
-package design
+package main
 
-import "time"
+import (
+	"time"
+)
 
 type price int64
 
@@ -23,10 +25,7 @@ type marketData struct {
 	index int
 }
 
-func (md *marketData) nextBar() (ohlc, bool) {
-	if len(md.bars)-1 == md.index {
-		return ohlc{}, false
-	}
-	md.index++
-	return md.bars[md.index], true
+func (md *marketData) getPriceQ() chan ohlc {
+	return make(chan ohlc)
+
 }
