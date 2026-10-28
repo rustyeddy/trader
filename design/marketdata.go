@@ -1,10 +1,19 @@
 package main
 
 import (
+	"context"
+	"iter"
+	"math/rand"
 	"time"
 )
 
 type price int64
+
+const priceScale = 100000
+
+func (p price) Float64() float64 {
+	return float64(p) / priceScale
+}
 
 type ohlc struct {
 	o, h, l, c price
@@ -21,11 +30,47 @@ type marketData struct {
 	timerange  timeRange
 	interval   string
 
-	bars  []ohlc
+	data  []ohlc
 	index int
 }
 
-func (md *marketData) getPriceQ() chan ohlc {
-	return make(chan ohlc)
+// bars returns an iterator over the bars in order. If ctx is cancelled the
+// iterator yields ctx.Err() once and stops. No goroutine is involved, so
+// breaking out of the loop early leaks nothing.
+func (md *marketData) bars(ctx context.Context) iter.Seq2[ohlc, error] {
+	return func(yield func(ohlc, error) bool) {
+		for _, bar := range md.data {
+			if err := ctx.Err(); err != nil {
+				yield(ohlc{}, err)
+				return
+			}
+			if !yield(bar, nil) {
+				return
+			}
+		}
+	}
+}
 
+// synthesize fills md.data with one daily bar per weekday in md.timerange,
+// following a seeded random walk so runs are deterministic. Prices are
+// integer points (1/100000), e.g. 110000 == 1.10000.
+func (md *marketData) synthesize(seed int64, start price) {
+	rng := rand.New(rand.NewSource(seed))
+	md.data = md.data[:0]
+	md.index = 0
+
+	px := start
+	step := func() price { return price(rng.Intn(601) - 300) } // +/- 30 pips
+	for d := md.timerange.start; !d.After(md.timerange.end); d = d.AddDate(0, 0, 1) {
+		if wd := d.Weekday(); wd == time.Saturday || wd == time.Sunday {
+			continue
+		}
+		o := px
+		c := o + step()
+		h, l := max(o, c), min(o, c)
+		h += price(rng.Intn(151))
+		l -= price(rng.Intn(151))
+		md.data = append(md.data, ohlc{o: o, h: h, l: l, c: c, v: 1000 + rng.Intn(9000)})
+		px = c
+	}
 }

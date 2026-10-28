@@ -5,13 +5,26 @@ type broker struct {
 	accounts map[string]*account
 }
 
-func getBroker(id string) (*broker, bool) {
-	return &broker{
-		id: id,
-	}, true
+var brokers map[string]*broker
+
+func init() {
+	brokers = make(map[string]*broker)
+	brokers["sim"] = &broker{"sim", nil}
+	brokers["sim"].addAccount("sim123", 10000)
+}
+
+func getBroker(id string) (br *broker, ok bool) {
+	if br, ok = brokers[id]; !ok {
+		brokers[id] = &broker{id, make(map[string]*account)}
+		br = brokers[id]
+	}
+	return br, true
 }
 
 func (b *broker) addAccount(id string, balance money) *account {
+	if b.accounts == nil {
+		b.accounts = make(map[string]*account)
+	}
 	act := newAccount(id, balance)
 	b.accounts[id] = act
 	return act

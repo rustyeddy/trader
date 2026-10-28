@@ -27,14 +27,14 @@ func (tr *trader) intentLoop(ctx context.Context) (intentQ chan intent) {
 }
 
 func (tr *trader) handleIntent(ctx context.Context, i intent) {
-	switch i.kind {
-	case "open":
+	switch i.side {
+	case "buy":
 		if tr.account.marginAvailable() <= 0 {
 			return
 		}
 		tr.openTrade(i)
 
-	case "close":
+	case "sell":
 		tr.closeTrade(i)
 	}
 
