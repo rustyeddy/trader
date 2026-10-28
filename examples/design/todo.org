@@ -1,0 +1,11 @@
+#+TITLE: To Do
+
+* Market Data
+** Download and validate market data
+** Convert to canonical
+** Valid and identify gaps
+** Fill in gaps
+** Store and retrieve data
+** Data caching
+
+
