@@ -10,11 +10,6 @@ type strategy interface {
 	onBar(ctx context.Context, bar ohlc) intent
 }
 
-type intent struct {
-	kind string // open, close, noop
-	side string // long or short
-}
-
 // emax is concrete implementation of emax
 // will need to become an interface certainly
 type emax struct {

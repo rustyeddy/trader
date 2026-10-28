@@ -8,13 +8,13 @@ import (
 type backtest struct {
 }
 
-func (bt *backtest) run(ctx context.Context, bars iter.Seq2[ohlc, error], strat strategy, tr *trader) error {
+func (bt *backtest) run(ctx context.Context, bars iter.Seq2[ohlc, error], strat strategy, h handleIntent) error {
 	for bar, err := range bars {
 		if err != nil {
 			return err
 		}
 		intent := strat.onBar(ctx, bar)
-		tr.handleIntent(ctx, intent)
+		h.handleIntent(ctx, intent)
 	}
 	return nil
 }

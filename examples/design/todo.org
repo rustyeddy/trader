@@ -8,4 +8,8 @@
 ** Store and retrieve data
 ** Data caching
 
+* Multiple Instruments
+How to allow backtests, studies, etc. to handle multi-instruments when
+needed.
+
 
