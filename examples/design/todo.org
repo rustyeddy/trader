@@ -1,15 +1,109 @@
-#+TITLE: To Do
+#+TITLE: Trader Design — Prioritized TODOs
+#+STARTUP: overview
 
-* Market Data
-** Download and validate market data
-** Convert to canonical
-** Valid and identify gaps
-** Fill in gaps
-** Store and retrieve data
-** Data caching
+* Ground Rules
+- Design APIs first; keep everything in =examples/design= private until settled.
+- After EACH task, =make check && make run= must succeed with small deterministic synthetic data.
+- Prefer concrete types and one readable call path; no new framework or interface without a demonstrated need.
+- Preserve causal backtest timing; distinguish simulated broker rejection from infrastructure failure.
+- Do not start retrofitting production packages until the milestone below is reviewed.
 
-* Multiple Instruments
-How to allow backtests, studies, etc. to handle multi-instruments when
-needed.
+* P0 — Core Contracts (next iteration)
 
+** TODO 1. Define Intent semantics and errors
+- Decide whether intent expresses transaction action (open/close/buy/sell),
+  desired position/portfolio target, or a deliberately small combination.
+- Decide whether strategy can query *read-only* current positions; separate
+  signal generation from portfolio/account sizing and execution.
+- Specify instrument, direction, close/reverse, optional stop/target, and
+  sizing hint without requiring account knowledge.
+- Decide whether signal quality (A/B/C, score) is optional metadata that
+  risk/sizing *may* use, not a hidden sizing rule.
+- Define no-op/no signal, validation, and rejection semantics.
+- Demonstrate long entry/exit, short entry/exit, reversal and no-op.
+- Keep one intent per bar initially; test whether multiple intents are truly needed.
+- Acceptance: GoDoc-like examples and tests; no stringly typed ambiguous
+  =side= values used as both position direction and order action.
 
+** TODO 2. Propagate handler errors predictably
+- Keep =handleIntent(ctx, intent) error= (currently implemented) and
+  propagate errors in the run loop with instrument/time context.
+- Separate expected decision outcomes (e.g. insufficient margin / rejected
+  trade) from fatal runtime/data/broker failures; decide which should
+  continue a study/backtest and which must stop.
+- Verify context cancellation; remove leftover channel/goroutine intent loop.
+- Acceptance: tests for accepted, rejected, fatal and cancelled processing.
+
+** TODO 3. Define Study, Scanner, Strategy, Indicator roles
+- Strategy generates *trading* intents; study gathers analysis/results;
+  scanner classifies/selects instruments; indicators compute measurements.
+- Test one EMA trading strategy, one ATR study, one multi-symbol scanner.
+- Explore shared bar consumption without forcing non-trading outputs into
+  trading intents or inventing generic event/handler hierarchies.
+- Choose minimal =OnBar= / =OnBars= contracts (or adapters) based on examples;
+  avoid defining four parallel interfaces just because names differ.
+- Acceptance: each use case reads naturally and compiles; write down why
+  any introduced interface is necessary.
+
+* P1 — Multi-Instrument Market Data and Shared Runner
+
+** TODO 4. Make bars self-contained and decide multi-symbol observation semantics
+- Include observed timestamp, instrument identity, OHLCV and price basis
+  (bid/ask/trade; spread provenance as needed) in an observation.
+- Compare =OnBar(bar)= versus =OnBars(frame)= with a single- and two-symbol
+  example. Decide whether frame contains only fresh bars or carried values.
+- Define deterministic time ordering, simultaneous timestamps, missing
+  symbols, sparse instruments and no look-ahead; never silently synthesize bars.
+- Consider a multi-symbol strategy that produces 0, 1, or several intents.
+- Acceptance: two synthetic datasets interleave correctly, with an
+  incomplete/missing observation test.
+
+** TODO 5. Extract or rename the shared data runner only if it simplifies
+- Try one small =run(ctx, observations, onBar, handler)= loop for historical
+  trading, live trading and trade-signal studies.
+- Do not force indicator-only studies/scanners to return =Intent=.
+- Backtest retains simulated clock, pending-order eligibility, fill sequencing
+  and results; common loop must not cause same-bar look-ahead.
+- Prefer a concrete function over a =DataRunner= interface until there is a
+  real substitution need.
+- Acceptance: identical test strategy logic runs in historical and
+  live-like synthetic scenarios.
+
+** TODO 6. Establish Query / Dataset / Load API contracts
+- Define query: instruments, interval, [start,end), provider/basis and
+  explicit coverage/gap policy.
+- Compare =dataset, err := marketdata.Load(ctx, query)= followed by
+  =dataset.Bars(ctx)= with a stateful =md.Load(); md.Bars()= API.
+- Keep =iter.Seq2[Observation, error]= as the current lazy baseline;
+  assess slice and channel alternatives only against concrete use cases.
+- Dataset hides multi-file assembly, time ordering, caching and resource
+  lifetime; define ownership/closing only where genuinely needed.
+- Acceptance: an in-memory synthetic dataset satisfies the selected API;
+  disk/network loading not required yet.
+
+* Milestone — Review Before Production Refactoring
+** TODO Run and document three executable examples
+- EMA cross: single instrument, long/short signals and trader handler.
+- Cross-instrument strategy: two symbols, including missing bar behavior.
+- ATR study or scanner: results without broker/account or forced intent.
+- Ensure =make check && make run= green after every change.
+- Review package boundaries, GoDoc, intent semantics and run diagrams.
+- Confirm reduction in interfaces/layers before migrating current Trader.
+
+* P2 — Follow-on Implementation (after milestone)
+** TODO Account / portfolio / risk
+- Account facts, open positions, balance/equity, margin available,
+  position sizing, and portfolio risk policies; wire simple synthetic fills.
+** TODO Broker and execution
+- Submit/cancel; fills, partial fills, rejects; simulated prices,
+  bid/ask spread, slippage, commission, execution events and reconciliation.
+- Maintain next-bar-open causal execution in backtests.
+** TODO Market data acquisition and storage
+- Download and validate provider observations; convert to canonical.
+- Detect/report coverage and expected closures vs unexpected gaps.
+- Choose explicit gap policy; do not silently fill missing bars.
+- Store/retrieve across multiple files, cache, and bound memory use.
+** TODO Incrementally retrofit production packages
+- Preserve financial regression tests; keep CLI/transport thin.
+- Delete redundant interfaces, service forwarding and factories rather
+  than moving them; prune obsolete architecture documents.
