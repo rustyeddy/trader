@@ -2,8 +2,8 @@ package main
 
 import "context"
 
-type handleIntent interface {
-	handleIntent(context.Context, intent)
+type intentHandler interface {
+	handleIntent(context.Context, intent) error
 }
 
 type intent struct {

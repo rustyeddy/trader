@@ -8,13 +8,16 @@ import (
 type backtest struct {
 }
 
-func (bt *backtest) run(ctx context.Context, bars iter.Seq2[ohlc, error], strat strategy, h handleIntent) error {
+func (bt *backtest) run(ctx context.Context, bars iter.Seq2[ohlc, error], strat strategy, h intentHandler) error {
 	for bar, err := range bars {
 		if err != nil {
 			return err
 		}
 		intent := strat.onBar(ctx, bar)
-		h.handleIntent(ctx, intent)
+		err := h.handleIntent(ctx, intent)
+		if err != nil {
+			return err // Question: HOW to handle these errors?
+		}
 	}
 	return nil
 }

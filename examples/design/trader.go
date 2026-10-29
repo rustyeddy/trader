@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"os"
+	"errors"
 )
 
 type trader struct {
@@ -10,34 +10,18 @@ type trader struct {
 	account *account
 }
 
-func (tr *trader) intentLoop(ctx context.Context) (intentQ chan intent) {
-	intentQ = make(chan intent)
-	go func() {
-
-		select {
-		case i := <-intentQ:
-			tr.handleIntent(ctx, i)
-
-		case <-ctx.Done():
-			os.Exit(0)
-		}
-
-	}()
-	return intentQ
-}
-
-func (tr *trader) handleIntent(ctx context.Context, i intent) {
+func (tr *trader) handleIntent(ctx context.Context, i intent) (err error) {
 	switch i.side {
 	case "buy":
 		if tr.account.marginAvailable() <= 0 {
-			return
+			return errors.New("Not enough margin available")
 		}
-		tr.openTrade(i)
+		err = tr.openTrade(i)
 
 	case "sell":
-		tr.closeTrade(i)
+		err = tr.closeTrade(i)
 	}
-
+	return err
 }
 
 func (tr *trader) openTrade(i intent) error {
