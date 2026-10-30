@@ -15,6 +15,5 @@ func newAccount(id string, balance money) *account {
 }
 
 func (act *account) marginAvailable() money {
-
-	return 0
+	return act.balance
 }

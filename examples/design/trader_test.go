@@ -29,10 +29,16 @@ func TestTrader_HandleIntent(t *testing.T) {
 		assert.NoError(t, tr.handleIntent(ctx, intent{action: add}))
 		assert.NoError(t, tr.handleIntent(ctx, intent{action: reduce}))
 	})
-	t.Run("open is rejected while no margin is available", func(t *testing.T) {
-		// marginAvailable is still a stub that reports zero margin.
-		err := newTestTrader().handleIntent(ctx, intent{action: open})
-		require.ErrorIs(t, err, errInsufficientMargin)
+	t.Run("open is accepted when margin is available", func(t *testing.T) {
+		assert.NoError(t, newTestTrader().handleIntent(ctx, intent{action: open}))
+	})
+	t.Run("open is rejected with zero margin", func(t *testing.T) {
+		tr := &trader{broker: &broker{id: "t"}, account: newAccount("a", 0)}
+		require.ErrorIs(t, tr.handleIntent(ctx, intent{action: open}), errInsufficientMargin)
+	})
+	t.Run("open is rejected with negative margin", func(t *testing.T) {
+		tr := &trader{broker: &broker{id: "t"}, account: newAccount("a", -1)}
+		require.ErrorIs(t, tr.handleIntent(ctx, intent{action: open}), errInsufficientMargin)
 	})
 }
 
