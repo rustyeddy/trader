@@ -3,15 +3,24 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func closes(vals ...float64) []ohlc {
-	bars := make([]ohlc, len(vals))
+// testStart is the fixed timestamp of the first test bar (a Monday).
+var testStart = time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
+
+// closes builds consecutive daily test bars for "TEST" with the given closes.
+func closes(vals ...float64) []bar {
+	bars := make([]bar, len(vals))
 	for i, v := range vals {
-		bars[i] = ohlc{c: price(v * priceScale)}
+		bars[i] = bar{
+			instrument: "TEST",
+			Time:       testStart.AddDate(0, 0, i),
+			ohlc:       ohlc{c: price(v * priceScale)},
+		}
 	}
 	return bars
 }
@@ -43,7 +52,7 @@ func TestEmax_LongWarmsOnSameBars(t *testing.T) {
 	}
 	// Regression: the long EMA must be seeded from bars 1-4 (value 2.5). If it
 	// were only fed after the short EMA warmed, the next value would differ.
-	v, ok := e.emaLong.onBar(ctx, ohlc{c: price(4 * priceScale)})
+	v, ok := e.emaLong.onBar(ctx, bar{ohlc: ohlc{c: price(4 * priceScale)}})
 	require.True(t, ok)
 	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
@@ -119,4 +128,23 @@ func TestEmax_Init(t *testing.T) {
 			assert.NotNil(t, e.emaLong)
 		})
 	}
+}
+
+func TestEmax_IntentsCarryInstrumentAndDirection(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
+	ctx := context.Background()
+
+	var opens, closes_ []intent
+	for _, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
+		switch i := e.onBar(ctx, b); i.action {
+		case open:
+			opens = append(opens, i)
+		case close:
+			closes_ = append(closes_, i)
+		default:
+			assert.Equal(t, intent{}, i, "hold carries no instrument or direction")
+		}
+	}
+	assert.Equal(t, []intent{{instrument: "TEST", direction: long, action: open}}, opens)
+	assert.Equal(t, []intent{{instrument: "TEST", direction: long, action: close}}, closes_)
 }

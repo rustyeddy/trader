@@ -7,7 +7,7 @@ import (
 
 type strategy interface {
 	init(cfg map[string]any) error
-	onBar(ctx context.Context, bar ohlc) intent
+	onBar(ctx context.Context, b bar) intent
 }
 
 // emax is concrete implementation of emax
@@ -34,10 +34,10 @@ func (e *emax) init(cfg map[string]any) error {
 	return nil
 }
 
-func (e *emax) onBar(ctx context.Context, bar ohlc) intent {
+func (e *emax) onBar(ctx context.Context, b bar) intent {
 	// Feed both EMAs every bar so the long one warms up on the same data.
-	s, sok := e.emaShort.onBar(ctx, bar)
-	l, lok := e.emaLong.onBar(ctx, bar)
+	s, sok := e.emaShort.onBar(ctx, b)
+	l, lok := e.emaLong.onBar(ctx, b)
 	if !sok || !lok {
 		return intent{}
 	}
@@ -45,10 +45,10 @@ func (e *emax) onBar(ctx context.Context, bar ohlc) intent {
 	switch {
 	case s > l && !e.over:
 		e.over = true
-		return intent{action: open}
+		return intent{instrument: b.instrument, direction: long, action: open}
 	case s < l && e.over:
 		e.over = false
-		return intent{action: close}
+		return intent{instrument: b.instrument, direction: long, action: close}
 	}
 	return intent{}
 }

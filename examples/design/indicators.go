@@ -22,14 +22,14 @@ func newSMA(window int) *sma {
 
 // onBar returns the average of the last window closes, and false until a
 // full window has been seen.
-func (s *sma) onBar(_ context.Context, bar ohlc) (float64, bool) {
+func (s *sma) onBar(_ context.Context, b bar) (float64, bool) {
 	if s.count == s.window {
 		s.sum -= s.buf[s.next]
 	} else {
 		s.count++
 	}
-	s.buf[s.next] = bar.c
-	s.sum += bar.c
+	s.buf[s.next] = b.c
+	s.sum += b.c
 	s.next = (s.next + 1) % s.window
 
 	if s.count < s.window {
@@ -57,8 +57,8 @@ func newEMA(window int) *ema {
 
 // onBar returns the current EMA, and false until a full window has been
 // seen to seed it.
-func (e *ema) onBar(_ context.Context, bar ohlc) (float64, bool) {
-	val := bar.c.Float64()
+func (e *ema) onBar(_ context.Context, b bar) (float64, bool) {
+	val := b.c.Float64()
 	if e.count < e.window {
 		e.count++
 		e.sum += val

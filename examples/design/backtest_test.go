@@ -17,14 +17,14 @@ import (
 // it was shown.
 type scriptStrategy struct {
 	intents []intent
-	seen    []ohlc
+	seen    []bar
 }
 
 func (s *scriptStrategy) init(map[string]any) error { return nil }
 
-func (s *scriptStrategy) onBar(_ context.Context, bar ohlc) intent {
+func (s *scriptStrategy) onBar(_ context.Context, b bar) intent {
 	i := len(s.seen)
-	s.seen = append(s.seen, bar)
+	s.seen = append(s.seen, b)
 	if i < len(s.intents) {
 		return s.intents[i]
 	}
@@ -46,11 +46,11 @@ func (h *recordHandler) handleIntent(_ context.Context, i intent) error {
 	return nil
 }
 
-func seq(bars []ohlc, errAt int, err error) iter.Seq2[ohlc, error] {
-	return func(yield func(ohlc, error) bool) {
+func seq(bars []bar, errAt int, err error) iter.Seq2[bar, error] {
+	return func(yield func(bar, error) bool) {
 		for i, b := range bars {
 			if i == errAt {
-				yield(ohlc{}, err)
+				yield(bar{}, err)
 				return
 			}
 			if !yield(b, nil) {
@@ -60,7 +60,7 @@ func seq(bars []ohlc, errAt int, err error) iter.Seq2[ohlc, error] {
 	}
 }
 
-func TestBacktestRun_ProcessesEveryBarInOrder(t *testing.T) {
+func TestBacktestRun_AcceptedRequests(t *testing.T) {
 	bars := closes(1, 2, 3)
 	strat := &scriptStrategy{intents: []intent{{action: open}, {}, {action: close}}}
 	h := &recordHandler{}
@@ -72,7 +72,7 @@ func TestBacktestRun_ProcessesEveryBarInOrder(t *testing.T) {
 	assert.Equal(t, []intent{{action: open}, {}, {action: close}}, h.got)
 }
 
-func TestBacktestRun_EmptyInput(t *testing.T) {
+func TestBacktestRun_NoBarsNoCalls(t *testing.T) {
 	strat := &scriptStrategy{}
 	h := &recordHandler{}
 
@@ -81,7 +81,7 @@ func TestBacktestRun_EmptyInput(t *testing.T) {
 	assert.Empty(t, h.got)
 }
 
-func TestBacktestRun_HandlerErrorStopsRun(t *testing.T) {
+func TestBacktestRun_FatalHandlerErrorStopsRun(t *testing.T) {
 	boom := errors.New("rejected")
 	strat := &scriptStrategy{}
 	h := &recordHandler{failAt: 2, err: boom}
@@ -93,7 +93,7 @@ func TestBacktestRun_HandlerErrorStopsRun(t *testing.T) {
 	assert.Len(t, h.got, 2)
 }
 
-func TestBacktestRun_IteratorErrorPropagates(t *testing.T) {
+func TestBacktestRun_DataErrorStopsRun(t *testing.T) {
 	boom := errors.New("bad data")
 	strat := &scriptStrategy{}
 	h := &recordHandler{}
@@ -135,7 +135,7 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-func TestBacktestRun_MarginRejectionIsLoggedAndRunContinues(t *testing.T) {
+func TestBacktestRun_ExpectedRejectionIsLoggedAndRunContinues(t *testing.T) {
 	logs := captureLogs(t)
 	strat := &scriptStrategy{intents: []intent{
 		{instrument: "EUR/USD", direction: long, action: open},
@@ -152,6 +152,7 @@ func TestBacktestRun_MarginRejectionIsLoggedAndRunContinues(t *testing.T) {
 	assert.Contains(t, out, "level=WARN")
 	assert.Contains(t, out, "intent rejected")
 	assert.Contains(t, out, "insufficient margin available")
+	assert.Contains(t, out, "time=2010-01-04")
 	assert.Contains(t, out, "instrument=EUR/USD")
 	assert.Contains(t, out, "action=open")
 	assert.Contains(t, out, "direction=long")
@@ -165,4 +166,88 @@ func TestBacktestRun_FatalHandlerErrorIsNotLoggedAsRejection(t *testing.T) {
 
 	require.Error(t, err)
 	assert.NotContains(t, logs.String(), "intent rejected")
+}
+
+func TestBacktestRun_AcceptedRequestCallsHandlerOnceWithIntent(t *testing.T) {
+	want := intent{instrument: "EUR/USD", direction: short, action: open}
+	strat := &scriptStrategy{intents: []intent{want}}
+	h := &recordHandler{}
+
+	err := (&backtest{}).run(context.Background(), seq(closes(1), -1, nil), strat, h)
+
+	require.NoError(t, err)
+	require.Len(t, h.got, 1)
+	assert.Equal(t, want, h.got[0])
+}
+
+// rejectFirstOpen rejects only the first open it sees for margin, then
+// accepts everything, modelling margin that becomes available later.
+type rejectFirstOpen struct {
+	rejected bool
+	got      []intent
+	accepted []int // bar index of each accepted open
+	calls    int
+}
+
+func (h *rejectFirstOpen) handleIntent(_ context.Context, i intent) error {
+	idx := h.calls
+	h.calls++
+	h.got = append(h.got, i)
+	if i.action != open {
+		return nil
+	}
+	if !h.rejected {
+		h.rejected = true
+		return errInsufficientMargin
+	}
+	h.accepted = append(h.accepted, idx)
+	return nil
+}
+
+func countActions(intents []intent, a action) (n int) {
+	for _, i := range intents {
+		if i.action == a {
+			n++
+		}
+	}
+	return n
+}
+
+// §2 critical regression: a rejected entry must not become a late fill.
+func TestMissedEntry_RejectedOpenIsNotRetried(t *testing.T) {
+	captureLogs(t)
+	e := newTestEmax(t, 2, 4)
+	h := &rejectFirstOpen{}
+
+	// Bearish, one bullish cross at index 5, then bullish for many bars while
+	// margin "becomes available" (the handler accepts any later open).
+	bars := closes(10, 9, 8, 7, 6, 12, 14, 16, 18, 20, 22, 24, 26)
+	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), e, h)
+
+	require.NoError(t, err)
+	require.Len(t, h.got, len(bars), "handler sees one intent per bar")
+	assert.Equal(t, open, h.got[5].action, "the one entry opportunity")
+	assert.True(t, h.rejected)
+	assert.Equal(t, 1, countActions(h.got, open), "no second open while still bullish")
+	assert.Empty(t, h.accepted, "no late entry once margin is available")
+	for i := 6; i < len(h.got); i++ {
+		assert.Equal(t, hold, h.got[i].action, "bar %d", i)
+	}
+}
+
+// §2: a rejected entry must not suppress re-entry forever.
+func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
+	captureLogs(t)
+	e := newTestEmax(t, 2, 4)
+	h := &rejectFirstOpen{}
+
+	// bullish cross (rejected), bearish cross, then a fresh bullish cross.
+	bars := closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2, 1, 14, 20, 30)
+	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), e, h)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, countActions(h.got, open), "intents: %v", h.got)
+	assert.Equal(t, open, h.got[5].action, "first, rejected, opportunity")
+	require.Len(t, h.accepted, 1, "the fresh opportunity is accepted")
+	assert.Greater(t, h.accepted[0], 5)
 }

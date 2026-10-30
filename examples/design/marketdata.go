@@ -20,9 +20,11 @@ type ohlc struct {
 	v          int
 }
 
+// bar is one observation: an instrument's OHLCV at a point in time.
 type bar struct {
 	instrument string
 	time.Time
+	ohlc
 }
 
 type timeRange struct {
@@ -35,21 +37,21 @@ type marketData struct {
 	timerange  timeRange
 	interval   string
 
-	data  []ohlc
+	data  []bar
 	index int
 }
 
 // bars returns an iterator over the bars in order. If ctx is cancelled the
 // iterator yields ctx.Err() once and stops. No goroutine is involved, so
 // breaking out of the loop early leaks nothing.
-func (md *marketData) bars(ctx context.Context) iter.Seq2[ohlc, error] {
-	return func(yield func(ohlc, error) bool) {
-		for _, bar := range md.data {
+func (md *marketData) bars(ctx context.Context) iter.Seq2[bar, error] {
+	return func(yield func(bar, error) bool) {
+		for _, b := range md.data {
 			if err := ctx.Err(); err != nil {
-				yield(ohlc{}, err)
+				yield(bar{}, err)
 				return
 			}
-			if !yield(bar, nil) {
+			if !yield(b, nil) {
 				return
 			}
 		}
@@ -57,7 +59,8 @@ func (md *marketData) bars(ctx context.Context) iter.Seq2[ohlc, error] {
 }
 
 // synthesize fills md.data with one daily bar per weekday in md.timerange,
-// following a seeded random walk so runs are deterministic. Prices are
+// stamped with md.instrument and the day's date, following a seeded random
+// walk so runs are deterministic. Prices are
 // integer points (1/100000), e.g. 110000 == 1.10000.
 func (md *marketData) synthesize(seed int64, start price) {
 	rng := rand.New(rand.NewSource(seed))
@@ -75,7 +78,11 @@ func (md *marketData) synthesize(seed int64, start price) {
 		h, l := max(o, c), min(o, c)
 		h += price(rng.Intn(151))
 		l -= price(rng.Intn(151))
-		md.data = append(md.data, ohlc{o: o, h: h, l: l, c: c, v: 1000 + rng.Intn(9000)})
+		md.data = append(md.data, bar{
+			instrument: md.instrument,
+			Time:       d,
+			ohlc:       ohlc{o: o, h: h, l: l, c: c, v: 1000 + rng.Intn(9000)},
+		})
 		px = c
 	}
 }

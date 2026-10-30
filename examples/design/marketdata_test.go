@@ -10,7 +10,7 @@ import (
 )
 
 func TestBars_YieldsAllInOrder(t *testing.T) {
-	md := &marketData{data: []ohlc{{c: 1}, {c: 2}, {c: 3}}}
+	md := &marketData{data: testBars(1, 2, 3)}
 	var got []price
 	for b, err := range md.bars(context.Background()) {
 		require.NoError(t, err)
@@ -20,7 +20,7 @@ func TestBars_YieldsAllInOrder(t *testing.T) {
 }
 
 func TestBars_EarlyBreak(t *testing.T) {
-	md := &marketData{data: []ohlc{{c: 1}, {c: 2}, {c: 3}}}
+	md := &marketData{data: testBars(1, 2, 3)}
 	n := 0
 	for range md.bars(context.Background()) {
 		n++
@@ -30,7 +30,7 @@ func TestBars_EarlyBreak(t *testing.T) {
 }
 
 func TestBars_ContextCancelled(t *testing.T) {
-	md := &marketData{data: []ohlc{{c: 1}, {c: 2}, {c: 3}}}
+	md := &marketData{data: testBars(1, 2, 3)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var bars int
@@ -139,7 +139,50 @@ func TestSynthesize_BarInvariants(t *testing.T) {
 func TestSynthesize_ResetsPreviousData(t *testing.T) {
 	md := synthMD(t, "2010-01-04", "2010-01-08")
 	md.synthesize(1, 110000)
-	first := append([]ohlc(nil), md.data...)
+	first := append([]bar(nil), md.data...)
 	md.synthesize(1, 110000)
 	assert.Equal(t, first, md.data, "re-synthesizing must replace, not append")
+}
+
+// testBars builds bars whose closes are the given integer points.
+func testBars(closes ...price) []bar {
+	bars := make([]bar, len(closes))
+	for i, c := range closes {
+		bars[i] = bar{instrument: "TEST", Time: testStart.AddDate(0, 0, i), ohlc: ohlc{c: c}}
+	}
+	return bars
+}
+
+func TestSynthesize_StampsInstrumentAndTime(t *testing.T) {
+	md := synthMD(t, "2010-01-01", "2010-01-12") // Fri .. Tue, two weeks
+	md.instrument = "EUR/USD"
+	md.synthesize(1, 110000)
+	require.NotEmpty(t, md.data)
+
+	assert.Equal(t, time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC), md.data[0].Time)
+	for i, b := range md.data {
+		assert.Equal(t, "EUR/USD", b.instrument, "bar %d", i)
+		assert.NotEqual(t, time.Saturday, b.Weekday(), "bar %d", i)
+		assert.NotEqual(t, time.Sunday, b.Weekday(), "bar %d", i)
+		if i > 0 {
+			assert.True(t, b.After(md.data[i-1].Time), "bar %d must be later than the previous", i)
+		}
+	}
+	last := md.data[len(md.data)-1]
+	assert.Equal(t, time.Date(2010, 1, 12, 0, 0, 0, 0, time.UTC), last.Time)
+}
+
+func TestBars_YieldsInstrumentAndTime(t *testing.T) {
+	md := synthMD(t, "2010-01-04", "2010-01-08")
+	md.instrument = "GBP/USD"
+	md.synthesize(1, 110000)
+
+	var n int
+	for b, err := range md.bars(context.Background()) {
+		require.NoError(t, err)
+		assert.Equal(t, md.data[n], b)
+		assert.Equal(t, "GBP/USD", b.instrument)
+		n++
+	}
+	assert.Equal(t, 5, n)
 }

@@ -52,7 +52,7 @@ func TestSMA_NoDriftOverLongRun(t *testing.T) {
 	s := newSMA(7)
 	var v float64
 	for i := 0; i < 100000; i++ {
-		v, _ = s.onBar(context.Background(), ohlc{c: 123457})
+		v, _ = s.onBar(context.Background(), bar{ohlc: ohlc{c: 123457}})
 	}
 	assert.Equal(t, price(123457).Float64(), v)
 }
@@ -95,7 +95,7 @@ func TestEMA_ConstantSeries(t *testing.T) {
 	e := newEMA(5)
 	var v float64
 	for i := 0; i < 50; i++ {
-		v, _ = e.onBar(context.Background(), ohlc{c: 110000})
+		v, _ = e.onBar(context.Background(), bar{ohlc: ohlc{c: 110000}})
 	}
 	assert.InDelta(t, 1.1, v, 1e-12)
 }
