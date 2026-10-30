@@ -1,0 +1,150 @@
+#+TITLE: Intent Contract — Test-First Scenarios
+#+STARTUP: overview
+
+* Status
+DRAFT for review. This is a test plan for Claude, NOT an approved final API.
+Implement in =examples/design= one small step at a time. Keep
+=make check && make run= green after every step. Read =AGENTS.md= and
+=../../.agents/skills/go-testing/SKILL.md= first.
+
+* Working Semantics
+- An intent expresses a desired trading *transition*, not a broker order.
+- Actions: Open, Hold, Add, Reduce, Close.
+- Direction: Long or Short, separate from order side Buy/Sell.
+- Instrument identifies the position affected.
+- Hold means no new request; it MUST NOT retry a rejected earlier Open.
+- Open/Add are one-time opportunities unless a strategy explicitly emits
+  another new intent. Desired exposure is not a perpetual entry command.
+- Trader may reject an intent; rejection never changes the actual position.
+- Strategy's signal state is not proof that a broker order was filled.
+- Leave signal quality/scoring, broker-specific orders, and quantitative
+  risk sizing for later. Avoid new interfaces except where needed.
+- A strategy MAY optionally receive a read-only snapshot function at
+  construction time; =OnBar()= itself should not require an account.
+
+* 1. Intent Validation — =intent_test.go=
+Use Testify =require=/=assert= and table-driven cases.
+
+** TODO Valid semantic combinations
+- Open Long, Open Short.
+- Add Long, Add Short.
+- Reduce Long, Reduce Short.
+- Close Long, Close Short (or directionless Close if chosen explicitly).
+- Hold with no instrument/direction, if Hold is the canonical no-op.
+- Show that a zero-value intent is either a valid no-op OR invalid;
+  decide and document before implementation.
+- Validation must not confuse position direction with order buy/sell.
+
+** TODO Invalid semantic combinations
+- Missing instrument on actionable intents.
+- Unknown action.
+- Unknown direction on actions requiring direction.
+- Contradictory fields (e.g. Hold with a requested quantity, if later
+  quantities are introduced).
+- Invalid encoding must return an error, not silently become Hold.
+- Do not prematurely require StopLoss, Target or risk fields.
+
+* 2. Signal Lifetime / Missed Entry — =strategy_test.go= or =intent_test.go=
+** TODO One-shot entry opportunity (critical regression test)
+Given: Flat, EMA crosses bullish on bar T, strategy emits Open Long.
+And: Trader rejects Open (e.g. insufficient margin).
+When: Subsequent bars remain bullish but no NEW qualifying entry occurs.
+Then: Strategy emits Hold (or no intent), not repeated Open Long.
+And: Trader does not enter late simply because margin later becomes available.
+
+** TODO Explicit new opportunity
+Given: An earlier Open was rejected.
+When: A fresh qualifying signal occurs according to strategy rules.
+Then: A fresh Open is allowed. Do not globally suppress reentry forever.
+
+** TODO Accepted order is not an executed position
+Given: Open emitted and an order is pending, unfilled or rejected.
+Then: Snapshot must report actual positions and pending orders separately
+where available; strategy must not equate signal generation with a fill.
+(Use a minimal fake snapshot or defer pending-order mechanics to broker TODO.)
+
+* 3. Transitions / Handler — =intent_test.go=, =trader_test.go=
+** TODO Flat -> Open Long; Flat -> Open Short
+- Request translates to an eligible opening decision; broker execution
+  remains separate.
+
+** TODO Long -> Hold; Short -> Hold
+- Hold does not place or repeat an order.
+- Repeated Hold must not change position or pending orders.
+
+** TODO Long -> Add Long; Short -> Add Short
+- Add requires appropriate existing directional exposure; do not silently
+  reinterpret Add as Open while flat (unless explicitly agreed).
+- Size/increment is intentionally unresolved; use deterministic minimal
+  semantics or test rejection until sizing contract exists.
+
+** TODO Long -> Reduce; Short -> Reduce
+- Reduce cannot increase exposure or flip position.
+- Specify whether Reduce while flat rejects or is harmless no-op.
+
+** TODO Long -> Close; Short -> Close
+- Close is full flattening of the specified instrument position.
+- Decide whether Close while flat should be no-op or explicit rejection.
+
+** TODO Reversals
+- Current action list has no Reverse. Test Close followed by a separately
+  permitted Open (may be two intents / two observations).
+- Decide whether atomic reversal is required before extending the API.
+
+** TODO Mismatched directions
+- Add Long to existing Short must not silently pyramid a short or reverse.
+- Reduce/Close with a mismatched specified direction must not close the
+  wrong position.
+
+* 4. Snapshot Access — =strategy_test.go= / =account_test.go=
+** TODO Snapshot optional
+- Simple EMA strategy runs with no snapshot function/interface.
+- A pyramiding strategy can be constructed with =snapshot func() Snapshot=
+  or a narrow SnapshotProvider; do not modify =OnBar= signature.
+
+** TODO Immutable snapshot semantics
+- Returning a struct by value copies its fields, but does NOT deep-copy
+  nested slices, maps or pointers. Verify changing a returned snapshot
+  cannot mutate the account. Alternatively hide fields via accessors.
+- Snapshot represents state at current (simulated) time only; no future
+  fills or market information.
+- Test nil/unavailable snapshot behavior where strategy needs it.
+
+** TODO Pyramiding does not chase/retry
+- Given a long position and a fresh qualifying add signal, emit Add Long.
+- If Add is rejected, subsequent bars with no new qualification emit Hold.
+- If the prior Add is pending, do not issue duplicate exposure requests.
+  Pending-order accounting can be refined with broker integration.
+
+* 5. Handler Results / Error Classification — =backtest_test.go=
+** TODO Accepted request
+- Handler called once with the correct intent; loop continues.
+
+** TODO Expected rejection
+- Insufficient margin/limit violation is a *trading outcome*, not
+  necessarily a fatal program error. Establish reporting of rejection
+  while continuing subsequent bars.
+- Choose concrete rejected-result/error representation before testing
+  exact signature; avoid an elaborate result hierarchy.
+
+** TODO Fatal error and cancellation
+- Data/iterator error and fatal handler failure stop the run with context.
+- Context cancellation exits, and errors preserve cause via =errors.Is=.
+- No future bars processed after a fatal error.
+
+* Decisions to Settle Before Tests Are Written in Go
+1. Is zero-value Intent equivalent to Hold, or invalid?
+2. Does Close require Direction? If yes, it is a position direction.
+3. Are Add/Reduce relative moves supported in v1 without a quantity
+   contract, or represented as valid but not executable yet?
+4. Does expected rejection return an error (typed/classified) or an
+   explicit execution result? Distinguish it from run failure.
+5. How should a strategy detect new opportunities after rejection?
+   Proposed default: strategy owns signal lifecycle; snapshot is optional.
+
+* Acceptance Gate
+- Place Go tests in matching =*_test.go= files, using Testify.
+- Ensure one rejected entry cannot become an accidental late fill.
+- Keep existing EMA, synthetic data, iterator and demo runnable.
+- No production package changes; no new abstractions without approval.
+- Demonstrate tests with =make check && make run= and report results.
