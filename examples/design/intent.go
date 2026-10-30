@@ -29,3 +29,29 @@ type intent struct {
 	direction  direction
 	action     action
 }
+
+func (d direction) String() string {
+	switch d {
+	case long:
+		return "long"
+	case short:
+		return "short"
+	}
+	return "none"
+}
+
+func (a action) String() string {
+	switch a {
+	case hold:
+		return "hold"
+	case open:
+		return "open"
+	case add:
+		return "add"
+	case close:
+		return "close"
+	case reduce:
+		return "reduce"
+	}
+	return "unknown"
+}

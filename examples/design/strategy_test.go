@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,71 +16,107 @@ func closes(vals ...float64) []ohlc {
 	return bars
 }
 
-func TestEmaxHoldsUntilBothWarm(t *testing.T) {
-	e := &emax{short: 2, long: 4}
+func newTestEmax(t *testing.T, short, long int) *emax {
+	t.Helper()
+	e := &emax{short: short, long: long}
 	require.NoError(t, e.init(nil))
+	return e
+}
 
-	// Falling prices, so short < long once warm; no signal and no sell
-	// while the long EMA is still warming up (first 3 bars).
+func TestEmax_HoldsUntilBothWarm(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
-	for i, b := range closes(10, 9, 8, 7)[:3] {
-		require.Equal(t, "hold", e.onBar(ctx, b).side, "bar %d", i)
+
+	// Falling prices: once warm, short < long. No signal, and especially no
+	// close, while the long EMA is still warming up (first 3 bars).
+	for i, b := range closes(10, 9, 8) {
+		assert.Equal(t, hold, e.onBar(ctx, b).action, "bar %d", i)
 	}
 }
 
-func TestEmaxLongWarmsOnSameBars(t *testing.T) {
-	e := &emax{short: 2, long: 4}
-	require.NoError(t, e.init(nil))
-
+func TestEmax_LongWarmsOnSameBars(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
+
 	for _, b := range closes(1, 2, 3, 4) {
 		e.onBar(ctx, b)
 	}
-	// Long EMA seeded from bars 1-4 means it is valid on the 4th bar with
-	// value 2.5. Had it been fed late it would not be valid yet.
+	// Regression: the long EMA must be seeded from bars 1-4 (value 2.5). If it
+	// were only fed after the short EMA warmed, the next value would differ.
 	v, ok := e.emaLong.onBar(ctx, ohlc{c: price(4 * priceScale)})
 	require.True(t, ok)
-	require.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
+	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
 
-func TestEmaxCrossovers(t *testing.T) {
-	e := &emax{short: 2, long: 4}
-	require.NoError(t, e.init(nil))
+func TestEmax_Crossovers(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
+	ctx := context.Background()
 
 	// Down, then sharply up (short crosses above long), then sharply down.
 	series := closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2)
-	var sides []string
-	ctx := context.Background()
+	var got []action
 	for _, b := range series {
-		sides = append(sides, e.onBar(ctx, b).side)
+		got = append(got, e.onBar(ctx, b).action)
 	}
 
-	var buys, sells int
-	for _, s := range sides {
-		switch s {
-		case "buy":
-			buys++
-		case "sell":
-			sells++
-		}
-	}
-	require.Equal(t, 1, buys, "sides: %v", sides)
-	require.Equal(t, 1, sells, "sides: %v", sides)
-	require.Less(t, indexOf(sides, "buy"), indexOf(sides, "sell"))
+	// Warm on bar index 3. The short EMA crosses above the long one on the
+	// jump to 12 (index 5) and back below on the drop to 8 (index 8).
+	want := []action{hold, hold, hold, hold, hold, open, hold, hold, close, hold, hold}
+	assert.Equal(t, want, got)
 }
 
-func indexOf(ss []string, want string) int {
-	for i, s := range ss {
-		if s == want {
-			return i
+func TestEmax_NoRepeatedOpen(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
+	ctx := context.Background()
+
+	var opens int
+	for _, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 18, 20, 22, 24) {
+		if e.onBar(ctx, b).action == open {
+			opens++
 		}
 	}
-	return -1
+	assert.Equal(t, 1, opens, "a sustained bullish state must not re-emit open")
 }
 
-func TestEmaxInitValidation(t *testing.T) {
-	require.Error(t, (&emax{short: 0, long: 5}).init(nil))
-	require.Error(t, (&emax{short: 5, long: 5}).init(nil))
-	require.Error(t, (&emax{short: 6, long: 5}).init(nil))
-	require.NoError(t, (&emax{short: 2, long: 5}).init(nil))
+func TestEmax_FirstValidBarAlreadyBullish(t *testing.T) {
+	// Documents current behavior: with short already above long on the first
+	// valid bar there is no crossover, but emax still emits open.
+	e := newTestEmax(t, 2, 4)
+	ctx := context.Background()
+
+	var got []action
+	for _, b := range closes(1, 2, 3, 4) {
+		got = append(got, e.onBar(ctx, b).action)
+	}
+	assert.Equal(t, []action{hold, hold, hold, open}, got)
+}
+
+func TestEmax_Init(t *testing.T) {
+	tests := []struct {
+		name        string
+		short, long int
+		wantErr     bool
+	}{
+		{"valid", 2, 5, false},
+		{"zero short", 0, 5, true},
+		{"zero long", 2, 0, true},
+		{"negative short", -1, 5, true},
+		{"equal windows", 5, 5, true},
+		{"short above long", 6, 5, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &emax{short: tt.short, long: tt.long}
+			err := e.init(nil)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, e.emaShort)
+				assert.Nil(t, e.emaLong)
+				return
+			}
+			require.NoError(t, err)
+			assert.NotNil(t, e.emaShort)
+			assert.NotNil(t, e.emaLong)
+		})
+	}
 }
