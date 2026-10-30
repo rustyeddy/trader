@@ -39,16 +39,16 @@ func (e *emax) onBar(ctx context.Context, bar ohlc) intent {
 	s, sok := e.emaShort.onBar(ctx, bar)
 	l, lok := e.emaLong.onBar(ctx, bar)
 	if !sok || !lok {
-		return intent{side: "hold"}
+		return intent{}
 	}
 
 	switch {
 	case s > l && !e.over:
 		e.over = true
-		return intent{side: "buy"}
+		return intent{action: open}
 	case s < l && e.over:
 		e.over = false
-		return intent{side: "sell"}
+		return intent{action: close}
 	}
-	return intent{side: "hold"}
+	return intent{}
 }

@@ -11,14 +11,14 @@ type trader struct {
 }
 
 func (tr *trader) handleIntent(ctx context.Context, i intent) (err error) {
-	switch i.side {
-	case "buy":
+	switch i.action {
+	case open:
 		if tr.account.marginAvailable() <= 0 {
 			return errors.New("Not enough margin available")
 		}
 		err = tr.openTrade(i)
 
-	case "sell":
+	case close:
 		err = tr.closeTrade(i)
 	}
 	return err
