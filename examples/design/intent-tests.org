@@ -12,6 +12,10 @@ Implement in =examples/design= one small step at a time. Keep
 - Actions: Hold=0 (zero value), Open, Add, Reduce, Close.
 - Direction: noDirection=0, Long=1, Short=2 (explicit values).
 - The zero-value intent is Hold and is a valid no-op.
+- Every intent a strategy emits, including Hold, SHOULD name its instrument,
+  so each intent identifies what it refers to (needed once strategies cover
+  several instruments and may return several intents per observation).
+  Hold carries no direction or size.
 - Position direction is separate from order side Buy/Sell.
 - Open requires direction; Add, Reduce, Close do NOT require direction.
   They act on the existing position for the specified instrument.
@@ -37,7 +41,8 @@ Use Testify =require=/=assert= and table-driven cases.
 - Add with instrument, positive increment size, no direction.
 - Reduce with instrument and nonnegative bounded reduction size, no direction.
 - Close with instrument and no direction or size.
-- Hold (zero-value intent), with no instrument/direction/size.
+- Hold with an instrument and no direction/size (what strategies emit).
+- Hold zero-value intent (no instrument) remains a valid no-op.
 - Assert noDirection=0, Long=1, Short=2.
 - Validation must not confuse position direction with order buy/sell.
 
@@ -146,7 +151,8 @@ where available; strategy must not equate signal generation with a fill.
 - No future bars processed after a fatal error.
 
 * Settled Decisions
-1. Zero-value Intent is Hold, with zero-valued fields.
+1. Zero-value Intent is Hold, with zero-valued fields. A Hold emitted by a
+   strategy should still name its instrument; validation accepts both.
 2. Direction enum: noDirection=0, Long=1, Short=2.
 3. Open requires direction. Add, Reduce and Close require no direction;
    they refer to the existing position for the instrument.
