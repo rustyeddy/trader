@@ -1,0 +1,210 @@
+#+TITLE: Trader — Architecture North Star
+#+SUBTITLE: Simple, understandable Go, validated by working examples
+#+STARTUP: overview
+
+* First-Order Goal: Clarity and Simplicity
+
+Trader must have an architecture that is *clear, crisp, small, and
+readily understandable by a competent Go developer*.
+
+This is the first-order design goal. Favor straightforward Go code
+over an elaborate framework. A developer should be able to follow the
+important paths, write a strategy or study, and understand where
+behavior lives without tracing through layers of indirection.
+
+- Prefer a few cohesive responsibilities, concrete types, and simple functions.
+- Add packages or interfaces only when a real boundary justifies them.
+- Remove indirection; do not merely rename or relocate it.
+- Keep configuration, plumbing, and transport code out of domain logic.
+- Preserve useful implementation and tests rather than rewriting everything.
+- Optimize for a single developer's ability to understand, maintain, and extend
+  the system.
+
+* Working Method: Architecture First, Proven in Code
+
+The current phase is *high-level architectural design*, not detailed
+production hardening. We will establish a simple coherent design
+through small, executable Go examples and focused tests before
+retrofitting the production codebase.
+
+- Propose a small API and demonstrate it in working code.
+- Test the important end-to-end behavior and architectural boundaries.
+- Challenge each abstraction: does it simplify the caller's job?
+- Make one architectural decision at a time, then move forward.
+- Avoid premature refinements, edge-case debates, and pedantic correctness that
+  do not materially affect the shape of the architecture.
+- Record open questions without letting them block the core design.
+- Do not begin broad production refactoring until the simple prototype hangs
+  together and demonstrates the central workflows.
+
+* Functional Model
+
+These are *responsibilities*, not a requirement for one package per item.
+
+| Responsibility | Role                                                         |
+|----------------+--------------------------------------------------------------|
+| MarketData     | Acquire, store, assemble, cache, and deliver market bars.    |
+| Strategy       | Consume observations; generate trading intents.              |
+| Account        | Hold account/position facts; support sizing and risk checks. |
+| Broker         | Execute orders; report fills and execution activity.         |
+| Trader         | Coordinate intents, risk/account, broker, and state updates. |
+| Backtest       | Replay historical data with simulated execution.             |
+| Study          | Compute and retain research observations and statistics.     |
+| Scanner        | Classify/select instruments and interesting conditions.      |
+
+Reporting, journaling, configuration, and logging support these
+responsibilities; they are not automatically separate subsystems or
+service layers.
+
+* The Essential Execution Path
+
+A trading workflow should remain recognizable at a glance:
+
+#+begin_src text
+MarketData -> Bar(s) -> Strategy -> Intent -> Trader -> Account/Broker
+#+end_src
+
+Illustrative pseudo-Go (not a frozen interface):
+
+#+begin_src go
+for bar, err := range data.Bars(ctx) {
+    if err != nil { return err }
+    intent := strategy.OnBar(ctx, bar)
+    if err := trader.HandleIntent(ctx, intent); err != nil { return err }
+}
+#+end_src
+
+The goal is to reuse market-observation processing across backtests
+and live trading. Studies and scanners should share the
+data-consumption mechanics where useful, *without being forced to
+create trading intents or depend on brokers/accounts*.
+
+An =IntentHandler= is a useful small boundary for trading, but not a universal
+interface for all consumers.
+
+* Key Architectural Decisions
+
+** Market data owns assembly; consumers see observations
+
+MarketData is responsible for retrieving and combining data from
+potentially multiple files or providers, putting observations in
+order, and managing coverage/gaps, caching, and memory. Consumers must
+not need to know how stored bars were located or assembled.
+
+A Go iterator is the current working baseline. Slices and channels remain
+possible alternatives or complements when a concrete use case justifies them.
+Do not add mechanisms simply for symmetry.
+
+** Keep Bar and Bars
+
+A =Bar= is one observation for one instrument. A =Bars= collection groups
+observations keyed by instrument, allowing multi-instrument consumers.
+
+#+begin_src go
+// Illustrative, not an approved final type signature.
+type Bars map[Instrument]Bar
+#+end_src
+
+Preserve single-bar use cases. Decide how multi-instrument observations are
+aligned and delivered through working two-instrument examples rather than by
+building a generic framework in advance.
+
+** Bar timestamp and causal availability
+
+A bar's timestamp denotes its *opening* time. A completed bar must not be
+presented to a strategy or study until *after its closing time*.
+
+Example: an H1 bar stamped 10:00 covers 10:00–11:00 and becomes available at
+11:00. The bar's opening timestamp, the time its full data becomes available,
+and the time an order can actually fill are distinct concepts.
+
+This causal rule must hold in historical replay as well as live processing.
+Do not silently provide future bars or fabricate missing observations.
+
+** Strategies emit intents, not orders
+
+Strategies decide what trading action is desired. Trader coordinates validation,
+account/risk decisions, execution, and reconciliation. The broker (real or
+simulated) is responsible for execution outcomes.
+
+A strategy should not need direct broker access. Where strategy behavior depends
+on actual exposure, make read-only account/position information available
+without making =OnBar= a large, dependency-heavy method.
+
+Keep signal state distinct from actual account/position state. The precise
+intent fields, sizing, rejection policies, and reversal behavior can evolve
+from small executable examples; they are not today's architectural focus.
+
+** A shared data-processing mechanism, not one universal application
+
+Backtest and live trading should reuse the same essential decision path, with
+historical versus live data and simulated versus real broker mechanics differing
+at their natural boundaries.
+
+Studies produce research measurements; scanners identify conditions or
+instruments. Neither should be required to manufacture =Intent= values.
+
+* Validate with Three Small Executable Examples
+
+1. *Single-instrument trading:* An EMA-cross strategy consumes bars, emits
+   intents, and uses a simple Trader handler against a simulated account/broker.
+2. *Multi-instrument processing:* A two-instrument strategy or scanner consumes
+   =Bars= and demonstrates chronological delivery and a missing-bar case.
+3. *Non-trading research:* An ATR study consumes market data and produces
+   results without creating an account, broker, or trading intent.
+
+Each example should be easy to read and should have focused tests proving its
+important behavior. The aim is architectural confidence, not exhaustive
+production-level completeness.
+
+* Results and Journaling: Important, Deferred Design
+
+Backtests, studies, and scanners must eventually yield *durable, reviewable,
+comparable, and reproducible* results. Keep these concepts distinct:
+
+- Trading journal: decisions, orders, fills, positions, and completed trades.
+- Backtest results: performance and simulated execution outcomes.
+- Study results: measurements, observations, and statistical findings.
+- Scanner results: classifications and instrument selections.
+- Reports: human-readable views derived from recorded facts.
+
+The engine generates observations and outcomes; reporting should not dictate
+its architecture. We will design run identity, provenance, persistence, Org
+reports, and comparison facilities together *after* the high-level execution
+and data-consumption architecture is demonstrated. No storage backend or
+reporting interface is selected here.
+
+* Open Questions — Resolve by Examples, Not Speculation
+
+- Exact =OnBar= / =OnBars= signatures and whether multiple intents per cycle
+  are needed.
+- How multi-instrument =Bars= frames handle sparse, asynchronous, or missing
+  observations.
+- Whether and when a slice or channel complements the current iterator.
+- The smallest useful read-only account/position view for strategies.
+- Intent sizing, execution timing, rejection, and reversal details.
+- Durable result model and reporting/journaling storage formats.
+
+These are acknowledged questions, *not permission to expand the design now*.
+
+* Migration Principle
+
+Keep the prototype isolated while the architecture is being validated. Once
+three small examples demonstrate the desired shape, selectively migrate working
+production functionality and tests. Measure success in *less code, fewer
+layers, understandable APIs, and a shorter path from market data to useful
+results*—not in the number of abstractions introduced.
+
+* Architecture Review Test
+
+Before accepting a significant change, ask:
+
+1. Can a good Go developer quickly understand this without reading the entire
+   repository?
+2. Does the example caller remain small and natural?
+3. Did we remove complexity, or merely move it somewhere else?
+4. Is this abstraction demonstrated by working code and a test?
+5. Are we solving a present architectural problem, or prematurely polishing a
+   future implementation detail?
+
+If an approach fails these tests, simplify it.

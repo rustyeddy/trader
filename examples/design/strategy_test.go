@@ -187,3 +187,8 @@ func TestEmax_HoldsCarryInstrumentAndValidate(t *testing.T) {
 		assert.NoError(t, in.validate(), "bar %d (%s)", i, in.action)
 	}
 }
+
+func TestEmax_Name(t *testing.T) {
+	var s strategy = &emax{id: "emax-20-50"}
+	assert.Equal(t, "emax-20-50", s.name())
+}

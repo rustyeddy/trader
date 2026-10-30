@@ -20,6 +20,8 @@ type scriptStrategy struct {
 	seen    []bar
 }
 
+func (s *scriptStrategy) name() string { return "script" }
+
 func (s *scriptStrategy) init(map[string]any) error { return nil }
 
 func (s *scriptStrategy) onBar(_ context.Context, b bar) intent {

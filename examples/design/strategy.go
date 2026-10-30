@@ -6,6 +6,7 @@ import (
 )
 
 type strategy interface {
+	name() string
 	init(cfg map[string]any) error
 	onBar(ctx context.Context, b bar) intent
 }
@@ -13,13 +14,17 @@ type strategy interface {
 // emax is concrete implementation of emax
 // will need to become an interface certainly
 type emax struct {
-	name  string
+	id    string
 	short int
 	long  int
 	over  bool // is short over long
 
 	emaShort *ema
 	emaLong  *ema
+}
+
+func (e *emax) name() string {
+	return e.id
 }
 
 func (e *emax) init(cfg map[string]any) error {

@@ -15,30 +15,72 @@ func main() {
 }
 
 func run() error {
+
+	tr, err := getTrader()
+	panicOnError(err)
+
+	prices, err := getPrices()
+	panicOnError(err)
+
+	strat, err := getStrategy()
+	panicOnError(err)
+
+	slog.Info("backtest starting",
+		"strategy", strat.name(),
+		"instrument", prices.instrument,
+		"interval", prices.interval,
+		"bars", len(prices.data))
+
+	bt := &backtest{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := bt.run(ctx, prices.bars(ctx), strat, tr); err != nil {
+		return err
+	}
+
+	slog.Info("backtest complete", "strategy", strat.name())
+
+	// write the reports
+	return nil
+}
+
+func panicOnError(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func getTrader() (*trader, error) {
 	br, ok := getBroker("sim")
 	if !ok {
-		return errUnknownBroker
+		return nil, errUnknownBroker
 	}
 
 	act, ok := br.getAccount("sim123")
 	if !ok {
-		return errUnknownAccount
+		return nil, errUnknownAccount
 	}
 
 	tr := &trader{
 		broker:  br,
 		account: act,
 	}
+	return tr, nil
+}
+
+func getPrices() (*marketData, error) {
 
 	// determine the price data
 	tstart, err := time.Parse("2006-01-02", "2010-01-01")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	tend, err := time.Parse("2006-01-02", "2011-12-31")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	prices := &marketData{
 		instrument: "EUR/USD",
@@ -49,33 +91,17 @@ func run() error {
 		interval: "d1",
 	}
 	prices.synthesize(1, 110000) // start at 1.10000
+	return prices, nil
+}
+
+func getStrategy() (strategy, error) {
 
 	emax := &emax{
-		name:  "emax",
+		id:    "emax",
 		short: 20,
 		long:  50,
 	}
 
-	if err := emax.init(nil); err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	slog.Info("backtest starting",
-		"strategy", emax.name,
-		"instrument", prices.instrument,
-		"interval", prices.interval,
-		"bars", len(prices.data))
-
-	bt := &backtest{}
-	if err := bt.run(ctx, prices.bars(ctx), emax, tr); err != nil {
-		return err
-	}
-
-	slog.Info("backtest complete", "strategy", emax.name)
-
-	// write the reports
-	return nil
+	err := emax.init(nil)
+	return emax, err
 }
