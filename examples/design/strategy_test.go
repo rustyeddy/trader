@@ -142,9 +142,48 @@ func TestEmax_IntentsCarryInstrumentAndDirection(t *testing.T) {
 		case close:
 			closes_ = append(closes_, i)
 		default:
-			assert.Equal(t, intent{}, i, "hold carries no instrument or direction")
+			assert.Equal(t, intent{instrument: "TEST"}, i, "hold names its instrument")
 		}
 	}
 	assert.Equal(t, []intent{{instrument: "TEST", direction: long, action: open}}, opens)
-	assert.Equal(t, []intent{{instrument: "TEST", direction: long, action: close}}, closes_)
+	assert.Equal(t, []intent{{instrument: "TEST", action: close}}, closes_, "close takes no direction")
+}
+
+// There is no atomic reverse: a position change is a close followed, on a
+// later bar, by a separate open.
+func TestEmax_ReversalIsCloseThenSeparateOpen(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
+	ctx := context.Background()
+
+	series := closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2, 1, 14, 20, 30, 10, 2)
+	var seq []action
+	var openBar, closeBar []int
+	for i, b := range series {
+		in := e.onBar(ctx, b)
+		switch in.action {
+		case open:
+			openBar = append(openBar, i)
+			seq = append(seq, in.action)
+		case close:
+			closeBar = append(closeBar, i)
+			seq = append(seq, in.action)
+		}
+	}
+
+	assert.Equal(t, []action{open, close, open, close}, seq, "opens and closes strictly alternate")
+	for i := range closeBar {
+		assert.Less(t, openBar[i], closeBar[i], "close follows its open")
+	}
+	assert.Less(t, closeBar[0], openBar[1], "re-open happens on a later bar than the close")
+}
+
+func TestEmax_HoldsCarryInstrumentAndValidate(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
+	ctx := context.Background()
+
+	for i, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
+		in := e.onBar(ctx, b)
+		assert.Equal(t, "TEST", in.instrument, "bar %d (%s)", i, in.action)
+		assert.NoError(t, in.validate(), "bar %d (%s)", i, in.action)
+	}
 }

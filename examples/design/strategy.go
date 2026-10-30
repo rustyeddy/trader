@@ -38,8 +38,11 @@ func (e *emax) onBar(ctx context.Context, b bar) intent {
 	// Feed both EMAs every bar so the long one warms up on the same data.
 	s, sok := e.emaShort.onBar(ctx, b)
 	l, lok := e.emaLong.onBar(ctx, b)
+
+	// Every intent, including hold, names its instrument.
+	noop := intent{instrument: b.instrument}
 	if !sok || !lok {
-		return intent{}
+		return noop
 	}
 
 	switch {
@@ -48,7 +51,7 @@ func (e *emax) onBar(ctx context.Context, b bar) intent {
 		return intent{instrument: b.instrument, direction: long, action: open}
 	case s < l && e.over:
 		e.over = false
-		return intent{instrument: b.instrument, direction: long, action: close}
+		return intent{instrument: b.instrument, action: close} // close takes no direction
 	}
-	return intent{}
+	return noop
 }

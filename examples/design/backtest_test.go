@@ -62,14 +62,19 @@ func seq(bars []bar, errAt int, err error) iter.Seq2[bar, error] {
 
 func TestBacktestRun_AcceptedRequests(t *testing.T) {
 	bars := closes(1, 2, 3)
-	strat := &scriptStrategy{intents: []intent{{action: open}, {}, {action: close}}}
+	want := []intent{
+		{instrument: "TEST", direction: long, action: open},
+		{instrument: "TEST"},
+		{instrument: "TEST", action: close},
+	}
+	strat := &scriptStrategy{intents: want}
 	h := &recordHandler{}
 
 	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), strat, h)
 
 	require.NoError(t, err)
 	assert.Equal(t, bars, strat.seen)
-	assert.Equal(t, []intent{{action: open}, {}, {action: close}}, h.got)
+	assert.Equal(t, want, h.got)
 }
 
 func TestBacktestRun_NoBarsNoCalls(t *testing.T) {
@@ -250,4 +255,53 @@ func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	assert.Equal(t, open, h.got[5].action, "first, rejected, opportunity")
 	require.Len(t, h.accepted, 1, "the fresh opportunity is accepted")
 	assert.Greater(t, h.accepted[0], 5)
+}
+
+func TestBacktestRun_FatalHandlerErrorHasInstrumentAndTimeContext(t *testing.T) {
+	boom := errors.New("broker down")
+	h := &recordHandler{failAt: 2, err: boom}
+
+	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3), -1, nil), &scriptStrategy{}, h)
+
+	require.ErrorIs(t, err, boom, "cause preserved")
+	assert.Contains(t, err.Error(), "TEST")
+	assert.Contains(t, err.Error(), "2010-01-05", "time of the second bar")
+}
+
+func TestBacktestRun_DataErrorHasContext(t *testing.T) {
+	boom := errors.New("bad data")
+
+	// error on the first bar: nothing processed yet
+	err := (&backtest{}).run(context.Background(), seq(closes(1, 2), 0, boom),
+		&scriptStrategy{}, &recordHandler{})
+	require.ErrorIs(t, err, boom)
+
+	// error after bars were processed: mentions the last good bar
+	err = (&backtest{}).run(context.Background(), seq(closes(1, 2, 3), 2, boom),
+		&scriptStrategy{}, &recordHandler{})
+	require.ErrorIs(t, err, boom)
+	assert.Contains(t, err.Error(), "TEST")
+	assert.Contains(t, err.Error(), "2010-01-05", "last successfully processed bar")
+}
+
+func TestBacktestRun_InvalidIntentStopsRunBeforeHandler(t *testing.T) {
+	bad := intent{instrument: "TEST", action: open} // open without a direction
+	strat := &scriptStrategy{intents: []intent{{instrument: "TEST"}, bad, {instrument: "TEST"}}}
+	h := &recordHandler{}
+
+	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3, 4), -1, nil), strat, h)
+
+	require.ErrorIs(t, err, errInvalidIntent)
+	assert.Contains(t, err.Error(), "TEST")
+	assert.Contains(t, err.Error(), "2010-01-05", "time of the offending bar")
+	assert.Len(t, strat.seen, 2, "no bars processed after the invalid intent")
+	assert.Equal(t, []intent{{instrument: "TEST"}}, h.got, "the invalid intent never reaches the handler")
+}
+
+func TestBacktestRun_ValidHoldWithInstrumentReachesHandler(t *testing.T) {
+	strat := &scriptStrategy{intents: []intent{{instrument: "TEST"}}}
+	h := &recordHandler{}
+
+	require.NoError(t, (&backtest{}).run(context.Background(), seq(closes(1), -1, nil), strat, h))
+	assert.Equal(t, []intent{{instrument: "TEST"}}, h.got)
 }
