@@ -2,11 +2,16 @@
 #+STARTUP: overview
 
 * Ground Rules
-- Design APIs first; keep everything in =examples/design= private until settled.
-- After EACH task, =make check && make run= must succeed with small deterministic synthetic data.
-- Prefer concrete types and one readable call path; no new framework or interface without a demonstrated need.
-- Preserve causal backtest timing; distinguish simulated broker rejection from infrastructure failure.
-- Do not start retrofitting production packages until the milestone below is reviewed.
+- Design APIs first; keep everything in =examples/design= private
+  until settled.
+- After EACH task, =make check && make run= must succeed with small
+  deterministic synthetic data.
+- Prefer concrete types and one readable call path; no new framework
+  or interface without a demonstrated need.
+- Preserve causal backtest timing; distinguish simulated broker
+  rejection from infrastructure failure.
+- Do not start retrofitting production packages until the milestone
+  below is reviewed.
 
 * P0 — Core Contracts (next iteration)
 
