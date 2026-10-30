@@ -20,6 +20,11 @@ type ohlc struct {
 	v          int
 }
 
+type bar struct {
+	instrument string
+	time.Time
+}
+
 type timeRange struct {
 	start time.Time
 	end   time.Time
