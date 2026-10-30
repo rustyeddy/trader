@@ -9,8 +9,15 @@ Implement in =examples/design= one small step at a time. Keep
 
 * Working Semantics
 - An intent expresses a desired trading *transition*, not a broker order.
-- Actions: Open, Hold, Add, Reduce, Close.
-- Direction: Long or Short, separate from order side Buy/Sell.
+- Actions: Hold=0 (zero value), Open, Add, Reduce, Close.
+- Direction: noDirection=0, Long=1, Short=2 (explicit values).
+- The zero-value intent is Hold and is a valid no-op.
+- Position direction is separate from order side Buy/Sell.
+- Open requires direction; Add, Reduce, Close do NOT require direction.
+  They act on the existing position for the specified instrument.
+- Add requires a positive increment size. Reduce cannot exceed current
+  position size; it must never reverse the position.
+- Size units and the exact representation of size are yet to be defined.
 - Instrument identifies the position affected.
 - Hold means no new request; it MUST NOT retry a rejected earlier Open.
 - Open/Add are one-time opportunities unless a strategy explicitly emits
@@ -27,18 +34,21 @@ Use Testify =require=/=assert= and table-driven cases.
 
 ** TODO Valid semantic combinations
 - Open Long, Open Short.
-- Add Long, Add Short.
-- Reduce Long, Reduce Short.
-- Close Long, Close Short (or directionless Close if chosen explicitly).
-- Hold with no instrument/direction, if Hold is the canonical no-op.
-- Show that a zero-value intent is either a valid no-op OR invalid;
-  decide and document before implementation.
+- Add with instrument, positive increment size, no direction.
+- Reduce with instrument and nonnegative bounded reduction size, no direction.
+- Close with instrument and no direction or size.
+- Hold (zero-value intent), with no instrument/direction/size.
+- Assert noDirection=0, Long=1, Short=2.
 - Validation must not confuse position direction with order buy/sell.
 
 ** TODO Invalid semantic combinations
 - Missing instrument on actionable intents.
 - Unknown action.
-- Unknown direction on actions requiring direction.
+- Open with noDirection or an unknown direction.
+- Nonzero direction on Add, Reduce, or Close (unless later explicitly approved).
+- Add with missing, zero or negative size.
+- Reduce with negative size or size greater than current position size
+  (the latter is a stateful handler validation, not pure intent validation).
 - Contradictory fields (e.g. Hold with a requested quantity, if later
   quantities are introduced).
 - Invalid encoding must return an error, not silently become Hold.
@@ -75,15 +85,17 @@ where available; strategy must not equate signal generation with a fill.
 ** TODO Long -> Add Long; Short -> Add Short
 - Add requires appropriate existing directional exposure; do not silently
   reinterpret Add as Open while flat (unless explicitly agreed).
-- Size/increment is intentionally unresolved; use deterministic minimal
-  semantics or test rejection until sizing contract exists.
+- Add requires positive size; define its units/representation before coding
+  executable sizing logic. Its direction is inferred from held position.
 
 ** TODO Long -> Reduce; Short -> Reduce
-- Reduce cannot increase exposure or flip position.
+- Reduce has no direction field. It cannot increase exposure, exceed
+  position size, or flip position. Define whether zero reduce is valid.
 - Specify whether Reduce while flat rejects or is harmless no-op.
 
 ** TODO Long -> Close; Short -> Close
-- Close is full flattening of the specified instrument position.
+- Close is full flattening of the specified instrument position; no
+  direction is supplied.
 - Decide whether Close while flat should be no-op or explicit rejection.
 
 ** TODO Reversals
@@ -91,10 +103,10 @@ where available; strategy must not equate signal generation with a fill.
   permitted Open (may be two intents / two observations).
 - Decide whether atomic reversal is required before extending the API.
 
-** TODO Mismatched directions
-- Add Long to existing Short must not silently pyramid a short or reverse.
-- Reduce/Close with a mismatched specified direction must not close the
-  wrong position.
+** TODO Position direction is derived for Add/Reduce/Close
+- Add/Reduce/Close do not specify direction; handler looks up the
+  existing instrument position. No accidental reversal.
+- Test absence of an existing position and zero/negative sizes.
 
 * 4. Snapshot Access — =strategy_test.go= / =account_test.go=
 ** TODO Snapshot optional
@@ -111,7 +123,8 @@ where available; strategy must not equate signal generation with a fill.
 - Test nil/unavailable snapshot behavior where strategy needs it.
 
 ** TODO Pyramiding does not chase/retry
-- Given a long position and a fresh qualifying add signal, emit Add Long.
+- Given a long position and a fresh qualifying add signal, emit Add
+  for the instrument with a positive increment size.
 - If Add is rejected, subsequent bars with no new qualification emit Hold.
 - If the prior Add is pending, do not issue duplicate exposure requests.
   Pending-order accounting can be refined with broker integration.
@@ -121,9 +134,9 @@ where available; strategy must not equate signal generation with a fill.
 - Handler called once with the correct intent; loop continues.
 
 ** TODO Expected rejection
-- Insufficient margin/limit violation is a *trading outcome*, not
-  necessarily a fatal program error. Establish reporting of rejection
-  while continuing subsequent bars.
+- Insufficient margin/limit violation is an expected *rejection*:
+  record it and continue processing subsequent bars. It is not a fatal
+  run failure.
 - Choose concrete rejected-result/error representation before testing
   exact signature; avoid an elaborate result hierarchy.
 
@@ -132,15 +145,24 @@ where available; strategy must not equate signal generation with a fill.
 - Context cancellation exits, and errors preserve cause via =errors.Is=.
 - No future bars processed after a fatal error.
 
-* Decisions to Settle Before Tests Are Written in Go
-1. Is zero-value Intent equivalent to Hold, or invalid?
-2. Does Close require Direction? If yes, it is a position direction.
-3. Are Add/Reduce relative moves supported in v1 without a quantity
-   contract, or represented as valid but not executable yet?
-4. Does expected rejection return an error (typed/classified) or an
-   explicit execution result? Distinguish it from run failure.
-5. How should a strategy detect new opportunities after rejection?
-   Proposed default: strategy owns signal lifecycle; snapshot is optional.
+* Settled Decisions
+1. Zero-value Intent is Hold, with zero-valued fields.
+2. Direction enum: noDirection=0, Long=1, Short=2.
+3. Open requires direction. Add, Reduce and Close require no direction;
+   they refer to the existing position for the instrument.
+4. Add requires a positive size; Reduce cannot exceed existing size or
+   reverse it. Close flattens the entire position.
+5. Insufficient margin is rejected, recorded and processing continues.
+
+* Remaining Decisions Before Executable Size Tests
+1. Define size unit/type for Add and Reduce, and whether Reduce size=0
+   is a no-op, invalid, or means all (prefer explicit Close for all).
+2. Define whether Add/Reduce/Close without an existing position reject
+   or no-op; preserve a clear distinction from Open.
+3. Decide how the handler exposes expected rejection without stopping
+   the run (typed error or result).
+4. Confirm strategy's entry opportunity lifetime and optional snapshot
+   injection through regression tests.
 
 * Acceptance Gate
 - Place Go tests in matching =*_test.go= files, using Testify.
