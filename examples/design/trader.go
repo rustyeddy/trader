@@ -6,7 +6,7 @@ import (
 )
 
 // errInsufficientMargin is an expected trading outcome, not a runtime
-// failure: the intent is rejected and the run continues.
+// failure: the order is rejected and the run continues.
 var errInsufficientMargin = errors.New("insufficient margin available")
 
 var (
@@ -19,26 +19,26 @@ type trader struct {
 	account *account
 }
 
-func (tr *trader) handleIntent(ctx context.Context, i intent) (err error) {
-	switch i.action {
+func (tr *trader) handleOrder(ctx context.Context, o *order) (err error) {
+	switch o.action {
 	case open:
 		if tr.account.marginAvailable() <= 0 {
 			return errInsufficientMargin
 		}
-		err = tr.openTrade(i)
+		err = tr.openTrade(o)
 
 	case close:
-		err = tr.closeTrade(i)
+		err = tr.closeTrade(o)
 	}
 	return err
 }
 
-func (tr *trader) openTrade(i intent) error {
+func (tr *trader) openTrade(o *order) error {
 
 	return nil
 }
 
-func (tr *trader) closeTrade(i intent) error {
+func (tr *trader) closeTrade(o *order) error {
 
 	return nil
 }

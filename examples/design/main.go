@@ -48,6 +48,7 @@ func run() error {
 
 func panicOnError(err error) {
 	if err != nil {
+		slog.Error("Goodbye cruel world!", "error", err)
 		panic(err)
 	}
 }

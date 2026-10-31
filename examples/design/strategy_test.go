@@ -25,6 +25,14 @@ func closes(vals ...float64) []bar {
 	return bars
 }
 
+// actionOf is the action of o, or noAction for a nil (do nothing) order.
+func actionOf(o *order) action {
+	if o == nil {
+		return noAction
+	}
+	return o.action
+}
+
 func newTestEmax(t *testing.T, short, long int) *emax {
 	t.Helper()
 	e := &emax{short: short, long: long}
@@ -32,14 +40,14 @@ func newTestEmax(t *testing.T, short, long int) *emax {
 	return e
 }
 
-func TestEmax_HoldsUntilBothWarm(t *testing.T) {
+func TestEmax_NoOrderUntilBothWarm(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
 	// Falling prices: once warm, short < long. No signal, and especially no
 	// close, while the long EMA is still warming up (first 3 bars).
 	for i, b := range closes(10, 9, 8) {
-		assert.Equal(t, hold, e.onBar(ctx, b).action, "bar %d", i)
+		assert.Nil(t, e.onBar(ctx, b), "bar %d", i)
 	}
 }
 
@@ -65,12 +73,12 @@ func TestEmax_Crossovers(t *testing.T) {
 	series := closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2)
 	var got []action
 	for _, b := range series {
-		got = append(got, e.onBar(ctx, b).action)
+		got = append(got, actionOf(e.onBar(ctx, b)))
 	}
 
 	// Warm on bar index 3. The short EMA crosses above the long one on the
 	// jump to 12 (index 5) and back below on the drop to 8 (index 8).
-	want := []action{hold, hold, hold, hold, hold, open, hold, hold, close, hold, hold}
+	want := []action{noAction, noAction, noAction, noAction, noAction, open, noAction, noAction, close, noAction, noAction}
 	assert.Equal(t, want, got)
 }
 
@@ -80,7 +88,7 @@ func TestEmax_NoRepeatedOpen(t *testing.T) {
 
 	var opens int
 	for _, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 18, 20, 22, 24) {
-		if e.onBar(ctx, b).action == open {
+		if actionOf(e.onBar(ctx, b)) == open {
 			opens++
 		}
 	}
@@ -95,9 +103,9 @@ func TestEmax_FirstValidBarAlreadyBullish(t *testing.T) {
 
 	var got []action
 	for _, b := range closes(1, 2, 3, 4) {
-		got = append(got, e.onBar(ctx, b).action)
+		got = append(got, actionOf(e.onBar(ctx, b)))
 	}
-	assert.Equal(t, []action{hold, hold, hold, open}, got)
+	assert.Equal(t, []action{noAction, noAction, noAction, open}, got)
 }
 
 func TestEmax_Init(t *testing.T) {
@@ -130,23 +138,24 @@ func TestEmax_Init(t *testing.T) {
 	}
 }
 
-func TestEmax_IntentsCarryInstrumentAndDirection(t *testing.T) {
+func TestEmax_OrdersCarryInstrumentAndDirection(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
-	var opens, closes_ []intent
+	var opens, closes_ []*order
 	for _, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
-		switch i := e.onBar(ctx, b); i.action {
+		o := e.onBar(ctx, b)
+		switch actionOf(o) {
 		case open:
-			opens = append(opens, i)
+			opens = append(opens, o)
 		case close:
-			closes_ = append(closes_, i)
+			closes_ = append(closes_, o)
 		default:
-			assert.Equal(t, intent{instrument: "TEST"}, i, "hold names its instrument")
+			assert.Nil(t, o, "no action means no order")
 		}
 	}
-	assert.Equal(t, []intent{{instrument: "TEST", direction: long, action: open}}, opens)
-	assert.Equal(t, []intent{{instrument: "TEST", action: close}}, closes_, "close takes no direction")
+	assert.Equal(t, []*order{{instrument: "TEST", direction: long, action: open, orderType: marketOrder}}, opens)
+	assert.Equal(t, []*order{{instrument: "TEST", action: close, orderType: marketOrder}}, closes_, "close takes no direction")
 }
 
 // There is no atomic reverse: a position change is a close followed, on a
@@ -159,14 +168,13 @@ func TestEmax_ReversalIsCloseThenSeparateOpen(t *testing.T) {
 	var seq []action
 	var openBar, closeBar []int
 	for i, b := range series {
-		in := e.onBar(ctx, b)
-		switch in.action {
+		switch a := actionOf(e.onBar(ctx, b)); a {
 		case open:
 			openBar = append(openBar, i)
-			seq = append(seq, in.action)
+			seq = append(seq, a)
 		case close:
 			closeBar = append(closeBar, i)
-			seq = append(seq, in.action)
+			seq = append(seq, a)
 		}
 	}
 
@@ -177,15 +185,21 @@ func TestEmax_ReversalIsCloseThenSeparateOpen(t *testing.T) {
 	assert.Less(t, closeBar[0], openBar[1], "re-open happens on a later bar than the close")
 }
 
-func TestEmax_HoldsCarryInstrumentAndValidate(t *testing.T) {
+func TestEmax_OrdersValidate(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
+	var n int
 	for i, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
-		in := e.onBar(ctx, b)
-		assert.Equal(t, "TEST", in.instrument, "bar %d (%s)", i, in.action)
-		assert.NoError(t, in.validate(), "bar %d (%s)", i, in.action)
+		o := e.onBar(ctx, b)
+		if o == nil {
+			continue
+		}
+		n++
+		assert.Equal(t, "TEST", o.instrument, "bar %d (%s)", i, o.action)
+		assert.NoError(t, o.validate(), "bar %d (%s)", i, o.action)
 	}
+	assert.Equal(t, 2, n, "one open and one close")
 }
 
 func TestEmax_Name(t *testing.T) {

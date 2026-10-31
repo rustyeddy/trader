@@ -18,6 +18,6 @@ func TestRun_CompletesWithoutRejections(t *testing.T) {
 	assert.Contains(t, out, "backtest starting")
 	assert.Contains(t, out, "bars=521")
 	assert.Contains(t, out, "backtest complete")
-	assert.NotContains(t, out, "intent rejected")
+	assert.NotContains(t, out, "order rejected")
 	assert.NotContains(t, out, "level=ERROR")
 }

@@ -13,35 +13,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// scriptStrategy returns a fixed intent per bar index and records the bars
-// it was shown.
+// scriptStrategy returns a fixed order per bar index (nil means no order) and
+// records the bars it was shown.
 type scriptStrategy struct {
-	intents []intent
-	seen    []bar
+	orders []*order
+	seen   []bar
 }
 
 func (s *scriptStrategy) name() string { return "script" }
 
 func (s *scriptStrategy) init(map[string]any) error { return nil }
 
-func (s *scriptStrategy) onBar(_ context.Context, b bar) intent {
+func (s *scriptStrategy) onBar(_ context.Context, b bar) *order {
 	i := len(s.seen)
 	s.seen = append(s.seen, b)
-	if i < len(s.intents) {
-		return s.intents[i]
+	if i < len(s.orders) {
+		return s.orders[i]
 	}
-	return intent{}
+	return nil
 }
 
-// recordHandler records intents and fails on a chosen call.
+// openOrder is a valid open-long order for "TEST".
+func openOrder() *order {
+	return &order{instrument: "TEST", direction: long, action: open, orderType: marketOrder}
+}
+
+// opens returns n distinct valid open orders, one per bar.
+func opens(n int) []*order {
+	orders := make([]*order, n)
+	for i := range orders {
+		orders[i] = openOrder()
+	}
+	return orders
+}
+
+// recordHandler records orders and fails on a chosen call.
 type recordHandler struct {
-	got    []intent
+	got    []*order
 	failAt int // 1-based call number to fail on; 0 means never
 	err    error
 }
 
-func (h *recordHandler) handleIntent(_ context.Context, i intent) error {
-	h.got = append(h.got, i)
+func (h *recordHandler) handleOrder(_ context.Context, o *order) error {
+	h.got = append(h.got, o)
 	if h.failAt != 0 && len(h.got) == h.failAt {
 		return h.err
 	}
@@ -64,19 +78,27 @@ func seq(bars []bar, errAt int, err error) iter.Seq2[bar, error] {
 
 func TestBacktestRun_AcceptedRequests(t *testing.T) {
 	bars := closes(1, 2, 3)
-	want := []intent{
-		{instrument: "TEST", direction: long, action: open},
-		{instrument: "TEST"},
-		{instrument: "TEST", action: close},
-	}
-	strat := &scriptStrategy{intents: want}
+	o1 := openOrder()
+	o3 := &order{instrument: "TEST", action: close, orderType: marketOrder}
+	strat := &scriptStrategy{orders: []*order{o1, nil, o3}}
 	h := &recordHandler{}
 
 	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), strat, h)
 
 	require.NoError(t, err)
-	assert.Equal(t, bars, strat.seen)
-	assert.Equal(t, want, h.got)
+	assert.Equal(t, bars, strat.seen, "every bar reaches the strategy")
+	require.Len(t, h.got, 2, "the bar with no order never reaches the handler")
+	assert.Same(t, o1, h.got[0])
+	assert.Same(t, o3, h.got[1])
+}
+
+func TestBacktestRun_NoOrderSkipsHandler(t *testing.T) {
+	strat := &scriptStrategy{} // returns nil on every bar
+	h := &recordHandler{}
+
+	require.NoError(t, (&backtest{}).run(context.Background(), seq(closes(1, 2, 3), -1, nil), strat, h))
+	assert.Len(t, strat.seen, 3)
+	assert.Empty(t, h.got)
 }
 
 func TestBacktestRun_NoBarsNoCalls(t *testing.T) {
@@ -88,9 +110,21 @@ func TestBacktestRun_NoBarsNoCalls(t *testing.T) {
 	assert.Empty(t, h.got)
 }
 
+func TestBacktestRun_RecordsRequestedInHistory(t *testing.T) {
+	o := openOrder()
+	strat := &scriptStrategy{orders: []*order{nil, o}}
+
+	require.NoError(t, (&backtest{}).run(context.Background(), seq(closes(1, 2), -1, nil), strat, &recordHandler{}))
+
+	assert.Equal(t, stateRequested, o.state)
+	require.Len(t, o.history, 1)
+	assert.Equal(t, stateRequested, o.history[0].state)
+	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[0].time, "stamped with the bar's time")
+}
+
 func TestBacktestRun_FatalHandlerErrorStopsRun(t *testing.T) {
 	boom := errors.New("rejected")
-	strat := &scriptStrategy{}
+	strat := &scriptStrategy{orders: opens(4)}
 	h := &recordHandler{failAt: 2, err: boom}
 
 	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3, 4), -1, nil), strat, h)
@@ -116,7 +150,7 @@ func TestBacktestRun_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	strat := &scriptStrategy{}
+	strat := &scriptStrategy{orders: opens(4)}
 	h := &cancelAfterFirst{cancel: cancel}
 
 	err := (&backtest{}).run(ctx, md.bars(ctx), strat, h)
@@ -127,7 +161,7 @@ func TestBacktestRun_ContextCancelled(t *testing.T) {
 
 type cancelAfterFirst struct{ cancel context.CancelFunc }
 
-func (c *cancelAfterFirst) handleIntent(context.Context, intent) error {
+func (c *cancelAfterFirst) handleOrder(context.Context, *order) error {
 	c.cancel()
 	return nil
 }
@@ -142,22 +176,28 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-func TestBacktestRun_ExpectedRejectionIsLoggedAndRunContinues(t *testing.T) {
+func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing.T) {
 	logs := captureLogs(t)
-	strat := &scriptStrategy{intents: []intent{
-		{instrument: "EUR/USD", direction: long, action: open},
-	}}
+	o := &order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}
+	strat := &scriptStrategy{orders: []*order{o}}
 	h := &recordHandler{failAt: 1, err: fmt.Errorf("open: %w", errInsufficientMargin)}
 
 	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3), -1, nil), strat, h)
 
 	require.NoError(t, err, "a margin rejection must not stop the run")
 	assert.Len(t, strat.seen, 3, "bars after the rejection are still processed")
-	assert.Len(t, h.got, 3)
+	require.Len(t, h.got, 1)
+
+	assert.Equal(t, stateRejected, o.state)
+	require.Len(t, o.history, 2)
+	assert.Equal(t, stateRequested, o.history[0].state)
+	assert.Equal(t, stateRejected, o.history[1].state)
+	assert.Contains(t, o.history[1].reason, "insufficient margin")
+	assert.Equal(t, testStart, o.history[1].time)
 
 	out := logs.String()
 	assert.Contains(t, out, "level=WARN")
-	assert.Contains(t, out, "intent rejected")
+	assert.Contains(t, out, "order rejected")
 	assert.Contains(t, out, "insufficient margin available")
 	assert.Contains(t, out, "time=2010-01-04")
 	assert.Contains(t, out, "instrument=EUR/USD")
@@ -167,57 +207,52 @@ func TestBacktestRun_ExpectedRejectionIsLoggedAndRunContinues(t *testing.T) {
 
 func TestBacktestRun_FatalHandlerErrorIsNotLoggedAsRejection(t *testing.T) {
 	logs := captureLogs(t)
+	o := openOrder()
 	h := &recordHandler{failAt: 1, err: errors.New("broker down")}
 
-	err := (&backtest{}).run(context.Background(), seq(closes(1, 2), -1, nil), &scriptStrategy{}, h)
+	err := (&backtest{}).run(context.Background(), seq(closes(1, 2), -1, nil), &scriptStrategy{orders: []*order{o}}, h)
 
 	require.Error(t, err)
-	assert.NotContains(t, logs.String(), "intent rejected")
+	assert.NotContains(t, logs.String(), "order rejected")
+	assert.Equal(t, stateRequested, o.state, "a fatal error is not recorded as a rejection")
 }
 
-func TestBacktestRun_AcceptedRequestCallsHandlerOnceWithIntent(t *testing.T) {
-	want := intent{instrument: "EUR/USD", direction: short, action: open}
-	strat := &scriptStrategy{intents: []intent{want}}
+func TestBacktestRun_AcceptedRequestCallsHandlerOnceWithOrder(t *testing.T) {
+	want := &order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder}
+	strat := &scriptStrategy{orders: []*order{want}}
 	h := &recordHandler{}
 
 	err := (&backtest{}).run(context.Background(), seq(closes(1), -1, nil), strat, h)
 
 	require.NoError(t, err)
 	require.Len(t, h.got, 1)
-	assert.Equal(t, want, h.got[0])
+	assert.Same(t, want, h.got[0])
+	assert.Equal(t, "EUR/USD", h.got[0].instrument)
+	assert.Equal(t, short, h.got[0].direction)
+	assert.Equal(t, open, h.got[0].action)
 }
 
 // rejectFirstOpen rejects only the first open it sees for margin, then
 // accepts everything, modelling margin that becomes available later.
 type rejectFirstOpen struct {
 	rejected bool
-	got      []intent
-	accepted []int // bar index of each accepted open
-	calls    int
+	got      []*order
 }
 
-func (h *rejectFirstOpen) handleIntent(_ context.Context, i intent) error {
-	idx := h.calls
-	h.calls++
-	h.got = append(h.got, i)
-	if i.action != open {
-		return nil
-	}
-	if !h.rejected {
+func (h *rejectFirstOpen) handleOrder(_ context.Context, o *order) error {
+	h.got = append(h.got, o)
+	if o.action == open && !h.rejected {
 		h.rejected = true
 		return errInsufficientMargin
 	}
-	h.accepted = append(h.accepted, idx)
 	return nil
 }
 
-func countActions(intents []intent, a action) (n int) {
-	for _, i := range intents {
-		if i.action == a {
-			n++
-		}
+func actions(orders []*order) (as []action) {
+	for _, o := range orders {
+		as = append(as, o.action)
 	}
-	return n
+	return as
 }
 
 // §2 critical regression: a rejected entry must not become a late fill.
@@ -232,14 +267,10 @@ func TestMissedEntry_RejectedOpenIsNotRetried(t *testing.T) {
 	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), e, h)
 
 	require.NoError(t, err)
-	require.Len(t, h.got, len(bars), "handler sees one intent per bar")
-	assert.Equal(t, open, h.got[5].action, "the one entry opportunity")
+	require.Equal(t, []action{open}, actions(h.got), "the strategy asked once and never again")
 	assert.True(t, h.rejected)
-	assert.Equal(t, 1, countActions(h.got, open), "no second open while still bullish")
-	assert.Empty(t, h.accepted, "no late entry once margin is available")
-	for i := 6; i < len(h.got); i++ {
-		assert.Equal(t, hold, h.got[i].action, "bar %d", i)
-	}
+	assert.Equal(t, stateRejected, h.got[0].state)
+	assert.Equal(t, testStart.AddDate(0, 0, 5), h.got[0].history[0].time, "the one entry opportunity, bar 5")
 }
 
 // §2: a rejected entry must not suppress re-entry forever.
@@ -253,17 +284,17 @@ func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), e, h)
 
 	require.NoError(t, err)
-	require.Equal(t, 2, countActions(h.got, open), "intents: %v", h.got)
-	assert.Equal(t, open, h.got[5].action, "first, rejected, opportunity")
-	require.Len(t, h.accepted, 1, "the fresh opportunity is accepted")
-	assert.Greater(t, h.accepted[0], 5)
+	require.Equal(t, []action{open, close, open}, actions(h.got))
+	assert.Equal(t, stateRejected, h.got[0].state, "first opportunity was rejected")
+	assert.Equal(t, stateRequested, h.got[2].state, "the fresh opportunity is not rejected")
+	assert.True(t, h.got[2].history[0].time.After(h.got[0].history[0].time))
 }
 
 func TestBacktestRun_FatalHandlerErrorHasInstrumentAndTimeContext(t *testing.T) {
 	boom := errors.New("broker down")
 	h := &recordHandler{failAt: 2, err: boom}
 
-	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3), -1, nil), &scriptStrategy{}, h)
+	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3), -1, nil), &scriptStrategy{orders: opens(3)}, h)
 
 	require.ErrorIs(t, err, boom, "cause preserved")
 	assert.Contains(t, err.Error(), "TEST")
@@ -286,24 +317,17 @@ func TestBacktestRun_DataErrorHasContext(t *testing.T) {
 	assert.Contains(t, err.Error(), "2010-01-05", "last successfully processed bar")
 }
 
-func TestBacktestRun_InvalidIntentStopsRunBeforeHandler(t *testing.T) {
-	bad := intent{instrument: "TEST", action: open} // open without a direction
-	strat := &scriptStrategy{intents: []intent{{instrument: "TEST"}, bad, {instrument: "TEST"}}}
+func TestBacktestRun_InvalidOrderStopsRunBeforeHandler(t *testing.T) {
+	bad := &order{instrument: "TEST", action: open} // open without a direction
+	strat := &scriptStrategy{orders: []*order{nil, bad, openOrder()}}
 	h := &recordHandler{}
 
 	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3, 4), -1, nil), strat, h)
 
-	require.ErrorIs(t, err, errInvalidIntent)
+	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "TEST")
 	assert.Contains(t, err.Error(), "2010-01-05", "time of the offending bar")
-	assert.Len(t, strat.seen, 2, "no bars processed after the invalid intent")
-	assert.Equal(t, []intent{{instrument: "TEST"}}, h.got, "the invalid intent never reaches the handler")
-}
-
-func TestBacktestRun_ValidHoldWithInstrumentReachesHandler(t *testing.T) {
-	strat := &scriptStrategy{intents: []intent{{instrument: "TEST"}}}
-	h := &recordHandler{}
-
-	require.NoError(t, (&backtest{}).run(context.Background(), seq(closes(1), -1, nil), strat, h))
-	assert.Equal(t, []intent{{instrument: "TEST"}}, h.got)
+	assert.Len(t, strat.seen, 2, "no bars processed after the invalid order")
+	assert.Empty(t, h.got, "the invalid order never reaches the handler")
+	assert.Empty(t, bad.history, "an invalid order is never recorded as requested")
 }

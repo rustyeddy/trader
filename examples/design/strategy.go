@@ -8,7 +8,7 @@ import (
 type strategy interface {
 	name() string
 	init(cfg map[string]any) error
-	onBar(ctx context.Context, b bar) intent
+	onBar(ctx context.Context, b bar) *order
 }
 
 // emax is concrete implementation of emax
@@ -39,24 +39,24 @@ func (e *emax) init(cfg map[string]any) error {
 	return nil
 }
 
-func (e *emax) onBar(ctx context.Context, b bar) intent {
+// onBar returns the order the strategy wants for this bar, or nil when there
+// is nothing to do.
+func (e *emax) onBar(ctx context.Context, b bar) *order {
 	// Feed both EMAs every bar so the long one warms up on the same data.
 	s, sok := e.emaShort.onBar(ctx, b)
 	l, lok := e.emaLong.onBar(ctx, b)
-
-	// Every intent, including hold, names its instrument.
-	noop := intent{instrument: b.instrument}
 	if !sok || !lok {
-		return noop
+		return nil
 	}
 
 	switch {
 	case s > l && !e.over:
 		e.over = true
-		return intent{instrument: b.instrument, direction: long, action: open}
+		return &order{instrument: b.instrument, direction: long, action: open, orderType: marketOrder}
 	case s < l && e.over:
 		e.over = false
-		return intent{instrument: b.instrument, action: close} // close takes no direction
+		// close takes no direction: it acts on the existing position
+		return &order{instrument: b.instrument, action: close, orderType: marketOrder}
 	}
-	return noop
+	return nil
 }
