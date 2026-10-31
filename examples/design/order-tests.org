@@ -1,0 +1,226 @@
+#+TITLE: Order Contract — Test-First Scenarios
+#+STARTUP: overview
+
+* Status
+DRAFT for review. This is a test plan for Claude, NOT an approved final API.
+Implement in =examples/design= one small step at a time. Keep
+=make check && make run= green after every step. Read =AGENTS.md= and
+=../../.agents/skills/go-testing/SKILL.md= first.
+
+This plan was written when requests were called intents. An =order= now carries
+a request through its whole life, so the former intent scenarios are order
+scenarios. Items marked DONE are implemented and tested.
+
+* Working Semantics
+- An order is a request from a strategy that travels the full lifecycle:
+  the strategy asks for an action, the account sizes it (or rejects it), the
+  broker is sent the sized request, the broker fills or rejects it, and the
+  trader records the result as an open position or a closed trade.
+- Order states: requested, sized, submitted, filled, rejected. Every state
+  change is recorded in the order's history with a timestamp and logged.
+  (Timestamps use =time.Now= for now; a managed clock replaces it later.)
+- Actions: noAction=0 (zero value, unset), Open, Add, Reduce, Close.
+- Direction: noDirection=0, Long=1, Short=2 (explicit values).
+- There is no Hold order. A strategy that has nothing to do on a bar returns
+  a nil =*order=; the run loop skips it (no validation, no handler call).
+- The zero-value order has no action and is INVALID. It is not a no-op.
+- Every order a strategy emits names its instrument, so each order identifies
+  what it refers to (needed once strategies cover several instruments and may
+  return several orders per observation).
+- Who sets what:
+  - strategy: instrument, action, direction (Open only), reference price,
+    order type, and the stop loss (Open only).
+  - account: units (sizing), or rejection.
+  - broker: order id, and later the fill.
+- Position direction is separate from order side Buy/Sell.
+- Open requires direction; Add, Reduce, Close do NOT require direction.
+  They act on the existing position for the specified instrument.
+- Open also requires a stop loss, set by the strategy and not by the account.
+  The account only sizes the order from it (and rejects a stop on the wrong
+  side of the entry). Close, Add and Reduce carry no stop.
+- Add requires a positive increment size. Reduce cannot exceed current
+  position size; it must never reverse the position.
+- Size units and the exact representation of size for Add/Reduce are yet to be
+  defined. Open is sized by the account from the account's risk budget and the
+  strategy's stop.
+- Instrument identifies the position affected.
+- No order on a bar means no new request; it MUST NOT retry a rejected earlier
+  Open.
+- Open/Add are one-time opportunities unless a strategy explicitly emits
+  another new order. Desired exposure is not a perpetual entry command.
+- The account or broker may reject an order; rejection never changes the
+  actual position.
+- Strategy's signal state is not proof that a broker order was filled.
+- A flip from long to short (or back) is a Close order followed by a separate
+  Open order on a later bar. There is no atomic reverse.
+- Leave signal quality/scoring, broker-specific order types, and portfolio
+  risk policy for later. Avoid new interfaces except where needed.
+- A strategy MAY optionally receive a read-only snapshot function at
+  construction time; =onBar()= itself should not require an account.
+
+* 1. Order Validation — =order_test.go=
+Use Testify =require=/=assert= and table-driven cases.
+
+** TODO Valid semantic combinations
+Open and Close are implemented (DONE); Add and Reduce wait on the size type.
+- Open Long, Open Short, each with a positive stop loss set by the strategy.
+- Add with instrument, positive increment size, no direction.
+- Reduce with instrument and nonnegative bounded reduction size, no direction.
+- Close with instrument and no direction, no size and no stop.
+- Assert noDirection=0, Long=1, Short=2, noAction=0.
+- Validation must not confuse position direction with order buy/sell.
+
+** TODO Invalid semantic combinations
+Everything below except the Add/Reduce size rules is implemented (DONE).
+- The zero-value order (no action) and an order with only an instrument.
+- Missing instrument on any order.
+- Unknown action.
+- Open with noDirection or an unknown direction.
+- Open without a stop loss, or with a non-positive one: the strategy must
+  set it, so the order is invalid before it reaches the account.
+- Nonzero direction on Add, Reduce, or Close (unless later explicitly approved).
+- Add with missing, zero or negative size.
+- Reduce with negative size or size greater than current position size
+  (the latter is a stateful handler validation, not pure order validation).
+- Contradictory fields, if quantities are later accepted from strategies.
+- Invalid encoding must return an error, never be silently skipped.
+- A stop on the wrong side of the entry is an invalid order, found when the
+  order is sized (DONE).
+- Require StopLoss on Open only. Do not prematurely require Target or other
+  risk fields.
+
+* 2. Signal Lifetime / Missed Entry — =strategy_test.go= or =backtest_test.go=
+** DONE One-shot entry opportunity (critical regression test)
+=TestMissedEntry_RejectedOpenIsNotRetried=
+Given: Flat, EMA crosses bullish on bar T, strategy returns an Open Long order.
+And: The account rejects the Open (e.g. insufficient margin).
+When: Subsequent bars remain bullish but no NEW qualifying entry occurs.
+Then: Strategy returns no order, not a repeated Open Long.
+And: The trader does not enter late simply because margin later becomes
+available.
+
+** DONE Explicit new opportunity
+=TestMissedEntry_FreshSignalAfterRejectionIsAllowed=
+Given: An earlier Open was rejected.
+When: A fresh qualifying signal occurs according to strategy rules.
+Then: A fresh Open is allowed. Do not globally suppress reentry forever.
+
+** TODO Accepted order is not an executed position
+Given: Open emitted and an order is pending, unfilled or rejected.
+Then: Snapshot must report actual positions and pending orders separately
+where available; strategy must not equate signal generation with a fill.
+(Use a minimal fake snapshot or defer pending-order mechanics to broker TODO.)
+
+* 3. Transitions / Handler — =order_test.go=, =trader_test.go=
+** TODO Flat -> Open Long; Flat -> Open Short
+- Order is sized and submitted; broker execution remains separate. Sizing and
+  submission are tested; the fill and the resulting position are not yet.
+
+** TODO Long -> no order; Short -> no order
+- A bar with no order places nothing and repeats nothing.
+- Repeated bars with no order must not change position or pending orders.
+
+** TODO Long -> Add Long; Short -> Add Short
+- Add requires appropriate existing directional exposure; do not silently
+  reinterpret Add as Open while flat (unless explicitly agreed).
+- Add requires positive size; define its units/representation before coding
+  executable sizing logic. Its direction is inferred from held position.
+
+** TODO Long -> Reduce; Short -> Reduce
+- Reduce has no direction field. It cannot increase exposure, exceed
+  position size, or flip position. Define whether zero reduce is valid.
+- Specify whether Reduce while flat rejects or is harmless no-op.
+
+** TODO Long -> Close; Short -> Close
+- Close is full flattening of the specified instrument position; no
+  direction is supplied.
+- Decide whether Close while flat should be no-op or explicit rejection.
+
+** TODO Reversals
+- There is no Reverse action. A flip is a Close order followed by a separate
+  Open order on a later bar. The strategy side is tested (=emax= closes on
+  the crossover bar and opens the other way on the next); the account/broker
+  side needs positions.
+- Decide whether atomic reversal is required before extending the API.
+
+** TODO Position direction is derived for Add/Reduce/Close
+- Add/Reduce/Close do not specify direction; the account looks up the
+  existing instrument position. No accidental reversal.
+- Test absence of an existing position and zero/negative sizes.
+
+* 4. Snapshot Access — =strategy_test.go= / =account_test.go=
+** TODO Snapshot optional
+- Simple EMA strategy runs with no snapshot function/interface.
+- A pyramiding strategy can be constructed with =snapshot func() Snapshot=
+  or a narrow SnapshotProvider; do not modify =onBar= signature.
+
+** TODO Immutable snapshot semantics
+- Returning a struct by value copies its fields, but does NOT deep-copy
+  nested slices, maps or pointers. Verify changing a returned snapshot
+  cannot mutate the account. Alternatively hide fields via accessors.
+- Snapshot represents state at current (simulated) time only; no future
+  fills or market information.
+- Test nil/unavailable snapshot behavior where strategy needs it.
+
+** TODO Pyramiding does not chase/retry
+- Given a long position and a fresh qualifying add signal, emit an Add order
+  for the instrument with a positive increment size.
+- If Add is rejected, subsequent bars with no new qualification return no
+  order.
+- If the prior Add is pending, do not issue duplicate exposure requests.
+  Pending-order accounting can be refined with broker integration.
+
+* 5. Handler Results / Error Classification — =backtest_test.go=
+** DONE Accepted request
+- Handler called once with the correct order; loop continues. A bar whose
+  strategy returns no order never reaches the handler.
+
+** DONE Expected rejection
+- Insufficient margin and an order below the minimum size are expected
+  *rejections*: record the rejection in the order's history, log it and
+  continue processing subsequent bars. They are not fatal run failures.
+- Representation: sentinel errors (=errInsufficientMargin=,
+  =errOrderTooSmall=) classified by =isRejection=; no result hierarchy.
+
+** DONE Fatal error and cancellation
+- Data/iterator error, invalid order, and fatal handler failure stop the run
+  with instrument and time context.
+- Context cancellation exits, and errors preserve cause via =errors.Is=.
+- No future bars processed after a fatal error.
+
+* Settled Decisions
+1. There is no Hold. Doing nothing is a nil =*order=. The zero-value order
+   (no action) is invalid. Every order names its instrument.
+2. Direction enum: noDirection=0, Long=1, Short=2.
+3. Open requires direction. Add, Reduce and Close require no direction;
+   they refer to the existing position for the instrument.
+4. Add requires a positive size; Reduce cannot exceed existing size or
+   reverse it. Close flattens the entire position.
+5. Insufficient margin (and an order too small to trade) is rejected,
+   recorded and processing continues.
+6. Open requires a positive stop loss, set by the strategy. The account sizes
+   from that stop and never creates or changes it; a missing or wrong-side
+   stop is an invalid order (a strategy bug), not a trading rejection.
+7. An order carries its own lifecycle. Each state change (requested, sized,
+   submitted, filled, rejected) is recorded in its history with a timestamp
+   and logged.
+8. Open orders are sized by the account from its risk budget and the
+   strategy's stop; the strategy does not choose units.
+9. Rejections are exposed as sentinel errors (=errInsufficientMargin=,
+   =errOrderTooSmall=) that the run loop classifies with =isRejection=.
+
+* Remaining Decisions Before Executable Size Tests
+1. Define size unit/type for Add and Reduce, and whether Reduce size=0
+   is a no-op, invalid, or means all (prefer explicit Close for all).
+2. Define whether Add/Reduce/Close without an existing position reject
+   or no-op; preserve a clear distinction from Open.
+3. Confirm strategy's entry opportunity lifetime and optional snapshot
+   injection through regression tests (the lifetime is covered by the
+   missed-entry tests; the snapshot is not built yet).
+
+* Acceptance Gate
+- Place Go tests in matching =*_test.go= files, using Testify.
+- Ensure one rejected entry cannot become an accidental late fill.
+- Keep existing EMA, synthetic data, iterator and demo runnable.
+- No production package changes; no new abstractions without approval.
+- Demonstrate tests with =make check && make run= and report results.

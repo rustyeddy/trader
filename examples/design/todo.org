@@ -15,36 +15,48 @@
 
 * P0 — Core Contracts (next iteration)
 
-** TODO 1. Define Intent semantics and errors
-- Decide whether intent expresses transaction action (open/close/buy/sell),
-  desired position/portfolio target, or a deliberately small combination.
-- Decide whether strategy can query *read-only* current positions; separate
-  signal generation from portfolio/account sizing and execution.
-- Specify instrument, direction, close/reverse, optional stop/target, and
-  sizing hint without requiring account knowledge.
-- Decide whether signal quality (A/B/C, score) is optional metadata that
+** TODO 1. Define Order semantics and errors
+An order carries one request through its whole life: the strategy asks, the
+account sizes (or rejects), the broker fills (or rejects), and the trader
+records the result. See =order-tests.org= for the scenarios.
+- [X] Decide what an order expresses: a small action (open/add/reduce/close)
+  plus direction for opens, not a broker order and not a position target.
+- [ ] Decide whether a strategy can query *read-only* current positions;
+  separate signal generation from portfolio/account sizing and execution.
+  (Optional snapshot function at construction; not built yet.)
+- [X] Specify instrument, direction, close, stop, and size without requiring
+  account knowledge: the strategy sets instrument, action, direction (open),
+  price and stop (open); the account sets units. Target is not required.
+- [ ] Decide whether signal quality (A/B/C, score) is optional metadata that
   risk/sizing *may* use, not a hidden sizing rule.
-- Define no-op/no signal, validation, and rejection semantics.
-- Demonstrate long entry/exit, short entry/exit, reversal and no-op.
-- Keep one intent per bar initially; test whether multiple intents are truly needed.
-- Acceptance: GoDoc-like examples and tests; no stringly typed ambiguous
-  =side= values used as both position direction and order action.
+- [X] Define no-op/no signal, validation, and rejection semantics: a nil
+  =*order= is no signal, =order.validate()= rejects malformed orders, and
+  expected rejections are sentinel errors.
+- [X] Demonstrate long entry/exit, short entry/exit, reversal and no-op
+  (=emax=: a flip is a close, then the opposite open on the next bar).
+- [X] Keep one order per bar initially.
+- [ ] Test whether multiple orders per bar are truly needed (multi-symbol
+  strategies, TODO 4).
+- [X] Acceptance: no stringly typed ambiguous =side= values; direction and
+  action are separate typed enums.
 
-** TODO 2. Propagate handler errors predictably
-- Keep =handleIntent(ctx, intent) error= (currently implemented) and
-  propagate errors in the run loop with instrument/time context.
-- Separate expected decision outcomes (e.g. insufficient margin / rejected
-  trade) from fatal runtime/data/broker failures; decide which should
-  continue a study/backtest and which must stop.
-- Verify context cancellation; remove leftover channel/goroutine intent loop.
-- Acceptance: tests for accepted, rejected, fatal and cancelled processing.
+** DONE 2. Propagate handler errors predictably
+- [X] Keep =handleOrder(ctx, *order) error= and propagate errors in the run
+  loop with instrument/time context.
+- [X] Separate expected decision outcomes (insufficient margin, order too
+  small: =isRejection=) from fatal runtime/data/broker failures. Rejections
+  are recorded in the order history, logged, and the run continues; invalid
+  orders and other errors stop it.
+- [X] Verify context cancellation; the channel/goroutine loop is gone (bars
+  are an =iter.Seq2=).
+- [X] Acceptance: tests for accepted, rejected, fatal and cancelled processing.
 
 ** TODO 3. Define Study, Scanner, Strategy, Indicator roles
-- Strategy generates *trading* intents; study gathers analysis/results;
+- Strategy generates *trading* orders; study gathers analysis/results;
   scanner classifies/selects instruments; indicators compute measurements.
 - Test one EMA trading strategy, one ATR study, one multi-symbol scanner.
 - Explore shared bar consumption without forcing non-trading outputs into
-  trading intents or inventing generic event/handler hierarchies.
+  trading orders or inventing generic event/handler hierarchies.
 - Choose minimal =OnBar= / =OnBars= contracts (or adapters) based on examples;
   avoid defining four parallel interfaces just because names differ.
 - Acceptance: each use case reads naturally and compiles; write down why
@@ -55,18 +67,19 @@
 ** TODO 4. Make bars self-contained and decide multi-symbol observation semantics
 - Include observed timestamp, instrument identity, OHLCV and price basis
   (bid/ask/trade; spread provenance as needed) in an observation.
+  (=bar= has instrument, time and OHLCV; the price basis is still open.)
 - Compare =OnBar(bar)= versus =OnBars(frame)= with a single- and two-symbol
   example. Decide whether frame contains only fresh bars or carried values.
 - Define deterministic time ordering, simultaneous timestamps, missing
   symbols, sparse instruments and no look-ahead; never silently synthesize bars.
-- Consider a multi-symbol strategy that produces 0, 1, or several intents.
+- Consider a multi-symbol strategy that produces 0, 1, or several orders.
 - Acceptance: two synthetic datasets interleave correctly, with an
   incomplete/missing observation test.
 
 ** TODO 5. Extract or rename the shared data runner only if it simplifies
 - Try one small =run(ctx, observations, onBar, handler)= loop for historical
   trading, live trading and trade-signal studies.
-- Do not force indicator-only studies/scanners to return =Intent=.
+- Do not force indicator-only studies/scanners to return =*order=.
 - Backtest retains simulated clock, pending-order eligibility, fill sequencing
   and results; common loop must not cause same-bar look-ahead.
 - Prefer a concrete function over a =DataRunner= interface until there is a
@@ -88,21 +101,41 @@
 
 * Milestone — Review Before Production Refactoring
 ** TODO Run and document three executable examples
-- EMA cross: single instrument, long/short signals and trader handler.
+- EMA cross: single instrument, long/short orders and trader handler
+  (working today: sized from risk and the strategy's stop, submitted to the
+  simulated broker; fills are not built yet).
 - Cross-instrument strategy: two symbols, including missing bar behavior.
-- ATR study or scanner: results without broker/account or forced intent.
+- ATR study or scanner: results without broker/account or forced order.
 - Ensure =make check && make run= green after every change.
-- Review package boundaries, GoDoc, intent semantics and run diagrams.
+- Review package boundaries, GoDoc, order semantics and run diagrams.
 - Confirm reduction in interfaces/layers before migrating current Trader.
 
 * P2 — Follow-on Implementation (after milestone)
 ** TODO Account / portfolio / risk
 - Account facts, open positions, balance/equity, margin available,
   position sizing, and portfolio risk policies; wire simple synthetic fills.
+- [X] Instrument registry (=instrument=, keyed by symbol) and fixed-point
+  =rate= (=rateScale= 1_000_000).
+- [X] Open orders sized from =riskPct= and the strategy's stop; rounded to the
+  unit step, capped at the maximum, rejected below the minimum or when the
+  required margin (50:1 for EURUSD) exceeds the margin available.
+- [ ] Positions in =account.positions=, created and updated when a fill comes
+  back (netting: one position per instrument).
+- [ ] =close= resolves to the real position size (units 0 means "whole
+  position" today); add/reduce sizing once their size type is defined.
+- [ ] Margin available accounts for margin already used; equity includes
+  unrealized P/L (needs mark prices).
+- [ ] Quote-to-account currency conversion (account currency is assumed to be
+  the quote currency today).
 ** TODO Broker and execution
 - Submit/cancel; fills, partial fills, rejects; simulated prices,
   bid/ask spread, slippage, commission, execution events and reconciliation.
 - Maintain next-bar-open causal execution in backtests.
+- [X] =broker.submit= assigns the order id, marks it submitted and logs it.
+- [ ] Simulated fills (next-bar-open): the broker fills or rejects the
+  submitted order and the trader records the result as an open position or a
+  closed trade (the order moves to filled or rejected).
+- [ ] Replace =time.Now= in order history with a managed (simulated) clock.
 ** TODO Market data acquisition and storage
 - Download and validate provider observations; convert to canonical.
 - Detect/report coverage and expected closures vs unexpected gaps.
