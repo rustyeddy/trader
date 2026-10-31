@@ -9,6 +9,16 @@ import (
 // failure: the order is rejected and the run continues.
 var errInsufficientMargin = errors.New("insufficient margin available")
 
+// errOrderTooSmall is also an expected outcome: the risk budget, or the
+// instrument's limits, leave nothing worth trading.
+var errOrderTooSmall = errors.New("order size below the minimum")
+
+// isRejection reports whether err is an expected trading outcome that rejects
+// the order and lets the run continue, as opposed to a failure that stops it.
+func isRejection(err error) bool {
+	return errors.Is(err, errInsufficientMargin) || errors.Is(err, errOrderTooSmall)
+}
+
 var (
 	errUnknownBroker     = errors.New("unknown broker")
 	errUnknownAccount    = errors.New("unknown account")

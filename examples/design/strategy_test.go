@@ -44,8 +44,7 @@ func TestEmax_NoOrderUntilBothWarm(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
-	// Falling prices: once warm, short < long. No signal, and especially no
-	// close, while the long EMA is still warming up (first 3 bars).
+	// The long EMA needs 4 bars, so nothing is ordered on bars 0-2.
 	for i, b := range closes(10, 9, 8) {
 		assert.Nil(t, e.onBar(ctx, b), "bar %d", i)
 	}
@@ -65,47 +64,94 @@ func TestEmax_LongWarmsOnSameBars(t *testing.T) {
 	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
 
+// flipSeries starts bearish, flips bullish, then bearish again.
+var flipSeries = []float64{10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2}
+
 func TestEmax_Crossovers(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
-	// Down, then sharply up (short crosses above long), then sharply down.
-	series := closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2)
-	var got []action
-	for _, b := range series {
-		got = append(got, actionOf(e.onBar(ctx, b)))
-	}
-
-	// Warm on bar index 3. The short EMA crosses above the long one on the
-	// jump to 12 (index 5) and back below on the drop to 8 (index 8).
-	want := []action{noAction, noAction, noAction, noAction, noAction, open, noAction, noAction, close, noAction, noAction}
-	assert.Equal(t, want, got)
-}
-
-func TestEmax_NoRepeatedOpen(t *testing.T) {
-	e := newTestEmax(t, 2, 4)
-	ctx := context.Background()
-
-	var opens int
-	for _, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 18, 20, 22, 24) {
-		if actionOf(e.onBar(ctx, b)) == open {
-			opens++
+	var acts []action
+	var dirs []direction
+	for _, b := range closes(flipSeries...) {
+		o := e.onBar(ctx, b)
+		acts = append(acts, actionOf(o))
+		if o != nil {
+			dirs = append(dirs, o.direction)
 		}
 	}
-	assert.Equal(t, 1, opens, "a sustained bullish state must not re-emit open")
+
+	// Warm on bar 3, already bearish: open short. The short EMA crosses above
+	// the long one on the jump to 12 (bar 5): close, then open long on bar 6.
+	// It crosses back below on the drop to 8 (bar 8): close, open short on 9.
+	assert.Equal(t, []action{
+		noAction, noAction, noAction, open, noAction, close,
+		open, noAction, close, open, noAction,
+	}, acts)
+	assert.Equal(t, []direction{short, noDirection, long, noDirection, short}, dirs)
 }
 
-func TestEmax_FirstValidBarAlreadyBullish(t *testing.T) {
-	// Documents current behavior: with short already above long on the first
-	// valid bar there is no crossover, but emax still emits open.
+func TestEmax_SustainedTrendOpensOnce(t *testing.T) {
+	tests := []struct {
+		name   string
+		series []float64
+		want   direction
+	}{
+		{"rising goes long", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, long},
+		{"falling goes short", []float64{12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}, short},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEmax(t, 2, 4)
+			var orders []*order
+			for _, b := range closes(tt.series...) {
+				if o := e.onBar(context.Background(), b); o != nil {
+					orders = append(orders, o)
+				}
+			}
+			require.Len(t, orders, 1, "a sustained trend must not re-emit open")
+			assert.Equal(t, open, orders[0].action)
+			assert.Equal(t, tt.want, orders[0].direction)
+		})
+	}
+}
+
+func TestEmax_FirstValidBarAlreadyTrending(t *testing.T) {
+	// Documents current behavior: if the EMAs are already apart on the first
+	// valid bar there is no crossover, but emax opens in the trend's direction.
+	tests := []struct {
+		name   string
+		series []float64
+		want   direction
+	}{
+		{"bullish", []float64{1, 2, 3, 4}, long},
+		{"bearish", []float64{4, 3, 2, 1}, short},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEmax(t, 2, 4)
+			var got []*order
+			for _, b := range closes(tt.series...) {
+				got = append(got, e.onBar(context.Background(), b))
+			}
+			require.Len(t, got, 4)
+			assert.Nil(t, got[0])
+			assert.Nil(t, got[1])
+			assert.Nil(t, got[2])
+			require.NotNil(t, got[3])
+			assert.Equal(t, open, got[3].action)
+			assert.Equal(t, tt.want, got[3].direction)
+		})
+	}
+}
+
+func TestEmax_EqualEMAsChangeNothing(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
-
-	var got []action
-	for _, b := range closes(1, 2, 3, 4) {
-		got = append(got, actionOf(e.onBar(ctx, b)))
+	// A flat series: both EMAs are identical, so there is no trend to act on.
+	for i, b := range closes(5, 5, 5, 5, 5, 5, 5) {
+		assert.Nil(t, e.onBar(ctx, b), "bar %d", i)
 	}
-	assert.Equal(t, []action{noAction, noAction, noAction, open}, got)
 }
 
 func TestEmax_Init(t *testing.T) {
@@ -142,35 +188,28 @@ func TestEmax_OrdersCarryInstrumentDirectionAndPrice(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
-	var opens, closes_ []*order
-	for _, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
-		o := e.onBar(ctx, b)
-		switch actionOf(o) {
-		case open:
-			opens = append(opens, o)
-		case close:
-			closes_ = append(closes_, o)
-		default:
-			assert.Nil(t, o, "no action means no order")
+	var got []*order
+	for _, b := range closes(flipSeries...) {
+		if o := e.onBar(ctx, b); o != nil {
+			got = append(got, o)
 		}
 	}
-	// The open fires on the bar closing at 12, the close on the bar closing
-	// at 8; each order is priced at the close of the bar that triggered it.
-	assert.Equal(t, []*order{{
-		instrument: "TEST", direction: long, action: open, orderType: marketOrder,
-		price: price(12 * priceScale),
-	}}, opens)
-	assert.Equal(t, []*order{{
-		instrument: "TEST", action: close, orderType: marketOrder,
-		price: price(8 * priceScale),
-	}}, closes_, "close takes no direction")
+	// Each order is priced at the close of the bar that triggered it, and a
+	// close takes no direction.
+	assert.Equal(t, []*order{
+		{instrument: "TEST", direction: short, action: open, orderType: marketOrder, price: price(7 * priceScale)},
+		{instrument: "TEST", action: close, orderType: marketOrder, price: price(12 * priceScale)},
+		{instrument: "TEST", direction: long, action: open, orderType: marketOrder, price: price(14 * priceScale)},
+		{instrument: "TEST", action: close, orderType: marketOrder, price: price(8 * priceScale)},
+		{instrument: "TEST", direction: short, action: open, orderType: marketOrder, price: price(4 * priceScale)},
+	}, got)
 }
 
 func TestEmax_OrderPriceIsTheTriggeringBarsClose(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
-	for i, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
+	for i, b := range closes(flipSeries...) {
 		if o := e.onBar(ctx, b); o != nil {
 			assert.Equal(t, b.c, o.price, "bar %d (%s)", i, o.action)
 			assert.NotZero(t, o.price)
@@ -178,16 +217,15 @@ func TestEmax_OrderPriceIsTheTriggeringBarsClose(t *testing.T) {
 	}
 }
 
-// There is no atomic reverse: a position change is a close followed, on a
-// later bar, by a separate open.
-func TestEmax_ReversalIsCloseThenSeparateOpen(t *testing.T) {
+// There is no atomic reverse: a flip is a close on the crossover bar, then the
+// opposite open on the very next bar, never both on one bar.
+func TestEmax_FlipIsCloseThenOpenOnTheNextBar(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
-	series := closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2, 1, 14, 20, 30, 10, 2)
 	var seq []action
 	var openBar, closeBar []int
-	for i, b := range series {
+	for i, b := range closes(flipSeries...) {
 		switch a := actionOf(e.onBar(ctx, b)); a {
 		case open:
 			openBar = append(openBar, i)
@@ -198,11 +236,11 @@ func TestEmax_ReversalIsCloseThenSeparateOpen(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, []action{open, close, open, close}, seq, "opens and closes strictly alternate")
-	for i := range closeBar {
-		assert.Less(t, openBar[i], closeBar[i], "close follows its open")
+	assert.Equal(t, []action{open, close, open, close, open}, seq, "opens and closes strictly alternate")
+	require.Len(t, closeBar, 2)
+	for i, c := range closeBar {
+		assert.Equal(t, c+1, openBar[i+1], "the opposite open follows its close by exactly one bar")
 	}
-	assert.Less(t, closeBar[0], openBar[1], "re-open happens on a later bar than the close")
 }
 
 func TestEmax_OrdersValidate(t *testing.T) {
@@ -210,7 +248,7 @@ func TestEmax_OrdersValidate(t *testing.T) {
 	ctx := context.Background()
 
 	var n int
-	for i, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
+	for i, b := range closes(flipSeries...) {
 		o := e.onBar(ctx, b)
 		if o == nil {
 			continue
@@ -219,7 +257,7 @@ func TestEmax_OrdersValidate(t *testing.T) {
 		assert.Equal(t, "TEST", o.instrument, "bar %d (%s)", i, o.action)
 		assert.NoError(t, o.validate(), "bar %d (%s)", i, o.action)
 	}
-	assert.Equal(t, 2, n, "one open and one close")
+	assert.Equal(t, 5, n)
 }
 
 func TestEmax_Name(t *testing.T) {

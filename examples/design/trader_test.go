@@ -20,13 +20,14 @@ func TestTrader_HandleOrder(t *testing.T) {
 	ctx := context.Background()
 	captureLogs(t)
 	openO := func() *order {
-		return &order{instrument: "EURUSD", direction: long, action: open, orderType: marketOrder}
+		return &order{instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10}
 	}
 
 	t.Run("open is sized then submitted", func(t *testing.T) {
 		o := openO()
 		require.NoError(t, newTestTrader().handleOrder(ctx, o))
-		assert.Equal(t, defaultOrderUnits, o.units)
+		assert.Equal(t, int64(909), o.units, "balance 1000: floor(1000 / 1.1)")
+		assert.Equal(t, price(108900), o.stopLoss)
 		assert.Equal(t, stateSubmitted, o.state)
 		assert.NotEmpty(t, o.id)
 		require.Len(t, o.history, 2)

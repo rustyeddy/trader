@@ -17,7 +17,10 @@ type emax struct {
 	id    string
 	short int
 	long  int
-	over  bool // is short over long
+
+	// signal state, not the actual position: what the strategy last asked for
+	pos     direction // side it is in (noDirection: flat)
+	pending direction // side to open on the next bar, after a flipping close
 
 	emaShort *ema
 	emaLong  *ema
@@ -41,7 +44,13 @@ func (e *emax) init(cfg map[string]any) error {
 
 // onBar returns the order the strategy wants for this bar, or nil when there
 // is nothing to do.
-func (e *emax) onBar(ctx context.Context, b bar) (o *order) {
+//
+// The strategy is always long when the short EMA is above the long EMA and
+// short when it is below. A flip is a close on the crossover bar followed by
+// the opposite open on the next bar: an onBar returns one order, and there is
+// no atomic reverse. An open that is rejected is not retried; the next order
+// comes only from the next crossover.
+func (e *emax) onBar(ctx context.Context, b bar) *order {
 	// Feed both EMAs every bar so the long one warms up on the same data.
 	s, sok := e.emaShort.onBar(ctx, b)
 	l, lok := e.emaLong.onBar(ctx, b)
@@ -49,15 +58,39 @@ func (e *emax) onBar(ctx context.Context, b bar) (o *order) {
 		return nil
 	}
 
+	// Finish a flip: the close went out last bar, now open the other side.
+	if e.pending != noDirection {
+		d := e.pending
+		e.pending = noDirection
+		e.pos = d
+		return e.openOrder(b, d)
+	}
+
+	var trend direction
 	switch {
-	case s > l && !e.over:
-		e.over = true
-		return &order{instrument: b.instrument, price: b.c, action: open, orderType: marketOrder, direction: long}
-	case s < l && e.over:
-		e.over = false
+	case s > l:
+		trend = long
+	case s < l:
+		trend = short
+	default:
+		return nil // equal: no change
+	}
+
+	switch {
+	case trend == e.pos:
+		return nil
+	case e.pos == noDirection:
+		e.pos = trend
+		return e.openOrder(b, trend)
+	default:
+		// in the opposite side: close now, open the new side next bar
+		e.pos = noDirection
+		e.pending = trend
 		// close takes no direction: it acts on the existing position
 		return &order{instrument: b.instrument, price: b.c, action: close, orderType: marketOrder}
 	}
+}
 
-	return nil
+func (e *emax) openOrder(b bar, d direction) *order {
+	return &order{instrument: b.instrument, price: b.c, action: open, orderType: marketOrder, direction: d}
 }

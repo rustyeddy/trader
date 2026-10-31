@@ -302,16 +302,16 @@ func TestMissedEntry_RejectedOpenIsNotRetried(t *testing.T) {
 	e := &tapStrategy{strategy: newTestEmax(t, 2, 4)}
 	h := &rejectFirstOpen{}
 
-	// Bearish, one bullish cross at index 5, then bullish for many bars while
-	// margin "becomes available" (the handler accepts any later open).
-	bars := closes(10, 9, 8, 7, 6, 12, 14, 16, 18, 20, 22, 24, 26)
+	// Bullish from the first valid bar (3) and bullish for many bars after,
+	// while margin "becomes available" (the handler accepts any later open).
+	bars := closes(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), e, h)
 
 	require.NoError(t, err)
 	require.Equal(t, []action{open}, actions(h.got), "the strategy asked once and never again")
 	assert.True(t, h.rejected)
 	assert.Equal(t, stateRejected, h.got[0].state)
-	assert.Equal(t, []int{5}, e.at, "the one entry opportunity, bar 5")
+	assert.Equal(t, []int{3}, e.at, "the one entry opportunity, bar 3")
 }
 
 // §2: a rejected entry must not suppress re-entry forever.
@@ -320,17 +320,18 @@ func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	e := &tapStrategy{strategy: newTestEmax(t, 2, 4)}
 	h := &rejectFirstOpen{}
 
-	// bullish cross (rejected), bearish cross, then a fresh bullish cross.
-	bars := closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2, 1, 14, 20, 30)
+	// Rising (open long at 3, rejected), a drop (close at 8, open short at 9),
+	// then a rise again (close at 12, open long at 13).
+	bars := closes(1, 2, 3, 4, 5, 6, 7, 8, 4, 2, 1, 0.5, 6, 9, 12)
 	err := (&backtest{}).run(context.Background(), seq(bars, -1, nil), e, h)
 
 	require.NoError(t, err)
-	require.Equal(t, []action{open, close, open}, actions(h.got))
+	require.Equal(t, []action{open, close, open, close, open}, actions(h.got))
+	assert.Equal(t, []int{3, 8, 9, 12, 13}, e.at)
 	assert.Equal(t, stateRejected, h.got[0].state, "first opportunity was rejected")
+	assert.Equal(t, short, h.got[2].direction)
 	assert.Equal(t, stateRequested, h.got[2].state, "the fresh opportunity is not rejected")
-	require.Len(t, e.at, 3)
-	assert.Equal(t, 5, e.at[0])
-	assert.Greater(t, e.at[2], e.at[1], "the fresh open comes after the close")
+	assert.Equal(t, stateRequested, h.got[4].state)
 }
 
 func TestBacktestRun_FatalHandlerErrorHasInstrumentAndTimeContext(t *testing.T) {

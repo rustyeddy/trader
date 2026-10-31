@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -35,7 +34,7 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], strat s
 		o.record(stateRequested, "")
 		err := h.handleOrder(ctx, o)
 		switch {
-		case errors.Is(err, errInsufficientMargin):
+		case isRejection(err):
 			// Expected trading outcome: record it, log it and keep processing bars.
 			if o.state != stateRejected { // the rejecting step normally records it
 				o.record(stateRejected, err.Error())
