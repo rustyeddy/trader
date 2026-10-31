@@ -30,7 +30,7 @@ scenarios. Items marked DONE are implemented and tested.
 - Who sets what:
   - strategy: instrument, action, direction (Open only), reference price,
     order type, and the stop loss (Open only).
-  - account: units (sizing), or rejection.
+  - account: units (sizing, limited by risk and by margin), or rejection.
   - broker: order id, and later the fill.
 - Position direction is separate from order side Buy/Sell.
 - Open requires direction; Add, Reduce, Close do NOT require direction.
@@ -176,9 +176,12 @@ where available; strategy must not equate signal generation with a fill.
   strategy returns no order never reaches the handler.
 
 ** DONE Expected rejection
-- Insufficient margin and an order below the minimum size are expected
-  *rejections*: record the rejection in the order's history, log it and
-  continue processing subsequent bars. They are not fatal run failures.
+- An order whose size ends up below the instrument's minimum is an expected
+  *rejection*: errInsufficientMargin when margin was the limit,
+  errOrderTooSmall when the risk budget was. Record the rejection in the
+  order's history, log it and continue processing subsequent bars. They are
+  not fatal run failures. A margin shortfall alone does not reject; it makes
+  the order smaller (decision 8).
 - Representation: sentinel errors (=errInsufficientMargin=,
   =errOrderTooSmall=) classified by =isRejection=; no result hierarchy.
 
@@ -196,16 +199,21 @@ where available; strategy must not equate signal generation with a fill.
    they refer to the existing position for the instrument.
 4. Add requires a positive size; Reduce cannot exceed existing size or
    reverse it. Close flattens the entire position.
-5. Insufficient margin (and an order too small to trade) is rejected,
-   recorded and processing continues.
+5. An order that cannot reach the instrument's minimum size is rejected,
+   recorded and processing continues: with insufficient margin when margin
+   was the limit, and as too small when the risk budget was. Limited margin
+   alone reduces the size rather than rejecting the order.
 6. Open requires a positive stop loss, set by the strategy. The account sizes
    from that stop and never creates or changes it; a missing or wrong-side
    stop is an invalid order (a strategy bug), not a trading rejection.
 7. An order carries its own lifecycle. Each state change (requested, sized,
    submitted, filled, rejected) is recorded in its history with a timestamp
    and logged.
-8. Open orders are sized by the account from its risk budget and the
-   strategy's stop; the strategy does not choose units.
+8. Open orders are sized by the account; the strategy does not choose units.
+   Units are the smaller of the risk limit (a stop-out loses at most riskPct
+   of the balance, from the strategy's stop) and the margin limit (the most
+   the available margin can cover), rounded down to the unit step and capped
+   at the maximum. Rejected only if below the minimum.
 9. Rejections are exposed as sentinel errors (=errInsufficientMargin=,
    =errOrderTooSmall=) that the run loop classifies with =isRejection=.
 

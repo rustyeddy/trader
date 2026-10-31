@@ -189,26 +189,67 @@ func TestAccount_Size_Open_WithoutMarginIsRejected(t *testing.T) {
 	}
 }
 
-func TestAccount_Size_Open_RequiredMarginAboveAvailableIsRejected(t *testing.T) {
+// requiredMargin is the margin an order of units at p needs, rounded up,
+// computed independently of production code with arbitrary precision.
+func requiredMargin(units int64, p price, mr rate) int64 {
+	n := big.NewInt(units)
+	n.Mul(n, big.NewInt(int64(p)))
+	n.Mul(n, big.NewInt(int64(mr)))
+	n.Mul(n, big.NewInt(moneyScale))
+	d := big.NewInt(priceScale * rateScale)
+	q, r := new(big.Int).QuoRem(n, d, new(big.Int))
+	if r.Sign() != 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	return q.Int64()
+}
+
+func TestAccount_Size_Open_MarginShortfallReducesUnitsInsteadOfRejecting(t *testing.T) {
 	captureLogs(t)
 	inst := testInstrument("TESTMR")
 	inst.marginRate = rate(2 * rateScale) // 200%: every unit needs twice its value
 	registerInstrument(t, inst)
 
-	// 9090 units * 1.10 = 9999 of notional; 200% of that is 19998 > 10000.
+	// The risk budget alone would allow 9090 units, but 9090 units at 1.10
+	// need 19998 of margin against 10000 available. The margin covers 4545.
 	o := openOrderAt("TESTMR", long, eurusd1_10)
-	err := newAccount("a", 10000).size(o)
+	require.NoError(t, newAccount("a", 10000).size(o))
 
-	require.ErrorIs(t, err, errInsufficientMargin)
-	assert.Contains(t, err.Error(), "need 19998, have 10000")
-	assert.Zero(t, o.units)
-	assert.Equal(t, stateRejected, o.state)
+	assert.Equal(t, int64(4545), o.units, "floor(10000 / (1.10 * 2))")
+	assert.Equal(t, stateSized, o.state)
+	assert.LessOrEqual(t, requiredMargin(o.units, eurusd1_10, inst.marginRate), int64(10000))
+	assert.Greater(t, requiredMargin(o.units+1, eurusd1_10, inst.marginRate), int64(10000),
+		"one more unit would not be covered: the size is the largest the margin allows")
 }
 
-func TestAccount_Size_Open_RequiredMarginRoundsUp(t *testing.T) {
+func TestAccount_Size_Open_MarginLimitsAGenerousRiskBudget(t *testing.T) {
 	captureLogs(t)
-	// Cap the size at 1000 units and risk 100% so the cap, not the budget,
-	// decides the size and only the margin requirement is in question.
+	// 100% risk would size 909090 units; at 50:1 the margin covers 454545.
+	a := newAccount("a", 10000)
+	a.riskPct = rate(rateScale)
+	o := openOrderAt("EURUSD", long, eurusd1_10)
+
+	require.NoError(t, a.size(o))
+
+	assert.Equal(t, int64(454545), o.units)
+	mr := instruments["EURUSD"].marginRate
+	assert.LessOrEqual(t, requiredMargin(454545, eurusd1_10, mr), int64(10000))
+	assert.Greater(t, requiredMargin(454546, eurusd1_10, mr), int64(10000))
+}
+
+func TestAccount_Size_Open_RiskLimitWinsWhenItIsSmaller(t *testing.T) {
+	captureLogs(t)
+	// The default 1% risk (9090 units) is far below what 50:1 margin allows
+	// (454545), so margin plays no part.
+	o := openOrderAt("EURUSD", long, eurusd1_10)
+	require.NoError(t, newAccount("a", 10000).size(o))
+	assert.Equal(t, int64(9090), o.units)
+}
+
+func TestAccount_Size_Open_MarginUnitsRoundDown(t *testing.T) {
+	captureLogs(t)
+	// Cap the size at 1000 units and risk 100%, so only the cap and the margin
+	// can limit the order.
 	inst := testInstrument("TESTCEIL")
 	inst.maxUnits = 1000
 	registerInstrument(t, inst)
@@ -218,18 +259,68 @@ func TestAccount_Size_Open_RequiredMarginRoundsUp(t *testing.T) {
 		return a
 	}
 
-	// 1000 units at 1.10000 is 1100 of notional; 2% of that is exactly 22,
-	// which 22 covers.
+	// 1000 units at 1.10000 need exactly 22 of margin: all 1000 fit.
 	o := openOrderAt("TESTCEIL", long, 110000)
 	require.NoError(t, newAcct().size(o))
 	assert.Equal(t, int64(1000), o.units)
 
-	// At 1.10001 the requirement is 22.0002, which rounds up to 23 and 22
-	// cannot cover. Rounding down would wrongly accept this order.
+	// At 1.10001 the margin covers 999.99 units, and 1000 would need 22.0002,
+	// which rounds up to 23. The size is 999 (rounded down), not 1000 and not
+	// a rejection.
 	o = openOrderAt("TESTCEIL", long, 110001)
-	err := newAcct().size(o)
+	require.NoError(t, newAcct().size(o))
+	assert.Equal(t, int64(999), o.units)
+	assert.LessOrEqual(t, requiredMargin(999, 110001, inst.marginRate), int64(22))
+	assert.Equal(t, int64(23), requiredMargin(1000, 110001, inst.marginRate))
+}
+
+func TestAccount_Size_Open_MarginBelowTheMinimumIsAnInsufficientMarginRejection(t *testing.T) {
+	captureLogs(t)
+	inst := testInstrument("TESTMINM")
+	inst.minUnits = 500_000
+	registerInstrument(t, inst)
+
+	// Margin covers 454545 units, less than the 500000 minimum, and the risk
+	// budget (100%) is not what limits the order.
+	a := newAccount("a", 10000)
+	a.riskPct = rate(rateScale)
+	o := openOrderAt("TESTMINM", long, eurusd1_10)
+	err := a.size(o)
+
 	require.ErrorIs(t, err, errInsufficientMargin)
-	assert.Contains(t, err.Error(), "need 23, have 22")
+	assert.NotErrorIs(t, err, errOrderTooSmall)
+	assert.True(t, isRejection(err))
+	assert.Contains(t, err.Error(), "margin covers 454545 units, minimum 500000")
+	assert.Zero(t, o.units)
+	assert.Equal(t, stateRejected, o.state)
+}
+
+func TestAccount_Size_Open_MarginLimitThenUnitStep(t *testing.T) {
+	captureLogs(t)
+	inst := testInstrument("TESTSTEPM")
+	inst.marginRate = rate(2 * rateScale)
+	inst.unitStep = 100
+	registerInstrument(t, inst)
+
+	o := openOrderAt("TESTSTEPM", long, eurusd1_10) // margin covers 4545
+	require.NoError(t, newAccount("a", 10000).size(o))
+	assert.Equal(t, int64(4500), o.units, "rounded down to the step after the margin limit")
+}
+
+func TestAccount_Size_Open_InstrumentWithoutAMarginRateIsAConfigurationError(t *testing.T) {
+	captureLogs(t)
+	inst := testInstrument("TESTNOMR")
+	inst.marginRate = 0
+	registerInstrument(t, inst)
+
+	o := openOrderAt("TESTNOMR", long, eurusd1_10)
+	err := newAccount("a", 10000).size(o)
+
+	require.ErrorIs(t, err, errInstrumentConfig)
+	assert.False(t, isRejection(err), "a missing margin rate is a setup bug, not a trading outcome")
+	assert.Zero(t, o.units)
+	assert.Equal(t, stateRequested, o.state)
+	assert.Empty(t, o.history)
 }
 
 func TestAccount_Size_Open_RespectsInstrumentLimits(t *testing.T) {
@@ -295,39 +386,52 @@ func TestAccount_Size_Open_RiskIsBoundedAndTight(t *testing.T) {
 	captureLogs(t)
 	balances := []money{1, 11, 100, 999, 10000, 123456, 10_000_000_000}
 	prices := []price{10, 50000, 110000, 250000, 12_345_678}
+	// 1% and 2% keep risk the limit; 50% and 100% make margin the limit.
+	risks := []rate{rateOnePercent, rateTwoPercent, rate(rateScale / 2), rate(rateScale)}
 
 	for _, bal := range balances {
 		for _, p := range prices {
 			for _, d := range []direction{long, short} {
-				o := openOrderAt("EURUSD", d, p)
-				act := newAccount("a", bal)
-				err := act.size(o)
+				for _, rk := range risks {
+					o := openOrderAt("EURUSD", d, p)
+					act := newAccount("a", bal)
+					act.riskPct = rk
+					err := act.size(o)
 
-				// loss at the stop, in point-units, vs the budget, both scaled
-				// by rateScale*priceScale so the comparison is exact.
-				var dist int64
-				if d == long {
-					dist = int64(p - o.stopLoss)
-				} else {
-					dist = int64(o.stopLoss - p)
+					// loss at the stop, in point-units, vs the budget, both scaled
+					// by rateScale*priceScale so the comparison is exact.
+					var dist int64
+					if d == long {
+						dist = int64(p - o.stopLoss)
+					} else {
+						dist = int64(o.stopLoss - p)
+					}
+					if err != nil {
+						// Only a rejection is acceptable here: the order is below the
+						// minimum, or the margin cannot cover even the minimum.
+						require.True(t, errors.Is(err, errOrderTooSmall) || errors.Is(err, errInsufficientMargin),
+							"bal %d price %d %s: %v", bal, p, d, err)
+						continue
+					}
+					budget := new(big.Int).Mul(big.NewInt(int64(bal)), big.NewInt(int64(act.riskPct)))
+					budget.Mul(budget, big.NewInt(priceScale))
+					loss := func(units int64) *big.Int {
+						v := big.NewInt(units)
+						v.Mul(v, big.NewInt(dist))
+						return v.Mul(v, big.NewInt(rateScale))
+					}
+					mr := instruments["EURUSD"].marginRate
+					msg := fmt.Sprintf("bal %d price %d %s units %d dist %d", bal, p, d, o.units, dist)
+
+					assert.LessOrEqual(t, loss(o.units).Cmp(budget), 0, "risk exceeded: "+msg)
+					assert.LessOrEqual(t, requiredMargin(o.units, p, mr), int64(bal), "margin exceeded: "+msg)
+
+					// The size is the largest allowed: one more unit would break
+					// either the risk budget or the margin.
+					riskBroken := loss(o.units+1).Cmp(budget) > 0
+					marginBroken := requiredMargin(o.units+1, p, mr) > int64(bal)
+					assert.True(t, riskBroken || marginBroken, "not the largest size: "+msg)
 				}
-				if err != nil {
-					// Only "too small" is acceptable here; then even one unit
-					// would exceed the budget, or the margin could not cover it.
-					require.True(t, errors.Is(err, errOrderTooSmall) || errors.Is(err, errInsufficientMargin),
-						"bal %d price %d %s: %v", bal, p, d, err)
-					continue
-				}
-				budget := new(big.Int).Mul(big.NewInt(int64(bal)), big.NewInt(int64(act.riskPct)))
-				budget.Mul(budget, big.NewInt(priceScale))
-				loss := func(units int64) *big.Int {
-					v := big.NewInt(units)
-					v.Mul(v, big.NewInt(dist))
-					return v.Mul(v, big.NewInt(rateScale))
-				}
-				msg := fmt.Sprintf("bal %d price %d %s units %d dist %d", bal, p, d, o.units, dist)
-				assert.LessOrEqual(t, loss(o.units).Cmp(budget), 0, "risk exceeded: "+msg)
-				assert.Greater(t, loss(o.units+1).Cmp(budget), 0, "not the largest size: "+msg)
 			}
 		}
 	}
@@ -409,4 +513,13 @@ func TestNewAccount_PositionsMapIsReady(t *testing.T) {
 
 func TestNewAccount_DefaultRiskIsOnePercent(t *testing.T) {
 	assert.Equal(t, rateOnePercent, newAccount("a", 100).riskPct)
+}
+
+// Risk is measured against equity and the margin limit against the margin
+// available. They are the same number in this prototype, but they are separate
+// questions and must stay separate once fills and margin tracking exist.
+func TestAccount_EquityAndMarginAvailableArePlaceholdersForTheBalance(t *testing.T) {
+	a := newAccount("a", 12345)
+	assert.Equal(t, money(12345), a.equity())
+	assert.Equal(t, money(12345), a.marginAvailable())
 }

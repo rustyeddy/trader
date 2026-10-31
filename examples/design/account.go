@@ -24,6 +24,16 @@ func newAccount(id string, balance money) *account {
 	}
 }
 
+// equity is what the risk budget is a fraction of. It is the balance for now;
+// once positions exist it becomes balance plus unrealized profit and loss.
+func (act *account) equity() money {
+	return act.balance
+}
+
+// marginAvailable is what new positions may be margined against. It is the
+// balance for now; once positions exist it becomes equity less the margin
+// already in use. Sizing keeps it separate from equity: risk is measured
+// against equity, the margin limit against marginAvailable.
 func (act *account) marginAvailable() money {
 	return act.balance
 }
@@ -40,8 +50,10 @@ var errUnsupportedAction = errors.New("action not supported yet")
 // size decides how many units the order trades, or rejects it. The strategy
 // says what it wants; the account decides how much.
 //
-//   - open: sized so that being stopped out loses riskPct of the balance (see
-//     sizeOpen), or rejected with errInsufficientMargin or errOrderTooSmall.
+//   - open: sized to the smaller of the risk limit (a stop-out loses at most
+//     riskPct of the balance) and the margin limit (see sizeOpen), or rejected
+//     with errInsufficientMargin or errOrderTooSmall if that is below the
+//     instrument's minimum.
 //   - close: units stay 0, meaning the whole position, which is resolved once
 //     positions exist.
 //   - add, reduce and anything else: errUnsupportedAction until their size
@@ -69,16 +81,22 @@ func (act *account) size(o *order) error {
 // sizeOpen sets o.units for an opening order.
 //
 // The strategy decides where the stop goes; the account only decides how much
-// to trade given it. An opening order without a valid stop is rejected as an
-// invalid order, not a rejection. Units are
+// to trade given it. An opening order without a valid stop is an invalid
+// order, not a rejection. Two limits apply, and the smaller one wins:
 //
-//	floor(balance * riskPct * priceScale / (rateScale * stopDistance))
+//	riskUnits   = floor(equity * riskPct * priceScale / (rateScale * stopDistance))
+//	marginUnits = floor(marginAvailable * priceScale * rateScale / (price * marginRate))
 //
-// so a stop-out loses at most riskPct of the balance; all in integers with a
-// single rounding down. Units are rounded down to the instrument's step and
-// capped at its maximum. The order is rejected if that is below the minimum
-// or if the margin required (units * price * marginRate) exceeds the margin
-// available.
+// riskUnits is the most that loses at most riskPct of equity if stopped
+// out; marginUnits is the most whose margin requirement (units * price *
+// marginRate, rounded up) the available margin can cover. Each is a single
+// rounding down of an exact integer ratio. A margin shortfall therefore makes
+// the trade smaller instead of refusing it.
+//
+// The smaller limit is then rounded down to the instrument's step and capped at
+// its maximum. Only if the result is below the instrument's minimum is the
+// order rejected: with errInsufficientMargin when margin was the limit, and
+// with errOrderTooSmall when the risk budget was.
 func (act *account) sizeOpen(o *order, inst *instrument) error {
 	if act.marginAvailable() <= 0 {
 		return reject(o, errInsufficientMargin)
@@ -86,18 +104,33 @@ func (act *account) sizeOpen(o *order, inst *instrument) error {
 	if o.price <= 0 {
 		return fmt.Errorf("size open: %w: a market order needs a reference price", errInvalidOrder)
 	}
+	if inst.marginRate <= 0 {
+		return fmt.Errorf("size open: %w: %s has no margin rate", errInstrumentConfig, inst.symbol)
+	}
 
 	dist, err := stopDistance(o)
 	if err != nil {
 		return err
 	}
 
-	units, err := muldiv(
-		[]int64{int64(act.marginAvailable()), int64(act.riskPct), priceScale},
+	riskUnits, err := muldiv(
+		[]int64{int64(act.equity()), int64(act.riskPct), priceScale},
 		[]int64{rateScale, dist, moneyScale},
 		false)
 	if err != nil {
-		return fmt.Errorf("size open: units: %w", err)
+		return fmt.Errorf("size open: risk units: %w", err)
+	}
+	marginUnits, err := muldiv(
+		[]int64{int64(act.marginAvailable()), priceScale, rateScale},
+		[]int64{int64(o.price), int64(inst.marginRate), moneyScale},
+		false)
+	if err != nil {
+		return fmt.Errorf("size open: margin units: %w", err)
+	}
+
+	units, marginLimited := riskUnits, false
+	if marginUnits < riskUnits {
+		units, marginLimited = marginUnits, true
 	}
 	if inst.unitStep > 1 {
 		units -= units % inst.unitStep
@@ -108,19 +141,13 @@ func (act *account) sizeOpen(o *order, inst *instrument) error {
 			units -= units % inst.unitStep
 		}
 	}
-	if min := max(inst.minUnits, 1); units < min {
-		return reject(o, fmt.Errorf("%w: %d units, minimum %d", errOrderTooSmall, units, min))
-	}
 
-	required, err := muldiv(
-		[]int64{units, int64(o.price), int64(inst.marginRate), moneyScale},
-		[]int64{priceScale, rateScale},
-		true) // round the requirement up
-	if err != nil {
-		return fmt.Errorf("size open: margin: %w", err)
-	}
-	if money(required) > act.marginAvailable() {
-		return reject(o, fmt.Errorf("%w: need %d, have %d", errInsufficientMargin, required, act.marginAvailable()))
+	if min := max(inst.minUnits, 1); units < min {
+		if marginLimited {
+			return reject(o, fmt.Errorf("%w: margin covers %d units, minimum %d",
+				errInsufficientMargin, units, min))
+		}
+		return reject(o, fmt.Errorf("%w: %d units, minimum %d", errOrderTooSmall, units, min))
 	}
 
 	o.units = units

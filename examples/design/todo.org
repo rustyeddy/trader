@@ -116,9 +116,11 @@ records the result. See =order-tests.org= for the scenarios.
   position sizing, and portfolio risk policies; wire simple synthetic fills.
 - [X] Instrument registry (=instrument=, keyed by symbol) and fixed-point
   =rate= (=rateScale= 1_000_000).
-- [X] Open orders sized from =riskPct= and the strategy's stop; rounded to the
-  unit step, capped at the maximum, rejected below the minimum or when the
-  required margin (50:1 for EURUSD) exceeds the margin available.
+- [X] Open orders sized from =riskPct= and the strategy's stop, limited by the
+  margin available (50:1 for EURUSD): units are the smaller of the risk limit
+  and the margin limit, rounded to the unit step and capped at the maximum.
+  A margin shortfall shrinks the trade; the order is rejected only when the
+  result is below the instrument's minimum.
 - [ ] Positions in =account.positions=, created and updated when a fill comes
   back (netting: one position per instrument).
 - [ ] =close= resolves to the real position size (units 0 means "whole

@@ -23,6 +23,7 @@ var (
 	errUnknownBroker     = errors.New("unknown broker")
 	errUnknownAccount    = errors.New("unknown account")
 	errUnknownInstrument = errors.New("unknown instrument")
+	errInstrumentConfig  = errors.New("instrument not configured")
 )
 
 type trader struct {
