@@ -33,10 +33,6 @@ func (act *account) marginAvailable() money {
 // the instrument's quote currency, so no conversion is needed.
 const moneyScale int64 = 1
 
-// defaultStopPct places the stop this fraction of the entry price away. It
-// stands in for a stop chosen by the strategy.
-const defaultStopPct = rateOnePercent
-
 // errUnsupportedAction is returned for actions the account cannot size yet.
 // It is a programming gap, not a trading outcome.
 var errUnsupportedAction = errors.New("action not supported yet")
@@ -70,10 +66,11 @@ func (act *account) size(o *order) error {
 	return nil
 }
 
-// sizeOpen sets o.units and o.stopLoss for an opening order.
+// sizeOpen sets o.units for an opening order.
 //
-// The stop is the order's own stopLoss when the strategy set one, otherwise
-// defaultStopPct of the entry price away on the losing side. Units are then
+// The strategy decides where the stop goes; the account only decides how much
+// to trade given it. An opening order without a valid stop is rejected as an
+// invalid order, not a rejection. Units are
 //
 //	floor(balance * riskPct * priceScale / (rateScale * stopDistance))
 //
@@ -90,7 +87,7 @@ func (act *account) sizeOpen(o *order, inst *instrument) error {
 		return fmt.Errorf("size open: %w: a market order needs a reference price", errInvalidOrder)
 	}
 
-	dist, stop, err := stopFor(o)
+	dist, err := stopDistance(o)
 	if err != nil {
 		return err
 	}
@@ -127,34 +124,25 @@ func (act *account) sizeOpen(o *order, inst *instrument) error {
 	}
 
 	o.units = units
-	o.stopLoss = stop
 	return nil
 }
 
-// stopFor returns the stop distance in price points and the stop price for an
-// opening order, validating a stop the strategy supplied.
-func stopFor(o *order) (dist int64, stop price, err error) {
+// stopDistance returns how far, in price points, the order's stop is from its
+// entry price. A stop the strategy did not set, or one that is not beyond the
+// entry on the losing side, is a strategy bug and an invalid order.
+func stopDistance(o *order) (int64, error) {
 	if o.stopLoss == 0 {
-		dist = int64(o.price) * int64(defaultStopPct) / rateScale
-		if dist < 1 {
-			dist = 1
-		}
-		if o.direction == short {
-			return dist, o.price + price(dist), nil
-		}
-		return dist, o.price - price(dist), nil
+		return 0, fmt.Errorf("size open: %w: an open order needs a stop loss", errInvalidOrder)
 	}
-
+	dist := int64(o.price - o.stopLoss)
 	if o.direction == short {
 		dist = int64(o.stopLoss - o.price)
-	} else {
-		dist = int64(o.price - o.stopLoss)
 	}
 	if dist <= 0 {
-		return 0, 0, fmt.Errorf("size open: %w: %s stop %d is not beyond the entry price %d",
+		return 0, fmt.Errorf("size open: %w: %s stop %d is not beyond the entry price %d",
 			errInvalidOrder, o.direction, o.stopLoss, o.price)
 	}
-	return dist, o.stopLoss, nil
+	return dist, nil
 }
 
 // reject records the rejection on the order and returns err.

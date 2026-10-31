@@ -98,9 +98,10 @@ func getPrices() (*marketData, error) {
 func getStrategy() (strategy, error) {
 
 	emax := &emax{
-		id:    "emax",
-		short: 20,
-		long:  50,
+		id:      "emax",
+		short:   20,
+		long:    50,
+		stopPct: rateOnePercent,
 	}
 
 	err := emax.init(nil)

@@ -20,7 +20,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 	ctx := context.Background()
 	captureLogs(t)
 	openO := func() *order {
-		return &order{instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10}
+		return &order{instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
 	}
 
 	t.Run("open is sized then submitted", func(t *testing.T) {

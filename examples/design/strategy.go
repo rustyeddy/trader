@@ -18,6 +18,10 @@ type emax struct {
 	short int
 	long  int
 
+	// stopPct is how far from the entry price the stop is placed, as a
+	// fraction of that price. Every open order carries the stop it produces.
+	stopPct rate
+
 	// signal state, not the actual position: what the strategy last asked for
 	pos     direction // side it is in (noDirection: flat)
 	pending direction // side to open on the next bar, after a flipping close
@@ -36,6 +40,9 @@ func (e *emax) init(cfg map[string]any) error {
 	}
 	if e.short >= e.long {
 		return fmt.Errorf("emax: short window (%d) must be less than long window (%d)", e.short, e.long)
+	}
+	if e.stopPct <= 0 || int64(e.stopPct) >= rateScale {
+		return fmt.Errorf("emax: stop must be between 0%% and 100%% of price (stopPct=%d)", e.stopPct)
 	}
 	e.emaShort = newEMA(e.short)
 	e.emaLong = newEMA(e.long)
@@ -92,5 +99,26 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 }
 
 func (e *emax) openOrder(b bar, d direction) *order {
-	return &order{instrument: b.instrument, price: b.c, action: open, orderType: marketOrder, direction: d}
+	return &order{
+		instrument: b.instrument,
+		price:      b.c,
+		stopLoss:   e.stopFor(b.c, d),
+		action:     open,
+		orderType:  marketOrder,
+		direction:  d,
+	}
+}
+
+// stopFor places the stop stopPct of the entry price away on the losing side:
+// below a long, above a short. The distance rounds down but is at least one
+// price point.
+func (e *emax) stopFor(entry price, d direction) price {
+	dist := price(int64(entry) * int64(e.stopPct) / rateScale)
+	if dist < 1 {
+		dist = 1
+	}
+	if d == short {
+		return entry + dist
+	}
+	return entry - dist
 }

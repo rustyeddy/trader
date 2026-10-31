@@ -46,8 +46,18 @@ func testInstrument(symbol string) *instrument {
 // eurusd1_10 is the price 1.10000: the default 1% stop is 1100 points away.
 const eurusd1_10 price = 110000
 
+// openOrderAt is an open order with the stop a strategy would give it: 1% of
+// the price away on the losing side, at least one point.
 func openOrderAt(sym string, d direction, p price) *order {
-	return &order{instrument: sym, direction: d, action: open, orderType: marketOrder, price: p}
+	dist := price(int64(p) * int64(rateOnePercent) / rateScale)
+	if dist < 1 {
+		dist = 1
+	}
+	stop := p - dist
+	if d == short {
+		stop = p + dist
+	}
+	return &order{instrument: sym, direction: d, action: open, orderType: marketOrder, price: p, stopLoss: stop}
 }
 
 func TestAccount_Size_Open(t *testing.T) {
@@ -85,16 +95,33 @@ func TestAccount_Size_Open(t *testing.T) {
 	}
 }
 
-func TestAccount_Size_Open_PlacesTheDefaultStopOnTheLosingSide(t *testing.T) {
+func TestAccount_Size_Open_NeedsAStopFromTheStrategy(t *testing.T) {
 	captureLogs(t)
+	for _, d := range []direction{long, short} {
+		o := openOrderAt("EURUSD", d, eurusd1_10)
+		o.stopLoss = 0 // the strategy did not set one
 
+		err := newAccount("a", 10000).size(o)
+
+		require.ErrorIs(t, err, errInvalidOrder, d.String())
+		assert.Contains(t, err.Error(), "needs a stop loss")
+		assert.False(t, isRejection(err), "a missing stop is a strategy bug, not a trading outcome")
+		assert.Zero(t, o.units)
+		assert.Zero(t, o.stopLoss, "the account never invents a stop")
+		assert.Equal(t, stateRequested, o.state)
+		assert.Empty(t, o.history)
+	}
+}
+
+func TestAccount_Size_Open_NeverChangesTheStrategysStop(t *testing.T) {
+	captureLogs(t)
 	l := openOrderAt("EURUSD", long, eurusd1_10)
 	require.NoError(t, newAccount("a", 10000).size(l))
-	assert.Equal(t, price(108900), l.stopLoss, "long: 1% below the entry")
+	assert.Equal(t, price(108900), l.stopLoss)
 
 	s := openOrderAt("EURUSD", short, eurusd1_10)
 	require.NoError(t, newAccount("a", 10000).size(s))
-	assert.Equal(t, price(111100), s.stopLoss, "short: 1% above the entry")
+	assert.Equal(t, price(111100), s.stopLoss)
 }
 
 func TestAccount_Size_Open_UsesAStrategyStop(t *testing.T) {
@@ -175,7 +202,6 @@ func TestAccount_Size_Open_RequiredMarginAboveAvailableIsRejected(t *testing.T) 
 	require.ErrorIs(t, err, errInsufficientMargin)
 	assert.Contains(t, err.Error(), "need 19998, have 10000")
 	assert.Zero(t, o.units)
-	assert.Zero(t, o.stopLoss)
 	assert.Equal(t, stateRejected, o.state)
 }
 
@@ -268,7 +294,7 @@ func TestAccount_Size_Open_BelowTheMinimumIsRejected(t *testing.T) {
 func TestAccount_Size_Open_RiskIsBoundedAndTight(t *testing.T) {
 	captureLogs(t)
 	balances := []money{1, 11, 100, 999, 10000, 123456, 10_000_000_000}
-	prices := []price{1, 50000, 110000, 250000, 12_345_678}
+	prices := []price{10, 50000, 110000, 250000, 12_345_678}
 
 	for _, bal := range balances {
 		for _, p := range prices {

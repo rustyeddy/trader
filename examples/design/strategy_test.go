@@ -35,7 +35,7 @@ func actionOf(o *order) action {
 
 func newTestEmax(t *testing.T, short, long int) *emax {
 	t.Helper()
-	e := &emax{short: short, long: long}
+	e := &emax{short: short, long: long, stopPct: rateOnePercent}
 	require.NoError(t, e.init(nil))
 	return e
 }
@@ -158,18 +158,24 @@ func TestEmax_Init(t *testing.T) {
 	tests := []struct {
 		name        string
 		short, long int
+		stopPct     rate
 		wantErr     bool
 	}{
-		{"valid", 2, 5, false},
-		{"zero short", 0, 5, true},
-		{"zero long", 2, 0, true},
-		{"negative short", -1, 5, true},
-		{"equal windows", 5, 5, true},
-		{"short above long", 6, 5, true},
+		{"valid", 2, 5, rateOnePercent, false},
+		{"zero short", 0, 5, rateOnePercent, true},
+		{"zero long", 2, 0, rateOnePercent, true},
+		{"negative short", -1, 5, rateOnePercent, true},
+		{"equal windows", 5, 5, rateOnePercent, true},
+		{"short above long", 6, 5, rateOnePercent, true},
+		{"stop not set", 2, 5, 0, true},
+		{"negative stop", 2, 5, -rateOnePercent, true},
+		{"stop of 100%", 2, 5, rate(rateScale), true},
+		{"stop above 100%", 2, 5, rate(2 * rateScale), true},
+		{"just under 100%", 2, 5, rate(rateScale - 1), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := &emax{short: tt.short, long: tt.long}
+			e := &emax{short: tt.short, long: tt.long, stopPct: tt.stopPct}
 			err := e.init(nil)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -194,14 +200,18 @@ func TestEmax_OrdersCarryInstrumentDirectionAndPrice(t *testing.T) {
 			got = append(got, o)
 		}
 	}
-	// Each order is priced at the close of the bar that triggered it, and a
-	// close takes no direction.
+	// Each order is priced at the close of the bar that triggered it. An open
+	// carries a stop 1% away on the losing side; a close takes no direction
+	// and no stop.
 	assert.Equal(t, []*order{
-		{instrument: "TEST", direction: short, action: open, orderType: marketOrder, price: price(7 * priceScale)},
+		{instrument: "TEST", direction: short, action: open, orderType: marketOrder,
+			price: price(7 * priceScale), stopLoss: price(707000)},
 		{instrument: "TEST", action: close, orderType: marketOrder, price: price(12 * priceScale)},
-		{instrument: "TEST", direction: long, action: open, orderType: marketOrder, price: price(14 * priceScale)},
+		{instrument: "TEST", direction: long, action: open, orderType: marketOrder,
+			price: price(14 * priceScale), stopLoss: price(1386000)},
 		{instrument: "TEST", action: close, orderType: marketOrder, price: price(8 * priceScale)},
-		{instrument: "TEST", direction: short, action: open, orderType: marketOrder, price: price(4 * priceScale)},
+		{instrument: "TEST", direction: short, action: open, orderType: marketOrder,
+			price: price(4 * priceScale), stopLoss: price(404000)},
 	}, got)
 }
 
@@ -263,4 +273,78 @@ func TestEmax_OrdersValidate(t *testing.T) {
 func TestEmax_Name(t *testing.T) {
 	var s strategy = &emax{id: "emax-20-50"}
 	assert.Equal(t, "emax-20-50", s.name())
+}
+
+func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
+	tests := []struct {
+		name    string
+		series  []float64
+		stopPct rate
+		want    direction
+		stop    price
+	}{
+		{"long 1%", []float64{1, 2, 3, 4}, rateOnePercent, long, 396000},   // 4.00 - 0.04
+		{"short 1%", []float64{4, 3, 2, 1}, rateOnePercent, short, 101000}, // 1.00 + 0.01
+		{"long 2%", []float64{1, 2, 3, 4}, rateTwoPercent, long, 392000},   // 4.00 - 0.08
+		{"short 2%", []float64{4, 3, 2, 1}, rateTwoPercent, short, 102000}, // 1.00 + 0.02
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &emax{short: 2, long: 4, stopPct: tt.stopPct}
+			require.NoError(t, e.init(nil))
+
+			var got *order
+			for _, b := range closes(tt.series...) {
+				if o := e.onBar(context.Background(), b); o != nil {
+					got = o
+				}
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.want, got.direction)
+			assert.Equal(t, tt.stop, got.stopLoss)
+			if tt.want == long {
+				assert.Less(t, got.stopLoss, got.price, "a long's stop is below the entry")
+			} else {
+				assert.Greater(t, got.stopLoss, got.price, "a short's stop is above the entry")
+			}
+		})
+	}
+}
+
+func TestEmax_StopDistanceRoundsDownAndIsAtLeastOnePoint(t *testing.T) {
+	e := &emax{short: 2, long: 4, stopPct: rateOnePercent}
+	require.NoError(t, e.init(nil))
+
+	// 1% of 12_345_678 is 123456.78, which rounds down to 123456.
+	assert.Equal(t, price(12_345_678-123_456), e.stopFor(12_345_678, long))
+	assert.Equal(t, price(12_345_678+123_456), e.stopFor(12_345_678, short))
+	// 1% of 10 points is 0.1: never a zero-distance stop.
+	assert.Equal(t, price(9), e.stopFor(10, long))
+	assert.Equal(t, price(11), e.stopFor(10, short))
+}
+
+func TestEmax_ClosesCarryNoStop(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
+	for _, b := range closes(flipSeries...) {
+		if o := e.onBar(context.Background(), b); o != nil && o.action == close {
+			assert.Zero(t, o.stopLoss)
+		}
+	}
+}
+
+func TestEmax_StopsPassAccountSizing(t *testing.T) {
+	// The strategy's stops are what the account sizes from: every open order
+	// emax produces must be sizeable.
+	captureLogs(t)
+	e := newTestEmax(t, 2, 4)
+	acct := newAccount("a", 10000)
+	for i, b := range closes(flipSeries...) {
+		o := e.onBar(context.Background(), b)
+		if o == nil || o.action != open {
+			continue
+		}
+		o.instrument = "EURUSD" // the test bars are "TEST"; size needs a known instrument
+		require.NoError(t, acct.size(o), "bar %d", i)
+		assert.Positive(t, o.units)
+	}
 }
