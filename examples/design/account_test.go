@@ -30,7 +30,7 @@ func TestAccount_Size(t *testing.T) {
 	t.Run("open gets the default units and is recorded as sized", func(t *testing.T) {
 		t0 := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 		stubClock(t, t0)
-		o := &order{instrument: "EUR/USD", direction: short, action: open}
+		o := &order{instrument: "EURUSD", direction: short, action: open}
 		require.NoError(t, newAccount("a", 500).size(o))
 		assert.Equal(t, defaultOrderUnits, o.units)
 		assert.Equal(t, stateSized, o.state)
@@ -38,7 +38,7 @@ func TestAccount_Size(t *testing.T) {
 	})
 	t.Run("open is rejected without margin and the rejection is recorded", func(t *testing.T) {
 		for _, bal := range []money{0, -10} {
-			o := &order{instrument: "EUR/USD", direction: long, action: open}
+			o := &order{instrument: "EURUSD", direction: long, action: open}
 			require.ErrorIs(t, newAccount("a", bal).size(o), errInsufficientMargin)
 			assert.Zero(t, o.units)
 			assert.Equal(t, stateRejected, o.state)
@@ -48,7 +48,7 @@ func TestAccount_Size(t *testing.T) {
 		}
 	})
 	t.Run("close is sized as the whole position", func(t *testing.T) {
-		o := &order{instrument: "EUR/USD", action: close}
+		o := &order{instrument: "EURUSD", action: close}
 		require.NoError(t, newAccount("a", 0).size(o), "closing needs no margin")
 		assert.Zero(t, o.units)
 		assert.Equal(t, stateSized, o.state)
@@ -56,10 +56,33 @@ func TestAccount_Size(t *testing.T) {
 	})
 	t.Run("add, reduce and no action are unsupported", func(t *testing.T) {
 		for _, a := range []action{add, reduce, noAction, action(99)} {
-			o := &order{instrument: "EUR/USD", action: a}
+			o := &order{instrument: "EURUSD", action: a}
 			require.ErrorIs(t, newAccount("a", 1000).size(o), errUnsupportedAction, a.String())
 			assert.Equal(t, stateRequested, o.state)
 			assert.Empty(t, o.history, "an unsupported action changes nothing")
 		}
 	})
+}
+
+func TestAccount_Size_UnknownInstrumentIsAnErrorNotARejection(t *testing.T) {
+	captureLogs(t)
+	o := &order{instrument: "NOPE", direction: long, action: open}
+
+	err := newAccount("a", 1000).size(o)
+
+	require.ErrorIs(t, err, errUnknownInstrument)
+	assert.NotErrorIs(t, err, errInsufficientMargin)
+	assert.Zero(t, o.units)
+	assert.Equal(t, stateRequested, o.state)
+	assert.Empty(t, o.history, "a bad instrument is a setup error, not a recorded rejection")
+}
+
+func TestNewAccount_PositionsMapIsReady(t *testing.T) {
+	a := newAccount("a", 100)
+	require.NotNil(t, a.positions)
+	assert.NotPanics(t, func() { a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 1} })
+}
+
+func TestNewAccount_DefaultRiskIsOnePercent(t *testing.T) {
+	assert.Equal(t, rateOnePercent, newAccount("a", 100).riskPct)
 }

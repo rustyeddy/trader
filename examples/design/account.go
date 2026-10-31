@@ -8,14 +8,18 @@ import (
 type money int64
 
 type account struct {
-	id      string
-	balance money
+	id        string
+	balance   money
+	riskPct   rate // fraction of the account risked per trade
+	positions map[string]*position
 }
 
 func newAccount(id string, balance money) *account {
 	return &account{
-		id:      id,
-		balance: balance,
+		id:        id,
+		balance:   balance,
+		riskPct:   rateOnePercent, // default risk per trade
+		positions: make(map[string]*position),
 	}
 }
 
@@ -41,6 +45,11 @@ var errUnsupportedAction = errors.New("action not supported yet")
 //   - add, reduce and anything else: errUnsupportedAction until their size
 //     rules are defined.
 func (act *account) size(o *order) error {
+	// inst will drive sizing (units, margin rate); for now we only require it exists.
+	if _, ok := getInstrument(o.instrument); !ok {
+		return fmt.Errorf("size %s: %w: %q", o.action, errUnknownInstrument, o.instrument)
+	}
+
 	switch o.action {
 	case open:
 		if act.marginAvailable() <= 0 {

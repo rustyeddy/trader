@@ -84,7 +84,7 @@ func getPrices() (*marketData, error) {
 		return nil, err
 	}
 	prices := &marketData{
-		instrument: "EUR/USD",
+		instrument: "EURUSD",
 		timerange: timeRange{
 			start: tstart,
 			end:   tend,

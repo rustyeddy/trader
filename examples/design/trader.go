@@ -10,8 +10,9 @@ import (
 var errInsufficientMargin = errors.New("insufficient margin available")
 
 var (
-	errUnknownBroker  = errors.New("unknown broker")
-	errUnknownAccount = errors.New("unknown account")
+	errUnknownBroker     = errors.New("unknown broker")
+	errUnknownAccount    = errors.New("unknown account")
+	errUnknownInstrument = errors.New("unknown instrument")
 )
 
 type trader struct {
