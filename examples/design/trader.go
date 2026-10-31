@@ -32,10 +32,12 @@ type trader struct {
 }
 
 func (tr *trader) handleOrder(ctx context.Context, o *order) (err error) {
+	// The strategy knows nothing of accounts; the trader says whose order this is.
+	o.accountID = tr.account.id
 
 	if err := tr.account.size(o); err != nil {
 		return err
 	}
 
-	return tr.broker.submit(ctx, tr.account.id, o)
+	return tr.broker.submit(ctx, o)
 }

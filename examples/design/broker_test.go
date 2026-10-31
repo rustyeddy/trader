@@ -72,9 +72,9 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 	logs := captureLogs(t)
 	b := &broker{id: "sim"}
 	b.addAccount("acct", 1000)
-	o := &order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, units: 1000}
+	o := &order{accountID: "acct", instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, units: 1000}
 
-	require.NoError(t, b.submit(context.Background(), "acct", o))
+	require.NoError(t, b.submit(context.Background(), o))
 
 	assert.Equal(t, "sim-1", o.id)
 	assert.Equal(t, stateSubmitted, o.state)
@@ -100,23 +100,23 @@ func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
 	b.addAccount("acct", 1000)
 	ctx := context.Background()
 
-	o1, o2 := &order{action: open}, &order{action: close}
-	require.NoError(t, b.submit(ctx, "acct", o1))
-	require.NoError(t, b.submit(ctx, "acct", o2))
+	o1, o2 := &order{accountID: "acct", action: open}, &order{accountID: "acct", action: close}
+	require.NoError(t, b.submit(ctx, o1))
+	require.NoError(t, b.submit(ctx, o2))
 	assert.Equal(t, "sim-1", o1.id)
 	assert.Equal(t, "sim-2", o2.id)
 
-	pre := &order{id: "mine", action: open}
-	require.NoError(t, b.submit(ctx, "acct", pre))
+	pre := &order{id: "mine", accountID: "acct", action: open}
+	require.NoError(t, b.submit(ctx, pre))
 	assert.Equal(t, "mine", pre.id, "an existing id is not overwritten")
 }
 
 func TestBroker_SubmitUnknownAccount(t *testing.T) {
 	logs := captureLogs(t)
 	b := &broker{id: "sim"}
-	o := &order{action: open}
+	o := &order{accountID: "ghost", action: open}
 
-	err := b.submit(context.Background(), "ghost", o)
+	err := b.submit(context.Background(), o)
 
 	require.ErrorIs(t, err, errUnknownAccount)
 	assert.Equal(t, stateRequested, o.state)
@@ -131,10 +131,37 @@ func TestBroker_SubmitCancelledContext(t *testing.T) {
 	b.addAccount("acct", 1000)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	o := &order{action: open}
+	o := &order{accountID: "acct", action: open}
 
-	require.ErrorIs(t, b.submit(ctx, "acct", o), context.Canceled)
+	require.ErrorIs(t, b.submit(ctx, o), context.Canceled)
 	assert.Empty(t, o.id)
 	assert.Equal(t, stateRequested, o.state)
 	assert.Empty(t, o.history)
+}
+
+func TestBroker_SubmitOrderWithoutAnAccountIsRejectedAsUnknown(t *testing.T) {
+	logs := captureLogs(t)
+	b := &broker{id: "sim"}
+	b.addAccount("acct", 1000)
+	o := &order{action: open} // the trader never set an account
+
+	err := b.submit(context.Background(), o)
+
+	require.ErrorIs(t, err, errUnknownAccount)
+	assert.Contains(t, err.Error(), "no account")
+	assert.Empty(t, o.id)
+	assert.Empty(t, o.history)
+	assert.NotContains(t, logs.String(), "order submitted")
+}
+
+func TestBroker_SubmitUsesTheOrdersAccountForTheLog(t *testing.T) {
+	logs := captureLogs(t)
+	b := &broker{id: "sim"}
+	b.addAccount("one", 1000)
+	b.addAccount("two", 1000)
+
+	require.NoError(t, b.submit(context.Background(), &order{accountID: "two", action: open}))
+
+	assert.Contains(t, logs.String(), "account=two")
+	assert.NotContains(t, logs.String(), "account=one")
 }

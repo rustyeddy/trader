@@ -67,6 +67,7 @@ type orderEvent struct {
 // strategy means there is nothing to do on that bar.
 type order struct {
 	id         string
+	accountID  string // set by the trader before the order is sized and submitted
 	instrument string
 	direction  direction
 	action     action

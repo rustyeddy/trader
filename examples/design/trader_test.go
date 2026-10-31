@@ -30,6 +30,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 		assert.Equal(t, price(108900), o.stopLoss)
 		assert.Equal(t, stateSubmitted, o.state)
 		assert.NotEmpty(t, o.id)
+		assert.Equal(t, "a", o.accountID, "the trader names the account")
 		require.Len(t, o.history, 2)
 		assert.Equal(t, stateSized, o.history[0].state)
 		assert.Equal(t, stateSubmitted, o.history[1].state)
@@ -39,6 +40,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 		require.NoError(t, newTestTrader().handleOrder(ctx, o))
 		assert.Zero(t, o.units, "units 0 means the whole position")
 		assert.Equal(t, stateSubmitted, o.state)
+		assert.Equal(t, "a", o.accountID)
 	})
 	t.Run("open is rejected with zero margin and never submitted", func(t *testing.T) {
 		o := openO()
@@ -47,6 +49,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 		require.Len(t, o.history, 1)
 		assert.Equal(t, stateRejected, o.history[0].state)
 		assert.Empty(t, o.id, "a rejected order never reaches the broker")
+		assert.Equal(t, "a", o.accountID, "but it is still recorded against its account")
 	})
 	t.Run("open is rejected with negative margin", func(t *testing.T) {
 		require.ErrorIs(t, newTestTraderWithBalance(-1).handleOrder(ctx, openO()), errInsufficientMargin)
@@ -64,4 +67,14 @@ func TestTrader_HandleOrder(t *testing.T) {
 
 func TestTrader_ImplementsOrderHandler(t *testing.T) {
 	var _ orderHandler = (*trader)(nil)
+}
+
+func TestTrader_HandleOrder_OverwritesAnyAccountTheStrategySet(t *testing.T) {
+	captureLogs(t)
+	o := &order{accountID: "someone-else", instrument: "EURUSD", direction: long, action: open,
+		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+
+	require.NoError(t, newTestTrader().handleOrder(context.Background(), o))
+
+	assert.Equal(t, "a", o.accountID, "the trader, not the strategy, decides the account")
 }

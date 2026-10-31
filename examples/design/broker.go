@@ -42,15 +42,18 @@ func (b *broker) getAccount(id string) (*account, bool) {
 	return a, ok
 }
 
-// submit accepts a sized order from the named account. For now the broker only
-// assigns the order an id, marks it submitted and logs the request; it does
-// not fill or reject it.
-func (b *broker) submit(ctx context.Context, accountID string, o *order) error {
+// submit accepts a sized order from the account named in o.accountID. For now
+// the broker only assigns the order an id, marks it submitted and logs the
+// request; it does not fill or reject it.
+func (b *broker) submit(ctx context.Context, o *order) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if _, ok := b.getAccount(accountID); !ok {
-		return fmt.Errorf("submit to broker %s: %w: %s", b.id, errUnknownAccount, accountID)
+	if o.accountID == "" {
+		return fmt.Errorf("submit to broker %s: %w: the order has no account", b.id, errUnknownAccount)
+	}
+	if _, ok := b.getAccount(o.accountID); !ok {
+		return fmt.Errorf("submit to broker %s: %w: %s", b.id, errUnknownAccount, o.accountID)
 	}
 
 	if o.id == "" {
@@ -60,7 +63,7 @@ func (b *broker) submit(ctx context.Context, accountID string, o *order) error {
 
 	slog.InfoContext(ctx, "order submitted",
 		"broker", b.id,
-		"account", accountID,
+		"account", o.accountID,
 		"order", o.id,
 		"instrument", o.instrument,
 		"action", o.action,
