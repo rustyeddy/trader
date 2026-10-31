@@ -44,10 +44,10 @@ These are *responsibilities*, not a requirement for one package per item.
 | Responsibility | Role                                                         |
 |----------------+--------------------------------------------------------------|
 | MarketData     | Acquire, store, assemble, cache, and deliver market bars.    |
-| Strategy       | Consume observations; generate trading intents.              |
+| Strategy       | Consume observations; request transactions with Orders.       |
 | Account        | Hold account/position facts; support sizing and risk checks. |
 | Broker         | Execute orders; report fills and execution activity.         |
-| Trader         | Coordinate intents, risk/account, broker, and state updates. |
+| Trader         | Coordinate orders, account sizing, and broker submission.     |
 | Backtest       | Replay historical data with simulated execution.             |
 | Study          | Compute and retain research observations and statistics.     |
 | Scanner        | Classify/select instruments and interesting conditions.      |
@@ -61,7 +61,7 @@ service layers.
 A trading workflow should remain recognizable at a glance:
 
 #+begin_src text
-MarketData -> Bar(s) -> Strategy -> Intent -> Trader -> Account/Broker
+MarketData -> Bar(s) -> Strategy -> *Order -> Trader -> Account.Size -> Broker.Submit
 #+end_src
 
 Illustrative pseudo-Go (not a frozen interface):
@@ -69,17 +69,18 @@ Illustrative pseudo-Go (not a frozen interface):
 #+begin_src go
 for bar, err := range data.Bars(ctx) {
     if err != nil { return err }
-    intent := strategy.OnBar(ctx, bar)
-    if err := trader.HandleIntent(ctx, intent); err != nil { return err }
+    order := strategy.OnBar(ctx, bar)
+    if order == nil { continue }
+    if err := trader.HandleOrder(ctx, order); err != nil { return err }
 }
 #+end_src
 
 The goal is to reuse market-observation processing across backtests
 and live trading. Studies and scanners should share the
 data-consumption mechanics where useful, *without being forced to
-create trading intents or depend on brokers/accounts*.
+create orders or depend on brokers/accounts*.
 
-An =IntentHandler= is a useful small boundary for trading, but not a universal
+An =OrderHandler= is a useful small boundary for trading, but not a universal
 interface for all consumers.
 
 * Key Architectural Decisions
@@ -121,19 +122,20 @@ and the time an order can actually fill are distinct concepts.
 This causal rule must hold in historical replay as well as live processing.
 Do not silently provide future bars or fabricate missing observations.
 
-** Strategies emit intents, not orders
+** Strategies request transactions using Orders
 
-Strategies decide what trading action is desired. Trader coordinates validation,
-account/risk decisions, execution, and reconciliation. The broker (real or
-simulated) is responsible for execution outcomes.
+Strategies return =*Order= when requesting a transaction and =nil= when there
+is no change. No separate =Intent= or =Hold= transaction is necessary.
+Each Order identifies its instrument, action (open/add/reduce/close), position
+direction when relevant, entry order type (market/limit/stop), intended entry
+price, and protective stop-loss price. A nil Order says nothing about whether
+the strategy is bullish, bearish, or currently holding a position.
 
-A strategy should not need direct broker access. Where strategy behavior depends
-on actual exposure, make read-only account/position information available
-without making =OnBar= a large, dependency-heavy method.
-
-Keep signal state distinct from actual account/position state. The precise
-intent fields, sizing, rejection policies, and reversal behavior can evolve
-from small executable examples; they are not today's architectural focus.
+The strategy chooses entry and stop prices, not account risk budgets or units.
+Trader coordinates account sizing and broker submission; a strategy does not
+submit broker orders directly. Where decisions depend on actual exposure, a
+small read-only account/position view may be provided without expanding =OnBar=.
+Keep indicator/signal state separate from actual account position state.
 
 ** A shared data-processing mechanism, not one universal application
 
@@ -145,20 +147,41 @@ Studies produce research measurements; scanners identify conditions or
 instruments. Neither should be required to manufacture =Intent= values.
 
 
-** Intents have been eliminated
-Trader eliminates the separate Intent type. Strategies produce Orders
-directly. A nil Order means no transaction is requested. Orders carry
-instrument identity, requested execution parameters, sizing
-information, lifecycle state, and timestamped history.
+** Order sizing, lifecycle, and execution boundary
+
+Trader handles a strategy's requested =*Order= using the small path:
+
+#+begin_src text
+Strategy -> *Order -> Trader.HandleOrder -> Account.Size -> Broker.Submit
+#+end_src
+
+Account owns balance, equity, margin availability, and the risk budget/policy.
+Position size is bounded by both planned stop-loss risk and available margin.
+The strategy does not calculate units or need to know account balance.
+The account sizes a requested order; Trader then submits the sized request to
+the broker. Keep sizing inside the Account domain for now: no new risk service.
+
+An Order carries its *current* mutable values and lifecycle state, plus a
+history slice of timestamped state changes and reasons. The initial working
+states are requested, sized, submitted, filled, and rejected. Preserve enough
+history to explain changes later, but do not build event sourcing now.
+The requested market price serves as the reference for eventual slippage
+analysis; limit and stop-entry types use their specified entry prices.
+
+The immediate architectural milestone ends at broker submission. Actual
+fills, partial fills, cancellation, asynchronous broker events, and account
+reconciliation are important but deferred to a separate design discussion.
+A reversal may eventually produce an ordered slice of close/open Orders;
+currently one optional =*Order= per strategy evaluation is sufficient.
 
 * Validate with Three Small Executable Examples
 
 1. *Single-instrument trading:* An EMA-cross strategy consumes bars, emits
-   intents, and uses a simple Trader handler against a simulated account/broker.
+   Orders (or nil), and uses a simple Trader handler against a simulated account/broker.
 2. *Multi-instrument processing:* A two-instrument strategy or scanner consumes
    =Bars= and demonstrates chronological delivery and a missing-bar case.
 3. *Non-trading research:* An ATR study consumes market data and produces
-   results without creating an account, broker, or trading intent.
+   results without creating an account, broker, or Order.
 
 Each example should be easy to read and should have focused tests proving its
 important behavior. The aim is architectural confidence, not exhaustive
@@ -169,7 +192,7 @@ production-level completeness.
 Backtests, studies, and scanners must eventually yield *durable, reviewable,
 comparable, and reproducible* results. Keep these concepts distinct:
 
-- Trading journal: decisions, orders, fills, positions, and completed trades.
+- Trading journal: order requests, state changes, fills, positions, and completed trades.
 - Backtest results: performance and simulated execution outcomes.
 - Study results: measurements, observations, and statistical findings.
 - Scanner results: classifications and instrument selections.
@@ -183,13 +206,14 @@ reporting interface is selected here.
 
 * Open Questions — Resolve by Examples, Not Speculation
 
-- Exact =OnBar= / =OnBars= signatures and whether multiple intents per cycle
-  are needed.
+- Exact =OnBar= / =OnBars= signatures and when multiple Orders per cycle
+  become necessary.
 - How multi-instrument =Bars= frames handle sparse, asynchronous, or missing
   observations.
 - Whether and when a slice or channel complements the current iterator.
 - The smallest useful read-only account/position view for strategies.
-- Intent sizing, execution timing, rejection, and reversal details.
+- Order execution timing, rejection, and reversal details beyond the
+  initial Account.Size / Broker.Submit demonstration.
 - Durable result model and reporting/journaling storage formats.
 
 These are acknowledged questions, *not permission to expand the design now*.
