@@ -36,7 +36,7 @@ func (s *scriptStrategy) onBar(_ context.Context, b bar) *order {
 
 // openOrder is a valid open-long order for "TEST".
 func openOrder() *order {
-	return &order{instrument: "TEST", direction: long, action: open, orderType: marketOrder}
+	return &order{instrument: "TEST", direction: long, action: open, orderType: marketOrder, price: 100000, stopLoss: 99000}
 }
 
 // opens returns n distinct valid open orders, one per bar.
@@ -182,7 +182,7 @@ func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing
 	logs := captureLogs(t)
 	t0 := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	stubClock(t, t0)
-	o := &order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}
+	o := &order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}
 	strat := &scriptStrategy{orders: []*order{o}}
 	h := &recordHandler{failAt: 1, err: fmt.Errorf("open: %w", errInsufficientMargin)}
 
@@ -243,7 +243,7 @@ func TestBacktestRun_FatalHandlerErrorIsNotLoggedAsRejection(t *testing.T) {
 }
 
 func TestBacktestRun_AcceptedRequestCallsHandlerOnceWithOrder(t *testing.T) {
-	want := &order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder}
+	want := &order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder, price: 110000, stopLoss: 111100}
 	strat := &scriptStrategy{orders: []*order{want}}
 	h := &recordHandler{}
 
@@ -362,7 +362,7 @@ func TestBacktestRun_DataErrorHasContext(t *testing.T) {
 }
 
 func TestBacktestRun_InvalidOrderStopsRunBeforeHandler(t *testing.T) {
-	bad := &order{instrument: "TEST", action: open} // open without a direction
+	bad := &order{instrument: "TEST", action: open, price: 100000, stopLoss: 99000} // open without a direction
 	strat := &scriptStrategy{orders: []*order{nil, bad, openOrder()}}
 	h := &recordHandler{}
 
@@ -374,4 +374,20 @@ func TestBacktestRun_InvalidOrderStopsRunBeforeHandler(t *testing.T) {
 	assert.Len(t, strat.seen, 2, "no bars processed after the invalid order")
 	assert.Empty(t, h.got, "the invalid order never reaches the handler")
 	assert.Empty(t, bad.history, "an invalid order is never recorded as requested")
+}
+
+func TestBacktestRun_OpenWithoutAStopStopsRunBeforeHandler(t *testing.T) {
+	// The strategy, not the account, must set the stop.
+	noStop := &order{instrument: "TEST", direction: long, action: open, orderType: marketOrder, price: 100000}
+	strat := &scriptStrategy{orders: []*order{nil, noStop, openOrder()}}
+	h := &recordHandler{}
+
+	err := (&backtest{}).run(context.Background(), seq(closes(1, 2, 3, 4), -1, nil), strat, h)
+
+	require.ErrorIs(t, err, errInvalidOrder)
+	assert.Contains(t, err.Error(), "stop loss")
+	assert.Contains(t, err.Error(), "2010-01-05", "time of the offending bar")
+	assert.Len(t, strat.seen, 2, "no bars processed after the invalid order")
+	assert.Empty(t, h.got, "an open without a stop never reaches the handler")
+	assert.Empty(t, noStop.history)
 }

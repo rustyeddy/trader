@@ -115,6 +115,9 @@ var errInvalidOrder = errors.New("invalid order")
 // stateful checks (such as a reduce larger than the position) belong to the
 // handler.
 //
+// An open must carry a positive stop price; whether it is on the losing side of
+// the entry is checked when the order is sized.
+//
 // Add and reduce are only checked for instrument and direction; their size
 // rules wait on the size type being defined.
 func (o *order) validate() error {
@@ -130,6 +133,11 @@ func (o *order) validate() error {
 		}
 		if o.direction == noDirection {
 			return fmt.Errorf("%w: open requires a direction", errInvalidOrder)
+		}
+		// The strategy decides where the stop goes; the account only sizes
+		// from it, so an open without one never reaches the account.
+		if o.stopLoss <= 0 {
+			return fmt.Errorf("%w: open requires a stop loss set by the strategy", errInvalidOrder)
 		}
 	case add, reduce, close:
 		if o.instrument == "" {

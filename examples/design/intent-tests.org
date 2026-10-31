@@ -18,6 +18,9 @@ Implement in =examples/design= one small step at a time. Keep
   Hold carries no direction or size.
 - Position direction is separate from order side Buy/Sell.
 - Open requires direction; Add, Reduce, Close do NOT require direction.
+- Open also requires a stop loss, set by the strategy and not by the account.
+  The account only sizes the order from it (and rejects a stop on the wrong
+  side of the entry). Close, Add and Reduce carry no stop.
   They act on the existing position for the specified instrument.
 - Add requires a positive increment size. Reduce cannot exceed current
   position size; it must never reverse the position.
@@ -37,7 +40,7 @@ Implement in =examples/design= one small step at a time. Keep
 Use Testify =require=/=assert= and table-driven cases.
 
 ** TODO Valid semantic combinations
-- Open Long, Open Short.
+- Open Long, Open Short, each with a positive stop loss set by the strategy.
 - Add with instrument, positive increment size, no direction.
 - Reduce with instrument and nonnegative bounded reduction size, no direction.
 - Close with instrument and no direction or size.
@@ -50,6 +53,8 @@ Use Testify =require=/=assert= and table-driven cases.
 - Missing instrument on actionable intents.
 - Unknown action.
 - Open with noDirection or an unknown direction.
+- Open without a stop loss, or with a non-positive one: the strategy must
+  set it, so the order is invalid before it reaches the account.
 - Nonzero direction on Add, Reduce, or Close (unless later explicitly approved).
 - Add with missing, zero or negative size.
 - Reduce with negative size or size greater than current position size
@@ -57,7 +62,8 @@ Use Testify =require=/=assert= and table-driven cases.
 - Contradictory fields (e.g. Hold with a requested quantity, if later
   quantities are introduced).
 - Invalid encoding must return an error, not silently become Hold.
-- Do not prematurely require StopLoss, Target or risk fields.
+- Require StopLoss on Open only. Do not prematurely require Target or other
+  risk fields.
 
 * 2. Signal Lifetime / Missed Entry — =strategy_test.go= or =intent_test.go=
 ** TODO One-shot entry opportunity (critical regression test)
@@ -159,6 +165,9 @@ where available; strategy must not equate signal generation with a fill.
 4. Add requires a positive size; Reduce cannot exceed existing size or
    reverse it. Close flattens the entire position.
 5. Insufficient margin is rejected, recorded and processing continues.
+6. Open requires a positive stop loss, set by the strategy. The account sizes
+   from that stop and never creates or changes it; a missing or wrong-side
+   stop is an invalid order (a strategy bug), not a trading rejection.
 
 * Remaining Decisions Before Executable Size Tests
 1. Define size unit/type for Add and Reduce, and whether Reduce size=0
