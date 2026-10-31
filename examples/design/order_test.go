@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -125,17 +126,60 @@ func TestOrder_Validate(t *testing.T) {
 	}
 }
 
-func TestOrder_RecordSetsStateAndAppendsHistory(t *testing.T) {
-	o := &order{instrument: "EUR/USD", direction: long, action: open}
-	t0 := time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
-	t1 := t0.AddDate(0, 0, 1)
+// stubClock replaces the order time source with one that returns start, then
+// one second later on each following call.
+func stubClock(t *testing.T, start time.Time) {
+	t.Helper()
+	prev := now
+	next := start
+	now = func() time.Time {
+		cur := next
+		next = next.Add(time.Second)
+		return cur
+	}
+	t.Cleanup(func() { now = prev })
+}
 
-	o.record(stateRequested, t0, "")
-	o.record(stateRejected, t1, "insufficient margin")
+func TestOrder_RecordSetsStateAppendsTimestampedHistoryAndLogs(t *testing.T) {
+	logs := captureLogs(t)
+	t0 := time.Date(2010, 1, 4, 9, 30, 0, 0, time.UTC)
+	stubClock(t, t0)
+	o := &order{id: "sim-1", instrument: "EUR/USD", direction: long, action: open}
+
+	o.record(stateRequested, "")
+	o.record(stateRejected, "insufficient margin")
 
 	assert.Equal(t, stateRejected, o.state)
 	assert.Equal(t, []orderEvent{
 		{state: stateRequested, time: t0},
-		{state: stateRejected, time: t1, reason: "insufficient margin"},
+		{state: stateRejected, time: t0.Add(time.Second), reason: "insufficient margin"},
 	}, o.history)
+
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	require.Len(t, lines, 2, "one log line per state change")
+	for _, l := range lines {
+		assert.Contains(t, l, "level=INFO")
+		assert.Contains(t, l, "order state")
+		assert.Contains(t, l, "order=sim-1")
+		assert.Contains(t, l, "instrument=EUR/USD")
+		assert.Contains(t, l, "action=open")
+	}
+	assert.Contains(t, lines[0], "to=requested")
+	assert.NotContains(t, lines[0], "from=", "the first event has no previous state")
+	assert.NotContains(t, lines[0], "reason=")
+	assert.Contains(t, lines[1], "from=requested")
+	assert.Contains(t, lines[1], "to=rejected")
+	assert.Contains(t, lines[1], `reason="insufficient margin"`)
+}
+
+func TestOrder_RecordUsesTheTimeSource(t *testing.T) {
+	captureLogs(t)
+	fixed := time.Date(2030, 6, 1, 12, 0, 0, 0, time.UTC)
+	prev := now
+	now = func() time.Time { return fixed }
+	t.Cleanup(func() { now = prev })
+
+	o := &order{}
+	o.record(stateSized, "")
+	assert.Equal(t, fixed, o.history[0].time)
 }

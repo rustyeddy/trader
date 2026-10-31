@@ -78,7 +78,11 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 
 	assert.Equal(t, "sim-1", o.id)
 	assert.Equal(t, stateSubmitted, o.state)
+	require.Len(t, o.history, 1)
+	assert.Equal(t, stateSubmitted, o.history[0].state)
+	assert.False(t, o.history[0].time.IsZero())
 	out := logs.String()
+	assert.Contains(t, out, "to=submitted", "the state change is logged")
 	assert.Contains(t, out, "order submitted")
 	assert.Contains(t, out, "broker=sim")
 	assert.Contains(t, out, "account=acct")
@@ -117,6 +121,7 @@ func TestBroker_SubmitUnknownAccount(t *testing.T) {
 	require.ErrorIs(t, err, errUnknownAccount)
 	assert.Equal(t, stateRequested, o.state)
 	assert.Empty(t, o.id)
+	assert.Empty(t, o.history)
 	assert.NotContains(t, logs.String(), "order submitted")
 }
 
@@ -131,4 +136,5 @@ func TestBroker_SubmitCancelledContext(t *testing.T) {
 	require.ErrorIs(t, b.submit(ctx, "acct", o), context.Canceled)
 	assert.Empty(t, o.id)
 	assert.Equal(t, stateRequested, o.state)
+	assert.Empty(t, o.history)
 }

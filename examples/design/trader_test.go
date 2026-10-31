@@ -29,6 +29,9 @@ func TestTrader_HandleOrder(t *testing.T) {
 		assert.Equal(t, defaultOrderUnits, o.units)
 		assert.Equal(t, stateSubmitted, o.state)
 		assert.NotEmpty(t, o.id)
+		require.Len(t, o.history, 2)
+		assert.Equal(t, stateSized, o.history[0].state)
+		assert.Equal(t, stateSubmitted, o.history[1].state)
 	})
 	t.Run("close is submitted without units", func(t *testing.T) {
 		o := &order{instrument: "EUR/USD", action: close, orderType: marketOrder}
@@ -39,7 +42,9 @@ func TestTrader_HandleOrder(t *testing.T) {
 	t.Run("open is rejected with zero margin and never submitted", func(t *testing.T) {
 		o := openO()
 		require.ErrorIs(t, newTestTraderWithBalance(0).handleOrder(ctx, o), errInsufficientMargin)
-		assert.Equal(t, stateRequested, o.state)
+		assert.Equal(t, stateRejected, o.state)
+		require.Len(t, o.history, 1)
+		assert.Equal(t, stateRejected, o.history[0].state)
 		assert.Empty(t, o.id, "a rejected order never reaches the broker")
 	})
 	t.Run("open is rejected with negative margin", func(t *testing.T) {

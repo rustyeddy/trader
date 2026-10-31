@@ -57,7 +57,6 @@ func (b *broker) submit(ctx context.Context, accountID string, o *order) error {
 		b.seq++
 		o.id = fmt.Sprintf("%s-%d", b.id, b.seq)
 	}
-	o.state = stateSubmitted
 
 	slog.InfoContext(ctx, "order submitted",
 		"broker", b.id,
@@ -68,5 +67,6 @@ func (b *broker) submit(ctx context.Context, accountID string, o *order) error {
 		"direction", o.direction,
 		"type", o.orderType,
 		"units", o.units)
+	o.record(stateSubmitted, "")
 	return nil
 }

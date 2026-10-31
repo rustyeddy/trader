@@ -44,6 +44,7 @@ func (act *account) size(o *order) error {
 	switch o.action {
 	case open:
 		if act.marginAvailable() <= 0 {
+			o.record(stateRejected, errInsufficientMargin.Error())
 			return errInsufficientMargin
 		}
 		o.units = defaultOrderUnits
@@ -52,6 +53,6 @@ func (act *account) size(o *order) error {
 	default:
 		return fmt.Errorf("size %s: %w", o.action, errUnsupportedAction)
 	}
-	o.state = stateSized
+	o.record(stateSized, "")
 	return nil
 }

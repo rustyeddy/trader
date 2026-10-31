@@ -32,13 +32,14 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], strat s
 			return fmt.Errorf("strategy order at %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
 		}
 
-		// The loop owns the simulated clock, so it stamps the order history.
-		o.record(stateRequested, b.Time, "")
+		o.record(stateRequested, "")
 		err := h.handleOrder(ctx, o)
 		switch {
 		case errors.Is(err, errInsufficientMargin):
 			// Expected trading outcome: record it, log it and keep processing bars.
-			o.record(stateRejected, b.Time, err.Error())
+			if o.state != stateRejected { // the rejecting step normally records it
+				o.record(stateRejected, err.Error())
+			}
 			slog.Warn("order rejected",
 				"reason", err,
 				"time", b.Time,

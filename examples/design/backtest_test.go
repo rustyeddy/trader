@@ -8,6 +8,7 @@ import (
 	"iter"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -111,15 +112,16 @@ func TestBacktestRun_NoBarsNoCalls(t *testing.T) {
 }
 
 func TestBacktestRun_RecordsRequestedInHistory(t *testing.T) {
+	captureLogs(t)
+	t0 := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	stubClock(t, t0)
 	o := openOrder()
 	strat := &scriptStrategy{orders: []*order{nil, o}}
 
 	require.NoError(t, (&backtest{}).run(context.Background(), seq(closes(1, 2), -1, nil), strat, &recordHandler{}))
 
 	assert.Equal(t, stateRequested, o.state)
-	require.Len(t, o.history, 1)
-	assert.Equal(t, stateRequested, o.history[0].state)
-	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[0].time, "stamped with the bar's time")
+	assert.Equal(t, []orderEvent{{state: stateRequested, time: t0}}, o.history)
 }
 
 func TestBacktestRun_FatalHandlerErrorStopsRun(t *testing.T) {
@@ -178,6 +180,8 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 
 func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing.T) {
 	logs := captureLogs(t)
+	t0 := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	stubClock(t, t0)
 	o := &order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}
 	strat := &scriptStrategy{orders: []*order{o}}
 	h := &recordHandler{failAt: 1, err: fmt.Errorf("open: %w", errInsufficientMargin)}
@@ -193,9 +197,10 @@ func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing
 	assert.Equal(t, stateRequested, o.history[0].state)
 	assert.Equal(t, stateRejected, o.history[1].state)
 	assert.Contains(t, o.history[1].reason, "insufficient margin")
-	assert.Equal(t, testStart, o.history[1].time)
+	assert.Equal(t, t0.Add(time.Second), o.history[1].time)
 
 	out := logs.String()
+	assert.Contains(t, out, "to=rejected", "the state change is logged too")
 	assert.Contains(t, out, "level=WARN")
 	assert.Contains(t, out, "order rejected")
 	assert.Contains(t, out, "insufficient margin available")
@@ -203,6 +208,26 @@ func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing
 	assert.Contains(t, out, "instrument=EUR/USD")
 	assert.Contains(t, out, "action=open")
 	assert.Contains(t, out, "direction=long")
+}
+
+// rejectingHandler records the rejection itself, as account.size does.
+type rejectingHandler struct{}
+
+func (rejectingHandler) handleOrder(_ context.Context, o *order) error {
+	o.record(stateRejected, errInsufficientMargin.Error())
+	return errInsufficientMargin
+}
+
+func TestBacktestRun_DoesNotRecordRejectionTwice(t *testing.T) {
+	captureLogs(t)
+	o := openOrder()
+
+	require.NoError(t, (&backtest{}).run(context.Background(), seq(closes(1), -1, nil),
+		&scriptStrategy{orders: []*order{o}}, rejectingHandler{}))
+
+	require.Len(t, o.history, 2)
+	assert.Equal(t, []orderState{stateRequested, stateRejected},
+		[]orderState{o.history[0].state, o.history[1].state})
 }
 
 func TestBacktestRun_FatalHandlerErrorIsNotLoggedAsRejection(t *testing.T) {
@@ -248,6 +273,22 @@ func (h *rejectFirstOpen) handleOrder(_ context.Context, o *order) error {
 	return nil
 }
 
+// tapStrategy wraps a strategy and records the bar index of every order it emits.
+type tapStrategy struct {
+	strategy
+	bars int
+	at   []int
+}
+
+func (s *tapStrategy) onBar(ctx context.Context, b bar) *order {
+	o := s.strategy.onBar(ctx, b)
+	if o != nil {
+		s.at = append(s.at, s.bars)
+	}
+	s.bars++
+	return o
+}
+
 func actions(orders []*order) (as []action) {
 	for _, o := range orders {
 		as = append(as, o.action)
@@ -258,7 +299,7 @@ func actions(orders []*order) (as []action) {
 // §2 critical regression: a rejected entry must not become a late fill.
 func TestMissedEntry_RejectedOpenIsNotRetried(t *testing.T) {
 	captureLogs(t)
-	e := newTestEmax(t, 2, 4)
+	e := &tapStrategy{strategy: newTestEmax(t, 2, 4)}
 	h := &rejectFirstOpen{}
 
 	// Bearish, one bullish cross at index 5, then bullish for many bars while
@@ -270,13 +311,13 @@ func TestMissedEntry_RejectedOpenIsNotRetried(t *testing.T) {
 	require.Equal(t, []action{open}, actions(h.got), "the strategy asked once and never again")
 	assert.True(t, h.rejected)
 	assert.Equal(t, stateRejected, h.got[0].state)
-	assert.Equal(t, testStart.AddDate(0, 0, 5), h.got[0].history[0].time, "the one entry opportunity, bar 5")
+	assert.Equal(t, []int{5}, e.at, "the one entry opportunity, bar 5")
 }
 
 // §2: a rejected entry must not suppress re-entry forever.
 func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	captureLogs(t)
-	e := newTestEmax(t, 2, 4)
+	e := &tapStrategy{strategy: newTestEmax(t, 2, 4)}
 	h := &rejectFirstOpen{}
 
 	// bullish cross (rejected), bearish cross, then a fresh bullish cross.
@@ -287,7 +328,9 @@ func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	require.Equal(t, []action{open, close, open}, actions(h.got))
 	assert.Equal(t, stateRejected, h.got[0].state, "first opportunity was rejected")
 	assert.Equal(t, stateRequested, h.got[2].state, "the fresh opportunity is not rejected")
-	assert.True(t, h.got[2].history[0].time.After(h.got[0].history[0].time))
+	require.Len(t, e.at, 3)
+	assert.Equal(t, 5, e.at[0])
+	assert.Greater(t, e.at[2], e.at[1], "the fresh open comes after the close")
 }
 
 func TestBacktestRun_FatalHandlerErrorHasInstrumentAndTimeContext(t *testing.T) {

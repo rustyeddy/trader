@@ -41,7 +41,7 @@ func (e *emax) init(cfg map[string]any) error {
 
 // onBar returns the order the strategy wants for this bar, or nil when there
 // is nothing to do.
-func (e *emax) onBar(ctx context.Context, b bar) *order {
+func (e *emax) onBar(ctx context.Context, b bar) (o *order) {
 	// Feed both EMAs every bar so the long one warms up on the same data.
 	s, sok := e.emaShort.onBar(ctx, b)
 	l, lok := e.emaLong.onBar(ctx, b)
@@ -52,11 +52,12 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 	switch {
 	case s > l && !e.over:
 		e.over = true
-		return &order{instrument: b.instrument, direction: long, action: open, orderType: marketOrder}
+		return &order{instrument: b.instrument, price: b.c, action: open, orderType: marketOrder, direction: long}
 	case s < l && e.over:
 		e.over = false
 		// close takes no direction: it acts on the existing position
-		return &order{instrument: b.instrument, action: close, orderType: marketOrder}
+		return &order{instrument: b.instrument, price: b.c, action: close, orderType: marketOrder}
 	}
+
 	return nil
 }

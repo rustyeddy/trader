@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -79,10 +80,31 @@ type order struct {
 	history []orderEvent
 }
 
-// record moves the order to state s and appends the event to its history.
-func (o *order) record(s orderState, t time.Time, reason string) {
+// now is the time source for order history. It is time.Now for now; a managed
+// (simulated) clock will replace it in a later refactor. Tests override it.
+var now = time.Now
+
+// record moves the order to state s, appends a timestamped event to its
+// history and logs the change. Every step an order takes goes through here.
+func (o *order) record(s orderState, reason string) {
+	from := o.state
+	first := len(o.history) == 0
 	o.state = s
-	o.history = append(o.history, orderEvent{state: s, time: t, reason: reason})
+	o.history = append(o.history, orderEvent{state: s, time: now(), reason: reason})
+
+	attrs := []any{
+		"order", o.id,
+		"instrument", o.instrument,
+		"action", o.action,
+	}
+	if !first {
+		attrs = append(attrs, "from", from)
+	}
+	attrs = append(attrs, "to", s)
+	if reason != "" {
+		attrs = append(attrs, "reason", reason)
+	}
+	slog.Info("order state", attrs...)
 }
 
 // errInvalidOrder marks an order whose fields are not a legal combination.

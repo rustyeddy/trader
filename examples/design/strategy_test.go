@@ -138,7 +138,7 @@ func TestEmax_Init(t *testing.T) {
 	}
 }
 
-func TestEmax_OrdersCarryInstrumentAndDirection(t *testing.T) {
+func TestEmax_OrdersCarryInstrumentDirectionAndPrice(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	ctx := context.Background()
 
@@ -154,8 +154,28 @@ func TestEmax_OrdersCarryInstrumentAndDirection(t *testing.T) {
 			assert.Nil(t, o, "no action means no order")
 		}
 	}
-	assert.Equal(t, []*order{{instrument: "TEST", direction: long, action: open, orderType: marketOrder}}, opens)
-	assert.Equal(t, []*order{{instrument: "TEST", action: close, orderType: marketOrder}}, closes_, "close takes no direction")
+	// The open fires on the bar closing at 12, the close on the bar closing
+	// at 8; each order is priced at the close of the bar that triggered it.
+	assert.Equal(t, []*order{{
+		instrument: "TEST", direction: long, action: open, orderType: marketOrder,
+		price: price(12 * priceScale),
+	}}, opens)
+	assert.Equal(t, []*order{{
+		instrument: "TEST", action: close, orderType: marketOrder,
+		price: price(8 * priceScale),
+	}}, closes_, "close takes no direction")
+}
+
+func TestEmax_OrderPriceIsTheTriggeringBarsClose(t *testing.T) {
+	e := newTestEmax(t, 2, 4)
+	ctx := context.Background()
+
+	for i, b := range closes(10, 9, 8, 7, 6, 12, 14, 16, 8, 4, 2) {
+		if o := e.onBar(ctx, b); o != nil {
+			assert.Equal(t, b.c, o.price, "bar %d (%s)", i, o.action)
+			assert.NotZero(t, o.price)
+		}
+	}
 }
 
 // There is no atomic reverse: a position change is a close followed, on a
