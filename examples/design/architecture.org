@@ -144,6 +144,13 @@ at their natural boundaries.
 Studies produce research measurements; scanners identify conditions or
 instruments. Neither should be required to manufacture =Intent= values.
 
+
+** Intents have been eliminated
+Trader eliminates the separate Intent type. Strategies produce Orders
+directly. A nil Order means no transaction is requested. Orders carry
+instrument identity, requested execution parameters, sizing
+information, lifecycle state, and timestamped history.
+
 * Validate with Three Small Executable Examples
 
 1. *Single-instrument trading:* An EMA-cross strategy consumes bars, emits
