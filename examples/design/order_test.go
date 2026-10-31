@@ -34,6 +34,19 @@ func TestDirection_String(t *testing.T) {
 	}
 }
 
+func TestOrderType_String(t *testing.T) {
+	tests := map[orderType]string{
+		noOrder:       "none",
+		marketOrder:   "market",
+		limitOrder:    "limit",
+		stopOrder:     "stop",
+		orderType(99): "unknown",
+	}
+	for ot, want := range tests {
+		assert.Equal(t, want, ot.String())
+	}
+}
+
 func TestOrderState_String(t *testing.T) {
 	tests := map[orderState]string{
 		stateRequested: "requested",

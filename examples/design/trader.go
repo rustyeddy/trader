@@ -20,25 +20,10 @@ type trader struct {
 }
 
 func (tr *trader) handleOrder(ctx context.Context, o *order) (err error) {
-	switch o.action {
-	case open:
-		if tr.account.marginAvailable() <= 0 {
-			return errInsufficientMargin
-		}
-		err = tr.openTrade(o)
 
-	case close:
-		err = tr.closeTrade(o)
+	if err := tr.account.size(o); err != nil {
+		return err
 	}
-	return err
-}
 
-func (tr *trader) openTrade(o *order) error {
-
-	return nil
-}
-
-func (tr *trader) closeTrade(o *order) error {
-
-	return nil
+	return tr.broker.submit(ctx, tr.account.id, o)
 }

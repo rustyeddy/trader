@@ -163,3 +163,17 @@ func (s orderState) String() string {
 	}
 	return "unknown"
 }
+
+func (t orderType) String() string {
+	switch t {
+	case noOrder:
+		return "none"
+	case marketOrder:
+		return "market"
+	case limitOrder:
+		return "limit"
+	case stopOrder:
+		return "stop"
+	}
+	return "unknown"
+}

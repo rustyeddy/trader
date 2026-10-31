@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,4 +66,69 @@ func TestNewAccount(t *testing.T) {
 	a := newAccount("x", 123)
 	assert.Equal(t, "x", a.id)
 	assert.Equal(t, money(123), a.balance)
+}
+
+func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
+	logs := captureLogs(t)
+	b := &broker{id: "sim"}
+	b.addAccount("acct", 1000)
+	o := &order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, units: 1000}
+
+	require.NoError(t, b.submit(context.Background(), "acct", o))
+
+	assert.Equal(t, "sim-1", o.id)
+	assert.Equal(t, stateSubmitted, o.state)
+	out := logs.String()
+	assert.Contains(t, out, "order submitted")
+	assert.Contains(t, out, "broker=sim")
+	assert.Contains(t, out, "account=acct")
+	assert.Contains(t, out, "order=sim-1")
+	assert.Contains(t, out, "instrument=EUR/USD")
+	assert.Contains(t, out, "action=open")
+	assert.Contains(t, out, "direction=long")
+	assert.Contains(t, out, "type=market")
+	assert.Contains(t, out, "units=1000")
+}
+
+func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
+	captureLogs(t)
+	b := &broker{id: "sim"}
+	b.addAccount("acct", 1000)
+	ctx := context.Background()
+
+	o1, o2 := &order{action: open}, &order{action: close}
+	require.NoError(t, b.submit(ctx, "acct", o1))
+	require.NoError(t, b.submit(ctx, "acct", o2))
+	assert.Equal(t, "sim-1", o1.id)
+	assert.Equal(t, "sim-2", o2.id)
+
+	pre := &order{id: "mine", action: open}
+	require.NoError(t, b.submit(ctx, "acct", pre))
+	assert.Equal(t, "mine", pre.id, "an existing id is not overwritten")
+}
+
+func TestBroker_SubmitUnknownAccount(t *testing.T) {
+	logs := captureLogs(t)
+	b := &broker{id: "sim"}
+	o := &order{action: open}
+
+	err := b.submit(context.Background(), "ghost", o)
+
+	require.ErrorIs(t, err, errUnknownAccount)
+	assert.Equal(t, stateRequested, o.state)
+	assert.Empty(t, o.id)
+	assert.NotContains(t, logs.String(), "order submitted")
+}
+
+func TestBroker_SubmitCancelledContext(t *testing.T) {
+	captureLogs(t)
+	b := &broker{id: "sim"}
+	b.addAccount("acct", 1000)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	o := &order{action: open}
+
+	require.ErrorIs(t, b.submit(ctx, "acct", o), context.Canceled)
+	assert.Empty(t, o.id)
+	assert.Equal(t, stateRequested, o.state)
 }

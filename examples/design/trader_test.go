@@ -8,36 +8,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestTrader() *trader {
-	return &trader{broker: &broker{id: "t"}, account: newAccount("a", 1000)}
+func newTestTraderWithBalance(balance money) *trader {
+	br := &broker{id: "t"}
+	act := br.addAccount("a", balance)
+	return &trader{broker: br, account: act}
 }
+
+func newTestTrader() *trader { return newTestTraderWithBalance(1000) }
 
 func TestTrader_HandleOrder(t *testing.T) {
 	ctx := context.Background()
-	openO := func() *order { return &order{instrument: "EUR/USD", direction: long, action: open} }
+	captureLogs(t)
+	openO := func() *order {
+		return &order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}
+	}
 
-	t.Run("order with no action is ignored", func(t *testing.T) {
-		// Rejecting malformed orders is the run loop's job (validate).
-		assert.NoError(t, newTestTrader().handleOrder(ctx, &order{}))
+	t.Run("open is sized then submitted", func(t *testing.T) {
+		o := openO()
+		require.NoError(t, newTestTrader().handleOrder(ctx, o))
+		assert.Equal(t, defaultOrderUnits, o.units)
+		assert.Equal(t, stateSubmitted, o.state)
+		assert.NotEmpty(t, o.id)
 	})
-	t.Run("close succeeds", func(t *testing.T) {
-		assert.NoError(t, newTestTrader().handleOrder(ctx, &order{instrument: "EUR/USD", action: close}))
+	t.Run("close is submitted without units", func(t *testing.T) {
+		o := &order{instrument: "EUR/USD", action: close, orderType: marketOrder}
+		require.NoError(t, newTestTrader().handleOrder(ctx, o))
+		assert.Zero(t, o.units, "units 0 means the whole position")
+		assert.Equal(t, stateSubmitted, o.state)
 	})
-	t.Run("add and reduce are not handled yet", func(t *testing.T) {
-		tr := newTestTrader()
-		assert.NoError(t, tr.handleOrder(ctx, &order{instrument: "EUR/USD", action: add}))
-		assert.NoError(t, tr.handleOrder(ctx, &order{instrument: "EUR/USD", action: reduce}))
-	})
-	t.Run("open is accepted when margin is available", func(t *testing.T) {
-		assert.NoError(t, newTestTrader().handleOrder(ctx, openO()))
-	})
-	t.Run("open is rejected with zero margin", func(t *testing.T) {
-		tr := &trader{broker: &broker{id: "t"}, account: newAccount("a", 0)}
-		require.ErrorIs(t, tr.handleOrder(ctx, openO()), errInsufficientMargin)
+	t.Run("open is rejected with zero margin and never submitted", func(t *testing.T) {
+		o := openO()
+		require.ErrorIs(t, newTestTraderWithBalance(0).handleOrder(ctx, o), errInsufficientMargin)
+		assert.Equal(t, stateRequested, o.state)
+		assert.Empty(t, o.id, "a rejected order never reaches the broker")
 	})
 	t.Run("open is rejected with negative margin", func(t *testing.T) {
-		tr := &trader{broker: &broker{id: "t"}, account: newAccount("a", -1)}
-		require.ErrorIs(t, tr.handleOrder(ctx, openO()), errInsufficientMargin)
+		require.ErrorIs(t, newTestTraderWithBalance(-1).handleOrder(ctx, openO()), errInsufficientMargin)
+	})
+	t.Run("add and reduce are not supported yet", func(t *testing.T) {
+		tr := newTestTrader()
+		require.ErrorIs(t, tr.handleOrder(ctx, &order{instrument: "EUR/USD", action: add}), errUnsupportedAction)
+		require.ErrorIs(t, tr.handleOrder(ctx, &order{instrument: "EUR/USD", action: reduce}), errUnsupportedAction)
+	})
+	t.Run("unknown account at the broker is an error", func(t *testing.T) {
+		tr := &trader{broker: &broker{id: "t"}, account: newAccount("ghost", 1000)}
+		require.ErrorIs(t, tr.handleOrder(ctx, openO()), errUnknownAccount)
 	})
 }
 
