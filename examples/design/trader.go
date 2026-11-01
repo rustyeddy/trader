@@ -56,35 +56,40 @@ func (tr *trader) onBar(ctx context.Context, b bar) error {
 		return fmt.Errorf("strategy order at %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
 	}
 
+	o.timestamp = b.Time
 	o.record(stateRequested, "")
-	err := tr.handleOrder(ctx, o)
-
-	switch {
-	case isRejection(err):
-		// Expected trading outcome: record it, log it and keep processing bars.
-		if o.state != stateRejected { // the rejecting step normally records it
-			o.record(stateRejected, err.Error())
-		}
+	if err := tr.handleOrder(ctx, o); err != nil {
+		return fmt.Errorf("handling %s %s at %s %s: %w",
+			o.action, o.instrument, b.instrument, b.Time.Format(time.DateOnly), err)
+	}
+	if o.state == stateRejected {
+		// Expected trading outcome: already recorded, so log it and keep going.
 		slog.Warn("order rejected",
-			"reason", err,
+			"reason", o.history[len(o.history)-1].reason,
 			"time", b.Time,
 			"instrument", o.instrument,
 			"action", o.action,
 			"direction", o.direction)
-	case err != nil:
-		return fmt.Errorf("handling %s %s at %s %s: %w",
-			o.action, o.instrument, b.instrument, b.Time.Format(time.DateOnly), err)
 	}
 	return nil
 }
 
-func (tr *trader) handleOrder(ctx context.Context, o *order) (err error) {
+// handleOrder sizes the order and submits it to the broker. An expected
+// rejection is recorded on the order and is not an error; anything else is
+// returned and stops the run.
+func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 	// The strategy knows nothing of accounts; the trader says whose order this is.
 	o.accountID = tr.account.id
 
-	if err := tr.account.size(o); err != nil {
-		return err
+	err := tr.account.size(o)
+	if err == nil {
+		err = tr.broker.submit(ctx, o)
 	}
-
-	return tr.broker.submit(ctx, o)
+	if isRejection(err) {
+		if o.state != stateRejected { // the rejecting step normally records it
+			o.record(stateRejected, err.Error())
+		}
+		return nil
+	}
+	return err
 }

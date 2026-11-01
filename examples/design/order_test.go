@@ -131,20 +131,6 @@ func TestOrder_Validate(t *testing.T) {
 	}
 }
 
-// stubClock replaces the order time source with one that returns start, then
-// one second later on each following call.
-func stubClock(t *testing.T, start time.Time) {
-	t.Helper()
-	prev := now
-	next := start
-	now = func() time.Time {
-		cur := next
-		next = next.Add(time.Second)
-		return cur
-	}
-	t.Cleanup(func() { now = prev })
-}
-
 func TestOrder_Validate_StopErrorNamesTheProblem(t *testing.T) {
 	err := (&order{instrument: "EUR/USD", direction: long, action: open}).validate()
 	require.ErrorIs(t, err, errInvalidOrder)
@@ -158,10 +144,10 @@ func TestOrder_Validate_CloseNeedsNoStop(t *testing.T) {
 func TestOrder_RecordSetsStateAppendsTimestampedHistoryAndLogs(t *testing.T) {
 	logs := captureLogs(t)
 	t0 := time.Date(2010, 1, 4, 9, 30, 0, 0, time.UTC)
-	stubClock(t, t0)
-	o := &order{id: "sim-1", instrument: "EUR/USD", direction: long, action: open}
+	o := &order{id: "sim-1", instrument: "EUR/USD", direction: long, action: open, timestamp: t0}
 
 	o.record(stateRequested, "")
+	o.timestamp = t0.Add(time.Second)
 	o.record(stateRejected, "insufficient margin")
 
 	assert.Equal(t, stateRejected, o.state)
@@ -187,14 +173,16 @@ func TestOrder_RecordSetsStateAppendsTimestampedHistoryAndLogs(t *testing.T) {
 	assert.Contains(t, lines[1], `reason="insufficient margin"`)
 }
 
-func TestOrder_RecordUsesTheTimeSource(t *testing.T) {
+func TestOrder_RecordStampsHistoryWithTheOrderTimestamp(t *testing.T) {
 	captureLogs(t)
-	fixed := time.Date(2030, 6, 1, 12, 0, 0, 0, time.UTC)
-	prev := now
-	now = func() time.Time { return fixed }
-	t.Cleanup(func() { now = prev })
+	first := time.Date(2030, 6, 1, 12, 0, 0, 0, time.UTC)
+	second := first.AddDate(0, 0, 1)
 
-	o := &order{}
+	o := &order{timestamp: first}
 	o.record(stateSized, "")
-	assert.Equal(t, fixed, o.history[0].time)
+	o.timestamp = second
+	o.record(stateSubmitted, "")
+
+	assert.Equal(t, first, o.history[0].time)
+	assert.Equal(t, second, o.history[1].time, "a later step carries the later bar's time")
 }

@@ -7,7 +7,6 @@ import (
 	"iter"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,13 +109,16 @@ func TestBacktestRun_NoBarsNoCalls(t *testing.T) {
 
 func TestBacktestRun_RecordsLifecycleInHistory(t *testing.T) {
 	captureLogs(t)
-	stubClock(t, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	o := openOrder()
 	strat := &scriptStrategy{orders: []*order{nil, o}}
+	bars := eurBars(1, 2)
 
-	require.NoError(t, runTrader(context.Background(), newTestTrader(), strat, seq(eurBars(1, 2), -1, nil)))
+	require.NoError(t, runTrader(context.Background(), newTestTrader(), strat, seq(bars, -1, nil)))
 
 	require.Len(t, o.history, 3)
+	for _, e := range o.history {
+		assert.Equal(t, bars[1].Time, e.time, "history carries the bar time, not the wall clock")
+	}
 	assert.Equal(t, []orderState{stateRequested, stateSized, stateSubmitted},
 		[]orderState{o.history[0].state, o.history[1].state, o.history[2].state})
 }
@@ -215,8 +217,6 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 
 func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing.T) {
 	logs := captureLogs(t)
-	t0 := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
-	stubClock(t, t0)
 	o := openOrder()
 	strat := &scriptStrategy{orders: []*order{o}}
 
@@ -230,7 +230,7 @@ func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing
 	assert.Equal(t, stateRequested, o.history[0].state)
 	assert.Equal(t, stateRejected, o.history[1].state)
 	assert.Contains(t, o.history[1].reason, "insufficient margin")
-	assert.Equal(t, t0.Add(time.Second), o.history[1].time)
+	assert.Equal(t, closes(1)[0].Time, o.history[1].time, "stamped with the bar time")
 
 	out := logs.String()
 	assert.Contains(t, out, "to=rejected", "the state change is logged too")

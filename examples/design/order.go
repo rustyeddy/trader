@@ -78,13 +78,15 @@ type order struct {
 	units     int64
 	stopLoss  price
 
+	// timestamp is the simulated time of the step the order is on: the bar
+	// being processed. Whoever advances the order sets it (the trader when the
+	// order is requested, the broker when it fills), and record stamps history
+	// with it. The managed clock for live trading will set it the same way.
+	timestamp time.Time
+
 	state   orderState
 	history []orderEvent
 }
-
-// now is the time source for order history. It is time.Now for now; a managed
-// (simulated) clock will replace it in a later refactor. Tests override it.
-var now = time.Now
 
 // record moves the order to state s, appends a timestamped event to its
 // history and logs the change. Every step an order takes goes through here.
@@ -92,7 +94,7 @@ func (o *order) record(s orderState, reason string) {
 	from := o.state
 	first := len(o.history) == 0
 	o.state = s
-	o.history = append(o.history, orderEvent{state: s, time: now(), reason: reason})
+	o.history = append(o.history, orderEvent{state: s, time: o.timestamp, reason: reason})
 
 	attrs := []any{
 		"order", o.id,

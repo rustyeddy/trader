@@ -139,7 +139,7 @@ records the result. See =order-tests.org= for the scenarios.
 - [ ] Simulated fills (next-bar-open): the broker fills or rejects the
   submitted order and the trader records the result as an open position or a
   closed trade (the order moves to filled or rejected).
-- [ ] Replace =time.Now= in order history with a managed (simulated) clock.
+- [X] Order history is stamped with simulated time: =order.timestamp= is the bar being processed (set by the trader; the broker will set it on fills). A live clock can set it the same way.
 ** TODO Market data acquisition and storage
 - Download and validate provider observations; convert to canonical.
 - Detect/report coverage and expected closures vs unexpected gaps.

@@ -18,7 +18,8 @@ scenarios. Items marked DONE are implemented and tested.
   trader records the result as an open position or a closed trade.
 - Order states: requested, sized, submitted, filled, rejected. Every state
   change is recorded in the order's history with a timestamp and logged.
-  (Timestamps use =time.Now= for now; a managed clock replaces it later.)
+  (Timestamps are simulated time: =order.timestamp= is the bar being processed,
+  set by whoever advances the order; =record= stamps history with it.)
 - Actions: noAction=0 (zero value, unset), Open, Add, Reduce, Close.
 - Direction: noDirection=0, Long=1, Short=2 (explicit values).
 - There is no Hold order. A strategy that has nothing to do on a bar returns

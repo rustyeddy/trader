@@ -44,7 +44,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 	t.Run("open is rejected with zero margin and never submitted", func(t *testing.T) {
 		o := openO()
-		require.ErrorIs(t, newTestTraderWithBalance(0).handleOrder(ctx, o), errInsufficientMargin)
+		require.NoError(t, newTestTraderWithBalance(0).handleOrder(ctx, o), "a rejection is recorded, not returned")
 		assert.Equal(t, stateRejected, o.state)
 		require.Len(t, o.history, 1)
 		assert.Equal(t, stateRejected, o.history[0].state)
@@ -52,7 +52,10 @@ func TestTrader_HandleOrder(t *testing.T) {
 		assert.Equal(t, "a", o.accountID, "but it is still recorded against its account")
 	})
 	t.Run("open is rejected with negative margin", func(t *testing.T) {
-		require.ErrorIs(t, newTestTraderWithBalance(-1).handleOrder(ctx, openO()), errInsufficientMargin)
+		o := openO()
+		require.NoError(t, newTestTraderWithBalance(-1).handleOrder(ctx, o))
+		assert.Equal(t, stateRejected, o.state)
+		assert.Contains(t, o.history[len(o.history)-1].reason, "insufficient margin")
 	})
 	t.Run("add and reduce are not supported yet", func(t *testing.T) {
 		tr := newTestTrader()

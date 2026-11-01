@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,7 +61,6 @@ func openOrderAt(sym string, d direction, p price) *order {
 
 func TestAccount_Size_Open(t *testing.T) {
 	captureLogs(t)
-	stubClock(t, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 
 	// units = floor(balance * riskPct * priceScale / (rateScale * stopDistance))
 	//       = floor(balance / 1.1)   for a 1% risk and a 1% stop at 1.10000.

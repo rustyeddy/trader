@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,9 +71,10 @@ func TestNewAccount(t *testing.T) {
 
 func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 	logs := captureLogs(t)
+	ts := time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
 	b := &broker{id: "sim"}
 	b.addAccount("acct", 1000)
-	o := &order{accountID: "acct", instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, units: 1000}
+	o := &order{accountID: "acct", instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, units: 1000, timestamp: ts}
 
 	require.NoError(t, b.submit(context.Background(), o))
 
@@ -80,7 +82,7 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 	assert.Equal(t, stateSubmitted, o.state)
 	require.Len(t, o.history, 1)
 	assert.Equal(t, stateSubmitted, o.history[0].state)
-	assert.False(t, o.history[0].time.IsZero())
+	assert.Equal(t, ts, o.history[0].time, "the broker stamps with the order's bar time")
 	out := logs.String()
 	assert.Contains(t, out, "to=submitted", "the state change is logged")
 	assert.Contains(t, out, "order submitted")
