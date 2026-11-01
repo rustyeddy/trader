@@ -75,5 +75,8 @@ func (b *broker) submit(ctx context.Context, o *order) error {
 }
 
 func (br *broker) onBar(ctx context.Context, b bar) error {
+
+	// check for pending market orders and fill the order on f
+
 	return nil
 }

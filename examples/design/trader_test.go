@@ -68,10 +68,6 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 }
 
-func TestTrader_ImplementsOrderHandler(t *testing.T) {
-	var _ orderHandler = (*trader)(nil)
-}
-
 func TestTrader_HandleOrder_ConflictingAccountIsAnError(t *testing.T) {
 	captureLogs(t)
 	o := &order{accountID: "someone-else", instrument: "EURUSD", direction: long, action: open,

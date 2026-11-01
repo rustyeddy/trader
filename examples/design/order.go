@@ -1,17 +1,11 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 )
-
-// orderHandler receives the orders a strategy requests.
-type orderHandler interface {
-	handleOrder(context.Context, *order) error
-}
 
 // direction is the direction of a position, not an order side (buy/sell).
 type direction uint8
