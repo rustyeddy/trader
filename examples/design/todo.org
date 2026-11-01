@@ -41,8 +41,10 @@ records the result. See =order-tests.org= for the scenarios.
   action are separate typed enums.
 
 ** DONE 2. Propagate handler errors predictably
-- [X] Keep =handleOrder(ctx, *order) error= and propagate errors in the run
-  loop with instrument/time context.
+- [X] The trader owns the order lifecycle: =backtest.run= feeds bars to
+  =trader.onBar=, which validates, records, sizes and submits the strategy's
+  order and propagates errors with instrument/time context. Errors from the
+  broker's and account's =onBar= are returned too.
 - [X] Separate expected decision outcomes (insufficient margin, order too
   small: =isRejection=) from fatal runtime/data/broker failures. Rejections
   are recorded in the order history, logged, and the run continues; invalid
@@ -77,7 +79,7 @@ records the result. See =order-tests.org= for the scenarios.
   incomplete/missing observation test.
 
 ** TODO 5. Extract or rename the shared data runner only if it simplifies
-- Try one small =run(ctx, observations, onBar, handler)= loop for historical
+- Try one small =run(ctx, observations, onBar)= loop for historical
   trading, live trading and trade-signal studies.
 - Do not force indicator-only studies/scanners to return =*order=.
 - Backtest retains simulated clock, pending-order eligibility, fill sequencing

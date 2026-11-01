@@ -22,11 +22,15 @@ scenarios. Items marked DONE are implemented and tested.
 - Actions: noAction=0 (zero value, unset), Open, Add, Reduce, Close.
 - Direction: noDirection=0, Long=1, Short=2 (explicit values).
 - There is no Hold order. A strategy that has nothing to do on a bar returns
-  a nil =*order=; the run loop skips it (no validation, no handler call).
+  a nil =*order=; the trader skips it (no validation, no sizing).
 - The zero-value order has no action and is INVALID. It is not a no-op.
 - Every order a strategy emits names its instrument, so each order identifies
   what it refers to (needed once strategies cover several instruments and may
   return several orders per observation).
+- The trader owns the order lifecycle. =backtest.run= only feeds bars to
+  =trader.onBar=, which advances the broker and account to the bar, asks the
+  strategy for an order, validates it, records it as requested, sizes and
+  submits it, and records expected rejections.
 - Who sets what:
   - strategy: instrument, action, direction (Open only), reference price,
     order type, and the stop loss (Open only).
@@ -170,10 +174,13 @@ where available; strategy must not equate signal generation with a fill.
 - If the prior Add is pending, do not issue duplicate exposure requests.
   Pending-order accounting can be refined with broker integration.
 
-* 5. Handler Results / Error Classification — =backtest_test.go=
+* 5. Trader Results / Error Classification — =backtest_test.go=
+  The tests run a real trader (account, broker, strategy) through
+  =backtest.run=; there is no stub handler.
 ** DONE Accepted request
-- Handler called once with the correct order; loop continues. A bar whose
-  strategy returns no order never reaches the handler.
+- The order is sized and submitted (history: requested, sized, submitted) and
+  the loop continues. A bar whose strategy returns no order never reaches the
+  account or broker.
 
 ** DONE Expected rejection
 - An order whose size ends up below the instrument's minimum is an expected
@@ -186,7 +193,7 @@ where available; strategy must not equate signal generation with a fill.
   =errOrderTooSmall=) classified by =isRejection=; no result hierarchy.
 
 ** DONE Fatal error and cancellation
-- Data/iterator error, invalid order, and fatal handler failure stop the run
+- Data/iterator error, invalid order, and fatal trader failure (and a failing broker or account =onBar=) stop the run
   with instrument and time context.
 - Context cancellation exits, and errors preserve cause via =errors.Is=.
 - No future bars processed after a fatal error.

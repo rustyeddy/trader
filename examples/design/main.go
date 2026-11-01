@@ -22,11 +22,8 @@ func run() error {
 	prices, err := getPrices()
 	panicOnError(err)
 
-	strat, err := getStrategy()
-	panicOnError(err)
-
 	slog.Info("backtest starting",
-		"strategy", strat.name(),
+		"strategy", tr.strategy.name(),
 		"instrument", prices.instrument,
 		"interval", prices.interval,
 		"bars", len(prices.data))
@@ -36,11 +33,11 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := bt.run(ctx, prices.bars(ctx), strat, tr); err != nil {
+	if err := bt.run(ctx, prices.bars(ctx), tr); err != nil {
 		return err
 	}
 
-	slog.Info("backtest complete", "strategy", strat.name())
+	slog.Info("backtest complete", "strategy", tr.strategy.name())
 
 	// write the reports
 	return nil
@@ -64,9 +61,15 @@ func getTrader() (*trader, error) {
 		return nil, errUnknownAccount
 	}
 
+	strat, err := getStrategy()
+	if err != nil {
+		return nil, err
+	}
+
 	tr := &trader{
-		broker:  br,
-		account: act,
+		broker:   br,
+		account:  act,
+		strategy: strat,
 	}
 	return tr, nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -211,4 +212,8 @@ func muldiv(nums, dens []int64, roundUp bool) (int64, error) {
 		return 0, errSizeOverflow
 	}
 	return q.Int64(), nil
+}
+
+func (a *account) onBar(ctx context.Context, b bar) error {
+	return nil
 }

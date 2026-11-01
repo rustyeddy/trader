@@ -73,3 +73,7 @@ func (b *broker) submit(ctx context.Context, o *order) error {
 	o.record(stateSubmitted, "")
 	return nil
 }
+
+func (br *broker) onBar(ctx context.Context, b bar) error {
+	return nil
+}

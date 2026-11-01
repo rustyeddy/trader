@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"log/slog"
 	"time"
 )
 
 type backtest struct {
 }
 
-func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], strat strategy, h orderHandler) error {
+func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], tr *trader) error {
 	var last bar // most recent bar processed, for error context
 	for b, err := range bars {
 		if err != nil {
@@ -22,32 +21,8 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], strat s
 		}
 		last = b
 
-		o := strat.onBar(ctx, b)
-		if o == nil {
-			continue // nothing to do on this bar
-		}
-		if err := o.validate(); err != nil {
-			// A strategy bug, not a trading outcome: stop before the handler.
-			return fmt.Errorf("strategy order at %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
-		}
-
-		o.record(stateRequested, "")
-		err := h.handleOrder(ctx, o)
-		switch {
-		case isRejection(err):
-			// Expected trading outcome: record it, log it and keep processing bars.
-			if o.state != stateRejected { // the rejecting step normally records it
-				o.record(stateRejected, err.Error())
-			}
-			slog.Warn("order rejected",
-				"reason", err,
-				"time", b.Time,
-				"instrument", o.instrument,
-				"action", o.action,
-				"direction", o.direction)
-		case err != nil:
-			return fmt.Errorf("handling %s %s at %s %s: %w",
-				o.action, o.instrument, b.instrument, b.Time.Format(time.DateOnly), err)
+		if err := tr.onBar(ctx, b); err != nil {
+			return err
 		}
 	}
 	return nil

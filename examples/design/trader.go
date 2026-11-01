@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"time"
 )
 
 // errInsufficientMargin is an expected trading outcome, not a runtime
@@ -27,8 +30,52 @@ var (
 )
 
 type trader struct {
-	broker  *broker
-	account *account
+	broker   *broker
+	account  *account
+	strategy strategy
+}
+
+// onBar advances the broker and account to the bar, then lets the strategy
+// react to it. The trader owns the order lifecycle from here: it validates the
+// strategy's order, records it as requested, sizes and submits it, and records
+// an expected rejection without stopping the run.
+func (tr *trader) onBar(ctx context.Context, b bar) error {
+	if err := tr.broker.onBar(ctx, b); err != nil {
+		return fmt.Errorf("broker on bar %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
+	}
+	if err := tr.account.onBar(ctx, b); err != nil {
+		return fmt.Errorf("account on bar %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
+	}
+
+	o := tr.strategy.onBar(ctx, b)
+	if o == nil {
+		return nil // nothing to do on this bar
+	}
+	if err := o.validate(); err != nil {
+		// A strategy bug, not a trading outcome: stop before the account.
+		return fmt.Errorf("strategy order at %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
+	}
+
+	o.record(stateRequested, "")
+	err := tr.handleOrder(ctx, o)
+
+	switch {
+	case isRejection(err):
+		// Expected trading outcome: record it, log it and keep processing bars.
+		if o.state != stateRejected { // the rejecting step normally records it
+			o.record(stateRejected, err.Error())
+		}
+		slog.Warn("order rejected",
+			"reason", err,
+			"time", b.Time,
+			"instrument", o.instrument,
+			"action", o.action,
+			"direction", o.direction)
+	case err != nil:
+		return fmt.Errorf("handling %s %s at %s %s: %w",
+			o.action, o.instrument, b.instrument, b.Time.Format(time.DateOnly), err)
+	}
+	return nil
 }
 
 func (tr *trader) handleOrder(ctx context.Context, o *order) (err error) {

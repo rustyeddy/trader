@@ -73,9 +73,10 @@ type order struct {
 	action     action
 	orderType  orderType
 
-	price    price
-	units    int64
-	stopLoss price
+	price     price
+	fillPrice price
+	units     int64
+	stopLoss  price
 
 	state   orderState
 	history []orderEvent
