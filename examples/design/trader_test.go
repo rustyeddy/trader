@@ -20,7 +20,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 	ctx := context.Background()
 	captureLogs(t)
 	openO := func() *order {
-		return &order{instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+		return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
 	}
 
 	t.Run("open is sized then submitted", func(t *testing.T) {
@@ -31,12 +31,13 @@ func TestTrader_HandleOrder(t *testing.T) {
 		assert.Equal(t, stateSubmitted, o.state)
 		assert.NotEmpty(t, o.id)
 		assert.Equal(t, "a", o.accountID, "the trader names the account")
-		require.Len(t, o.history, 2)
-		assert.Equal(t, stateSized, o.history[0].state)
-		assert.Equal(t, stateSubmitted, o.history[1].state)
+		require.Len(t, o.history, 3)
+		assert.Equal(t, stateRequested, o.history[0].state)
+		assert.Equal(t, stateSized, o.history[1].state)
+		assert.Equal(t, stateSubmitted, o.history[2].state)
 	})
 	t.Run("close is submitted without units", func(t *testing.T) {
-		o := &order{instrument: "EURUSD", action: close, orderType: marketOrder}
+		o := &order{Time: testStart, instrument: "EURUSD", action: close, orderType: marketOrder}
 		require.NoError(t, newTestTrader().handleOrder(ctx, o))
 		assert.Zero(t, o.units, "units 0 means the whole position")
 		assert.Equal(t, stateSubmitted, o.state)
@@ -46,8 +47,9 @@ func TestTrader_HandleOrder(t *testing.T) {
 		o := openO()
 		require.NoError(t, newTestTraderWithBalance(0).handleOrder(ctx, o), "a rejection is recorded, not returned")
 		assert.Equal(t, stateRejected, o.state)
-		require.Len(t, o.history, 1)
-		assert.Equal(t, stateRejected, o.history[0].state)
+		require.Len(t, o.history, 2)
+		assert.Equal(t, stateRequested, o.history[0].state)
+		assert.Equal(t, stateRejected, o.history[1].state)
 		assert.Empty(t, o.id, "a rejected order never reaches the broker")
 		assert.Equal(t, "a", o.accountID, "but it is still recorded against its account")
 	})
@@ -59,8 +61,8 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 	t.Run("add and reduce are not supported yet", func(t *testing.T) {
 		tr := newTestTrader()
-		require.ErrorIs(t, tr.handleOrder(ctx, &order{instrument: "EURUSD", action: add}), errUnsupportedAction)
-		require.ErrorIs(t, tr.handleOrder(ctx, &order{instrument: "EURUSD", action: reduce}), errUnsupportedAction)
+		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: add}), errUnsupportedAction)
+		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: reduce}), errUnsupportedAction)
 	})
 	t.Run("unknown account at the broker is an error", func(t *testing.T) {
 		tr := &trader{broker: &broker{id: "t"}, account: newAccount("ghost", 1000)}
@@ -70,19 +72,19 @@ func TestTrader_HandleOrder(t *testing.T) {
 
 func TestTrader_HandleOrder_ConflictingAccountIsAnError(t *testing.T) {
 	captureLogs(t)
-	o := &order{accountID: "someone-else", instrument: "EURUSD", direction: long, action: open,
+	o := &order{Time: testStart, accountID: "someone-else", instrument: "EURUSD", direction: long, action: open,
 		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
 
 	err := newTestTrader().handleOrder(context.Background(), o)
 
 	require.ErrorIs(t, err, errAccountConflict)
 	assert.Equal(t, "someone-else", o.accountID, "an existing account is never overwritten")
-	assert.Empty(t, o.history, "the order was neither sized nor submitted")
+	assert.Empty(t, o.history, "the order was neither requested, sized nor submitted")
 }
 
 func TestTrader_HandleOrder_MatchingAccountIsKept(t *testing.T) {
 	captureLogs(t)
-	o := &order{accountID: "a", instrument: "EURUSD", direction: long, action: open,
+	o := &order{Time: testStart, accountID: "a", instrument: "EURUSD", direction: long, action: open,
 		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
 
 	require.NoError(t, newTestTrader().handleOrder(context.Background(), o))

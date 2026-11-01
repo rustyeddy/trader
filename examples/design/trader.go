@@ -19,8 +19,18 @@ var errOrderTooSmall = errors.New("order size below the minimum")
 // isRejection reports whether err is an expected trading outcome that rejects
 // the order and lets the run continue, as opposed to a failure that stops it.
 func isRejection(err error) bool {
-	return errors.Is(err, errInsufficientMargin) || errors.Is(err, errOrderTooSmall)
+	return errors.Is(err, errInsufficientMargin) ||
+		errors.Is(err, errOrderTooSmall) ||
+		errors.Is(err, errNoPosition)
 }
+
+// errNoPosition is also an expected outcome: a close arrives for a position
+// that never opened (its open was rejected), so there is nothing to close.
+var errNoPosition = errors.New("no position to close")
+
+// errPositionExists is a fatal error: netting allows one position per
+// instrument, and add is not supported yet.
+var errPositionExists = errors.New("position already exists")
 
 var (
 	errUnknownBroker     = errors.New("unknown broker")
@@ -41,38 +51,15 @@ type trader struct {
 // strategy's order, records it as requested, sizes and submits it, and records
 // an expected rejection without stopping the run.
 func (tr *trader) onBar(ctx context.Context, b bar) error {
-	if err := tr.broker.onBar(ctx, b); err != nil {
-		return fmt.Errorf("broker on bar %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
-	}
 	if err := tr.account.onBar(ctx, b); err != nil {
 		return fmt.Errorf("account on bar %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
 	}
 
 	o := tr.strategy.onBar(ctx, b)
 	if o == nil {
-		return nil // nothing to do on this bar
+		return nil
 	}
-	if err := o.validate(); err != nil {
-		// A strategy bug, not a trading outcome: stop before the account.
-		return fmt.Errorf("strategy order at %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
-	}
-
-	o.timestamp = b.Time
-	o.record(stateRequested, "")
-	if err := tr.handleOrder(ctx, o); err != nil {
-		return fmt.Errorf("handling %s %s at %s %s: %w",
-			o.action, o.instrument, b.instrument, b.Time.Format(time.DateOnly), err)
-	}
-	if o.state == stateRejected {
-		// Expected trading outcome: already recorded, so log it and keep going.
-		slog.Warn("order rejected",
-			"reason", o.history[len(o.history)-1].reason,
-			"time", b.Time,
-			"instrument", o.instrument,
-			"action", o.action,
-			"direction", o.direction)
-	}
-	return nil
+	return tr.handleOrder(ctx, o)
 }
 
 // handleOrder sizes the order and submits it to the broker. An expected
@@ -90,6 +77,12 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 			errAccountConflict, o.accountID, tr.account.id)
 	}
 
+	if err := o.validate(); err != nil {
+		// A strategy bug, not a trading outcome: stop before the account.
+		return fmt.Errorf("strategy order at %s %s: %w", o.instrument, o.Time.Format(time.DateOnly), err)
+	}
+
+	o.record(stateRequested, "")
 	err := tr.account.size(o)
 	if err == nil {
 		err = tr.broker.submit(ctx, o)
@@ -98,7 +91,21 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 		if o.state != stateRejected { // the rejecting step normally records it
 			o.record(stateRejected, err.Error())
 		}
-		return nil
+		err = nil
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("handling %s %s at %s: %w",
+			o.action, o.instrument, o.Time.Format(time.DateOnly), err)
+	}
+
+	if o.state == stateRejected {
+		// Expected trading outcome: already recorded, so log it and keep going.
+		slog.Warn("order rejected",
+			"reason", o.history[len(o.history)-1].reason,
+			"time", o.Time,
+			"instrument", o.instrument,
+			"action", o.action,
+			"direction", o.direction)
+	}
+	return nil
 }

@@ -195,15 +195,17 @@ func TestEmax_OrdersCarryInstrumentDirectionAndPrice(t *testing.T) {
 	ctx := context.Background()
 
 	var got []*order
+	var at []time.Time
 	for _, b := range closes(flipSeries...) {
 		if o := e.onBar(ctx, b); o != nil {
 			got = append(got, o)
+			at = append(at, b.Time)
 		}
 	}
 	// Each order is priced at the close of the bar that triggered it. An open
 	// carries a stop 1% away on the losing side; a close takes no direction
 	// and no stop.
-	assert.Equal(t, []*order{
+	want := []*order{
 		{instrument: "TEST", direction: short, action: open, orderType: marketOrder,
 			price: price(7 * priceScale), stopLoss: price(707000)},
 		{instrument: "TEST", action: close, orderType: marketOrder, price: price(12 * priceScale)},
@@ -212,7 +214,12 @@ func TestEmax_OrdersCarryInstrumentDirectionAndPrice(t *testing.T) {
 		{instrument: "TEST", action: close, orderType: marketOrder, price: price(8 * priceScale)},
 		{instrument: "TEST", direction: short, action: open, orderType: marketOrder,
 			price: price(4 * priceScale), stopLoss: price(404000)},
-	}, got)
+	}
+	require.Len(t, got, len(want))
+	for i := range want {
+		want[i].Time = at[i] // stamped with the bar that triggered it
+	}
+	assert.Equal(t, want, got)
 }
 
 func TestEmax_OrderPriceIsTheTriggeringBarsClose(t *testing.T) {

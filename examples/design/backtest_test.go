@@ -26,7 +26,8 @@ func (s *scriptStrategy) init(map[string]any) error { return nil }
 func (s *scriptStrategy) onBar(_ context.Context, b bar) *order {
 	i := len(s.seen)
 	s.seen = append(s.seen, b)
-	if i < len(s.orders) {
+	if i < len(s.orders) && s.orders[i] != nil {
+		s.orders[i].Time = b.Time // a strategy stamps its orders with the bar
 		return s.orders[i]
 	}
 	return nil
@@ -34,7 +35,7 @@ func (s *scriptStrategy) onBar(_ context.Context, b bar) *order {
 
 // openOrder is a valid open-long order for EURUSD.
 func openOrder() *order {
-	return &order{instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+	return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
 }
 
 // eurBars is closes for EURUSD, the instrument the test account can size.
@@ -79,15 +80,15 @@ func TestBacktestRun_AcceptedRequests(t *testing.T) {
 	captureLogs(t)
 	bars := eurBars(1, 2, 3)
 	o1 := openOrder()
-	o3 := &order{instrument: "EURUSD", action: close, orderType: marketOrder}
+	o3 := &order{Time: testStart, instrument: "EURUSD", action: close, orderType: marketOrder}
 	strat := &scriptStrategy{orders: []*order{o1, nil, o3}}
 
 	err := runTrader(context.Background(), newTestTrader(), strat, seq(bars, -1, nil))
 
 	require.NoError(t, err)
 	assert.Equal(t, bars, strat.seen, "every bar reaches the strategy")
-	assert.Equal(t, stateSubmitted, o1.state)
-	assert.Equal(t, stateSubmitted, o3.state)
+	assert.Equal(t, stateFilled, o1.state, "filled on the bar after it was made")
+	assert.Equal(t, stateSubmitted, o3.state, "made on the last bar, so still waiting")
 	assert.Equal(t, "a", o1.accountID)
 }
 
@@ -255,7 +256,7 @@ func TestBacktestRun_OrderTooSmallIsARejectionToo(t *testing.T) {
 }
 
 func TestBacktestRun_InvalidOrderStopsRunBeforeSizing(t *testing.T) {
-	bad := &order{instrument: "EURUSD", action: open, price: eurusd1_10, stopLoss: 108900} // open without a direction
+	bad := &order{Time: testStart, instrument: "EURUSD", action: open, price: eurusd1_10, stopLoss: 108900} // open without a direction
 	strat := &scriptStrategy{orders: []*order{nil, bad, openOrder()}}
 	tr := newTestTrader()
 
@@ -271,7 +272,7 @@ func TestBacktestRun_InvalidOrderStopsRunBeforeSizing(t *testing.T) {
 
 func TestBacktestRun_OpenWithoutAStopStopsRunBeforeSizing(t *testing.T) {
 	// The strategy, not the account, must set the stop.
-	noStop := &order{instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10}
+	noStop := &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10}
 	strat := &scriptStrategy{orders: []*order{nil, noStop, openOrder()}}
 
 	err := runTrader(context.Background(), newTestTrader(), strat, seq(eurBars(1, 2, 3, 4), -1, nil))
@@ -352,6 +353,11 @@ func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	assert.Equal(t, []int{3, 8, 9, 12, 13}, s.at)
 	assert.Equal(t, stateRejected, s.got[0].state, "first opportunity was rejected")
 	assert.Equal(t, short, s.got[2].direction)
-	assert.Equal(t, stateSubmitted, s.got[2].state, "the fresh opportunity is accepted")
-	assert.Equal(t, stateSubmitted, s.got[4].state)
+	assert.Equal(t, stateRejected, s.got[1].state, "the close has no position: its open was rejected")
+	assert.Contains(t, s.got[1].history[len(s.got[1].history)-1].reason, "no position")
+	assert.Equal(t, stateFilled, s.got[2].state, "the fresh opportunity is accepted")
+	assert.Equal(t, stateFilled, s.got[3].state)
+	assert.Equal(t, stateFilled, s.got[4].state)
+	require.Contains(t, tr.account.positions, "EURUSD")
+	assert.Equal(t, long, tr.account.positions["EURUSD"].direction)
 }

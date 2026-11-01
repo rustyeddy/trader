@@ -94,7 +94,13 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 		e.pos = noDirection
 		e.pending = trend
 		// close takes no direction: it acts on the existing position
-		return &order{instrument: b.instrument, price: b.c, action: close, orderType: marketOrder}
+		return &order{
+			instrument: b.instrument,
+			price:      b.c,
+			action:     close,
+			orderType:  marketOrder,
+			Time:       b.Time,
+		}
 	}
 }
 
@@ -106,6 +112,7 @@ func (e *emax) openOrder(b bar, d direction) *order {
 		action:     open,
 		orderType:  marketOrder,
 		direction:  d,
+		Time:       b.Time,
 	}
 }
 

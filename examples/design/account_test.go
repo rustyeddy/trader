@@ -56,7 +56,7 @@ func openOrderAt(sym string, d direction, p price) *order {
 	if d == short {
 		stop = p + dist
 	}
-	return &order{instrument: sym, direction: d, action: open, orderType: marketOrder, price: p, stopLoss: stop}
+	return &order{Time: testStart, instrument: sym, direction: d, action: open, orderType: marketOrder, price: p, stopLoss: stop}
 }
 
 func TestAccount_Size_Open(t *testing.T) {
@@ -437,7 +437,7 @@ func TestAccount_Size_Open_RiskIsBoundedAndTight(t *testing.T) {
 
 func TestAccount_Size_CloseIsTheWholePositionAndNeedsNoMargin(t *testing.T) {
 	captureLogs(t)
-	o := &order{instrument: "EURUSD", action: close, orderType: marketOrder}
+	o := &order{Time: testStart, instrument: "EURUSD", action: close, orderType: marketOrder}
 
 	require.NoError(t, newAccount("a", 0).size(o))
 
@@ -450,7 +450,7 @@ func TestAccount_Size_CloseIsTheWholePositionAndNeedsNoMargin(t *testing.T) {
 func TestAccount_Size_AddReduceAndNoActionAreUnsupported(t *testing.T) {
 	captureLogs(t)
 	for _, a := range []action{add, reduce, noAction, action(99)} {
-		o := &order{instrument: "EURUSD", action: a}
+		o := &order{Time: testStart, instrument: "EURUSD", action: a}
 		require.ErrorIs(t, newAccount("a", 1000).size(o), errUnsupportedAction, a.String())
 		assert.Equal(t, stateRequested, o.state)
 		assert.Empty(t, o.history, "an unsupported action changes nothing")
@@ -492,7 +492,7 @@ func TestMuldiv(t *testing.T) {
 
 func TestAccount_Size_UnknownInstrumentIsAnErrorNotARejection(t *testing.T) {
 	captureLogs(t)
-	o := &order{instrument: "NOPE", direction: long, action: open}
+	o := &order{Time: testStart, instrument: "NOPE", direction: long, action: open}
 
 	err := newAccount("a", 1000).size(o)
 

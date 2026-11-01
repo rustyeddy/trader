@@ -10,10 +10,14 @@ import (
 type money int64
 
 type account struct {
-	id        string
-	balance   money
-	riskPct   rate // fraction of the account risked per trade
+	id      string
+	balance money
+	riskPct rate // fraction of the account risked per trade
+
+	orders    map[string][]*order // submitted orders awaiting execution, by instrument
 	positions map[string]*position
+
+	broker *broker
 }
 
 func newAccount(id string, balance money) *account {
@@ -21,6 +25,7 @@ func newAccount(id string, balance money) *account {
 		id:        id,
 		balance:   balance,
 		riskPct:   rateOnePercent, // default risk per trade
+		orders:    make(map[string][]*order),
 		positions: make(map[string]*position),
 	}
 }
@@ -214,6 +219,46 @@ func muldiv(nums, dens []int64, roundUp bool) (int64, error) {
 	return q.Int64(), nil
 }
 
+// onBar lets the broker execute the orders waiting on this bar's instrument.
+// Orders that are no longer submitted (filled or rejected) leave the list.
 func (a *account) onBar(ctx context.Context, b bar) error {
+	pending := append([]*order(nil), a.orders[b.instrument]...)
+
+	for _, o := range pending {
+		if err := a.broker.updateOrders(ctx, b, o); err != nil {
+			return err
+		}
+	}
+
+	waiting := a.orders[b.instrument][:0]
+	for _, o := range a.orders[b.instrument] {
+		if o.state == stateSubmitted {
+			waiting = append(waiting, o)
+		}
+	}
+	a.orders[b.instrument] = waiting
+	return nil
+}
+
+// applyFill updates the instrument's position for a filled order. One position
+// per instrument (netting): an open creates it, a close removes it and the
+// order takes the closed size. Add and reduce wait on the size type.
+func (a *account) applyFill(o *order) error {
+	pos := a.positions[o.instrument]
+	switch o.action {
+	case open:
+		if pos != nil {
+			return fmt.Errorf("%w: %s is already %s", errPositionExists, o.instrument, pos.direction)
+		}
+		a.positions[o.instrument] = &position{instrument: o.instrument, direction: o.direction, units: o.units}
+	case close:
+		if pos == nil {
+			return fmt.Errorf("%w: %s", errNoPosition, o.instrument)
+		}
+		o.units = pos.units
+		delete(a.positions, o.instrument)
+	default:
+		return fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)
+	}
 	return nil
 }

@@ -74,8 +74,8 @@ func TestOrder_EnumValuesAreStable(t *testing.T) {
 func TestOrder_ZeroValueIsNotAValidRequest(t *testing.T) {
 	// There is no hold order: "do nothing" is a nil *order, so a zero-value
 	// order is an unset action, not a no-op.
-	require.ErrorIs(t, (&order{}).validate(), errInvalidOrder)
-	require.ErrorIs(t, (&order{instrument: "EUR/USD"}).validate(), errInvalidOrder)
+	require.ErrorIs(t, (&order{Time: testStart}).validate(), errInvalidOrder)
+	require.ErrorIs(t, (&order{Time: testStart, instrument: "EUR/USD"}).validate(), errInvalidOrder)
 }
 
 func TestOrder_Validate(t *testing.T) {
@@ -121,6 +121,7 @@ func TestOrder_Validate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.in.Time = testStart
 			err := tt.in.validate()
 			if tt.wantErr {
 				require.ErrorIs(t, err, errInvalidOrder)
@@ -131,23 +132,30 @@ func TestOrder_Validate(t *testing.T) {
 	}
 }
 
+func TestOrder_Validate_NeedsTheBarTime(t *testing.T) {
+	err := (&order{instrument: "EUR/USD", direction: long, action: open, stopLoss: 108900}).validate()
+
+	require.ErrorIs(t, err, errInvalidOrder)
+	assert.Contains(t, err.Error(), "time")
+}
+
 func TestOrder_Validate_StopErrorNamesTheProblem(t *testing.T) {
-	err := (&order{instrument: "EUR/USD", direction: long, action: open}).validate()
+	err := (&order{Time: testStart, instrument: "EUR/USD", direction: long, action: open}).validate()
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "stop loss")
 }
 
 func TestOrder_Validate_CloseNeedsNoStop(t *testing.T) {
-	require.NoError(t, (&order{instrument: "EUR/USD", action: close}).validate())
+	require.NoError(t, (&order{Time: testStart, instrument: "EUR/USD", action: close}).validate())
 }
 
 func TestOrder_RecordSetsStateAppendsTimestampedHistoryAndLogs(t *testing.T) {
 	logs := captureLogs(t)
 	t0 := time.Date(2010, 1, 4, 9, 30, 0, 0, time.UTC)
-	o := &order{id: "sim-1", instrument: "EUR/USD", direction: long, action: open, timestamp: t0}
+	o := &order{id: "sim-1", instrument: "EUR/USD", direction: long, action: open, Time: t0}
 
 	o.record(stateRequested, "")
-	o.timestamp = t0.Add(time.Second)
+	o.Time = t0.Add(time.Second)
 	o.record(stateRejected, "insufficient margin")
 
 	assert.Equal(t, stateRejected, o.state)
@@ -178,9 +186,9 @@ func TestOrder_RecordStampsHistoryWithTheOrderTimestamp(t *testing.T) {
 	first := time.Date(2030, 6, 1, 12, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
 
-	o := &order{timestamp: first}
+	o := &order{Time: first}
 	o.record(stateSized, "")
-	o.timestamp = second
+	o.Time = second
 	o.record(stateSubmitted, "")
 
 	assert.Equal(t, first, o.history[0].time)
