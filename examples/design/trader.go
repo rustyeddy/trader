@@ -25,6 +25,7 @@ func isRejection(err error) bool {
 var (
 	errUnknownBroker     = errors.New("unknown broker")
 	errUnknownAccount    = errors.New("unknown account")
+	errAccountConflict   = errors.New("order account conflicts with the trader's account")
 	errUnknownInstrument = errors.New("unknown instrument")
 	errInstrumentConfig  = errors.New("instrument not configured")
 )
@@ -78,8 +79,16 @@ func (tr *trader) onBar(ctx context.Context, b bar) error {
 // rejection is recorded on the order and is not an error; anything else is
 // returned and stops the run.
 func (tr *trader) handleOrder(ctx context.Context, o *order) error {
-	// The strategy knows nothing of accounts; the trader says whose order this is.
-	o.accountID = tr.account.id
+	// The strategy knows nothing of accounts; the trader says whose order this
+	// is. An account already on the order is never overwritten.
+	switch o.accountID {
+	case "":
+		o.accountID = tr.account.id
+	case tr.account.id:
+	default:
+		return fmt.Errorf("%w: order is for account %s, trader has %s",
+			errAccountConflict, o.accountID, tr.account.id)
+	}
 
 	err := tr.account.size(o)
 	if err == nil {

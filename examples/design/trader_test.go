@@ -72,12 +72,25 @@ func TestTrader_ImplementsOrderHandler(t *testing.T) {
 	var _ orderHandler = (*trader)(nil)
 }
 
-func TestTrader_HandleOrder_OverwritesAnyAccountTheStrategySet(t *testing.T) {
+func TestTrader_HandleOrder_ConflictingAccountIsAnError(t *testing.T) {
 	captureLogs(t)
 	o := &order{accountID: "someone-else", instrument: "EURUSD", direction: long, action: open,
 		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
 
+	err := newTestTrader().handleOrder(context.Background(), o)
+
+	require.ErrorIs(t, err, errAccountConflict)
+	assert.Equal(t, "someone-else", o.accountID, "an existing account is never overwritten")
+	assert.Empty(t, o.history, "the order was neither sized nor submitted")
+}
+
+func TestTrader_HandleOrder_MatchingAccountIsKept(t *testing.T) {
+	captureLogs(t)
+	o := &order{accountID: "a", instrument: "EURUSD", direction: long, action: open,
+		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+
 	require.NoError(t, newTestTrader().handleOrder(context.Background(), o))
 
-	assert.Equal(t, "a", o.accountID, "the trader, not the strategy, decides the account")
+	assert.Equal(t, "a", o.accountID)
+	assert.Equal(t, stateSubmitted, o.state)
 }
