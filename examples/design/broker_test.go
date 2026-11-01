@@ -222,7 +222,7 @@ func TestAccount_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.Time, "stamped with the fill bar")
 	assert.Equal(t, stateFilled, o.history[len(o.history)-1].state)
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[len(o.history)-1].time)
-	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: 100}, act.positions["EURUSD"])
+	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: 100, entryPrice: 111500}, act.positions["EURUSD"])
 	assert.Empty(t, act.orders["EURUSD"], "a filled order is no longer waiting")
 }
 
@@ -251,12 +251,14 @@ func TestAccount_OnBar_CloseTakesThePositionsSizeAndRemovesIt(t *testing.T) {
 	open1 := submittedOrder(t, br, open, short, 250)
 	require.NoError(t, act.onBar(ctx, fillBar(1, 111000)))
 	require.Equal(t, stateFilled, open1.state)
+	assert.Equal(t, price(111000), act.positions["EURUSD"].entryPrice, "the position remembers its fill price")
 
 	cl := &order{accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder, Time: testStart.AddDate(0, 0, 1)}
 	require.NoError(t, br.submit(ctx, cl))
 	require.NoError(t, act.onBar(ctx, fillBar(2, 112000)))
 
 	assert.Equal(t, stateFilled, cl.state)
+	assert.Equal(t, price(111000), open1.fillPrice)
 	assert.Equal(t, int64(250), cl.units, "the order records what was closed")
 	assert.Equal(t, price(112000), cl.fillPrice)
 	assert.Empty(t, act.positions)
@@ -310,6 +312,27 @@ func TestBroker_OnOrderBar_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	require.ErrorIs(t, br.updateOrders(ctx, fillBar(1, 111000), o), context.Canceled)
+	require.ErrorIs(t, br.processOrder(ctx, fillBar(1, 111000), o), context.Canceled)
 	assert.Equal(t, stateSubmitted, o.state)
+}
+
+// Documents current behavior, not a goal: when one order in a batch fails, the
+// run stops before cleanup, so an order that already filled stays in
+// account.orders. Live recovery will need to reconcile such partial batches;
+// until then the backtest simply stops on the error.
+func TestAccount_OnBar_ErrorMidBatchLeavesFilledOrdersListed(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	first := submittedOrder(t, br, open, long, 100)
+	second := submittedOrder(t, br, open, long, 200) // fatal: the first one's position exists by then
+	third := submittedOrder(t, br, open, long, 300)
+
+	err := act.onBar(context.Background(), fillBar(1, 111000))
+
+	require.ErrorIs(t, err, errPositionExists)
+	assert.Equal(t, stateFilled, first.state, "processed before the failure")
+	assert.Equal(t, stateSubmitted, second.state, "the failing order is untouched")
+	assert.Equal(t, stateSubmitted, third.state, "later orders are not processed")
+	assert.Equal(t, []*order{first, second, third}, act.orders["EURUSD"],
+		"cleanup is skipped, so the filled order is still listed")
 }

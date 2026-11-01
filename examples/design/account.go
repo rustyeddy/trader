@@ -225,7 +225,7 @@ func (a *account) onBar(ctx context.Context, b bar) error {
 	pending := append([]*order(nil), a.orders[b.instrument]...)
 
 	for _, o := range pending {
-		if err := a.broker.updateOrders(ctx, b, o); err != nil {
+		if err := a.broker.processOrder(ctx, b, o); err != nil {
 			return err
 		}
 	}
@@ -250,7 +250,12 @@ func (a *account) applyFill(o *order) error {
 		if pos != nil {
 			return fmt.Errorf("%w: %s is already %s", errPositionExists, o.instrument, pos.direction)
 		}
-		a.positions[o.instrument] = &position{instrument: o.instrument, direction: o.direction, units: o.units}
+		a.positions[o.instrument] = &position{
+			instrument: o.instrument,
+			direction:  o.direction,
+			units:      o.units,
+			entryPrice: o.fillPrice,
+		}
 	case close:
 		if pos == nil {
 			return fmt.Errorf("%w: %s", errNoPosition, o.instrument)

@@ -45,7 +45,7 @@ func (br *broker) getAccount(id string) (*account, bool) {
 
 // submit accepts a sized order from the account named in o.accountID, assigns
 // it an id and hands it to the account to await execution. The order is filled
-// (or rejected) on a later bar by onOrderBar; submit itself never fills.
+// (or rejected) on a later bar by processOrder; submit itself never fills.
 func (br *broker) submit(ctx context.Context, o *order) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -77,11 +77,11 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	return nil
 }
 
-// onOrderBar gives a submitted order its chance to execute on bar b. The
+// processOrder gives a submitted order its chance to execute on bar b. The
 // account calls it at the start of every bar, before the strategy sees the bar,
 // so an order submitted on bar N can first fill on bar N+1 and never on the bar
 // that produced it.
-func (br *broker) updateOrders(ctx context.Context, b bar, o *order) error {
+func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -118,10 +118,12 @@ func (br *broker) fillOrder(o *order, p price) error {
 		return fmt.Errorf("fill order %s: %w: %s", o.id, errUnknownAccount, o.accountID)
 	}
 
+	o.fillPrice = p
 	if err := act.applyFill(o); err != nil {
 		if !isRejection(err) {
 			return fmt.Errorf("fill order %s: %w", o.id, err)
 		}
+		o.fillPrice = 0 // a rejected order never filled
 		o.record(stateRejected, err.Error())
 		slog.Warn("order rejected",
 			"reason", err,
@@ -131,8 +133,6 @@ func (br *broker) fillOrder(o *order, p price) error {
 			"direction", o.direction)
 		return nil
 	}
-
-	o.fillPrice = p
 	o.record(stateFilled, "")
 	return nil
 }
