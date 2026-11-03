@@ -551,3 +551,34 @@ func TestBroker_OnBar_CloseoutBlocksTheStrategyOpenOnTheSameBar(t *testing.T) {
 	o.Time = b.Time
 	require.ErrorIs(t, br.submit(context.Background(), o), errCloseoutGuard)
 }
+
+func TestBroker_OnBar_RetainsCompletedOrdersInCompletionOrder(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	ctx := context.Background()
+	filled := submittedOrder(t, br, open, long)
+	limit := brokerOpen("a")
+	limit.orderType = limitOrder
+	require.NoError(t, br.submit(ctx, limit))
+	assert.Empty(t, br.completed, "nothing has completed yet")
+
+	require.NoError(t, br.onBar(ctx, fillBar(1, 111500)))
+	cl := submittedOrder(t, br, close, noDirection)
+	cl.Time = fillBar(1, 0).Time
+	require.NoError(t, br.onBar(ctx, fillBar(2, 112000)))
+
+	assert.Equal(t, []*order{filled, cl}, br.completed, "filled orders are kept, in the order they completed")
+	assert.Equal(t, []*order{limit}, br.orders["EURUSD"], "a waiting order is not completed")
+	assert.Empty(t, br.closeouts, "strategy orders are not closeouts")
+}
+
+func TestBroker_OnBar_RetainsRejectedOrders(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	cl := submittedOrder(t, br, close, noDirection) // no position: rejected on fill
+
+	require.NoError(t, br.onBar(context.Background(), fillBar(1, 111500)))
+
+	assert.Equal(t, stateRejected, cl.state)
+	assert.Equal(t, []*order{cl}, br.completed)
+}

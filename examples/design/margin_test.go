@@ -264,6 +264,7 @@ func TestBroker_OnBar_CloseoutCancelsTheAccountsPendingOpens(t *testing.T) {
 	assert.Equal(t, "margin closeout", last.reason)
 	assert.Equal(t, lossBar().Time, last.time, "stamped with the closeout bar, not the order's own time")
 	assert.Empty(t, br.orders["GBPUSD"])
+	assert.Contains(t, br.completed, pending, "the cancelled order is retained")
 	assert.Equal(t, stateSubmitted, other.state, "another account's order is untouched")
 	assert.Equal(t, []*order{other}, br.orders["EURUSD"])
 	_ = act
@@ -334,4 +335,31 @@ func TestBroker_OnBar_ACloseoutThatDoesNotFillIsAnError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "closeout EURUSD")
+}
+
+func TestBroker_OnBar_CloseoutOrdersAreRecorded(t *testing.T) {
+	br, _ := liquidationBroker(t, usd(2000))
+
+	require.NoError(t, br.onBar(context.Background(), lossBar()))
+
+	require.Len(t, br.closeouts, 1, "progressive: one position was liquidated")
+	c := br.closeouts[0]
+	assert.Equal(t, "EURUSD", c.instrument)
+	assert.Equal(t, close, c.action)
+	assert.Equal(t, reasonMarginCloseout, c.reason)
+	assert.Equal(t, stateFilled, c.state)
+	assert.Equal(t, lossBar().Time, c.Time)
+	assert.Equal(t, []*order{c}, br.completed, "a closeout is also a completed order")
+}
+
+func TestBroker_OnBar_CompleteCloseoutRecordsEveryPosition(t *testing.T) {
+	br, _ := liquidationBroker(t, usd(2000))
+	br.completeCloseout = true
+
+	require.NoError(t, br.onBar(context.Background(), lossBar()))
+
+	require.Len(t, br.closeouts, 2)
+	assert.Equal(t, "EURUSD", br.closeouts[0].instrument, "worst loser first")
+	assert.Equal(t, "GBPUSD", br.closeouts[1].instrument)
+	assert.Len(t, br.completed, 2)
 }

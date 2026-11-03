@@ -28,6 +28,12 @@ type broker struct {
 	// closeout is not undone by a new open made on the same observation; later
 	// re-entry rules are a future policy.
 	closedOut map[string]time.Time
+
+	// completed keeps every order that has left the queue (filled, rejected by
+	// the broker or cancelled), in the order it completed, for the journal.
+	// closeouts is the subset the broker made itself to liquidate positions.
+	completed []*order
+	closeouts []*order
 }
 
 var brokers map[string]*broker
@@ -175,12 +181,15 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 	return nil
 }
 
-// prune drops the instrument's orders that are no longer submitted.
+// prune moves the instrument's orders that are no longer submitted from the
+// queue to the completed list.
 func (br *broker) prune(instrument string) {
-	waiting := br.orders[instrument][:0]
+	var waiting []*order
 	for _, o := range br.orders[instrument] {
 		if o.state == stateSubmitted {
 			waiting = append(waiting, o)
+		} else {
+			br.completed = append(br.completed, o)
 		}
 	}
 	br.orders[instrument] = waiting
@@ -268,6 +277,8 @@ func (br *broker) closeoutPosition(b bar, act *account, pos *position) error {
 	}
 	o.record(stateRequested, "")
 	o.record(stateSubmitted, "")
+	br.closeouts = append(br.closeouts, o)
+	br.completed = append(br.completed, o)
 	if err := br.fillOrder(o, pos.markPrice); err != nil {
 		return err
 	}
