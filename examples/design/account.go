@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"math"
+	"math/big"
 )
 
 // money is an amount of the account currency in cents (see moneyScale).
@@ -60,12 +60,68 @@ func (act *account) unrealizedPnL() (money, error) {
 	return total, nil
 }
 
-// marginAvailable is what new positions may be margined against. It is the
-// balance for now; once positions exist it becomes equity less the margin
-// already in use. Sizing keeps it separate from equity: risk is measured
-// against equity, the margin limit against marginAvailable.
-func (act *account) marginAvailable() money {
-	return act.balance
+// marginAvailable is what new positions may be margined against: equity less
+// the margin already in use. Sizing keeps it separate from equity: risk is
+// measured against equity, the margin limit against marginAvailable. It can be
+// zero or negative, which leaves no room for a new position.
+func (act *account) marginAvailable() (money, error) {
+	eq, err := act.equity()
+	if err != nil {
+		return 0, err
+	}
+	used, err := act.usedMargin()
+	if err != nil {
+		return 0, err
+	}
+	return eq - used, nil
+}
+
+// usedMargin is the margin held against open positions, valued at their
+// latest mark, plus the margin reserved by opening orders that are submitted
+// but not yet filled. Without the reserve, orders sized before they fill would
+// each see the same margin available.
+//
+// TODO: the margin is in the quote currency, assumed to be the account
+// currency (USD); see moneyScale.
+func (act *account) usedMargin() (money, error) {
+	var total money
+	for _, pos := range act.positions {
+		m, err := marginFor(pos.instrument, pos.units, pos.markPrice)
+		if err != nil {
+			return 0, err
+		}
+		total += m
+	}
+	for _, orders := range act.orders {
+		for _, o := range orders {
+			if o.state != stateSubmitted || o.action != open {
+				continue
+			}
+			m, err := marginFor(o.instrument, o.units, o.price)
+			if err != nil {
+				return 0, err
+			}
+			total += m
+		}
+	}
+	return total, nil
+}
+
+// marginFor is the margin units of symbol need at price p, rounded up to the
+// cent: units * p * marginRate.
+func marginFor(symbol string, units int64, p price) (money, error) {
+	inst, ok := getInstrument(symbol)
+	if !ok {
+		return 0, fmt.Errorf("margin for %s: %w", symbol, errUnknownInstrument)
+	}
+	m, err := muldiv(
+		[]int64{units, int64(p), int64(inst.marginRate), moneyScale},
+		[]int64{priceScale, rateScale},
+		true)
+	if err != nil {
+		return 0, fmt.Errorf("margin for %s: %w", symbol, err)
+	}
+	return money(m), nil
 }
 
 // moneyScale is how many money units make one unit of the account currency:
@@ -123,6 +179,7 @@ func (act *account) size(o *order) error {
 //
 //	riskUnits   = floor(equity * riskPct * priceScale / (rateScale * stopDistance))
 //	marginUnits = floor(marginAvailable * priceScale * rateScale / (price * marginRate))
+//	marginAvailable = equity - usedMargin
 //
 // riskUnits is the most that loses at most riskPct of equity if stopped
 // out; marginUnits is the most whose margin requirement (units * price *
@@ -135,7 +192,11 @@ func (act *account) size(o *order) error {
 // order rejected: with errInsufficientMargin when margin was the limit, and
 // with errOrderTooSmall when the risk budget was.
 func (act *account) sizeOpen(o *order, inst *instrument) error {
-	if act.marginAvailable() <= 0 {
+	margin, err := act.marginAvailable()
+	if err != nil {
+		return fmt.Errorf("size open: %w", err)
+	}
+	if margin <= 0 {
 		return reject(o, errInsufficientMargin)
 	}
 	if o.price <= 0 {
@@ -162,7 +223,7 @@ func (act *account) sizeOpen(o *order, inst *instrument) error {
 		return fmt.Errorf("size open: risk units: %w", err)
 	}
 	marginUnits, err := muldiv(
-		[]int64{int64(act.marginAvailable()), priceScale, rateScale},
+		[]int64{int64(margin), priceScale, rateScale},
 		[]int64{int64(o.price), int64(inst.marginRate), moneyScale},
 		false)
 	if err != nil {
