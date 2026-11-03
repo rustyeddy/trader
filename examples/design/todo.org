@@ -142,6 +142,17 @@ records the result. See =order-tests.org= for the scenarios.
 - [X] Order history is stamped with simulated time: =order.timestamp= is the bar being processed (set by the trader; the broker will set it on fills). A live clock can set it the same way.
 - [X] Margin closeout: =marginPolicy= and =closeoutPolicy= (progressive or complete); a liquidation is a closing order with =reasonMarginCloseout= that ends filled.
 - [X] Closeout guard: after a margin closeout the broker refuses =open= and =add= for that account on the same bar (=errCloseoutGuard=, an expected rejection); closes and later bars are unaffected. Re-entry rules are a later policy.
+- [ ] *Stale-price margin liquidation (multi-instrument).* Currently Broker
+  checks margin after marking the instrument of the incoming bar, but it may
+  select and instantly close a different instrument at that position's
+  older =markPrice= while recording the liquidation at the current bar's time.
+  Define a price-freshness/executable-quote policy before relying on
+  multi-instrument closeout results; never silently treat an old accounting
+  mark as a contemporaneous executable fill. Address asynchronous quotes,
+  instrument market closures, deterministic timestamp grouping, and
+  intrabar trigger/closeout ordering. Add a regression with EURUSD and
+  GBPUSD at different observation times that verifies the intended behavior.
+  This is *deferred*, not a blocker for the single-instrument prototype.
 - [ ] Record the broker's own liquidation orders (a closeouts list or journal entry); stop-loss enforcement (=reasonStopLoss=); limit and stop triggers.
 ** TODO Market data acquisition and storage
 - Download and validate provider observations; convert to canonical.
