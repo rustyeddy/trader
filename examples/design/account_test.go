@@ -724,3 +724,78 @@ func TestAccount_ApplyFill_OpenAndRejectedCloseLeaveTheBalanceAlone(t *testing.T
 
 	assert.Equal(t, usd(10000), act.balance)
 }
+
+func TestCheckedAdd_OverflowAndUnderflow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a, b money
+		want money
+		bad  bool
+	}{
+		{"ordinary", 120, -20, 100, false},
+		{"max boundary", money(math.MaxInt64)-1, 1, money(math.MaxInt64), false},
+		{"min boundary", money(math.MinInt64)+1, -1, money(math.MinInt64), false},
+		{"positive overflow", money(math.MaxInt64), 1, 0, true},
+		{"negative overflow", money(math.MinInt64), -1, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := checkedAdd(tc.a, tc.b)
+			if tc.bad {
+				require.ErrorIs(t, err, errSizeOverflow)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestAccount_UnrealizedPnL_TotalOverflow(t *testing.T) {
+	a := newAccount("a", 0)
+	// A 1000-point move equals one cent per unit.
+	units := int64(math.MaxInt64/2 + 1)
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: units, entryPrice: 110000, markPrice: 111000}
+	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: units, entryPrice: 110000, markPrice: 111000}
+	_, err := a.unrealizedPnL()
+	require.ErrorIs(t, err, errSizeOverflow)
+}
+
+func TestAccount_Equity_AdditionOverflow(t *testing.T) {
+	a := newAccount("a", money(math.MaxInt64))
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000, markPrice: 111000}
+	_, err := a.equity()
+	require.ErrorIs(t, err, errSizeOverflow)
+}
+
+func TestAccount_ApplyFill_BalanceOverflowLeavesPositionIntact(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		balance money
+		exit    price
+	}{
+		{"profit overflow", money(math.MaxInt64), 112000},
+		{"loss underflow", money(math.MinInt64), 108000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAccount("a", tc.balance)
+			pos := &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000}
+			a.positions["EURUSD"] = pos
+			o := &order{instrument: "EURUSD", action: close, fillPrice: tc.exit}
+			require.ErrorIs(t, a.applyFill(o), errSizeOverflow)
+			assert.Equal(t, tc.balance, a.balance)
+			assert.Same(t, pos, a.positions["EURUSD"])
+			assert.Zero(t, o.units, "failed close must not change order units")
+		})
+	}
+}
+
+func TestPosition_PnLAt_ExtremePriceDifferenceDoesNotWrap(t *testing.T) {
+	p := &position{direction: long, units: 1, entryPrice: price(math.MinInt64)}
+	got, err := p.realizedPnL(price(math.MaxInt64))
+	require.NoError(t, err)
+	// floor((MaxInt64 - MinInt64) * 100 / 100000) cents.
+	n := new(big.Int).Sub(big.NewInt(math.MaxInt64), big.NewInt(math.MinInt64))
+	n.Mul(n, big.NewInt(moneyScale))
+	n.Div(n, big.NewInt(priceScale))
+	assert.Equal(t, money(n.Int64()), got)
+}
