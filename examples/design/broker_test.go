@@ -222,7 +222,7 @@ func TestAccount_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.Time, "stamped with the fill bar")
 	assert.Equal(t, stateFilled, o.history[len(o.history)-1].state)
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[len(o.history)-1].time)
-	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: 100, entryPrice: 111500}, act.positions["EURUSD"])
+	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: 100, entryPrice: 111500, markPrice: 111600}, act.positions["EURUSD"])
 	assert.Empty(t, act.orders["EURUSD"], "a filled order is no longer waiting")
 }
 

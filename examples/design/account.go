@@ -31,10 +31,29 @@ func newAccount(id string, balance money) *account {
 	}
 }
 
-// equity is what the risk budget is a fraction of. It is the balance for now;
-// once positions exist it becomes balance plus unrealized profit and loss.
-func (act *account) equity() money {
-	return act.balance
+// equity is what the risk budget is a fraction of: the balance plus the
+// unrealized profit and loss of the open positions.
+func (act *account) equity() (money, error) {
+	pnl, err := act.unrealizedPnL()
+	if err != nil {
+		return 0, err
+	}
+	return act.balance + pnl, nil
+}
+
+// unrealizedPnL is the profit or loss of every open position at its latest
+// mark. A position is marked at its fill price when it opens, so a mark always
+// exists and an unmarked position is never counted as zero.
+func (act *account) unrealizedPnL() (money, error) {
+	var total money
+	for _, pos := range act.positions {
+		pnl, err := pos.unrealizedPnL()
+		if err != nil {
+			return 0, fmt.Errorf("unrealized P/L of %s: %w", pos.instrument, err)
+		}
+		total += pnl
+	}
+	return total, nil
 }
 
 // marginAvailable is what new positions may be margined against. It is the
@@ -127,8 +146,12 @@ func (act *account) sizeOpen(o *order, inst *instrument) error {
 		return err
 	}
 
+	equity, err := act.equity()
+	if err != nil {
+		return fmt.Errorf("size open: %w", err)
+	}
 	riskUnits, err := muldiv(
-		[]int64{int64(act.equity()), int64(act.riskPct), priceScale},
+		[]int64{int64(equity), int64(act.riskPct), priceScale},
 		[]int64{rateScale, dist, moneyScale},
 		false)
 	if err != nil {
@@ -238,6 +261,11 @@ func (a *account) onBar(ctx context.Context, b bar) error {
 		}
 	}
 
+	// Value the open position at this bar's close, after any fill on its open.
+	if pos := a.positions[b.instrument]; pos != nil {
+		pos.markPrice = b.c
+	}
+
 	waiting := a.orders[b.instrument][:0]
 	for _, o := range a.orders[b.instrument] {
 		if o.state == stateSubmitted {
@@ -263,6 +291,7 @@ func (a *account) applyFill(o *order) error {
 			direction:  o.direction,
 			units:      o.units,
 			entryPrice: o.fillPrice,
+			markPrice:  o.fillPrice,
 		}
 	case close:
 		if pos == nil {
@@ -289,6 +318,17 @@ func (a *account) applyFill(o *order) error {
 // TODO: this assumes the quote currency is the account currency (USD) and
 // excludes spread and commission; see moneyScale.
 func (p *position) realizedPnL(exit price) (money, error) {
+	return p.pnlAt(exit)
+}
+
+// unrealizedPnL is the profit or loss, in cents, of the position at its latest
+// mark. The same TODO as realizedPnL applies.
+func (p *position) unrealizedPnL() (money, error) {
+	return p.pnlAt(p.markPrice)
+}
+
+// pnlAt is the profit or loss, in cents, of the position valued at p.
+func (p *position) pnlAt(exit price) (money, error) {
 	delta := int64(exit - p.entryPrice)
 
 	if p.direction == short {

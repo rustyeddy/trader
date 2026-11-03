@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -517,12 +518,133 @@ func TestNewAccount_DefaultRiskIsOnePercent(t *testing.T) {
 }
 
 // Risk is measured against equity and the margin limit against the margin
-// available. They are the same number in this prototype, but they are separate
-// questions and must stay separate once fills and margin tracking exist.
-func TestAccount_EquityAndMarginAvailableArePlaceholdersForTheBalance(t *testing.T) {
+// available. They are separate questions: equity moves with unrealized P/L,
+// the margin available is still the balance until margin in use is tracked.
+func TestAccount_EquityIncludesUnrealizedPnLButMarginAvailableDoesNot(t *testing.T) {
 	a := newAccount("a", usd(12345))
-	assert.Equal(t, usd(12345), a.equity())
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000, entryPrice: 110000, markPrice: 111000}
+
+	eq, err := a.equity()
+
+	require.NoError(t, err)
+	assert.Equal(t, usd(12345+100), eq)
 	assert.Equal(t, usd(12345), a.marginAvailable())
+}
+
+func TestAccount_EquityWithoutPositionsIsTheBalance(t *testing.T) {
+	eq, err := newAccount("a", usd(12345)).equity()
+
+	require.NoError(t, err)
+	assert.Equal(t, usd(12345), eq)
+}
+
+func TestPosition_UnrealizedPnL(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  direction
+		mark price
+		want money
+	}{
+		{"long up", long, 111000, usd(100)},
+		{"long down", long, 109000, -usd(100)},
+		{"short up", short, 111000, -usd(100)},
+		{"short down", short, 109000, usd(100)},
+		{"marked at entry", long, 110000, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &position{direction: tt.dir, units: 10000, entryPrice: 110000, markPrice: tt.mark}
+
+			got, err := p.unrealizedPnL()
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAccount_UnrealizedPnL_SumsEveryPosition(t *testing.T) {
+	a := newAccount("a", usd(1000))
+	require.Zero(t, mustPnL(t, a), "no positions")
+
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000, entryPrice: 110000, markPrice: 111000} // +100
+	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: short, units: 5000, entryPrice: 150000, markPrice: 151000} // -50
+	a.positions["AUDUSD"] = &position{instrument: "AUDUSD", direction: long, units: 1000, entryPrice: 70000, markPrice: 69000}    // -10
+
+	assert.Equal(t, usd(40), mustPnL(t, a))
+}
+
+func mustPnL(t *testing.T, a *account) money {
+	t.Helper()
+	pnl, err := a.unrealizedPnL()
+	require.NoError(t, err)
+	return pnl
+}
+
+func TestAccount_UnrealizedPnL_OverflowIsAnErrorNotAPartialSum(t *testing.T) {
+	a := newAccount("a", usd(1000))
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: math.MaxInt64, entryPrice: 1, markPrice: math.MaxInt64}
+
+	_, err := a.unrealizedPnL()
+	require.ErrorIs(t, err, errSizeOverflow)
+
+	_, err = a.equity()
+	require.ErrorIs(t, err, errSizeOverflow)
+}
+
+func TestAccount_Size_Open_RiskIsMeasuredAgainstEquity(t *testing.T) {
+	captureLogs(t)
+	// $1000 balance buys floor(1000/1.1)=909 units; another position's
+	// unrealized +$100 lifts equity to $1100 and the size to floor(1100/1.1)=1000.
+	a := newAccount("a", usd(1000))
+	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 10000, entryPrice: 150000, markPrice: 151000}
+	o := openOrderAt("EURUSD", long, eurusd1_10)
+
+	require.NoError(t, a.size(o))
+
+	assert.Equal(t, int64(1000), o.units)
+}
+
+func TestAccount_Size_Open_UnrealizedLossShrinksTheRiskBudget(t *testing.T) {
+	captureLogs(t)
+	a := newAccount("a", usd(1000))
+	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 10000, entryPrice: 150000, markPrice: 149000}
+	o := openOrderAt("EURUSD", long, eurusd1_10)
+
+	require.NoError(t, a.size(o))
+
+	assert.Equal(t, int64(818), o.units, "floor(900 / 1.1)")
+}
+
+func TestAccount_OnBar_MarksThePositionAtTheBarClose(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	ctx := context.Background()
+	submittedOrder(t, br, open, long, 100)
+
+	// The fill bar opens at 1.115 and closes 100 points higher.
+	require.NoError(t, act.onBar(ctx, fillBar(1, 111500)))
+	pos := act.positions["EURUSD"]
+	require.NotNil(t, pos)
+	assert.Equal(t, price(111500), pos.entryPrice)
+	assert.Equal(t, price(111600), pos.markPrice, "valued at the bar's close, after the fill at its open")
+
+	require.NoError(t, act.onBar(ctx, fillBar(2, 112000)))
+	assert.Equal(t, price(112100), pos.markPrice)
+
+	other := fillBar(3, 90000)
+	other.instrument = "GBPUSD"
+	require.NoError(t, act.onBar(ctx, other))
+	assert.Equal(t, price(112100), pos.markPrice, "another instrument's bar does not move the mark")
+}
+
+func TestAccount_ApplyFill_OpenIsMarkedAtTheFillPrice(t *testing.T) {
+	act := newAccount("a", usd(1000))
+
+	require.NoError(t, act.applyFill(&order{instrument: "EURUSD", direction: short, action: open, units: 5, fillPrice: 110000}))
+
+	assert.Equal(t, price(110000), act.positions["EURUSD"].markPrice)
+	assert.Zero(t, mustPnL(t, act), "no profit or loss the moment it opens")
 }
 
 func TestPosition_RealizedPnL(t *testing.T) {
