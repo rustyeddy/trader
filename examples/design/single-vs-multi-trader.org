@@ -1,0 +1,163 @@
+#+TITLE: Trader Prototype: Single-Trader and Multi-Trader Bar Ownership
+#+DATE: [2026-11-02 Mon]
+#+STATUS: Design note — current prototype invariant; multi-Trader design deferred
+#+STARTUP: overview
+
+* Scope
+
+This note records what =examples/design/= currently implements and the
+constraint that must hold if we later support several Traders sharing a
+simulated Broker. It is deliberately *not* a new runtime abstraction, an
+accepted ADR, or a claim that the existing prototype already supports
+multi-Trader replay. The canonical framework architecture and accepted ADRs
+continue to govern production work.
+
+* Current implementation: single Trader, single replay
+
+The current =main.go= selects one Broker (=sim=), one Account (=sim123=), one
+Strategy (=emax=), and one market-data iterator. =backtest.run()= iterates
+=iter.Seq2[bar,error]= and calls one =trader.onBar(ctx,b)= for each observation.
+
+#+begin_example
+MarketData.bars(ctx)
+    |
+    v
+Backtest.run()          owns iteration and error propagation
+    |
+    v
+Trader.onBar()          one selected Account and Strategy
+    |
+    +-- Broker.onBar(ctx, bar)
+    |     +-- execute eligible pending Orders (all Accounts)
+    |     +-- Account.applyFill(order) on the Order's Account
+    |     +-- Account.mark(bar) for each Account
+    |
+    +-- Strategy.onBar(ctx, bar)
+    |     +-- potentially create an Order
+    |
+    +-- Broker.submit(ctx, order)
+          +-- Account.size(order, reservedMargin)
+          +-- queue Order for later execution
+#+end_example
+
+=broker.orders= is the authoritative active-order collection, keyed by
+instrument; each Order carries =accountID=. =broker.accounts= maps account
+IDs to =*account=. Account owns =positions=, =balance=, financial marks,
+realized/unrealized P&L, equity, position margin, and sizing calculations.
+The Broker owns execution, pending-order reservation accounting, and order
+lifecycle. =Account.applyFill()= updates balance and position together.
+
+The Broker's =onBar()= is *broker-wide*: it processes pending Orders for
+every Account associated with that instrument, then marks all Accounts.
+It is not scoped to =trader.account=.
+
+* Required invariant today
+
+For a shared simulated Broker, *each ordered market observation must be
+delivered to =broker.onBar()= exactly once*. The current composition root
+satisfies this by running one backtest through one Trader. The presence of
+multiple Accounts in =broker.accounts= does not by itself mean that
+multiple Traders or independently replayed strategies are supported.
+
+Do not start two =backtest.run()= loops with different Traders that share
+the same simulated Broker and each call =trader.onBar()= against the same
+price stream. The second call can advance the shared Broker state a
+second time, duplicate marking/side effects as behavior grows, or produce
+different strategy observations depending on scheduling.
+
+In particular, the order of operations must remain:
+1. Process eligible Orders already pending before this bar.
+2. Apply fills and mark financial state.
+3. Allow Strategies to observe the completed bar and submit *new* Orders.
+An Order created from bar N cannot execute against the OHLC of bar N.
+The current simulator fills eligible market Orders at the open of a later
+bar, based on timestamp ordering.
+
+* Ownership boundaries that should survive scaling
+
+- *MarketData* owns retrieving/assembling observations, not account decisions.
+- *Backtest or live runner* owns source iteration / event intake.
+- *Broker* is advanced once per market event and owns Orders and execution.
+- *Account* owns Positions, balances and accounting; applying fills must
+  remain safe against double application and partial financial updates.
+- *Trader* binds one Strategy and one selected Account to a Broker and
+  handles the Strategy's proposed Orders.
+- Strategy intent and actual broker/account exposure are distinct. Replacing
+  the =emax= strategy's assumed exposure with actual Positions and pending
+  Orders remains a separate deferred item.
+
+Market observations are identified by instrument and event time; they do
+not belong intrinsically to an Account. Broker Orders carry the Account ID.
+
+* Multi-Trader extension — proposed, not implemented
+
+When multiple Traders share a Broker and/or market stream, move the
+broker-wide bar advancement *out of each =trader.onBar()=* and into a
+single higher-level runner/coordinator (name and API deferred). The
+coordinator owns one ordered market event stream per shared Broker and
+fans out completed observations to participating Strategies only *after*
+the Broker has processed the event.
+
+#+begin_example
+             Backtest / Live Event Runner
+                       |
+                  ordered bar
+                       |
+                       v
+              Shared Broker.onBar()        (once)
+                  |        |
+           execute Orders  mark Accounts
+                       |
+                       v
+             Trader A.strategyOnBar()
+             Trader B.strategyOnBar()
+                       |
+                       v
+               Broker.submit()              (accountID on each Order)
+#+end_example
+
+This diagram is a *possible* extension, not a requirement to create the
+coordinator now. Strategy dispatch order, a shared-account risk budget,
+conflicting intents, fairness, and multi-instrument timestamp alignment
+must be explicitly resolved before multi-Trader operation is enabled.
+
+The first useful multi-Trader validation would use two Strategies bound
+to different Accounts on the *same* Broker, one shared replay, and verify
+that the Broker receives each bar once, each Order updates only its own
+Account, and neither Strategy sees its bar-N Order filled on bar N. A
+second case should test Strategies sharing one Account and the policy
+for conflicting signals and pending-order margin reservations.
+
+* Live execution and replay requirements
+
+Live broker fills, rejections, margin closeouts, and other notifications
+may arrive independently of bars. The simulator must converge with live
+handling at the *same Order update and Account apply* boundary, without
+requiring live fills to wait for a bar. Preserve execution IDs,
+idempotency, serialization/reconciliation of Account changes, and
+repeatable event ordering before enabling concurrent execution.
+
+The historical bar runner and live event runner need not have the same
+upstream input mechanisms; they must preserve the same financial and
+Order lifecycle semantics.
+
+* Explicitly deferred
+
+- Multi-Trader or multi-Strategy composition and dispatch API.
+- Broker event loop / concurrency controls.
+- Shared-Account strategy arbitration and exposure reconciliation.
+- Margin warning/closeout policy and forced-liquidation behavior.
+- Intrabar ordering, stop execution, slippage, live reconciliation, and
+  duplicate external execution notifications.
+
+* Review triggers
+
+Revisit this note before:
+- allowing two Traders to share one simulated Broker;
+- adding a second independent replay loop to one Broker;
+- dispatching bars or fills concurrently;
+- introducing live notifications that can interleave with replay;
+- changing where =broker.onBar()= is called.
+
+The governing rule is simple: *a shared Broker has one market-event
+advancement path, regardless of how many Strategies consume that event*.
