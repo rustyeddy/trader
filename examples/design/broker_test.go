@@ -515,3 +515,39 @@ func TestBroker_OnBar_AppliesFillsToTheOrdersOwnAccount(t *testing.T) {
 	assert.Empty(t, one.positions)
 	assert.Contains(t, two.positions, "EURUSD")
 }
+
+func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	br.closedOut = map[string]time.Time{"a": testStart}
+
+	o := brokerOpen("a")
+	err := br.submit(context.Background(), o)
+
+	require.ErrorIs(t, err, errCloseoutGuard)
+	assert.True(t, isRejection(err))
+	assert.Empty(t, br.orders["EURUSD"])
+
+	// A close is still allowed, and so is an open on a later bar.
+	cl := &order{Time: testStart, accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder}
+	require.NoError(t, br.submit(context.Background(), cl))
+	later := brokerOpen("a")
+	later.Time = testStart.AddDate(0, 0, 1)
+	require.NoError(t, br.submit(context.Background(), later))
+}
+
+func TestBroker_OnBar_CloseoutBlocksTheStrategyOpenOnTheSameBar(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	act.balance = usd(1000)
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000,
+		entryPrice: eurusd1_10, markPrice: eurusd1_10}
+	b := fillBar(1, 90000) // a crash: the account is liquidated on this bar
+
+	require.NoError(t, br.onBar(context.Background(), b))
+	require.Empty(t, act.positions, "liquidated")
+
+	o := brokerOpen("a")
+	o.Time = b.Time
+	require.ErrorIs(t, br.submit(context.Background(), o), errCloseoutGuard)
+}

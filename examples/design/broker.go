@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"time"
 )
 
 type broker struct {
@@ -22,6 +23,11 @@ type broker struct {
 	// By default it is progressive: one position at a time, as the closeout
 	// policy chooses, until the margin policy no longer demands more.
 	completeCloseout bool
+
+	// closedOut is the bar time of each account's latest margin closeout. A
+	// closeout is not undone by a new open made on the same observation; later
+	// re-entry rules are a future policy.
+	closedOut map[string]time.Time
 }
 
 var brokers map[string]*broker
@@ -68,6 +74,13 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	act, ok := br.getAccount(o.accountID)
 	if !ok {
 		return fmt.Errorf("submit to broker %s: %w: %s", br.id, errUnknownAccount, o.accountID)
+	}
+
+	if o.action == open || o.action == add {
+		if at, ok := br.closedOut[o.accountID]; ok && !o.Time.After(at) {
+			return fmt.Errorf("submit to broker %s: %w: account %s at %s",
+				br.id, errCloseoutGuard, o.accountID, at.Format(time.DateOnly))
+		}
 	}
 
 	reserved, err := br.reservedMargin(o.accountID)
@@ -200,6 +213,10 @@ func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error 
 
 	slog.Warn("margin closeout", "broker", br.id, "account", act.id, "time", b.Time)
 	br.cancelOpens(act.id, "cancelled by margin closeout")
+	if br.closedOut == nil {
+		br.closedOut = make(map[string]time.Time)
+	}
+	br.closedOut[act.id] = b.Time
 	for status == marginLiquidate || br.completeCloseout {
 		pos, err := pick(act)
 		if err != nil {

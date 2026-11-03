@@ -110,6 +110,15 @@ Given: An earlier Open was rejected.
 When: A fresh qualifying signal occurs according to strategy rules.
 Then: A fresh Open is allowed. Do not globally suppress reentry forever.
 
+** DONE Margin closeout is not undone on the same bar
+=TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout=,
+=TestBroker_OnBar_CloseoutBlocksTheStrategyOpenOnTheSameBar=
+Given: The broker liquidated an account on bar T.
+When: The strategy opens on bar T (the same observation).
+Then: The open is rejected with =errCloseoutGuard= and the run continues.
+And: A close on bar T, and an open on a later bar, are accepted. The guard is
+not a permanent lock; re-entry rules are a later policy.
+
 ** TODO Accepted order is not an executed position
 Given: Open emitted and an order is pending, unfilled or rejected.
 Then: Snapshot must report actual positions and pending orders separately

@@ -21,8 +21,13 @@ var errOrderTooSmall = errors.New("order size below the minimum")
 func isRejection(err error) bool {
 	return errors.Is(err, errInsufficientMargin) ||
 		errors.Is(err, errOrderTooSmall) ||
-		errors.Is(err, errNoPosition)
+		errors.Is(err, errNoPosition) ||
+		errors.Is(err, errCloseoutGuard)
 }
+
+// errCloseoutGuard is an expected outcome: the account was margin-closed-out on
+// this bar, so a strategy open on the same observation is refused.
+var errCloseoutGuard = errors.New("margin closeout on this bar")
 
 // errNoPosition is also an expected outcome: a close arrives for a position
 // that never opened (its open was rejected), so there is nothing to close.

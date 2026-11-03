@@ -140,6 +140,9 @@ records the result. See =order-tests.org= for the scenarios.
   submitted order and the trader records the result as an open position or a
   closed trade (the order moves to filled or rejected).
 - [X] Order history is stamped with simulated time: =order.timestamp= is the bar being processed (set by the trader; the broker will set it on fills). A live clock can set it the same way.
+- [X] Margin closeout: =marginPolicy= and =closeoutPolicy= (progressive or complete); a liquidation is a closing order with =reasonMarginCloseout= that ends filled.
+- [X] Closeout guard: after a margin closeout the broker refuses =open= and =add= for that account on the same bar (=errCloseoutGuard=, an expected rejection); closes and later bars are unaffected. Re-entry rules are a later policy.
+- [ ] Record the broker's own liquidation orders (a closeouts list or journal entry); stop-loss enforcement (=reasonStopLoss=); limit and stop triggers.
 ** TODO Market data acquisition and storage
 - Download and validate provider observations; convert to canonical.
 - Detect/report coverage and expected closures vs unexpected gaps.
