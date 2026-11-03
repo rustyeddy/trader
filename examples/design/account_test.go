@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -88,7 +87,7 @@ func TestAccount_Size_Open(t *testing.T) {
 				act.riskPct = tt.riskPct
 				o := openOrderAt("EURUSD", d, eurusd1_10)
 
-				require.NoError(t, act.size(o))
+				require.NoError(t, act.size(o, 0))
 
 				assert.Equal(t, tt.wantUnits, o.units)
 				assert.Equal(t, stateSized, o.state)
@@ -105,7 +104,7 @@ func TestAccount_Size_Open_NeedsAStopFromTheStrategy(t *testing.T) {
 		o := openOrderAt("EURUSD", d, eurusd1_10)
 		o.stopLoss = 0 // the strategy did not set one
 
-		err := newAccount("a", usd(10000)).size(o)
+		err := newAccount("a", usd(10000)).size(o, 0)
 
 		require.ErrorIs(t, err, errInvalidOrder, d.String())
 		assert.Contains(t, err.Error(), "needs a stop loss")
@@ -120,11 +119,11 @@ func TestAccount_Size_Open_NeedsAStopFromTheStrategy(t *testing.T) {
 func TestAccount_Size_Open_NeverChangesTheStrategysStop(t *testing.T) {
 	captureLogs(t)
 	l := openOrderAt("EURUSD", long, eurusd1_10)
-	require.NoError(t, newAccount("a", usd(10000)).size(l))
+	require.NoError(t, newAccount("a", usd(10000)).size(l, 0))
 	assert.Equal(t, price(108900), l.stopLoss)
 
 	s := openOrderAt("EURUSD", short, eurusd1_10)
-	require.NoError(t, newAccount("a", usd(10000)).size(s))
+	require.NoError(t, newAccount("a", usd(10000)).size(s, 0))
 	assert.Equal(t, price(111100), s.stopLoss)
 }
 
@@ -134,13 +133,13 @@ func TestAccount_Size_Open_UsesAStrategyStop(t *testing.T) {
 	// A 2% stop (2200 points) halves the units compared with the default 1%.
 	l := openOrderAt("EURUSD", long, eurusd1_10)
 	l.stopLoss = 107800
-	require.NoError(t, newAccount("a", usd(10000)).size(l))
+	require.NoError(t, newAccount("a", usd(10000)).size(l, 0))
 	assert.Equal(t, int64(4545), l.units) // 4545.45
 	assert.Equal(t, price(107800), l.stopLoss, "the strategy's stop is kept")
 
 	s := openOrderAt("EURUSD", short, eurusd1_10)
 	s.stopLoss = 112200
-	require.NoError(t, newAccount("a", usd(10000)).size(s))
+	require.NoError(t, newAccount("a", usd(10000)).size(s, 0))
 	assert.Equal(t, int64(4545), s.units)
 	assert.Equal(t, price(112200), s.stopLoss)
 }
@@ -158,7 +157,7 @@ func TestAccount_Size_Open_StopOnTheWrongSideIsAnInvalidOrder(t *testing.T) {
 	} {
 		o := openOrderAt("EURUSD", tt.d, eurusd1_10)
 		o.stopLoss = tt.stop
-		err := newAccount("a", usd(10000)).size(o)
+		err := newAccount("a", usd(10000)).size(o, 0)
 
 		require.ErrorIs(t, err, errInvalidOrder, "%s stop %d", tt.d, tt.stop)
 		assert.False(t, isRejection(err), "a bad stop is a strategy bug, not a trading outcome")
@@ -172,7 +171,7 @@ func TestAccount_Size_Open_NeedsAReferencePrice(t *testing.T) {
 	captureLogs(t)
 	o := openOrderAt("EURUSD", long, 0)
 
-	err := newAccount("a", usd(10000)).size(o)
+	err := newAccount("a", usd(10000)).size(o, 0)
 
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Equal(t, stateRequested, o.state)
@@ -182,7 +181,7 @@ func TestAccount_Size_Open_WithoutMarginIsRejected(t *testing.T) {
 	captureLogs(t)
 	for _, bal := range []money{0, -usd(10)} {
 		o := openOrderAt("EURUSD", long, eurusd1_10)
-		err := newAccount("a", bal).size(o)
+		err := newAccount("a", bal).size(o, 0)
 
 		require.ErrorIs(t, err, errInsufficientMargin)
 		assert.True(t, isRejection(err))
@@ -217,7 +216,7 @@ func TestAccount_Size_Open_MarginShortfallReducesUnitsInsteadOfRejecting(t *test
 	// The risk budget alone would allow 9090 units, but 9090 units at 1.10
 	// need 19998 of margin against 10000 available. The margin covers 4545.
 	o := openOrderAt("TESTMR", long, eurusd1_10)
-	require.NoError(t, newAccount("a", usd(10000)).size(o))
+	require.NoError(t, newAccount("a", usd(10000)).size(o, 0))
 
 	assert.Equal(t, int64(4545), o.units, "floor(10000 / (1.10 * 2))")
 	assert.Equal(t, stateSized, o.state)
@@ -233,7 +232,7 @@ func TestAccount_Size_Open_MarginLimitsAGenerousRiskBudget(t *testing.T) {
 	a.riskPct = rate(rateScale)
 	o := openOrderAt("EURUSD", long, eurusd1_10)
 
-	require.NoError(t, a.size(o))
+	require.NoError(t, a.size(o, 0))
 
 	assert.Equal(t, int64(454545), o.units)
 	mr := instruments["EURUSD"].marginRate
@@ -246,7 +245,7 @@ func TestAccount_Size_Open_RiskLimitWinsWhenItIsSmaller(t *testing.T) {
 	// The default 1% risk (9090 units) is far below what 50:1 margin allows
 	// (454545), so margin plays no part.
 	o := openOrderAt("EURUSD", long, eurusd1_10)
-	require.NoError(t, newAccount("a", usd(10000)).size(o))
+	require.NoError(t, newAccount("a", usd(10000)).size(o, 0))
 	assert.Equal(t, int64(9090), o.units)
 }
 
@@ -265,14 +264,14 @@ func TestAccount_Size_Open_MarginUnitsRoundDown(t *testing.T) {
 
 	// 1000 units at 1.10000 need exactly $22 of margin: all 1000 fit.
 	o := openOrderAt("TESTCEIL", long, 110000)
-	require.NoError(t, newAcct().size(o))
+	require.NoError(t, newAcct().size(o, 0))
 	assert.Equal(t, int64(1000), o.units)
 
 	// At 1.10001 the margin covers 999.99 units, and 1000 would need $22.0002,
 	// which rounds up to the next cent, $22.01. The size is 999 (rounded down), not 1000 and not
 	// a rejection.
 	o = openOrderAt("TESTCEIL", long, 110001)
-	require.NoError(t, newAcct().size(o))
+	require.NoError(t, newAcct().size(o, 0))
 	assert.Equal(t, int64(999), o.units)
 	assert.LessOrEqual(t, requiredMargin(999, 110001, inst.marginRate), int64(usd(22)))
 	assert.Equal(t, int64(usd(22))+1, requiredMargin(1000, 110001, inst.marginRate))
@@ -289,7 +288,7 @@ func TestAccount_Size_Open_MarginBelowTheMinimumIsAnInsufficientMarginRejection(
 	a := newAccount("a", usd(10000))
 	a.riskPct = rate(rateScale)
 	o := openOrderAt("TESTMINM", long, eurusd1_10)
-	err := a.size(o)
+	err := a.size(o, 0)
 
 	require.ErrorIs(t, err, errInsufficientMargin)
 	assert.NotErrorIs(t, err, errOrderTooSmall)
@@ -307,7 +306,7 @@ func TestAccount_Size_Open_MarginLimitThenUnitStep(t *testing.T) {
 	registerInstrument(t, inst)
 
 	o := openOrderAt("TESTSTEPM", long, eurusd1_10) // margin covers 4545
-	require.NoError(t, newAccount("a", usd(10000)).size(o))
+	require.NoError(t, newAccount("a", usd(10000)).size(o, 0))
 	assert.Equal(t, int64(4500), o.units, "rounded down to the step after the margin limit")
 }
 
@@ -318,7 +317,7 @@ func TestAccount_Size_Open_InstrumentWithoutAMarginRateIsAConfigurationError(t *
 	registerInstrument(t, inst)
 
 	o := openOrderAt("TESTNOMR", long, eurusd1_10)
-	err := newAccount("a", usd(10000)).size(o)
+	err := newAccount("a", usd(10000)).size(o, 0)
 
 	require.ErrorIs(t, err, errInstrumentConfig)
 	assert.False(t, isRejection(err), "a missing margin rate is a setup bug, not a trading outcome")
@@ -334,14 +333,14 @@ func TestAccount_Size_Open_RespectsInstrumentLimits(t *testing.T) {
 	step.unitStep = 100
 	registerInstrument(t, step)
 	o := openOrderAt("TESTSTEP", long, eurusd1_10)
-	require.NoError(t, newAccount("a", usd(10000)).size(o))
+	require.NoError(t, newAccount("a", usd(10000)).size(o, 0))
 	assert.Equal(t, int64(9000), o.units, "9090 rounded down to the 100 step")
 
 	capped := testInstrument("TESTMAX")
 	capped.maxUnits = 5000
 	registerInstrument(t, capped)
 	o = openOrderAt("TESTMAX", long, eurusd1_10)
-	require.NoError(t, newAccount("a", usd(10000)).size(o))
+	require.NoError(t, newAccount("a", usd(10000)).size(o, 0))
 	assert.Equal(t, int64(5000), o.units, "capped at the maximum")
 
 	both := testInstrument("TESTBOTH")
@@ -349,7 +348,7 @@ func TestAccount_Size_Open_RespectsInstrumentLimits(t *testing.T) {
 	both.unitStep = 300
 	registerInstrument(t, both)
 	o = openOrderAt("TESTBOTH", long, eurusd1_10)
-	require.NoError(t, newAccount("a", usd(10000)).size(o))
+	require.NoError(t, newAccount("a", usd(10000)).size(o, 0))
 	assert.Equal(t, int64(4800), o.units, "the cap is also rounded down to the step")
 }
 
@@ -358,7 +357,7 @@ func TestAccount_Size_Open_BelowTheMinimumIsRejected(t *testing.T) {
 
 	t.Run("budget buys less than one unit", func(t *testing.T) {
 		o := openOrderAt("EURUSD", long, eurusd1_10)
-		err := newAccount("a", usd(1)).size(o) // 1/1.1 = 0.9 units
+		err := newAccount("a", usd(1)).size(o, 0) // 1/1.1 = 0.9 units
 
 		require.ErrorIs(t, err, errOrderTooSmall)
 		assert.True(t, isRejection(err))
@@ -372,7 +371,7 @@ func TestAccount_Size_Open_BelowTheMinimumIsRejected(t *testing.T) {
 		registerInstrument(t, inst)
 
 		o := openOrderAt("TESTMIN", long, eurusd1_10)
-		err := newAccount("a", usd(10000)).size(o) // 9090 < 10000
+		err := newAccount("a", usd(10000)).size(o, 0) // 9090 < 10000
 
 		require.ErrorIs(t, err, errOrderTooSmall)
 		assert.Contains(t, err.Error(), "9090 units, minimum 10000")
@@ -380,7 +379,7 @@ func TestAccount_Size_Open_BelowTheMinimumIsRejected(t *testing.T) {
 	t.Run("zero risk budget", func(t *testing.T) {
 		a := newAccount("a", usd(10000))
 		a.riskPct = 0
-		require.ErrorIs(t, a.size(openOrderAt("EURUSD", long, eurusd1_10)), errOrderTooSmall)
+		require.ErrorIs(t, a.size(openOrderAt("EURUSD", long, eurusd1_10), 0), errOrderTooSmall)
 	})
 }
 
@@ -400,7 +399,7 @@ func TestAccount_Size_Open_RiskIsBoundedAndTight(t *testing.T) {
 					o := openOrderAt("EURUSD", d, p)
 					act := newAccount("a", bal)
 					act.riskPct = rk
-					err := act.size(o)
+					err := act.size(o, 0)
 
 					// loss at the stop, in point-units, vs the budget, both scaled
 					// by rateScale*priceScale so the comparison is exact.
@@ -446,7 +445,7 @@ func TestAccount_Size_CloseIsTheWholePositionAndNeedsNoMargin(t *testing.T) {
 	captureLogs(t)
 	o := &order{Time: testStart, instrument: "EURUSD", action: close, orderType: marketOrder}
 
-	require.NoError(t, newAccount("a", 0).size(o))
+	require.NoError(t, newAccount("a", 0).size(o, 0))
 
 	assert.Zero(t, o.units)
 	assert.Zero(t, o.stopLoss)
@@ -458,7 +457,7 @@ func TestAccount_Size_AddReduceAndNoActionAreUnsupported(t *testing.T) {
 	captureLogs(t)
 	for _, a := range []action{add, reduce, noAction, action(99)} {
 		o := &order{Time: testStart, instrument: "EURUSD", action: a}
-		require.ErrorIs(t, newAccount("a", usd(1000)).size(o), errUnsupportedAction, a.String())
+		require.ErrorIs(t, newAccount("a", usd(1000)).size(o, 0), errUnsupportedAction, a.String())
 		assert.Equal(t, stateRequested, o.state)
 		assert.Empty(t, o.history, "an unsupported action changes nothing")
 	}
@@ -501,7 +500,7 @@ func TestAccount_Size_UnknownInstrumentIsAnErrorNotARejection(t *testing.T) {
 	captureLogs(t)
 	o := &order{Time: testStart, instrument: "NOPE", direction: long, action: open}
 
-	err := newAccount("a", usd(1000)).size(o)
+	err := newAccount("a", usd(1000)).size(o, 0)
 
 	require.ErrorIs(t, err, errUnknownInstrument)
 	assert.NotErrorIs(t, err, errInsufficientMargin)
@@ -563,18 +562,6 @@ func TestAccount_UsedMargin(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, money(3), used)
 	})
-	t.Run("a submitted open reserves its margin until it fills", func(t *testing.T) {
-		a := newAccount("a", usd(1))
-		a.orders["EURUSD"] = []*order{
-			{instrument: "EURUSD", action: open, units: 10000, price: 110000, state: stateSubmitted}, // $220
-			{instrument: "EURUSD", action: close, state: stateSubmitted},                             // frees, never reserves
-			{instrument: "EURUSD", action: open, units: 99999, price: 110000, state: stateFilled},    // already a position
-			{instrument: "EURUSD", action: open, units: 99999, price: 110000, state: stateRejected},
-		}
-		used, err := a.usedMargin()
-		require.NoError(t, err)
-		assert.Equal(t, usd(220), used)
-	})
 	t.Run("an unknown instrument is an error, not a zero", func(t *testing.T) {
 		a := newAccount("a", usd(1))
 		a.positions["XXXYYY"] = &position{instrument: "XXXYYY", units: 1, markPrice: 1}
@@ -601,22 +588,25 @@ func TestAccount_Size_Open_UsedMarginReducesTheMarginLimit(t *testing.T) {
 	}
 
 	free := openOrderAt("EURUSD", long, eurusd1_10)
-	require.NoError(t, newAcct().size(free))
+	require.NoError(t, newAcct().size(free, 0))
 	assert.Equal(t, int64(454545), free.units, "floor($10000 / (1.10 * 2%))")
 
 	// 100000 units at 1.00 hold $2000 of margin, leaving $8000.
 	a := newAcct()
 	a.positions["TESTUM"] = &position{instrument: "TESTUM", direction: long, units: 100000, entryPrice: 100000, markPrice: 100000}
 	held := openOrderAt("EURUSD", long, eurusd1_10)
-	require.NoError(t, a.size(held))
+	require.NoError(t, a.size(held, 0))
 	assert.Equal(t, int64(363636), held.units, "floor($8000 / (1.10 * 2%))")
 
-	// A submitted open that has not filled yet holds its margin too.
-	b := newAcct()
-	b.orders["TESTUM"] = []*order{{instrument: "TESTUM", action: open, units: 100000, price: 100000, state: stateSubmitted}}
+	// Margin the broker reserves for submitted opens that have not filled
+	// counts the same way.
 	reserved := openOrderAt("EURUSD", long, eurusd1_10)
-	require.NoError(t, b.size(reserved))
+	require.NoError(t, newAcct().size(reserved, usd(2000)))
 	assert.Equal(t, int64(363636), reserved.units)
+
+	// Reserving all of it leaves nothing.
+	none := openOrderAt("EURUSD", long, eurusd1_10)
+	require.ErrorIs(t, newAcct().size(none, usd(10000)), errInsufficientMargin)
 }
 
 func TestAccount_Size_Open_AllMarginInUseRejects(t *testing.T) {
@@ -627,7 +617,7 @@ func TestAccount_Size_Open_AllMarginInUseRejects(t *testing.T) {
 	a.positions["TESTUM"] = &position{instrument: "TESTUM", direction: long, units: 500000, entryPrice: 100000, markPrice: 100000}
 	o := openOrderAt("EURUSD", long, eurusd1_10)
 
-	err := a.size(o)
+	err := a.size(o, 0)
 
 	require.ErrorIs(t, err, errInsufficientMargin)
 	assert.Equal(t, stateRejected, o.state)
@@ -639,7 +629,7 @@ func TestAccount_Size_Open_UnknownInstrumentInUseIsNotARejection(t *testing.T) {
 	a := newAccount("a", usd(10000))
 	a.positions["XXXYYY"] = &position{instrument: "XXXYYY", units: 1, markPrice: 1}
 
-	err := a.size(openOrderAt("EURUSD", long, eurusd1_10))
+	err := a.size(openOrderAt("EURUSD", long, eurusd1_10), 0)
 
 	require.ErrorIs(t, err, errUnknownInstrument)
 	assert.False(t, isRejection(err))
@@ -715,7 +705,7 @@ func TestAccount_Size_Open_RiskIsMeasuredAgainstEquity(t *testing.T) {
 	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 10000, entryPrice: 150000, markPrice: 151000}
 	o := openOrderAt("EURUSD", long, eurusd1_10)
 
-	require.NoError(t, a.size(o))
+	require.NoError(t, a.size(o, 0))
 
 	assert.Equal(t, int64(1000), o.units)
 }
@@ -727,37 +717,38 @@ func TestAccount_Size_Open_UnrealizedLossShrinksTheRiskBudget(t *testing.T) {
 	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 10000, entryPrice: 150000, markPrice: 149000}
 	o := openOrderAt("EURUSD", long, eurusd1_10)
 
-	require.NoError(t, a.size(o))
+	require.NoError(t, a.size(o, 0))
 
 	assert.Equal(t, int64(818), o.units, "floor(900 / 1.1)")
 }
 
-func TestAccount_OnBar_MarksThePositionAtTheBarClose(t *testing.T) {
-	captureLogs(t)
-	br, act := newFillBroker()
-	ctx := context.Background()
-	submittedOrder(t, br, open, long, 100)
+func TestAccount_Mark_ValuesThePositionAtTheBarClose(t *testing.T) {
+	act := newAccount("a", usd(1000))
+	pos := &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000, markPrice: 110000}
+	act.positions["EURUSD"] = pos
 
-	// The fill bar opens at 1.115 and closes 100 points higher.
-	require.NoError(t, act.onBar(ctx, fillBar(1, 111500)))
-	pos := act.positions["EURUSD"]
-	require.NotNil(t, pos)
-	assert.Equal(t, price(111500), pos.entryPrice)
-	assert.Equal(t, price(111600), pos.markPrice, "valued at the bar's close, after the fill at its open")
+	act.mark(fillBar(1, 111500)) // closes at 111600
+	assert.Equal(t, price(111600), pos.markPrice)
 
-	require.NoError(t, act.onBar(ctx, fillBar(2, 112000)))
-	assert.Equal(t, price(112100), pos.markPrice)
-
-	other := fillBar(3, 90000)
+	other := fillBar(2, 90000)
 	other.instrument = "GBPUSD"
-	require.NoError(t, act.onBar(ctx, other))
-	assert.Equal(t, price(112100), pos.markPrice, "another instrument's bar does not move the mark")
+	act.mark(other)
+	assert.Equal(t, price(111600), pos.markPrice, "another instrument's bar does not move the mark")
+
+	act.mark(bar{instrument: "AUDUSD"}) // no position: nothing to value
+}
+
+func TestAccount_SetBalance(t *testing.T) {
+	act := newAccount("a", usd(1))
+	act.setBalance(usd(233))
+	assert.Equal(t, usd(233), act.balance)
 }
 
 func TestAccount_ApplyFill_OpenIsMarkedAtTheFillPrice(t *testing.T) {
 	act := newAccount("a", usd(1000))
 
-	require.NoError(t, act.applyFill(&order{instrument: "EURUSD", direction: short, action: open, units: 5, fillPrice: 110000}))
+	_, err := act.applyFill(&order{instrument: "EURUSD", direction: short, action: open, units: 5, fillPrice: 110000})
+	require.NoError(t, err)
 
 	assert.Equal(t, price(110000), act.positions["EURUSD"].markPrice)
 	assert.Zero(t, mustPnL(t, act), "no profit or loss the moment it opens")
@@ -806,17 +797,17 @@ func TestPosition_RealizedPnL_Overflow(t *testing.T) {
 	require.ErrorIs(t, err, errSizeOverflow)
 }
 
-func TestAccount_ApplyFill_CloseRealizesPnLIntoTheBalance(t *testing.T) {
+func TestAccount_ApplyFill_CloseReturnsThePnLAndLeavesTheBalanceToTheBroker(t *testing.T) {
 	tests := []struct {
 		name string
 		dir  direction
 		exit price
 		want money
 	}{
-		{"long win", long, 111000, usd(10100)},
-		{"long loss", long, 109000, usd(9900)},
-		{"short win", short, 109000, usd(10100)},
-		{"short loss", short, 111000, usd(9900)},
+		{"long win", long, 111000, usd(100)},
+		{"long loss", long, 109000, -usd(100)},
+		{"short win", short, 109000, usd(100)},
+		{"short loss", short, 111000, -usd(100)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -824,9 +815,11 @@ func TestAccount_ApplyFill_CloseRealizesPnLIntoTheBalance(t *testing.T) {
 			act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: tt.dir, units: 10000, entryPrice: 110000}
 			cl := &order{instrument: "EURUSD", action: close, fillPrice: tt.exit}
 
-			require.NoError(t, act.applyFill(cl))
+			pnl, err := act.applyFill(cl)
 
-			assert.Equal(t, tt.want, act.balance)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, pnl)
+			assert.Equal(t, usd(10000), act.balance, "the broker applies the P/L to the balance")
 			assert.Empty(t, act.positions)
 		})
 	}
@@ -835,8 +828,11 @@ func TestAccount_ApplyFill_CloseRealizesPnLIntoTheBalance(t *testing.T) {
 func TestAccount_ApplyFill_OpenAndRejectedCloseLeaveTheBalanceAlone(t *testing.T) {
 	act := newAccount("a", usd(10000))
 
-	require.NoError(t, act.applyFill(&order{instrument: "EURUSD", direction: long, action: open, units: 5, fillPrice: 110000}))
-	require.ErrorIs(t, act.applyFill(&order{instrument: "GBPUSD", action: close, fillPrice: 110000}), errNoPosition)
+	pnl, err := act.applyFill(&order{instrument: "EURUSD", direction: long, action: open, units: 5, fillPrice: 110000})
+	require.NoError(t, err)
+	assert.Zero(t, pnl, "an open realizes nothing")
+	_, err = act.applyFill(&order{instrument: "GBPUSD", action: close, fillPrice: 110000})
+	require.ErrorIs(t, err, errNoPosition)
 
 	assert.Equal(t, usd(10000), act.balance)
 }
@@ -897,7 +893,8 @@ func TestAccount_ApplyFill_BalanceOverflowLeavesPositionIntact(t *testing.T) {
 			pos := &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000}
 			a.positions["EURUSD"] = pos
 			o := &order{instrument: "EURUSD", action: close, fillPrice: tc.exit}
-			require.ErrorIs(t, a.applyFill(o), errSizeOverflow)
+			_, err := a.applyFill(o)
+			require.ErrorIs(t, err, errSizeOverflow)
 			assert.Equal(t, tc.balance, a.balance)
 			assert.Same(t, pos, a.positions["EURUSD"])
 			assert.Zero(t, o.units, "failed close must not change order units")

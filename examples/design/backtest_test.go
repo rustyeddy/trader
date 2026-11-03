@@ -156,7 +156,7 @@ func TestBacktestRun_FatalErrorIsNotLoggedAsRejection(t *testing.T) {
 
 	require.Error(t, err)
 	assert.NotContains(t, logs.String(), "order rejected")
-	assert.Equal(t, stateSized, o.state, "a fatal error is not recorded as a rejection")
+	assert.Equal(t, stateRequested, o.state, "a fatal error is not recorded as a rejection")
 }
 
 func TestBacktestRun_DataErrorStopsRun(t *testing.T) {

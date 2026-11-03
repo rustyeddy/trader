@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -16,10 +15,7 @@ type account struct {
 	balance money
 	riskPct rate // fraction of the account risked per trade
 
-	orders    map[string][]*order // submitted orders awaiting execution, by instrument
 	positions map[string]*position
-
-	broker *broker
 }
 
 func newAccount(id string, balance money) *account {
@@ -27,7 +23,6 @@ func newAccount(id string, balance money) *account {
 		id:        id,
 		balance:   balance,
 		riskPct:   rateOnePercent, // default risk per trade
-		orders:    make(map[string][]*order),
 		positions: make(map[string]*position),
 	}
 }
@@ -73,13 +68,12 @@ func (act *account) marginAvailable() (money, error) {
 	if err != nil {
 		return 0, err
 	}
-	return eq - used, nil
+	return checkedAdd(eq, -used) // used is never negative
 }
 
 // usedMargin is the margin held against open positions, valued at their
-// latest mark, plus the margin reserved by opening orders that are submitted
-// but not yet filled. Without the reserve, orders sized before they fill would
-// each see the same margin available.
+// latest mark. Margin reserved by orders that are submitted but not yet filled
+// is the broker's to know, since it holds the orders; it passes that to size.
 //
 // TODO: the margin is in the quote currency, assumed to be the account
 // currency (USD); see moneyScale.
@@ -90,18 +84,8 @@ func (act *account) usedMargin() (money, error) {
 		if err != nil {
 			return 0, err
 		}
-		total += m
-	}
-	for _, orders := range act.orders {
-		for _, o := range orders {
-			if o.state != stateSubmitted || o.action != open {
-				continue
-			}
-			m, err := marginFor(o.instrument, o.units, o.price)
-			if err != nil {
-				return 0, err
-			}
-			total += m
+		if total, err = checkedAdd(total, m); err != nil {
+			return 0, fmt.Errorf("used margin total: %w", err)
 		}
 	}
 	return total, nil
@@ -151,7 +135,7 @@ var errUnsupportedAction = errors.New("action not supported yet")
 //     positions exist.
 //   - add, reduce and anything else: errUnsupportedAction until their size
 //     rules are defined.
-func (act *account) size(o *order) error {
+func (act *account) size(o *order, reserved money) error {
 	inst, ok := getInstrument(o.instrument)
 	if !ok {
 		return fmt.Errorf("size %s: %w: %q", o.action, errUnknownInstrument, o.instrument)
@@ -159,7 +143,7 @@ func (act *account) size(o *order) error {
 
 	switch o.action {
 	case open:
-		if err := act.sizeOpen(o, inst); err != nil {
+		if err := act.sizeOpen(o, inst, reserved); err != nil {
 			return err
 		}
 	case close:
@@ -179,7 +163,11 @@ func (act *account) size(o *order) error {
 //
 //	riskUnits   = floor(equity * riskPct * priceScale / (rateScale * stopDistance))
 //	marginUnits = floor(marginAvailable * priceScale * rateScale / (price * marginRate))
-//	marginAvailable = equity - usedMargin
+//	marginAvailable = equity - usedMargin - reserved
+//
+// reserved is the margin the broker holds for this account's submitted opens
+// that have not filled yet; without it, orders sized before they fill would
+// each see the same margin available.
 //
 // riskUnits is the most that loses at most riskPct of equity if stopped
 // out; marginUnits is the most whose margin requirement (units * price *
@@ -191,9 +179,13 @@ func (act *account) size(o *order) error {
 // its maximum. Only if the result is below the instrument's minimum is the
 // order rejected: with errInsufficientMargin when margin was the limit, and
 // with errOrderTooSmall when the risk budget was.
-func (act *account) sizeOpen(o *order, inst *instrument) error {
+func (act *account) sizeOpen(o *order, inst *instrument, reserved money) error {
 	margin, err := act.marginAvailable()
 	if err != nil {
+		return fmt.Errorf("size open: %w", err)
+	}
+	// held by the broker's submitted opens that have not filled (reserved >= 0)
+	if margin, err = checkedAdd(margin, -reserved); err != nil {
 		return fmt.Errorf("size open: %w", err)
 	}
 	if margin <= 0 {
@@ -324,41 +316,32 @@ func muldiv(nums, dens []int64, roundUp bool) (int64, error) {
 	return q.Int64(), nil
 }
 
-// onBar lets the broker execute the orders waiting on this bar's instrument.
-// Orders that are no longer submitted (filled or rejected) leave the list.
-func (a *account) onBar(ctx context.Context, b bar) error {
-	pending := append([]*order(nil), a.orders[b.instrument]...)
-
-	for _, o := range pending {
-		if err := a.broker.processOrder(ctx, b, o); err != nil {
-			return err
-		}
-	}
-
-	// Value the open position at this bar's close, after any fill on its open.
+// mark values the open position in b's instrument at the bar's close. The
+// broker calls it after the bar's fills, so a position opened at the bar's open
+// is valued at its close.
+func (a *account) mark(b bar) {
 	if pos := a.positions[b.instrument]; pos != nil {
 		pos.markPrice = b.c
 	}
-
-	waiting := a.orders[b.instrument][:0]
-	for _, o := range a.orders[b.instrument] {
-		if o.state == stateSubmitted {
-			waiting = append(waiting, o)
-		}
-	}
-	a.orders[b.instrument] = waiting
-	return nil
 }
 
-// applyFill updates the instrument's position for a filled order. One position
-// per instrument (netting): an open creates it, a close removes it and the
-// order takes the closed size. Add and reduce wait on the size type.
-func (a *account) applyFill(o *order) error {
+// setBalance is how the broker reports the account's balance after realizing
+// profit or loss.
+func (a *account) setBalance(m money) {
+	a.balance = m
+}
+
+// applyFill updates the instrument's position for a filled order and returns
+// the profit or loss it realized, which is zero unless it closed a position.
+// The broker applies that to the balance. One position per instrument
+// (netting): an open creates it, a close removes it and the order takes the
+// closed size. Add and reduce wait on the size type.
+func (a *account) applyFill(o *order) (money, error) {
 	pos := a.positions[o.instrument]
 	switch o.action {
 	case open:
 		if pos != nil {
-			return fmt.Errorf("%w: %s is already %s", errPositionExists, o.instrument, pos.direction)
+			return 0, fmt.Errorf("%w: %s is already %s", errPositionExists, o.instrument, pos.direction)
 		}
 		a.positions[o.instrument] = &position{
 			instrument: o.instrument,
@@ -367,27 +350,26 @@ func (a *account) applyFill(o *order) error {
 			entryPrice: o.fillPrice,
 			markPrice:  o.fillPrice,
 		}
+		return 0, nil
 	case close:
 		if pos == nil {
-			return fmt.Errorf("%w: %s", errNoPosition, o.instrument)
+			return 0, fmt.Errorf("%w: %s", errNoPosition, o.instrument)
 		}
-
 		pnl, err := pos.realizedPnL(o.fillPrice)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		balance, err := checkedAdd(a.balance, pnl)
-		if err != nil {
-			return fmt.Errorf("close %s balance: %w", o.instrument, err)
+		// Check the balance can take the P/L before the position is touched, so
+		// a failed close leaves the position and the order as they were.
+		if _, err := checkedAdd(a.balance, pnl); err != nil {
+			return 0, fmt.Errorf("close %s balance: %w", o.instrument, err)
 		}
-		a.balance = balance
 		o.units = pos.units
-
 		delete(a.positions, o.instrument)
+		return pnl, nil
 	default:
-		return fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)
+		return 0, fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)
 	}
-	return nil
 }
 
 // realizedPnL is the profit or loss, in cents, of closing the position at exit.

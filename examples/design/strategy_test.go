@@ -351,7 +351,7 @@ func TestEmax_StopsPassAccountSizing(t *testing.T) {
 			continue
 		}
 		o.instrument = "EURUSD" // the test bars are "TEST"; size needs a known instrument
-		require.NoError(t, acct.size(o), "bar %d", i)
+		require.NoError(t, acct.size(o, 0), "bar %d", i)
 		assert.Positive(t, o.units)
 	}
 }

@@ -9,7 +9,8 @@ import (
 type broker struct {
 	id       string
 	accounts map[string]*account
-	seq      int // last order id issued
+	orders   map[string][]*order // submitted orders awaiting execution, by instrument, for every account
+	seq      int                 // last order id issued
 }
 
 var brokers map[string]*broker
@@ -33,7 +34,6 @@ func (br *broker) addAccount(id string, balance money) *account {
 		br.accounts = make(map[string]*account)
 	}
 	act := newAccount(id, balance)
-	act.broker = br
 	br.accounts[id] = act
 	return act
 }
@@ -43,9 +43,10 @@ func (br *broker) getAccount(id string) (*account, bool) {
 	return a, ok
 }
 
-// submit accepts a sized order from the account named in o.accountID, assigns
-// it an id and hands it to the account to await execution. The order is filled
-// (or rejected) on a later bar by processOrder; submit itself never fills.
+// submit has the order's account size it, assigns it an id and queues it to
+// await execution. The order is filled (or rejected) on a later bar by onBar;
+// submit itself never fills. An expected rejection from sizing is returned for
+// the caller to classify; the order has already recorded it.
 func (br *broker) submit(ctx context.Context, o *order) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -56,6 +57,14 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	act, ok := br.getAccount(o.accountID)
 	if !ok {
 		return fmt.Errorf("submit to broker %s: %w: %s", br.id, errUnknownAccount, o.accountID)
+	}
+
+	reserved, err := br.reservedMargin(o.accountID)
+	if err != nil {
+		return fmt.Errorf("submit to broker %s: %w", br.id, err)
+	}
+	if err := act.size(o, reserved); err != nil {
+		return err
 	}
 
 	if o.id == "" {
@@ -73,14 +82,66 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 		"type", o.orderType,
 		"units", o.units)
 	o.record(stateSubmitted, "")
-	act.orders[o.instrument] = append(act.orders[o.instrument], o)
+	if br.orders == nil {
+		br.orders = make(map[string][]*order)
+	}
+	br.orders[o.instrument] = append(br.orders[o.instrument], o)
 	return nil
 }
 
-// processOrder gives a submitted order its chance to execute on bar b. The
-// account calls it at the start of every bar, before the strategy sees the bar,
-// so an order submitted on bar N can first fill on bar N+1 and never on the bar
-// that produced it.
+// reservedMargin is the margin held by the account's submitted opens that have
+// not filled yet, at each order's reference price. Closes reserve nothing.
+func (br *broker) reservedMargin(accountID string) (money, error) {
+	var total money
+	for _, orders := range br.orders {
+		for _, o := range orders {
+			if o.accountID != accountID || o.state != stateSubmitted || o.action != open {
+				continue
+			}
+			m, err := marginFor(o.instrument, o.units, o.price)
+			if err != nil {
+				return 0, err
+			}
+			if total, err = checkedAdd(total, m); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return total, nil
+}
+
+// onBar executes the orders waiting on b's instrument for every account, then
+// values each account's positions at the bar's close. The trader calls it at
+// the start of every bar, before the strategy sees the bar, so an order
+// submitted on bar N can first fill on bar N+1 and never on the bar that
+// produced it. Orders that are no longer submitted (filled or rejected) leave
+// the queue.
+func (br *broker) onBar(ctx context.Context, b bar) error {
+	pending := append([]*order(nil), br.orders[b.instrument]...)
+
+	for _, o := range pending {
+		if err := br.processOrder(ctx, b, o); err != nil {
+			return err
+		}
+	}
+
+	if len(pending) > 0 {
+		waiting := br.orders[b.instrument][:0]
+		for _, o := range br.orders[b.instrument] {
+			if o.state == stateSubmitted {
+				waiting = append(waiting, o)
+			}
+		}
+		br.orders[b.instrument] = waiting
+	}
+
+	for _, act := range br.accounts {
+		act.mark(b)
+	}
+	return nil
+}
+
+// processOrder gives a submitted order its chance to execute on bar b.
 func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -109,7 +170,8 @@ func executionPrice(o *order, b bar) price {
 	return b.o
 }
 
-// fillOrder applies the order to its account's positions at p. A fill that
+// fillOrder applies the order to its account's positions at p and reports any
+// realized profit or loss to the account's balance. A fill that
 // cannot apply (a close with no position) is an expected rejection, recorded
 // on the order; anything else is returned and stops the run.
 func (br *broker) fillOrder(o *order, p price) error {
@@ -119,7 +181,8 @@ func (br *broker) fillOrder(o *order, p price) error {
 	}
 
 	o.fillPrice = p
-	if err := act.applyFill(o); err != nil {
+	pnl, err := act.applyFill(o)
+	if err != nil {
 		if !isRejection(err) {
 			return fmt.Errorf("fill order %s: %w", o.id, err)
 		}
@@ -133,6 +196,11 @@ func (br *broker) fillOrder(o *order, p price) error {
 			"direction", o.direction)
 		return nil
 	}
+	balance, err := checkedAdd(act.balance, pnl)
+	if err != nil { // applyFill checked this before it changed the position
+		return fmt.Errorf("fill order %s: %w", o.id, err)
+	}
+	act.setBalance(balance)
 	o.record(stateFilled, "")
 	return nil
 }

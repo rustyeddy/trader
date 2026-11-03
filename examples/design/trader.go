@@ -46,13 +46,13 @@ type trader struct {
 	strategy strategy
 }
 
-// onBar advances the broker and account to the bar, then lets the strategy
-// react to it. The trader owns the order lifecycle from here: it validates the
-// strategy's order, records it as requested, sizes and submits it, and records
-// an expected rejection without stopping the run.
+// onBar advances the broker (fills and marks) to the bar, then lets the
+// strategy react to it. The trader owns the order lifecycle from here: it
+// validates the strategy's order, records it as requested, has the broker size
+// and queue it, and records an expected rejection without stopping the run.
 func (tr *trader) onBar(ctx context.Context, b bar) error {
-	if err := tr.account.onBar(ctx, b); err != nil {
-		return fmt.Errorf("account on bar %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
+	if err := tr.broker.onBar(ctx, b); err != nil {
+		return fmt.Errorf("broker on bar %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
 	}
 
 	o := tr.strategy.onBar(ctx, b)
@@ -62,7 +62,7 @@ func (tr *trader) onBar(ctx context.Context, b bar) error {
 	return tr.handleOrder(ctx, o)
 }
 
-// handleOrder sizes the order and submits it to the broker. An expected
+// handleOrder submits the order to the broker, which has the account size it. An expected
 // rejection is recorded on the order and is not an error; anything else is
 // returned and stops the run.
 func (tr *trader) handleOrder(ctx context.Context, o *order) error {
@@ -83,10 +83,7 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 	}
 
 	o.record(stateRequested, "")
-	err := tr.account.size(o)
-	if err == nil {
-		err = tr.broker.submit(ctx, o)
-	}
+	err := tr.broker.submit(ctx, o)
 	if isRejection(err) {
 		if o.state != stateRejected { // the rejecting step normally records it
 			o.record(stateRejected, err.Error())
