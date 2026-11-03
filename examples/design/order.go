@@ -48,6 +48,29 @@ const (
 	stateRejected
 )
 
+// orderReason is why the order exists. A liquidation is still an ordinary
+// closing order that ends filled; the reason is what tells it apart in the
+// audit trail.
+type orderReason uint8
+
+const (
+	reasonStrategy       orderReason = iota // the strategy asked for it
+	reasonStopLoss                          // a stop-loss triggered
+	reasonMarginCloseout                    // the broker liquidated the position
+)
+
+func (r orderReason) String() string {
+	switch r {
+	case reasonStrategy:
+		return "strategy"
+	case reasonStopLoss:
+		return "stop loss"
+	case reasonMarginCloseout:
+		return "margin closeout"
+	}
+	return "unknown"
+}
+
 // orderEvent is one entry in an order's history.
 type orderEvent struct {
 	state  orderState
@@ -66,6 +89,7 @@ type order struct {
 	direction  direction
 	action     action
 	orderType  orderType
+	reason     orderReason // zero is reasonStrategy
 
 	price     price
 	fillPrice price
@@ -99,6 +123,9 @@ func (o *order) record(s orderState, reason string) {
 		attrs = append(attrs, "from", from)
 	}
 	attrs = append(attrs, "to", s)
+	if o.reason != reasonStrategy {
+		attrs = append(attrs, "cause", o.reason)
+	}
 	if reason != "" {
 		attrs = append(attrs, "reason", reason)
 	}

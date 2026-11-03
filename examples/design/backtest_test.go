@@ -319,6 +319,9 @@ func actions(orders []*order) (as []action) {
 func newRejectFirstOpen(t *testing.T) (*trader, *rejectFirstOpen) {
 	t.Helper()
 	tr := newTestTrader()
+	// These price series swing far enough to wipe out the account; the tests
+	// are about missed entries, not liquidation.
+	tr.broker.margin = func(*account) (marginStatus, error) { return marginHealthy, nil }
 	s := &rejectFirstOpen{strategy: newTestEmax(t, 2, 4), act: tr.account, cash: tr.account.balance}
 	tr.account.balance = 0
 	return tr, s

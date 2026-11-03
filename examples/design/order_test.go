@@ -194,3 +194,24 @@ func TestOrder_RecordStampsHistoryWithTheOrderTimestamp(t *testing.T) {
 	assert.Equal(t, first, o.history[0].time)
 	assert.Equal(t, second, o.history[1].time, "a later step carries the later bar's time")
 }
+
+func TestOrderReason_String(t *testing.T) {
+	assert.Equal(t, "strategy", reasonStrategy.String())
+	assert.Equal(t, "stop loss", reasonStopLoss.String())
+	assert.Equal(t, "margin closeout", reasonMarginCloseout.String())
+	assert.Equal(t, "unknown", orderReason(99).String())
+}
+
+func TestOrder_ReasonDefaultsToTheStrategy(t *testing.T) {
+	assert.Equal(t, reasonStrategy, (&order{}).reason)
+}
+
+func TestOrder_RecordLogsTheCauseOnlyWhenItIsNotTheStrategy(t *testing.T) {
+	logs := captureLogs(t)
+
+	(&order{id: "1", action: open}).record(stateRequested, "")
+	assert.NotContains(t, logs.String(), "cause=")
+
+	(&order{id: "2", action: close, reason: reasonMarginCloseout}).record(stateRequested, "")
+	assert.Contains(t, logs.String(), `cause="margin closeout"`)
+}

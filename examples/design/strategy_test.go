@@ -220,6 +220,9 @@ func TestEmax_OrdersCarryInstrumentDirectionAndPrice(t *testing.T) {
 		want[i].Time = at[i] // stamped with the bar that triggered it
 	}
 	assert.Equal(t, want, got)
+	for _, o := range got {
+		assert.Equal(t, reasonStrategy, o.reason)
+	}
 }
 
 func TestEmax_OrderPriceIsTheTriggeringBarsClose(t *testing.T) {

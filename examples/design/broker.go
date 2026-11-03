@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 )
 
 type broker struct {
@@ -11,6 +12,16 @@ type broker struct {
 	accounts map[string]*account
 	orders   map[string][]*order // submitted orders awaiting execution, by instrument, for every account
 	seq      int                 // last order id issued
+
+	// margin and closeout decide when and what to liquidate. Nil means
+	// defaultMarginPolicy and closeWorstLoser.
+	margin   marginPolicy
+	closeout closeoutPolicy
+
+	// completeCloseout makes a liquidation close every position of the account.
+	// By default it is progressive: one position at a time, as the closeout
+	// policy chooses, until the margin policy no longer demands more.
+	completeCloseout bool
 }
 
 var brokers map[string]*broker
@@ -68,8 +79,7 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	}
 
 	if o.id == "" {
-		br.seq++
-		o.id = fmt.Sprintf("%s-%d", br.id, br.seq)
+		o.id = br.nextID()
 	}
 
 	slog.InfoContext(ctx, "order submitted",
@@ -87,6 +97,12 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	}
 	br.orders[o.instrument] = append(br.orders[o.instrument], o)
 	return nil
+}
+
+// nextID issues the next order id.
+func (br *broker) nextID() string {
+	br.seq++
+	return fmt.Sprintf("%s-%d", br.id, br.seq)
 }
 
 // reservedMargin is the margin held by the account's submitted opens that have
@@ -126,17 +142,119 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 	}
 
 	if len(pending) > 0 {
-		waiting := br.orders[b.instrument][:0]
-		for _, o := range br.orders[b.instrument] {
-			if o.state == stateSubmitted {
-				waiting = append(waiting, o)
-			}
-		}
-		br.orders[b.instrument] = waiting
+		br.prune(b.instrument)
 	}
-
 	for _, act := range br.accounts {
 		act.mark(b)
+	}
+
+	// Judge every account against the margin rules, in a fixed order.
+	ids := make([]string, 0, len(br.accounts))
+	for id := range br.accounts {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if err := br.enforceMargin(ctx, b, br.accounts[id]); err != nil {
+			return fmt.Errorf("margin check %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// prune drops the instrument's orders that are no longer submitted.
+func (br *broker) prune(instrument string) {
+	waiting := br.orders[instrument][:0]
+	for _, o := range br.orders[instrument] {
+		if o.state == stateSubmitted {
+			waiting = append(waiting, o)
+		}
+	}
+	br.orders[instrument] = waiting
+}
+
+// enforceMargin applies the margin rules to one account on bar b. A warning is
+// logged. Liquidation cancels the account's unfilled opens, then closes
+// positions one at a time, as the closeout policy chooses. A progressive
+// closeout stops as soon as the margin policy is satisfied; a complete one
+// closes everything.
+func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error {
+	policy, pick := br.margin, br.closeout
+	if policy == nil {
+		policy = defaultMarginPolicy
+	}
+	if pick == nil {
+		pick = closeWorstLoser
+	}
+
+	status, err := policy(act)
+	if err != nil {
+		return err
+	}
+	if status == marginWarning {
+		slog.Warn("margin warning", "broker", br.id, "account", act.id, "time", b.Time)
+	}
+	if status != marginLiquidate {
+		return nil
+	}
+
+	slog.Warn("margin closeout", "broker", br.id, "account", act.id, "time", b.Time)
+	br.cancelOpens(act.id, "cancelled by margin closeout")
+	for status == marginLiquidate || br.completeCloseout {
+		pos, err := pick(act)
+		if err != nil {
+			return err
+		}
+		if pos == nil {
+			return nil // nothing left to close
+		}
+		if err := br.closeoutPosition(b, act, pos); err != nil {
+			return err
+		}
+		if status, err = policy(act); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// cancelOpens rejects the account's submitted opens: once the account is being
+// liquidated they must not fill and take the margin back.
+func (br *broker) cancelOpens(accountID, reason string) {
+	for instrument, orders := range br.orders {
+		cancelled := false
+		for _, o := range orders {
+			if o.accountID == accountID && o.state == stateSubmitted && o.action == open {
+				o.record(stateRejected, reason)
+				cancelled = true
+			}
+		}
+		if cancelled {
+			br.prune(instrument)
+		}
+	}
+}
+
+// closeoutPosition closes pos at its latest mark with a market order the
+// broker makes itself. It fills at once, on this bar.
+func (br *broker) closeoutPosition(b bar, act *account, pos *position) error {
+	o := &order{
+		id:         br.nextID(),
+		accountID:  act.id,
+		instrument: pos.instrument,
+		action:     close,
+		orderType:  marketOrder,
+		reason:     reasonMarginCloseout,
+		price:      pos.markPrice,
+		Time:       b.Time,
+	}
+	o.record(stateRequested, "")
+	o.record(stateSubmitted, "")
+	if err := br.fillOrder(o, pos.markPrice); err != nil {
+		return err
+	}
+	if o.state != stateFilled {
+		return fmt.Errorf("closeout %s: the order was %s", pos.instrument, o.state)
 	}
 	return nil
 }

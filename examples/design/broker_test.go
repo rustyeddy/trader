@@ -493,8 +493,8 @@ func TestBroker_OnBar_MarksEveryAccountsPosition(t *testing.T) {
 	br := &broker{id: "t"}
 	one := br.addAccount("one", usd(1))
 	two := br.addAccount("two", usd(1))
-	one.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 1, markPrice: 110000}
-	two.positions["EURUSD"] = &position{instrument: "EURUSD", direction: short, units: 1, markPrice: 110000}
+	one.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000, markPrice: 110000}
+	two.positions["EURUSD"] = &position{instrument: "EURUSD", direction: short, units: 1, entryPrice: 110000, markPrice: 110000}
 
 	require.NoError(t, br.onBar(context.Background(), fillBar(1, 111500)))
 
