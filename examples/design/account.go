@@ -325,23 +325,20 @@ func (a *account) mark(b bar) {
 	}
 }
 
-// setBalance is how the broker reports the account's balance after realizing
-// profit or loss.
-func (a *account) setBalance(m money) {
-	a.balance = m
-}
-
-// applyFill updates the instrument's position for a filled order and returns
-// the profit or loss it realized, which is zero unless it closed a position.
-// The broker applies that to the balance. One position per instrument
-// (netting): an open creates it, a close removes it and the order takes the
-// closed size. Add and reduce wait on the size type.
-func (a *account) applyFill(o *order) (money, error) {
+// applyFill applies a filled order to the account: it validates the fill,
+// realizes any profit or loss, checks the balance arithmetic, then updates the
+// balance and the position together. Either all of it happens or none of it
+// does, so a failed fill leaves the account as it was. One position per
+// instrument (netting): an open creates it, a close removes it and the order
+// takes the closed size. Add and reduce wait on the size type.
+//
+// The broker only reports the execution; it never touches the balance.
+func (a *account) applyFill(o *order) error {
 	pos := a.positions[o.instrument]
 	switch o.action {
 	case open:
 		if pos != nil {
-			return 0, fmt.Errorf("%w: %s is already %s", errPositionExists, o.instrument, pos.direction)
+			return fmt.Errorf("%w: %s is already %s", errPositionExists, o.instrument, pos.direction)
 		}
 		a.positions[o.instrument] = &position{
 			instrument: o.instrument,
@@ -350,26 +347,26 @@ func (a *account) applyFill(o *order) (money, error) {
 			entryPrice: o.fillPrice,
 			markPrice:  o.fillPrice,
 		}
-		return 0, nil
 	case close:
 		if pos == nil {
-			return 0, fmt.Errorf("%w: %s", errNoPosition, o.instrument)
+			return fmt.Errorf("%w: %s", errNoPosition, o.instrument)
 		}
 		pnl, err := pos.realizedPnL(o.fillPrice)
 		if err != nil {
-			return 0, err
+			return err
 		}
-		// Check the balance can take the P/L before the position is touched, so
-		// a failed close leaves the position and the order as they were.
-		if _, err := checkedAdd(a.balance, pnl); err != nil {
-			return 0, fmt.Errorf("close %s balance: %w", o.instrument, err)
+		balance, err := checkedAdd(a.balance, pnl)
+		if err != nil {
+			return fmt.Errorf("close %s balance: %w", o.instrument, err)
 		}
+		// Nothing can fail from here on.
+		a.balance = balance
 		o.units = pos.units
 		delete(a.positions, o.instrument)
-		return pnl, nil
 	default:
-		return 0, fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)
+		return fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)
 	}
+	return nil
 }
 
 // realizedPnL is the profit or loss, in cents, of closing the position at exit.

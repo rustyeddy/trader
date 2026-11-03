@@ -170,8 +170,8 @@ func executionPrice(o *order, b bar) price {
 	return b.o
 }
 
-// fillOrder applies the order to its account's positions at p and reports any
-// realized profit or loss to the account's balance. A fill that
+// fillOrder reports the execution at p to the order's account, which validates
+// it and updates its balance and positions together. A fill that
 // cannot apply (a close with no position) is an expected rejection, recorded
 // on the order; anything else is returned and stops the run.
 func (br *broker) fillOrder(o *order, p price) error {
@@ -181,8 +181,7 @@ func (br *broker) fillOrder(o *order, p price) error {
 	}
 
 	o.fillPrice = p
-	pnl, err := act.applyFill(o)
-	if err != nil {
+	if err := act.applyFill(o); err != nil {
 		if !isRejection(err) {
 			return fmt.Errorf("fill order %s: %w", o.id, err)
 		}
@@ -196,11 +195,6 @@ func (br *broker) fillOrder(o *order, p price) error {
 			"direction", o.direction)
 		return nil
 	}
-	balance, err := checkedAdd(act.balance, pnl)
-	if err != nil { // applyFill checked this before it changed the position
-		return fmt.Errorf("fill order %s: %w", o.id, err)
-	}
-	act.setBalance(balance)
 	o.record(stateFilled, "")
 	return nil
 }

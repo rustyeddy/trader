@@ -310,7 +310,7 @@ func TestBroker_OnBar_OpenOverAnExistingPositionIsFatal(t *testing.T) {
 func TestAccount_ApplyFill_AddAndReduceAreUnsupported(t *testing.T) {
 	act := newAccount("a", usd(1000))
 	for _, a := range []action{add, reduce} {
-		require.ErrorIs(t, func() error { _, err := act.applyFill(&order{instrument: "EURUSD", action: a}); return err }(), errUnsupportedAction, a.String())
+		require.ErrorIs(t, act.applyFill(&order{instrument: "EURUSD", action: a}), errUnsupportedAction, a.String())
 	}
 }
 

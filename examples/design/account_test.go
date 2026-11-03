@@ -738,17 +738,10 @@ func TestAccount_Mark_ValuesThePositionAtTheBarClose(t *testing.T) {
 	act.mark(bar{instrument: "AUDUSD"}) // no position: nothing to value
 }
 
-func TestAccount_SetBalance(t *testing.T) {
-	act := newAccount("a", usd(1))
-	act.setBalance(usd(233))
-	assert.Equal(t, usd(233), act.balance)
-}
-
 func TestAccount_ApplyFill_OpenIsMarkedAtTheFillPrice(t *testing.T) {
 	act := newAccount("a", usd(1000))
 
-	_, err := act.applyFill(&order{instrument: "EURUSD", direction: short, action: open, units: 5, fillPrice: 110000})
-	require.NoError(t, err)
+	require.NoError(t, act.applyFill(&order{instrument: "EURUSD", direction: short, action: open, units: 5, fillPrice: 110000}))
 
 	assert.Equal(t, price(110000), act.positions["EURUSD"].markPrice)
 	assert.Zero(t, mustPnL(t, act), "no profit or loss the moment it opens")
@@ -797,17 +790,17 @@ func TestPosition_RealizedPnL_Overflow(t *testing.T) {
 	require.ErrorIs(t, err, errSizeOverflow)
 }
 
-func TestAccount_ApplyFill_CloseReturnsThePnLAndLeavesTheBalanceToTheBroker(t *testing.T) {
+func TestAccount_ApplyFill_CloseRealizesPnLIntoTheBalanceAndRemovesThePosition(t *testing.T) {
 	tests := []struct {
 		name string
 		dir  direction
 		exit price
 		want money
 	}{
-		{"long win", long, 111000, usd(100)},
-		{"long loss", long, 109000, -usd(100)},
-		{"short win", short, 109000, usd(100)},
-		{"short loss", short, 111000, -usd(100)},
+		{"long win", long, 111000, usd(10100)},
+		{"long loss", long, 109000, usd(9900)},
+		{"short win", short, 109000, usd(10100)},
+		{"short loss", short, 111000, usd(9900)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -815,11 +808,10 @@ func TestAccount_ApplyFill_CloseReturnsThePnLAndLeavesTheBalanceToTheBroker(t *t
 			act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: tt.dir, units: 10000, entryPrice: 110000}
 			cl := &order{instrument: "EURUSD", action: close, fillPrice: tt.exit}
 
-			pnl, err := act.applyFill(cl)
+			require.NoError(t, act.applyFill(cl))
 
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, pnl)
-			assert.Equal(t, usd(10000), act.balance, "the broker applies the P/L to the balance")
+			assert.Equal(t, tt.want, act.balance)
+			assert.Equal(t, int64(10000), cl.units, "the order records what was closed")
 			assert.Empty(t, act.positions)
 		})
 	}
@@ -828,11 +820,8 @@ func TestAccount_ApplyFill_CloseReturnsThePnLAndLeavesTheBalanceToTheBroker(t *t
 func TestAccount_ApplyFill_OpenAndRejectedCloseLeaveTheBalanceAlone(t *testing.T) {
 	act := newAccount("a", usd(10000))
 
-	pnl, err := act.applyFill(&order{instrument: "EURUSD", direction: long, action: open, units: 5, fillPrice: 110000})
-	require.NoError(t, err)
-	assert.Zero(t, pnl, "an open realizes nothing")
-	_, err = act.applyFill(&order{instrument: "GBPUSD", action: close, fillPrice: 110000})
-	require.ErrorIs(t, err, errNoPosition)
+	require.NoError(t, act.applyFill(&order{instrument: "EURUSD", direction: long, action: open, units: 5, fillPrice: 110000}))
+	require.ErrorIs(t, act.applyFill(&order{instrument: "GBPUSD", action: close, fillPrice: 110000}), errNoPosition)
 
 	assert.Equal(t, usd(10000), act.balance)
 }
@@ -893,8 +882,7 @@ func TestAccount_ApplyFill_BalanceOverflowLeavesPositionIntact(t *testing.T) {
 			pos := &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000}
 			a.positions["EURUSD"] = pos
 			o := &order{instrument: "EURUSD", action: close, fillPrice: tc.exit}
-			_, err := a.applyFill(o)
-			require.ErrorIs(t, err, errSizeOverflow)
+			require.ErrorIs(t, a.applyFill(o), errSizeOverflow)
 			assert.Equal(t, tc.balance, a.balance)
 			assert.Same(t, pos, a.positions["EURUSD"])
 			assert.Zero(t, o.units, "failed close must not change order units")
@@ -911,4 +899,53 @@ func TestPosition_PnLAt_ExtremePriceDifferenceDoesNotWrap(t *testing.T) {
 	n.Mul(n, big.NewInt(moneyScale))
 	n.Div(n, big.NewInt(priceScale))
 	assert.Equal(t, money(n.Int64()), got)
+}
+
+// A fill is all or nothing: whatever the reason it fails, the balance, the
+// positions and the order's units are exactly as they were.
+func TestAccount_ApplyFill_FailureChangesNothing(t *testing.T) {
+	existing := func() *position {
+		return &position{instrument: "EURUSD", direction: long, units: 10, entryPrice: 110000, markPrice: 110000}
+	}
+	tests := []struct {
+		name    string
+		balance money
+		pos     *position // existing EURUSD position, nil for none
+		o       *order
+		wantErr error
+	}{
+		{"open over a position", usd(10), existing(),
+			&order{instrument: "EURUSD", direction: short, action: open, units: 5, fillPrice: 111000}, errPositionExists},
+		{"close with no position", usd(10), nil,
+			&order{instrument: "EURUSD", action: close, fillPrice: 111000}, errNoPosition},
+		{"P/L arithmetic overflows", usd(10), &position{instrument: "EURUSD", direction: long, units: math.MaxInt64, entryPrice: 1},
+			&order{instrument: "EURUSD", action: close, fillPrice: math.MaxInt64}, errSizeOverflow},
+		{"balance overflows", money(math.MaxInt64), existing(),
+			&order{instrument: "EURUSD", action: close, fillPrice: 112000}, errSizeOverflow},
+		{"unsupported action", usd(10), existing(),
+			&order{instrument: "EURUSD", action: reduce, fillPrice: 111000}, errUnsupportedAction},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newAccount("a", tt.balance)
+			var before position
+			if tt.pos != nil {
+				a.positions["EURUSD"] = tt.pos
+				before = *tt.pos
+			}
+			unitsBefore := tt.o.units
+
+			require.ErrorIs(t, a.applyFill(tt.o), tt.wantErr)
+
+			assert.Equal(t, tt.balance, a.balance)
+			assert.Equal(t, unitsBefore, tt.o.units)
+			if tt.pos == nil {
+				assert.Empty(t, a.positions)
+				return
+			}
+			require.Contains(t, a.positions, "EURUSD")
+			assert.Same(t, tt.pos, a.positions["EURUSD"])
+			assert.Equal(t, before, *a.positions["EURUSD"])
+		})
+	}
 }
