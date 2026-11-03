@@ -260,7 +260,9 @@ func TestBroker_OnBar_CloseoutCancelsTheAccountsPendingOpens(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), lossBar()))
 
 	assert.Equal(t, stateCancelled, pending.state, "accepted earlier, so cancelled, not rejected")
-	assert.Equal(t, "margin closeout", pending.history[len(pending.history)-1].reason)
+	last := pending.history[len(pending.history)-1]
+	assert.Equal(t, "margin closeout", last.reason)
+	assert.Equal(t, lossBar().Time, last.time, "stamped with the closeout bar, not the order's own time")
 	assert.Empty(t, br.orders["GBPUSD"])
 	assert.Equal(t, stateSubmitted, other.state, "another account's order is untouched")
 	assert.Equal(t, []*order{other}, br.orders["EURUSD"])
