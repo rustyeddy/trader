@@ -212,7 +212,7 @@ func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error 
 	}
 
 	slog.Warn("margin closeout", "broker", br.id, "account", act.id, "time", b.Time)
-	br.cancelOpens(act.id, "cancelled by margin closeout")
+	br.cancelOpens(act.id, "margin closeout")
 	if br.closedOut == nil {
 		br.closedOut = make(map[string]time.Time)
 	}
@@ -235,14 +235,14 @@ func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error 
 	return nil
 }
 
-// cancelOpens rejects the account's submitted opens: once the account is being
+// cancelOpens cancels the account's submitted opens: once the account is being
 // liquidated they must not fill and take the margin back.
 func (br *broker) cancelOpens(accountID, reason string) {
 	for instrument, orders := range br.orders {
 		cancelled := false
 		for _, o := range orders {
 			if o.accountID == accountID && o.state == stateSubmitted && o.action == open {
-				o.record(stateRejected, reason)
+				o.record(stateCancelled, reason)
 				cancelled = true
 			}
 		}

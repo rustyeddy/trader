@@ -16,7 +16,7 @@ scenarios. Items marked DONE are implemented and tested.
   the strategy asks for an action, the account sizes it (or rejects it), the
   broker is sent the sized request, the broker fills or rejects it, and the
   trader records the result as an open position or a closed trade.
-- Order states: requested, sized, submitted, filled, rejected. Every state
+- Order states: requested, sized, submitted, filled, rejected, cancelled (rejected = declined; cancelled = accepted, then withdrawn before filling). Every state
   change is recorded in the order's history with a timestamp and logged.
   (Timestamps are simulated time: =order.timestamp= is the bar being processed,
   set by whoever advances the order; =record= stamps history with it.)

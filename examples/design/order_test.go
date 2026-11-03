@@ -55,6 +55,7 @@ func TestOrderState_String(t *testing.T) {
 		stateSubmitted: "submitted",
 		stateFilled:    "filled",
 		stateRejected:  "rejected",
+		stateCancelled: "cancelled",
 		orderState(99): "unknown",
 	}
 	for s, want := range tests {

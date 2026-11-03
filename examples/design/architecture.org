@@ -163,7 +163,7 @@ the broker. Keep sizing inside the Account domain for now: no new risk service.
 
 An Order carries its *current* mutable values and lifecycle state, plus a
 history slice of timestamped state changes and reasons. The initial working
-states are requested, sized, submitted, filled, and rejected. Preserve enough
+states are requested, sized, submitted, filled, rejected, and cancelled. Preserve enough
 history to explain changes later, but do not build event sourcing now.
 The requested market price serves as the reference for eventual slippage
 analysis; limit and stop-entry types use their specified entry prices.

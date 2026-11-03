@@ -37,7 +37,9 @@ const (
 )
 
 // orderState is where an order is in its lifecycle: requested by a strategy,
-// sized by the account, submitted to the broker, then filled or rejected.
+// sized by the account, submitted to the broker, then filled or rejected. A
+// rejection declines an order; a cancellation ends one that was already
+// accepted (submitted) before it filled.
 type orderState uint8
 
 const (
@@ -46,6 +48,7 @@ const (
 	stateSubmitted
 	stateFilled
 	stateRejected
+	stateCancelled // accepted earlier, no longer active
 )
 
 // orderReason is why the order exists. A liquidation is still an ordinary
@@ -218,6 +221,8 @@ func (s orderState) String() string {
 		return "filled"
 	case stateRejected:
 		return "rejected"
+	case stateCancelled:
+		return "cancelled"
 	}
 	return "unknown"
 }
