@@ -344,7 +344,7 @@ func TestEmax_StopsPassAccountSizing(t *testing.T) {
 	// emax produces must be sizeable.
 	captureLogs(t)
 	e := newTestEmax(t, 2, 4)
-	acct := newAccount("a", 10000)
+	acct := newAccount("a", usd(10000))
 	for i, b := range closes(flipSeries...) {
 		o := e.onBar(context.Background(), b)
 		if o == nil || o.action != open {

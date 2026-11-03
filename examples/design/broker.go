@@ -17,7 +17,7 @@ var brokers map[string]*broker
 func init() {
 	brokers = make(map[string]*broker)
 	brokers["sim"] = &broker{id: "sim"}
-	brokers["sim"].addAccount("sim123", 10000)
+	brokers["sim"].addAccount("sim123", usd(10000))
 }
 
 func getBroker(id string) (br *broker, ok bool) {

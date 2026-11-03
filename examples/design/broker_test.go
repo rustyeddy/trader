@@ -16,7 +16,7 @@ func TestGetBroker_Sim(t *testing.T) {
 
 	act, ok := br.getAccount("sim123")
 	require.True(t, ok)
-	assert.Equal(t, money(10000), act.balance)
+	assert.Equal(t, usd(10000), act.balance)
 }
 
 func TestGetBroker_UnknownIsCreatedAndReused(t *testing.T) {
@@ -34,11 +34,11 @@ func TestGetBroker_UnknownIsCreatedAndReused(t *testing.T) {
 
 func TestBroker_AddAccountInitializesNilMap(t *testing.T) {
 	b := &broker{id: "b"} // accounts map is nil
-	act := b.addAccount("a1", 500)
+	act := b.addAccount("a1", usd(500))
 
 	require.NotNil(t, act)
 	assert.Equal(t, "a1", act.id)
-	assert.Equal(t, money(500), act.balance)
+	assert.Equal(t, usd(500), act.balance)
 
 	got, ok := b.getAccount("a1")
 	require.True(t, ok)
@@ -47,13 +47,13 @@ func TestBroker_AddAccountInitializesNilMap(t *testing.T) {
 
 func TestBroker_AddAccountReplacesSameID(t *testing.T) {
 	b := &broker{id: "b"}
-	b.addAccount("a1", 500)
-	second := b.addAccount("a1", 900)
+	b.addAccount("a1", usd(500))
+	second := b.addAccount("a1", usd(900))
 
 	got, ok := b.getAccount("a1")
 	require.True(t, ok)
 	assert.Same(t, second, got)
-	assert.Equal(t, money(900), got.balance)
+	assert.Equal(t, usd(900), got.balance)
 }
 
 func TestBroker_GetAccountMissing(t *testing.T) {
@@ -64,16 +64,16 @@ func TestBroker_GetAccountMissing(t *testing.T) {
 }
 
 func TestNewAccount(t *testing.T) {
-	a := newAccount("x", 123)
+	a := newAccount("x", usd(123))
 	assert.Equal(t, "x", a.id)
-	assert.Equal(t, money(123), a.balance)
+	assert.Equal(t, usd(123), a.balance)
 }
 
 func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 	logs := captureLogs(t)
 	ts := time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
 	b := &broker{id: "sim"}
-	b.addAccount("acct", 1000)
+	b.addAccount("acct", usd(1000))
 	o := &order{
 		accountID:  "acct",
 		instrument: "EUR/USD",
@@ -107,7 +107,7 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
 	captureLogs(t)
 	b := &broker{id: "sim"}
-	b.addAccount("acct", 1000)
+	b.addAccount("acct", usd(1000))
 	ctx := context.Background()
 
 	o1, o2 := &order{Time: testStart, accountID: "acct", action: open}, &order{Time: testStart, accountID: "acct", action: close}
@@ -138,7 +138,7 @@ func TestBroker_SubmitUnknownAccount(t *testing.T) {
 func TestBroker_SubmitCancelledContext(t *testing.T) {
 	captureLogs(t)
 	b := &broker{id: "sim"}
-	b.addAccount("acct", 1000)
+	b.addAccount("acct", usd(1000))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	o := &order{Time: testStart, accountID: "acct", action: open}
@@ -152,7 +152,7 @@ func TestBroker_SubmitCancelledContext(t *testing.T) {
 func TestBroker_SubmitOrderWithoutAnAccountIsRejectedAsUnknown(t *testing.T) {
 	logs := captureLogs(t)
 	b := &broker{id: "sim"}
-	b.addAccount("acct", 1000)
+	b.addAccount("acct", usd(1000))
 	o := &order{Time: testStart, action: open} // the trader never set an account
 
 	err := b.submit(context.Background(), o)
@@ -167,8 +167,8 @@ func TestBroker_SubmitOrderWithoutAnAccountIsRejectedAsUnknown(t *testing.T) {
 func TestBroker_SubmitUsesTheOrdersAccountForTheLog(t *testing.T) {
 	logs := captureLogs(t)
 	b := &broker{id: "sim"}
-	b.addAccount("one", 1000)
-	b.addAccount("two", 1000)
+	b.addAccount("one", usd(1000))
+	b.addAccount("two", usd(1000))
 
 	require.NoError(t, b.submit(context.Background(), &order{Time: testStart, accountID: "two", action: open}))
 
@@ -194,7 +194,7 @@ func submittedOrder(t *testing.T, br *broker, a action, d direction, units int64
 
 func newFillBroker() (*broker, *account) {
 	br := &broker{id: "t"}
-	return br, br.addAccount("a", 10000)
+	return br, br.addAccount("a", usd(10000))
 }
 
 func TestBroker_SubmitQueuesTheOrderOnTheAccount(t *testing.T) {
@@ -293,7 +293,7 @@ func TestAccount_OnBar_OpenOverAnExistingPositionIsFatal(t *testing.T) {
 }
 
 func TestAccount_ApplyFill_AddAndReduceAreUnsupported(t *testing.T) {
-	act := newAccount("a", 1000)
+	act := newAccount("a", usd(1000))
 	for _, a := range []action{add, reduce} {
 		require.ErrorIs(t, act.applyFill(&order{instrument: "EURUSD", action: a}), errUnsupportedAction, a.String())
 	}

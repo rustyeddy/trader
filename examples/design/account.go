@@ -7,6 +7,7 @@ import (
 	"math/big"
 )
 
+// money is an amount of the account currency in cents (see moneyScale).
 type money int64
 
 type account struct {
@@ -44,10 +45,17 @@ func (act *account) marginAvailable() money {
 	return act.balance
 }
 
-// moneyScale is how many money units make one unit of the account currency.
-// For now money is whole account-currency units, and the account currency is
-// the instrument's quote currency, so no conversion is needed.
-const moneyScale int64 = 1
+// moneyScale is how many money units make one unit of the account currency:
+// money counts cents, so profit and loss are exact to the penny.
+//
+// TODO: the account currency is assumed to be USD, and an instrument's quote
+// currency is assumed to be USD too, so no conversion is done. Convert other
+// quote currencies, and account for spread and commission, before P/L is
+// treated as the account's real result.
+const moneyScale int64 = 100
+
+// usd is whole dollars as money.
+func usd(dollars int64) money { return money(dollars * moneyScale) }
 
 // errUnsupportedAction is returned for actions the account cannot size yet.
 // It is a programming gap, not a trading outcome.
@@ -260,10 +268,41 @@ func (a *account) applyFill(o *order) error {
 		if pos == nil {
 			return fmt.Errorf("%w: %s", errNoPosition, o.instrument)
 		}
+
+		pnl, err := pos.realizedPnL(o.fillPrice)
+		if err != nil {
+			return err
+		}
+		a.balance += pnl
 		o.units = pos.units
+
 		delete(a.positions, o.instrument)
 	default:
 		return fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)
 	}
 	return nil
+}
+
+// realizedPnL is the profit or loss, in cents, of closing the position at exit.
+// It rounds down (toward a larger loss) once, to the cent.
+//
+// TODO: this assumes the quote currency is the account currency (USD) and
+// excludes spread and commission; see moneyScale.
+func (p *position) realizedPnL(exit price) (money, error) {
+	delta := int64(exit - p.entryPrice)
+
+	if p.direction == short {
+		delta = -delta
+	}
+
+	amount, err := muldiv(
+		[]int64{p.units, delta, moneyScale},
+		[]int64{priceScale},
+		false,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	return money(amount), nil
 }

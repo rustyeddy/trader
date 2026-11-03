@@ -14,7 +14,7 @@ func newTestTraderWithBalance(balance money) *trader {
 	return &trader{broker: br, account: act}
 }
 
-func newTestTrader() *trader { return newTestTraderWithBalance(1000) }
+func newTestTrader() *trader { return newTestTraderWithBalance(usd(1000)) }
 
 func TestTrader_HandleOrder(t *testing.T) {
 	ctx := context.Background()
@@ -55,7 +55,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 	t.Run("open is rejected with negative margin", func(t *testing.T) {
 		o := openO()
-		require.NoError(t, newTestTraderWithBalance(-1).handleOrder(ctx, o))
+		require.NoError(t, newTestTraderWithBalance(-usd(1)).handleOrder(ctx, o))
 		assert.Equal(t, stateRejected, o.state)
 		assert.Contains(t, o.history[len(o.history)-1].reason, "insufficient margin")
 	})
@@ -65,7 +65,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: reduce}), errUnsupportedAction)
 	})
 	t.Run("unknown account at the broker is an error", func(t *testing.T) {
-		tr := &trader{broker: &broker{id: "t"}, account: newAccount("ghost", 1000)}
+		tr := &trader{broker: &broker{id: "t"}, account: newAccount("ghost", usd(1000))}
 		require.ErrorIs(t, tr.handleOrder(ctx, openO()), errUnknownAccount)
 	})
 }
