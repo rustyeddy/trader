@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math"
 )
 
 // money is an amount of the account currency in cents (see moneyScale).
@@ -38,7 +39,7 @@ func (act *account) equity() (money, error) {
 	if err != nil {
 		return 0, err
 	}
-	return act.balance + pnl, nil
+	return checkedAdd(act.balance, pnl)
 }
 
 // unrealizedPnL is the profit or loss of every open position at its latest
@@ -51,7 +52,10 @@ func (act *account) unrealizedPnL() (money, error) {
 		if err != nil {
 			return 0, fmt.Errorf("unrealized P/L of %s: %w", pos.instrument, err)
 		}
-		total += pnl
+		total, err = checkedAdd(total, pnl)
+		if err != nil {
+			return 0, fmt.Errorf("unrealized P/L total: %w", err)
+		}
 	}
 	return total, nil
 }
@@ -217,6 +221,15 @@ func reject(o *order, err error) error {
 
 var errSizeOverflow = errors.New("amount overflows int64")
 
+// checkedAdd adds two money amounts without silently wrapping int64.
+func checkedAdd(a, b money) (money, error) {
+	if (b > 0 && a > money(math.MaxInt64)-b) ||
+		(b < 0 && a < money(math.MinInt64)-b) {
+		return 0, errSizeOverflow
+	}
+	return a + b, nil
+}
+
 // muldiv returns the product of nums divided by the product of dens, rounded
 // down or, with roundUp, up. It multiplies everything before dividing, in
 // arbitrary precision, so there is a single rounding and no overflow.
@@ -302,7 +315,11 @@ func (a *account) applyFill(o *order) error {
 		if err != nil {
 			return err
 		}
-		a.balance += pnl
+		balance, err := checkedAdd(a.balance, pnl)
+		if err != nil {
+			return fmt.Errorf("close %s balance: %w", o.instrument, err)
+		}
+		a.balance = balance
 		o.units = pos.units
 
 		delete(a.positions, o.instrument)
@@ -329,20 +346,18 @@ func (p *position) unrealizedPnL() (money, error) {
 
 // pnlAt is the profit or loss, in cents, of the position valued at p.
 func (p *position) pnlAt(exit price) (money, error) {
-	delta := int64(exit - p.entryPrice)
-
+	// Compute the price difference before narrowing: subtraction can overflow
+	// int64 even when the final P/L is representable.
+	delta := new(big.Int).Sub(big.NewInt(int64(exit)), big.NewInt(int64(p.entryPrice)))
 	if p.direction == short {
-		delta = -delta
+		delta.Neg(delta)
 	}
-
-	amount, err := muldiv(
-		[]int64{p.units, delta, moneyScale},
-		[]int64{priceScale},
-		false,
-	)
-	if err != nil {
-		return 0, err
+	amount := delta.Mul(delta, big.NewInt(p.units))
+	amount.Mul(amount, big.NewInt(moneyScale))
+	// Div rounds toward negative infinity, preserving the cent policy.
+	amount.Div(amount, big.NewInt(priceScale))
+	if !amount.IsInt64() {
+		return 0, errSizeOverflow
 	}
-
-	return money(amount), nil
+	return money(amount.Int64()), nil
 }
