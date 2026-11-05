@@ -175,3 +175,48 @@ func TestBroker_OnBar_MarginCloseoutCancelsTheRestingStop(t *testing.T) {
 	assert.Equal(t, stateCancelled, stop.state)
 	assert.Empty(t, br.orders["EURUSD"])
 }
+
+func TestBroker_OnBar_GapThroughTheStopFillsAtTheOpen(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	ctx := context.Background()
+	op := submittedOrder(t, br, open, long) // stop 108900
+	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
+
+	// The next bar opens below the stop and never trades at it.
+	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}}
+	require.NoError(t, br.onBar(ctx, gap))
+
+	assert.Empty(t, act.positions)
+	stop := br.completed[len(br.completed)-1]
+	assert.Equal(t, reasonStopLoss, stop.reason)
+	assert.Equal(t, stateFilled, stop.state)
+	assert.Equal(t, price(108000), stop.fillPrice, "the open, not the stop price that never traded")
+	// 110000 -> 108000 is 2000 points a unit: 2 cents a unit.
+	assert.Equal(t, usd(10000)-money(op.units*2), act.balance)
+	assert.Empty(t, br.orders["EURUSD"])
+}
+
+func TestBroker_OnBar_EntryAlreadyBeyondTheStopIsClosedAtOnce(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	ctx := context.Background()
+	op := submittedOrder(t, br, open, long) // stop 108900
+
+	// The fill bar opens below the long's stop: the entry fills at that open,
+	// and its stop is already beyond it.
+	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}}
+	require.NoError(t, br.onBar(ctx, gap))
+
+	assert.Equal(t, stateFilled, op.state)
+	assert.Equal(t, price(108000), op.fillPrice)
+	assert.Empty(t, act.positions, "no position is left running beyond its stop")
+	require.Len(t, br.completed, 2)
+	assert.Same(t, op, br.completed[0])
+	stop := br.completed[1]
+	assert.Equal(t, reasonStopLoss, stop.reason)
+	assert.Equal(t, stateFilled, stop.state)
+	assert.Equal(t, price(108000), stop.fillPrice, "closed at the same open: no further loss")
+	assert.Equal(t, usd(10000), act.balance, "entered and exited at one price")
+	assert.Empty(t, br.orders["EURUSD"])
+}
