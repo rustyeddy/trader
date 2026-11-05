@@ -36,6 +36,13 @@ func TestTrader_HandleOrder(t *testing.T) {
 		assert.Equal(t, stateSized, o.history[1].state)
 		assert.Equal(t, stateSubmitted, o.history[2].state)
 	})
+	t.Run("limit open is sized at its limit price", func(t *testing.T) {
+		o := openO()
+		o.orderType, o.price, o.stopLoss = limitOrder, 100000, 99000
+		require.NoError(t, newTestTrader().handleOrder(ctx, o))
+		assert.Equal(t, int64(1000), o.units, "balance 1000: floor(1000 / 1.0)")
+		assert.Equal(t, stateSubmitted, o.state)
+	})
 	t.Run("close is submitted without units", func(t *testing.T) {
 		o := &order{Time: testStart, instrument: "EURUSD", action: close, orderType: marketOrder}
 		require.NoError(t, newTestTrader().handleOrder(ctx, o))

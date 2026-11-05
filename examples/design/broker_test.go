@@ -241,7 +241,7 @@ func TestBroker_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][0].reason)
 }
 
-func TestBroker_OnBar_IgnoresOtherInstrumentsAndUnsupportedTypes(t *testing.T) {
+func TestBroker_OnBar_IgnoresOtherInstrumentsAndUntouchedLimits(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
 	market := submittedOrder(t, br, open, long)
@@ -256,7 +256,7 @@ func TestBroker_OnBar_IgnoresOtherInstrumentsAndUnsupportedTypes(t *testing.T) {
 
 	require.NoError(t, br.onBar(context.Background(), fillBar(1, 111500)))
 	assert.Equal(t, stateFilled, market.state)
-	assert.Equal(t, stateSubmitted, limit.state, "limit orders do not execute yet")
+	assert.Equal(t, stateSubmitted, limit.state, "the limit is below the bar: not touched")
 	require.Len(t, br.orders["EURUSD"], 2)
 	assert.Same(t, limit, br.orders["EURUSD"][0])
 	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][1].reason, "the filled open's stop")

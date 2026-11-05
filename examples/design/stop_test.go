@@ -46,7 +46,7 @@ func TestStopFill(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p, hit := stopFill(tt.dir, tt.stop, tt.b)
+			p, hit := throughPrice(tt.dir, tt.stop, tt.b)
 			assert.Equal(t, tt.hit, hit)
 			assert.Equal(t, tt.want, p)
 		})

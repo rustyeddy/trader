@@ -152,10 +152,10 @@ func (br *broker) reservedMargin(accountID string) (money, error) {
 // produced it. Orders that are no longer submitted (filled or rejected) leave
 // the queue.
 func (br *broker) onBar(ctx context.Context, b bar) error {
-	// Market orders fill at the open, so they go first; the resting stops then
-	// trigger on the rest of the bar's range. A stop placed by a fill above is
-	// live on this bar too.
-	for _, kind := range []orderType{marketOrder, stopOrder} {
+	// Market orders fill at the open, so they go first; limit entries then fill
+	// on the rest of the bar's range, and the resting stops last. A stop placed
+	// by a fill above is live on this bar too.
+	for _, kind := range []orderType{marketOrder, limitOrder, stopOrder} {
 		for _, o := range append([]*order(nil), br.orders[b.instrument]...) {
 			if o.orderType != kind {
 				continue
@@ -266,19 +266,22 @@ func (br *broker) cancelOpens(accountID string, at time.Time, reason string) {
 	}
 }
 
-// stopFill reports whether bar b trades through a stop on a position of
-// direction dir and, if so, the price the stop fills at: the stop itself, or the
-// bar's open when it gaps beyond the stop (the stop cannot fill at a price that
-// never traded).
-func stopFill(dir direction, stop price, b bar) (price, bool) {
+// throughPrice reports whether bar b trades through price p against a
+// position of direction dir (the low reaches it for a long, the high for a
+// short) and, if so, the price an order resting at p fills at: p itself, or the
+// bar's open when it gaps beyond p (nothing traded at p). A long's buy limit
+// and a long's sell stop both trigger downward, a short's upward, so entry
+// limits and protective stops share it. For a limit the gap fill is the better
+// price; for a stop it is the worse one.
+func throughPrice(dir direction, p price, b bar) (price, bool) {
 	switch dir {
 	case long:
-		if b.l <= stop {
-			return min(stop, b.o), true
+		if b.l <= p {
+			return min(p, b.o), true
 		}
 	case short:
-		if b.h >= stop {
-			return max(stop, b.o), true
+		if b.h >= p {
+			return max(p, b.o), true
 		}
 	}
 	return 0, false
@@ -401,8 +404,8 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 // shouldExecute reports whether the submitted order executes on bar b. A
 // market order executes on a bar after the one that produced it; a stop order
 // when the bar trades through its price, including the bar it was placed on but
-// never an earlier bar.
-// Limit orders stay submitted until their trigger rules exist.
+// never an earlier bar. A limit order also waits for a later bar, then fills
+// when the bar trades through its price.
 func (br *broker) shouldExecute(o *order, b bar) bool {
 	if o.state != stateSubmitted || o.instrument != b.instrument {
 		return false
@@ -410,11 +413,17 @@ func (br *broker) shouldExecute(o *order, b bar) bool {
 	switch o.orderType {
 	case marketOrder:
 		return b.Time.After(o.Time)
+	case limitOrder:
+		if !b.Time.After(o.Time) {
+			return false // like a market order, never on the bar that produced it
+		}
+		_, hit := throughPrice(o.direction, o.price, b)
+		return hit
 	case stopOrder:
 		if b.Time.Before(o.Time) {
 			return false // never against an observation older than the stop
 		}
-		_, hit := stopFill(o.direction, o.price, b)
+		_, hit := throughPrice(o.direction, o.price, b)
 		return hit
 	}
 	return false
@@ -424,8 +433,8 @@ func (br *broker) shouldExecute(o *order, b bar) bool {
 // fills at the bar's open, the first price after the signal; a stop fills at
 // its price, or the open when the bar gapped past it.
 func executionPrice(o *order, b bar) price {
-	if o.orderType == stopOrder {
-		p, _ := stopFill(o.direction, o.price, b)
+	if o.orderType == stopOrder || o.orderType == limitOrder {
+		p, _ := throughPrice(o.direction, o.price, b)
 		return p
 	}
 	return b.o

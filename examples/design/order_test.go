@@ -90,6 +90,11 @@ func TestOrder_Validate(t *testing.T) {
 		{"open short", order{instrument: "EUR/USD", direction: short, action: open, stopLoss: 111100}, false},
 		{"close without direction", order{instrument: "EUR/USD", action: close}, false},
 
+		// limit orders
+		{"limit open", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, price: 109000, stopLoss: 107900}, false},
+		{"limit without a price", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, stopLoss: 107900}, true},
+		{"limit close is not supported", order{instrument: "EUR/USD", action: close, orderType: limitOrder, price: 109000}, true},
+
 		// no action
 		{"zero value", order{}, true},
 		{"instrument only", order{instrument: "EUR/USD"}, true},
