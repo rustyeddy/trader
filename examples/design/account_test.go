@@ -774,7 +774,7 @@ func TestPosition_RealizedPnL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := &position{instrument: "EURUSD", direction: tt.dir, units: tt.units, entryPrice: 110000}
 
-			got, err := p.realizedPnL(tt.exit)
+			got, err := p.pnlAt(tt.exit)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
@@ -785,7 +785,7 @@ func TestPosition_RealizedPnL(t *testing.T) {
 func TestPosition_RealizedPnL_Overflow(t *testing.T) {
 	p := &position{direction: long, units: math.MaxInt64, entryPrice: 1}
 
-	_, err := p.realizedPnL(math.MaxInt64)
+	_, err := p.pnlAt(math.MaxInt64)
 
 	require.ErrorIs(t, err, errSizeOverflow)
 }
@@ -892,7 +892,7 @@ func TestAccount_ApplyFill_BalanceOverflowLeavesPositionIntact(t *testing.T) {
 
 func TestPosition_PnLAt_ExtremePriceDifferenceDoesNotWrap(t *testing.T) {
 	p := &position{direction: long, units: 1, entryPrice: price(math.MinInt64)}
-	got, err := p.realizedPnL(price(math.MaxInt64))
+	got, err := p.pnlAt(price(math.MaxInt64))
 	require.NoError(t, err)
 	// floor((MaxInt64 - MinInt64) * 100 / 100000) cents.
 	n := new(big.Int).Sub(big.NewInt(math.MaxInt64), big.NewInt(math.MinInt64))

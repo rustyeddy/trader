@@ -144,6 +144,20 @@ func (o *order) record(s orderState, reason string) {
 	slog.Info("order state", attrs...)
 }
 
+// reject records the expected rejection err on the order, logs it and returns
+// it. It is the one place a rejection is recorded, so every refusal looks the
+// same in the history and the log, whoever made it.
+func reject(o *order, err error) error {
+	o.record(stateRejected, err.Error())
+	slog.Warn("order rejected",
+		"reason", err,
+		"time", o.Time,
+		"instrument", o.instrument,
+		"action", o.action,
+		"direction", o.direction)
+	return err
+}
+
 // errInvalidOrder marks an order whose fields are not a legal combination.
 // It is a strategy bug, not a trading outcome.
 var errInvalidOrder = errors.New("invalid order")

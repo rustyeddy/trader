@@ -17,31 +17,6 @@ func submitLimit(t *testing.T, br *broker, d direction, limit price) *order {
 	return o
 }
 
-func TestThroughPrice(t *testing.T) {
-	tests := []struct {
-		name string
-		dir  direction
-		p    price
-		b    bar
-		want price
-		hit  bool
-	}{
-		{"long, bar stays above", long, 109000, stopBar(110000, 110500, 109500, 110200), 0, false},
-		{"long, low touches", long, 109000, stopBar(110000, 110500, 109000, 110200), 109000, true},
-		{"long, gap below fills at the open", long, 109000, stopBar(108000, 108500, 107500, 108200), 108000, true},
-		{"short, bar stays below", short, 111000, stopBar(110000, 110500, 109500, 110200), 0, false},
-		{"short, high touches", short, 111000, stopBar(110000, 111000, 109500, 110200), 111000, true},
-		{"short, gap above fills at the open", short, 111000, stopBar(112000, 112500, 111800, 112200), 112000, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p, hit := throughPrice(tt.dir, tt.p, tt.b)
-			assert.Equal(t, tt.hit, hit)
-			assert.Equal(t, tt.want, p)
-		})
-	}
-}
-
 func TestBroker_OnBar_LimitNeverFillsOnTheBarThatProducedIt(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
@@ -220,7 +195,7 @@ func TestBroker_Submit_OpenIsAllowedOnceThePendingOneIsGone(t *testing.T) {
 	br, _ := newFillBroker()
 	first := submitLimit(t, br, long, 109000)
 	first.record(stateCancelled, "test")
-	br.prune("EURUSD")
+	br.complete(first)
 
 	require.NoError(t, br.submit(context.Background(), brokerOpen("a")))
 }

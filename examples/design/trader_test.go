@@ -9,7 +9,7 @@ import (
 )
 
 func newTestTraderWithBalance(balance money) *trader {
-	br := &broker{id: "t"}
+	br := newBroker("t")
 	act := br.addAccount("a", balance)
 	return &trader{broker: br, account: act}
 }
@@ -72,7 +72,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: reduce}), errUnsupportedAction)
 	})
 	t.Run("unknown account at the broker is an error", func(t *testing.T) {
-		tr := &trader{broker: &broker{id: "t"}, account: newAccount("ghost", usd(1000))}
+		tr := &trader{broker: newBroker("t"), account: newAccount("ghost", usd(1000))}
 		require.ErrorIs(t, tr.handleOrder(ctx, openO()), errUnknownAccount)
 	})
 }

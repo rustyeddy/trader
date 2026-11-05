@@ -19,38 +19,8 @@ func restingStop(br *broker, act *account, dir direction, stop price) *order {
 		entryPrice: 110000, markPrice: 110000}
 	s := &order{id: br.nextID(), accountID: act.id, instrument: "EURUSD", direction: dir, action: close,
 		orderType: stopOrder, reason: reasonStopLoss, price: stop, state: stateSubmitted, Time: testStart}
-	if br.orders == nil {
-		br.orders = make(map[string][]*order)
-	}
 	br.orders["EURUSD"] = append(br.orders["EURUSD"], s)
 	return s
-}
-
-func TestStopFill(t *testing.T) {
-	tests := []struct {
-		name string
-		dir  direction
-		stop price
-		b    bar
-		want price
-		hit  bool
-	}{
-		{"long, bar stays above", long, 108900, stopBar(110000, 110500, 109000, 110200), 0, false},
-		{"long, low touches the stop", long, 108900, stopBar(110000, 110500, 108900, 110200), 108900, true},
-		{"long, trades through", long, 108900, stopBar(110000, 110500, 108000, 109500), 108900, true},
-		{"long, gaps below: fills at the open", long, 108900, stopBar(108000, 108500, 107500, 108200), 108000, true},
-		{"short, bar stays below", short, 111100, stopBar(110000, 110500, 109000, 110200), 0, false},
-		{"short, high touches the stop", short, 111100, stopBar(110000, 111100, 109000, 110200), 111100, true},
-		{"short, gaps above: fills at the open", short, 111100, stopBar(112000, 112500, 111800, 112200), 112000, true},
-		{"no direction never triggers", noDirection, 108900, stopBar(1, 1, 0, 1), 0, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p, hit := throughPrice(tt.dir, tt.stop, tt.b)
-			assert.Equal(t, tt.hit, hit)
-			assert.Equal(t, tt.want, p)
-		})
-	}
 }
 
 func TestBroker_FilledOpenQueuesAProtectiveStopOrder(t *testing.T) {
@@ -77,7 +47,7 @@ func TestBroker_OpenWithoutAStopQueuesNoStopOrder(t *testing.T) {
 	br, _ := newFillBroker()
 	o := &order{id: "t-1", accountID: "a", instrument: "EURUSD", action: open, direction: long, fillPrice: 110000}
 
-	br.placeStop(o)
+	br.placeExits(o)
 
 	assert.Empty(t, br.orders["EURUSD"])
 }

@@ -10,31 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetBroker_Sim(t *testing.T) {
-	br, ok := getBroker("sim")
-	require.True(t, ok)
-	assert.Equal(t, "sim", br.id)
-
-	act, ok := br.getAccount("sim123")
-	require.True(t, ok)
-	assert.Equal(t, usd(10000), act.balance)
-}
-
-func TestGetBroker_UnknownIsCreatedAndReused(t *testing.T) {
-	t.Cleanup(func() { delete(brokers, "test-broker") })
-
-	br, ok := getBroker("test-broker")
-	require.True(t, ok)
-	assert.Equal(t, "test-broker", br.id)
-	assert.NotNil(t, br.accounts)
-
-	again, ok := getBroker("test-broker")
-	require.True(t, ok)
-	assert.Same(t, br, again)
-}
-
-func TestBroker_AddAccountInitializesNilMap(t *testing.T) {
-	b := &broker{id: "b"} // accounts map is nil
+func TestBroker_AddAccount(t *testing.T) {
+	b := newBroker("b")
 	act := b.addAccount("a1", usd(500))
 
 	require.NotNil(t, act)
@@ -47,7 +24,7 @@ func TestBroker_AddAccountInitializesNilMap(t *testing.T) {
 }
 
 func TestBroker_AddAccountReplacesSameID(t *testing.T) {
-	b := &broker{id: "b"}
+	b := newBroker("b")
 	b.addAccount("a1", usd(500))
 	second := b.addAccount("a1", usd(900))
 
@@ -58,7 +35,7 @@ func TestBroker_AddAccountReplacesSameID(t *testing.T) {
 }
 
 func TestBroker_GetAccountMissing(t *testing.T) {
-	b := &broker{id: "b"}
+	b := newBroker("b")
 	act, ok := b.getAccount("nope")
 	assert.False(t, ok)
 	assert.Nil(t, act)
@@ -73,7 +50,7 @@ func TestNewAccount(t *testing.T) {
 func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 	logs := captureLogs(t)
 	ts := time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
-	b := &broker{id: "sim"}
+	b := newBroker("sim")
 	b.addAccount("acct", usd(1000))
 	o := &order{
 		accountID:  "acct",
@@ -110,7 +87,7 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 
 func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
 	captureLogs(t)
-	b := &broker{id: "sim"}
+	b := newBroker("sim")
 	b.addAccount("acct", usd(1000))
 	ctx := context.Background()
 
@@ -129,7 +106,7 @@ func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
 
 func TestBroker_SubmitUnknownAccount(t *testing.T) {
 	logs := captureLogs(t)
-	b := &broker{id: "sim"}
+	b := newBroker("sim")
 	o := &order{Time: testStart, accountID: "ghost", action: open}
 
 	err := b.submit(context.Background(), o)
@@ -143,7 +120,7 @@ func TestBroker_SubmitUnknownAccount(t *testing.T) {
 
 func TestBroker_SubmitCancelledContext(t *testing.T) {
 	captureLogs(t)
-	b := &broker{id: "sim"}
+	b := newBroker("sim")
 	b.addAccount("acct", usd(1000))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -157,7 +134,7 @@ func TestBroker_SubmitCancelledContext(t *testing.T) {
 
 func TestBroker_SubmitOrderWithoutAnAccountIsRejectedAsUnknown(t *testing.T) {
 	logs := captureLogs(t)
-	b := &broker{id: "sim"}
+	b := newBroker("sim")
 	b.addAccount("acct", usd(1000))
 	o := &order{Time: testStart, action: open} // the trader never set an account
 
@@ -172,7 +149,7 @@ func TestBroker_SubmitOrderWithoutAnAccountIsRejectedAsUnknown(t *testing.T) {
 
 func TestBroker_SubmitUsesTheOrdersAccountForTheLog(t *testing.T) {
 	logs := captureLogs(t)
-	b := &broker{id: "sim"}
+	b := newBroker("sim")
 	b.addAccount("one", usd(1000))
 	b.addAccount("two", usd(1000))
 
@@ -208,7 +185,7 @@ func submittedOrder(t *testing.T, br *broker, a action, d direction) *order {
 }
 
 func newFillBroker() (*broker, *account) {
-	br := &broker{id: "t"}
+	br := newBroker("t")
 	return br, br.addAccount("a", usd(10000))
 }
 
@@ -319,9 +296,9 @@ func TestAccount_ApplyFill_AddAndReduceAreUnsupported(t *testing.T) {
 	}
 }
 
-func TestBroker_FillOrder_UnknownAccount(t *testing.T) {
-	br := &broker{id: "t"}
-	err := br.fillOrder(&order{id: "t-1", accountID: "ghost", instrument: "EURUSD", action: open}, 1)
+func TestBroker_Fill_UnknownAccount(t *testing.T) {
+	br := newBroker("t")
+	err := br.fill(&order{id: "t-1", accountID: "ghost", instrument: "EURUSD", action: open}, 1)
 	require.ErrorIs(t, err, errUnknownAccount)
 }
 
@@ -340,7 +317,7 @@ func TestBroker_OnOrderBar_CancelledContext(t *testing.T) {
 // run stops before cleanup, so an order that already filled stays in
 // the broker's orders. Live recovery will need to reconcile such partial batches;
 // until then the backtest simply stops on the error.
-func TestBroker_OnBar_ErrorMidBatchLeavesFilledOrdersListed(t *testing.T) {
+func TestBroker_OnBar_ErrorMidBatchKeepsTheQueueConsistent(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
 	first := submittedOrder(t, br, open, long)
@@ -361,10 +338,12 @@ func TestBroker_OnBar_ErrorMidBatchLeavesFilledOrdersListed(t *testing.T) {
 	assert.Equal(t, stateFilled, first.state, "processed before the failure")
 	assert.Equal(t, stateSubmitted, second.state, "the failing order is untouched")
 	assert.Equal(t, stateSubmitted, third.state, "later orders are not processed")
-	require.Len(t, br.orders["EURUSD"], 4)
-	assert.Equal(t, []*order{first, second, third}, br.orders["EURUSD"][:3],
-		"cleanup is skipped, so the filled order is still listed")
-	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][3].reason, "the first fill's stop")
+	// The queue holds exactly the waiting orders even after a failure: the
+	// filled order left it the moment it completed, before the error.
+	require.Len(t, br.orders["EURUSD"], 3)
+	assert.Equal(t, []*order{second, third}, br.orders["EURUSD"][:2], "the unprocessed orders still wait")
+	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][2].reason, "with the first fill's stop")
+	assert.Equal(t, []*order{first}, br.completed)
 }
 
 func TestBroker_Submit_HasTheAccountSizeTheOrder(t *testing.T) {
@@ -380,7 +359,7 @@ func TestBroker_Submit_HasTheAccountSizeTheOrder(t *testing.T) {
 
 func TestBroker_Submit_SizingRejectionIsReturnedRecordedAndNotQueued(t *testing.T) {
 	captureLogs(t)
-	br := &broker{id: "t"}
+	br := newBroker("t")
 	br.addAccount("a", 0)
 	o := brokerOpen("a")
 
@@ -443,7 +422,7 @@ func TestBroker_ReservedMargin_UnknownInstrumentAndOverflowAreErrors(t *testing.
 
 func TestBroker_Submit_ReservedMarginShrinksTheNextOrder(t *testing.T) {
 	captureLogs(t)
-	br := &broker{id: "t"}
+	br := newBroker("t")
 	act := br.addAccount("a", usd(10000))
 	act.riskPct = rate(rateScale) // only the margin can limit the orders
 	ctx := context.Background()
@@ -507,7 +486,7 @@ func TestBroker_OnBar_BalanceOverflowStopsTheFillAndKeepsThePosition(t *testing.
 
 func TestBroker_OnBar_MarksEveryAccountsPosition(t *testing.T) {
 	captureLogs(t)
-	br := &broker{id: "t"}
+	br := newBroker("t")
 	one := br.addAccount("one", usd(1))
 	two := br.addAccount("two", usd(1))
 	one.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000, markPrice: 110000}
@@ -521,7 +500,7 @@ func TestBroker_OnBar_MarksEveryAccountsPosition(t *testing.T) {
 
 func TestBroker_OnBar_AppliesFillsToTheOrdersOwnAccount(t *testing.T) {
 	captureLogs(t)
-	br := &broker{id: "t"}
+	br := newBroker("t")
 	one := br.addAccount("one", usd(10000))
 	two := br.addAccount("two", usd(10000))
 	o := brokerOpen("two")
@@ -535,8 +514,8 @@ func TestBroker_OnBar_AppliesFillsToTheOrdersOwnAccount(t *testing.T) {
 
 func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	captureLogs(t)
-	br, _ := newFillBroker()
-	br.closedOut = map[string]time.Time{"a": testStart}
+	br, act := newFillBroker()
+	act.closedOutAt = testStart
 
 	o := brokerOpen("a")
 	err := br.submit(context.Background(), o)

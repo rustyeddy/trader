@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"time"
 )
 
 // money is an amount of the account currency in cents (see moneyScale).
@@ -16,6 +17,8 @@ type account struct {
 	riskPct rate // fraction of the account risked per trade
 
 	positions map[string]*position
+
+	closedOutAt time.Time // the bar of the latest margin closeout; zero if none
 }
 
 func newAccount(id string, balance money) *account {
@@ -180,6 +183,22 @@ func (act *account) size(o *order, reserved money) error {
 // order rejected: with errInsufficientMargin when margin was the limit, and
 // with errOrderTooSmall when the risk budget was.
 func (act *account) sizeOpen(o *order, inst *instrument, reserved money) error {
+	// Bugs first, outcomes second: a broke account must not hide a bad order.
+	if o.price <= 0 {
+		return fmt.Errorf("size open: %w: a market order needs a reference price", errInvalidOrder)
+	}
+	if inst.marginRate <= 0 {
+		return fmt.Errorf("size open: %w: %s has no margin rate", errInstrumentConfig, inst.symbol)
+	}
+	dist, err := stopDistance(o)
+	if err != nil {
+		return err
+	}
+	if o.takeProfit != 0 && !o.beyond(o.takeProfit, false) {
+		return fmt.Errorf("size open: %w: %s take profit %d is not beyond the entry price %d",
+			errInvalidOrder, o.direction, o.takeProfit, o.price)
+	}
+
 	margin, err := act.marginAvailable()
 	if err != nil {
 		return fmt.Errorf("size open: %w", err)
@@ -189,21 +208,7 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved money) error {
 		return fmt.Errorf("size open: %w", err)
 	}
 	if margin <= 0 {
-		return reject(o, errInsufficientMargin)
-	}
-	if o.price <= 0 {
-		return fmt.Errorf("size open: %w: a market order needs a reference price", errInvalidOrder)
-	}
-	if inst.marginRate <= 0 {
-		return fmt.Errorf("size open: %w: %s has no margin rate", errInstrumentConfig, inst.symbol)
-	}
-
-	dist, err := stopDistance(o)
-	if err != nil {
-		return err
-	}
-	if err := checkTarget(o); err != nil {
-		return err
+		return reject(o, rejected("%w", errInsufficientMargin))
 	}
 
 	equity, err := act.equity()
@@ -225,26 +230,20 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved money) error {
 		return fmt.Errorf("size open: margin units: %w", err)
 	}
 
-	units, marginLimited := riskUnits, false
-	if marginUnits < riskUnits {
-		units, marginLimited = marginUnits, true
+	units, marginLimited := min(riskUnits, marginUnits), marginUnits < riskUnits
+	if inst.maxUnits > 0 {
+		units = min(units, inst.maxUnits)
 	}
 	if inst.unitStep > 1 {
 		units -= units % inst.unitStep
 	}
-	if inst.maxUnits > 0 && units > inst.maxUnits {
-		units = inst.maxUnits
-		if inst.unitStep > 1 {
-			units -= units % inst.unitStep
-		}
-	}
 
 	if min := max(inst.minUnits, 1); units < min {
 		if marginLimited {
-			return reject(o, fmt.Errorf("%w: margin covers %d units, minimum %d",
+			return reject(o, rejected("%w: margin covers %d units, minimum %d",
 				errInsufficientMargin, units, min))
 		}
-		return reject(o, fmt.Errorf("%w: %d units, minimum %d", errOrderTooSmall, units, min))
+		return reject(o, rejected("%w: %d units, minimum %d", errOrderTooSmall, units, min))
 	}
 
 	o.units = units
@@ -258,35 +257,21 @@ func stopDistance(o *order) (int64, error) {
 	if o.stopLoss == 0 {
 		return 0, fmt.Errorf("size open: %w: an open order needs a stop loss", errInvalidOrder)
 	}
-	dist := int64(o.price - o.stopLoss)
-	if o.direction == short {
-		dist = int64(o.stopLoss - o.price)
-	}
-	if dist <= 0 {
+	if !o.beyond(o.stopLoss, true) {
 		return 0, fmt.Errorf("size open: %w: %s stop %d is not beyond the entry price %d",
 			errInvalidOrder, o.direction, o.stopLoss, o.price)
 	}
-	return dist, nil
+	return max(int64(o.price-o.stopLoss), int64(o.stopLoss-o.price)), nil
 }
 
-// checkTarget checks that a take profit, when the strategy set one, is beyond
-// the entry price on the winning side. A target on the losing side is a
-// strategy bug and an invalid order.
-func checkTarget(o *order) error {
-	if o.takeProfit == 0 {
-		return nil
+// beyond reports whether p lies past the order's entry price on its losing
+// side (where a stop belongs) or, with losing false, its winning side (where a
+// target belongs). For a long the losing side is below the entry.
+func (o *order) beyond(p price, losing bool) bool {
+	if (o.direction == long) == losing {
+		return p < o.price
 	}
-	if (o.direction == long && o.takeProfit <= o.price) || (o.direction == short && o.takeProfit >= o.price) {
-		return fmt.Errorf("size open: %w: %s take profit %d is not beyond the entry price %d",
-			errInvalidOrder, o.direction, o.takeProfit, o.price)
-	}
-	return nil
-}
-
-// reject records the rejection on the order and returns err.
-func reject(o *order, err error) error {
-	o.record(stateRejected, err.Error())
-	return err
+	return p > o.price
 }
 
 var errSizeOverflow = errors.New("amount overflows int64")
@@ -369,7 +354,7 @@ func (a *account) applyFill(o *order) error {
 			return err
 		}
 		if need > avail {
-			return fmt.Errorf("%w: %s needs %d cents of margin at the fill, %d available",
+			return rejected("%w: %s needs %d cents of margin at the fill, %d available",
 				errInsufficientMargin, o.instrument, need, avail)
 		}
 		a.positions[o.instrument] = &position{
@@ -381,9 +366,9 @@ func (a *account) applyFill(o *order) error {
 		}
 	case close:
 		if pos == nil {
-			return fmt.Errorf("%w: %s", errNoPosition, o.instrument)
+			return rejected("%w: %s", errNoPosition, o.instrument)
 		}
-		pnl, err := pos.realizedPnL(o.fillPrice)
+		pnl, err := pos.pnlAt(o.fillPrice) // realized: closing at the fill
 		if err != nil {
 			return err
 		}
@@ -401,22 +386,18 @@ func (a *account) applyFill(o *order) error {
 	return nil
 }
 
-// realizedPnL is the profit or loss, in cents, of closing the position at exit.
-// It rounds down (toward a larger loss) once, to the cent.
-//
-// TODO: this assumes the quote currency is the account currency (USD) and
-// excludes spread and commission; see moneyScale.
-func (p *position) realizedPnL(exit price) (money, error) {
-	return p.pnlAt(exit)
-}
-
 // unrealizedPnL is the profit or loss, in cents, of the position at its latest
-// mark. The same TODO as realizedPnL applies.
+// mark.
 func (p *position) unrealizedPnL() (money, error) {
 	return p.pnlAt(p.markPrice)
 }
 
-// pnlAt is the profit or loss, in cents, of the position valued at p.
+// pnlAt is the profit or loss, in cents, of the position valued at exit:
+// realized when exit is a fill, unrealized when it is a mark. It rounds down
+// (toward a larger loss) once, to the cent.
+//
+// TODO: this assumes the quote currency is the account currency (USD) and
+// excludes spread and commission; see moneyScale.
 func (p *position) pnlAt(exit price) (money, error) {
 	// Compute the price difference before narrowing: subtraction can overflow
 	// int64 even when the final P/L is representable.

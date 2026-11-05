@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 )
 
@@ -16,15 +15,24 @@ var errInsufficientMargin = errors.New("insufficient margin available")
 // instrument's limits, leave nothing worth trading.
 var errOrderTooSmall = errors.New("order size below the minimum")
 
+// rejection marks an expected trading outcome: the order is refused and the
+// run continues. Any error not wrapped in one is a failure that stops the run.
+type rejection struct{ err error }
+
+func (r rejection) Error() string { return r.err.Error() }
+func (r rejection) Unwrap() error { return r.err }
+
+// rejected makes an expected trading outcome; format should wrap the sentinel
+// that names it, so callers can still test for it with errors.Is.
+func rejected(format string, args ...any) error {
+	return rejection{fmt.Errorf(format, args...)}
+}
+
 // isRejection reports whether err is an expected trading outcome that rejects
 // the order and lets the run continue, as opposed to a failure that stops it.
 func isRejection(err error) bool {
-	return errors.Is(err, errInsufficientMargin) ||
-		errors.Is(err, errOrderTooSmall) ||
-		errors.Is(err, errNoPosition) ||
-		errors.Is(err, errCloseoutGuard) ||
-		errors.Is(err, errOpenPending) ||
-		errors.Is(err, errNoOrder)
+	var r rejection
+	return errors.As(err, &r)
 }
 
 // errNoOrder is an expected outcome: a cancel names an order that is not
@@ -49,7 +57,6 @@ var errNoPosition = errors.New("no position to close")
 var errPositionExists = errors.New("position already exists")
 
 var (
-	errUnknownBroker     = errors.New("unknown broker")
 	errUnknownAccount    = errors.New("unknown account")
 	errAccountConflict   = errors.New("order account conflicts with the trader's account")
 	errUnknownInstrument = errors.New("unknown instrument")
@@ -78,9 +85,9 @@ func (tr *trader) onBar(ctx context.Context, b bar) error {
 	return tr.handleOrder(ctx, o)
 }
 
-// handleOrder submits the order to the broker, which has the account size it. An expected
-// rejection is recorded on the order and is not an error; anything else is
-// returned and stops the run.
+// handleOrder submits the order to the broker, which has the account size it.
+// An expected rejection has been recorded and logged by whoever rejected it
+// and is not an error; anything else is returned and stops the run.
 func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 	// The strategy knows nothing of accounts; the trader says whose order this
 	// is. An account already on the order is never overwritten.
@@ -99,26 +106,9 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 	}
 
 	o.record(stateRequested, "")
-	err := tr.broker.submit(ctx, o)
-	if isRejection(err) {
-		if o.state != stateRejected { // the rejecting step normally records it
-			o.record(stateRejected, err.Error())
-		}
-		err = nil
-	}
-	if err != nil {
+	if err := tr.broker.submit(ctx, o); err != nil && !isRejection(err) {
 		return fmt.Errorf("handling %s %s at %s: %w",
 			o.action, o.instrument, o.Time.Format(time.DateOnly), err)
-	}
-
-	if o.state == stateRejected {
-		// Expected trading outcome: already recorded, so log it and keep going.
-		slog.Warn("order rejected",
-			"reason", o.history[len(o.history)-1].reason,
-			"time", o.Time,
-			"instrument", o.instrument,
-			"action", o.action,
-			"direction", o.direction)
 	}
 	return nil
 }

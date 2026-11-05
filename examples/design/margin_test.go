@@ -166,7 +166,7 @@ func liquidationBroker(t *testing.T, balance money) (*broker, *account) {
 	t.Helper()
 	captureLogs(t)
 	registerInstrument(t, testInstrument("GBPUSD"))
-	br := &broker{id: "t"}
+	br := newBroker("t")
 	act := br.addAccount("a", balance)
 	// EURUSD: 100000 units, $2200 margin, -$1000 unrealized after the bar's mark.
 	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 100000, entryPrice: 111000, markPrice: 111000}
