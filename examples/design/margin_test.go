@@ -342,8 +342,8 @@ func TestBroker_OnBar_CloseoutOrdersAreRecorded(t *testing.T) {
 
 	require.NoError(t, br.onBar(context.Background(), lossBar()))
 
-	require.Len(t, br.closeouts, 1, "progressive: one position was liquidated")
-	c := br.closeouts[0]
+	require.Len(t, br.closeouts(), 1, "progressive: one position was liquidated")
+	c := br.closeouts()[0]
 	assert.Equal(t, "EURUSD", c.instrument)
 	assert.Equal(t, close, c.action)
 	assert.Equal(t, reasonMarginCloseout, c.reason)
@@ -358,13 +358,13 @@ func TestBroker_OnBar_CompleteCloseoutRecordsEveryPosition(t *testing.T) {
 
 	require.NoError(t, br.onBar(context.Background(), lossBar()))
 
-	require.Len(t, br.closeouts, 2)
-	assert.Equal(t, "EURUSD", br.closeouts[0].instrument, "worst loser first")
-	assert.Equal(t, "GBPUSD", br.closeouts[1].instrument)
+	require.Len(t, br.closeouts(), 2)
+	assert.Equal(t, "EURUSD", br.closeouts()[0].instrument, "worst loser first")
+	assert.Equal(t, "GBPUSD", br.closeouts()[1].instrument)
 	assert.Len(t, br.completed, 2)
 }
 
-func TestBroker_OnBar_FailedCloseoutIsKeptButNotCompleted(t *testing.T) {
+func TestBroker_OnBar_RejectedCloseoutIsKeptAsCompleted(t *testing.T) {
 	br, _ := liquidationBroker(t, usd(2000))
 	// A policy that names a position the account does not hold: the closing
 	// order is rejected, so the closeout fails.
@@ -375,9 +375,9 @@ func TestBroker_OnBar_FailedCloseoutIsKeptButNotCompleted(t *testing.T) {
 	err := br.onBar(context.Background(), lossBar())
 
 	require.Error(t, err)
-	require.Len(t, br.closeouts, 1, "the attempt is kept for diagnostics")
-	assert.NotEqual(t, stateFilled, br.closeouts[0].state)
-	assert.Empty(t, br.completed, "a failed closeout is not a completed order")
+	require.Len(t, br.closeouts(), 1, "the attempt is kept for diagnostics")
+	assert.Equal(t, stateRejected, br.closeouts()[0].state)
+	assert.Equal(t, br.closeouts(), br.completed, "a rejected closeout is terminal, so completed")
 }
 
 func TestBroker_OnBar_CompletedFollowsEventOrderNotQueueOrder(t *testing.T) {

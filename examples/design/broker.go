@@ -29,13 +29,11 @@ type broker struct {
 	// re-entry rules are a future policy.
 	closedOut map[string]time.Time
 
-	// completed keeps every order that has left the queue (filled, rejected by
-	// the broker or cancelled), in the order it completed, for the journal.
-	// Only complete appends to it.
-	// closeouts is every liquidation order the broker made itself, including a
-	// failed attempt; completed holds only orders in a terminal state.
+	// completed keeps every order that has reached a terminal state (filled,
+	// rejected by the broker or cancelled), in the order it happened, for the
+	// journal. Only complete appends to it. The broker's own liquidations are in
+	// it too; closeouts picks them out by their reason.
 	completed []*order
-	closeouts []*order
 }
 
 var brokers map[string]*broker
@@ -278,15 +276,26 @@ func (br *broker) closeoutPosition(b bar, act *account, pos *position) error {
 	}
 	o.record(stateRequested, "")
 	o.record(stateSubmitted, "")
-	br.closeouts = append(br.closeouts, o) // the attempt is kept even if it fails
 	if err := br.fillOrder(o, pos.markPrice); err != nil {
-		return err
+		return err // not terminal: the run stops and the error is logged
 	}
+	br.complete(o)
 	if o.state != stateFilled {
 		return fmt.Errorf("closeout %s: the order was %s", pos.instrument, o.state)
 	}
-	br.complete(o) // only a filled closeout is complete
 	return nil
+}
+
+// closeouts is the completed orders the broker made itself to liquidate
+// positions, including any that were rejected.
+func (br *broker) closeouts() []*order {
+	var out []*order
+	for _, o := range br.completed {
+		if o.reason == reasonMarginCloseout {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 // complete is the one place a terminal order is recorded as completed, so

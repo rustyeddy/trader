@@ -569,7 +569,7 @@ func TestBroker_OnBar_RetainsCompletedOrdersInCompletionOrder(t *testing.T) {
 
 	assert.Equal(t, []*order{filled, cl}, br.completed, "filled orders are kept, in the order they completed")
 	assert.Equal(t, []*order{limit}, br.orders["EURUSD"], "a waiting order is not completed")
-	assert.Empty(t, br.closeouts, "strategy orders are not closeouts")
+	assert.Empty(t, br.closeouts(), "strategy orders are not closeouts")
 }
 
 func TestBroker_OnBar_RetainsRejectedOrders(t *testing.T) {

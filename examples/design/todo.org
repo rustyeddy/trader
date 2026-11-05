@@ -153,7 +153,7 @@ records the result. See =order-tests.org= for the scenarios.
   intrabar trigger/closeout ordering. Add a regression with EURUSD and
   GBPUSD at different observation times that verifies the intended behavior.
   This is *deferred*, not a blocker for the single-instrument prototype.
-- [X] The broker retains every order that leaves its queue in =broker.completed= (completion order) and its own liquidation orders in =broker.closeouts=. Orders rejected before submit (sizing) never reach the broker and stay with the trader.
+- [X] The broker retains every order that leaves its queue in =broker.completed= (completion order) including its own liquidation orders (=broker.closeouts()= filters them by reason). Orders rejected before submit (sizing) never reach the broker and stay with the trader.
 - [ ] Stop-loss enforcement (=reasonStopLoss=); limit and stop triggers.
 ** TODO Market data acquisition and storage
 - Download and validate provider observations; convert to canonical.
