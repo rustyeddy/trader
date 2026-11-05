@@ -236,8 +236,9 @@ func TestBroker_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.Time, "stamped with the fill bar")
 	assert.Equal(t, stateFilled, o.history[len(o.history)-1].state)
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[len(o.history)-1].time)
-	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: 111500, stopLoss: 108900, markPrice: 111600}, act.positions["EURUSD"])
-	assert.Empty(t, br.orders["EURUSD"], "a filled order is no longer waiting")
+	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: 111500, markPrice: 111600}, act.positions["EURUSD"])
+	require.Len(t, br.orders["EURUSD"], 1, "the filled open left the queue; only its stop waits")
+	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][0].reason)
 }
 
 func TestBroker_OnBar_IgnoresOtherInstrumentsAndUnsupportedTypes(t *testing.T) {
@@ -256,7 +257,9 @@ func TestBroker_OnBar_IgnoresOtherInstrumentsAndUnsupportedTypes(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), fillBar(1, 111500)))
 	assert.Equal(t, stateFilled, market.state)
 	assert.Equal(t, stateSubmitted, limit.state, "limit orders do not execute yet")
-	assert.Equal(t, []*order{limit}, br.orders["EURUSD"])
+	require.Len(t, br.orders["EURUSD"], 2)
+	assert.Same(t, limit, br.orders["EURUSD"][0])
+	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][1].reason, "the filled open's stop")
 }
 
 func TestBroker_OnBar_CloseTakesThePositionsSizeAndRemovesIt(t *testing.T) {
@@ -348,8 +351,10 @@ func TestBroker_OnBar_ErrorMidBatchLeavesFilledOrdersListed(t *testing.T) {
 	assert.Equal(t, stateFilled, first.state, "processed before the failure")
 	assert.Equal(t, stateSubmitted, second.state, "the failing order is untouched")
 	assert.Equal(t, stateSubmitted, third.state, "later orders are not processed")
-	assert.Equal(t, []*order{first, second, third}, br.orders["EURUSD"],
+	require.Len(t, br.orders["EURUSD"], 4)
+	assert.Equal(t, []*order{first, second, third}, br.orders["EURUSD"][:3],
 		"cleanup is skipped, so the filled order is still listed")
+	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][3].reason, "the first fill's stop")
 }
 
 func TestBroker_Submit_HasTheAccountSizeTheOrder(t *testing.T) {
@@ -567,7 +572,10 @@ func TestBroker_OnBar_RetainsCompletedOrdersInCompletionOrder(t *testing.T) {
 	cl.Time = fillBar(1, 0).Time
 	require.NoError(t, br.onBar(ctx, fillBar(2, 112000)))
 
-	assert.Equal(t, []*order{filled, cl}, br.completed, "filled orders are kept, in the order they completed")
+	require.Len(t, br.completed, 3)
+	assert.Same(t, filled, br.completed[0], "filled orders are kept, in the order they completed")
+	assert.Same(t, cl, br.completed[1])
+	assert.Equal(t, stateCancelled, br.completed[2].state, "the open's stop, cancelled by the close")
 	assert.Equal(t, []*order{limit}, br.orders["EURUSD"], "a waiting order is not completed")
 	assert.Empty(t, br.closeouts(), "strategy orders are not closeouts")
 }

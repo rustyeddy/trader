@@ -152,30 +152,26 @@ func (br *broker) reservedMargin(accountID string) (money, error) {
 // produced it. Orders that are no longer submitted (filled or rejected) leave
 // the queue.
 func (br *broker) onBar(ctx context.Context, b bar) error {
-	pending := append([]*order(nil), br.orders[b.instrument]...)
-
-	for _, o := range pending {
-		if err := br.processOrder(ctx, b, o); err != nil {
-			return err
+	// Market orders fill at the open, so they go first; the resting stops then
+	// trigger on the rest of the bar's range. A stop placed by a fill above is
+	// live on this bar too.
+	for _, kind := range []orderType{marketOrder, stopOrder} {
+		for _, o := range append([]*order(nil), br.orders[b.instrument]...) {
+			if o.orderType != kind {
+				continue
+			}
+			if err := br.processOrder(ctx, b, o); err != nil {
+				return err
+			}
 		}
 	}
+	br.prune(b.instrument)
 
-	if len(pending) > 0 {
-		br.prune(b.instrument)
-	}
-
-	// Protective stops trigger on the bar's range, before positions are valued
-	// and judged against the margin rules, in a fixed account order.
 	ids := make([]string, 0, len(br.accounts))
 	for id := range br.accounts {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	for _, id := range ids {
-		if err := br.enforceStop(b, br.accounts[id]); err != nil {
-			return fmt.Errorf("stop check %s: %w", id, err)
-		}
-	}
 	for _, act := range br.accounts {
 		act.mark(b)
 	}
@@ -190,6 +186,9 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 // prune drops the instrument's orders that are no longer submitted from the
 // queue. It does not record them: complete does that when they finish.
 func (br *broker) prune(instrument string) {
+	if len(br.orders[instrument]) == 0 {
+		return // nothing queued; never write to a nil map
+	}
 	var waiting []*order
 	for _, o := range br.orders[instrument] {
 		if o.state == stateSubmitted {
@@ -267,42 +266,70 @@ func (br *broker) cancelOpens(accountID string, at time.Time, reason string) {
 	}
 }
 
-// enforceStop closes the account's position in b's instrument at its stop when
-// the bar trades through it. The close is an order the broker makes itself,
-// with reasonStopLoss, and it fills at once on this bar.
-func (br *broker) enforceStop(b bar, act *account) error {
-	pos := act.positions[b.instrument]
-	if pos == nil {
-		return nil
-	}
-	p, hit := stopFill(pos, b)
-	if !hit {
-		return nil
-	}
-	slog.Warn("stop loss", "broker", br.id, "account", act.id, "instrument", pos.instrument,
-		"stop", pos.stopLoss, "fill", p, "time", b.Time)
-	return br.closePosition(b, act, pos, reasonStopLoss, p)
-}
-
-// stopFill reports whether bar b trades through the position's stop and, if so,
-// the price the stop fills at: the stop itself, or the bar's open when it gaps
-// beyond the stop (the stop cannot fill at a price that never traded). A
-// position with no stop never triggers.
-func stopFill(pos *position, b bar) (price, bool) {
-	if pos.stopLoss == 0 {
-		return 0, false
-	}
-	switch pos.direction {
+// stopFill reports whether bar b trades through a stop on a position of
+// direction dir and, if so, the price the stop fills at: the stop itself, or the
+// bar's open when it gaps beyond the stop (the stop cannot fill at a price that
+// never traded).
+func stopFill(dir direction, stop price, b bar) (price, bool) {
+	switch dir {
 	case long:
-		if b.l <= pos.stopLoss {
-			return min(pos.stopLoss, b.o), true
+		if b.l <= stop {
+			return min(stop, b.o), true
 		}
 	case short:
-		if b.h >= pos.stopLoss {
-			return max(pos.stopLoss, b.o), true
+		if b.h >= stop {
+			return max(stop, b.o), true
 		}
 	}
 	return 0, false
+}
+
+// placeStop queues the protective stop for the position the filled open o
+// created: a resting close order the broker owns, like any other order waiting
+// on a trigger. An open without a stop gets none.
+func (br *broker) placeStop(o *order) {
+	if o.stopLoss <= 0 {
+		return
+	}
+	s := &order{
+		id:         br.nextID(),
+		accountID:  o.accountID,
+		instrument: o.instrument,
+		direction:  o.direction, // the direction of the position it protects
+		action:     close,
+		orderType:  stopOrder,
+		reason:     reasonStopLoss,
+		price:      o.stopLoss,
+		Time:       o.Time,
+	}
+	s.record(stateRequested, "")
+	s.record(stateSubmitted, "")
+	if br.orders == nil {
+		br.orders = make(map[string][]*order)
+	}
+	br.orders[s.instrument] = append(br.orders[s.instrument], s)
+}
+
+// cancelStops cancels the account's resting stops on an instrument once its
+// position is gone: a stop must never open or close a later position.
+func (br *broker) cancelStops(accountID, instrument string, at time.Time) {
+	for _, s := range br.orders[instrument] {
+		if s.accountID == accountID && s.state == stateSubmitted && s.reason == reasonStopLoss {
+			s.Time = at
+			s.record(stateCancelled, "position closed")
+			br.complete(s)
+		}
+	}
+	br.prune(instrument)
+}
+
+// finish records an order that reached a terminal state. A filled close ends
+// the position, so its resting stops go with it.
+func (br *broker) finish(o *order) {
+	br.complete(o)
+	if o.action == close && o.state == stateFilled {
+		br.cancelStops(o.accountID, o.instrument, o.Time)
+	}
 }
 
 // closeoutPosition liquidates pos at its latest mark.
@@ -328,7 +355,7 @@ func (br *broker) closePosition(b bar, act *account, pos *position, why orderRea
 	if err := br.fillOrder(o, p); err != nil {
 		return err // not terminal: the run stops and the error is logged
 	}
-	br.complete(o)
+	br.finish(o)
 	if o.state != stateFilled {
 		return fmt.Errorf("%s %s: the order was %s", why, pos.instrument, o.state)
 	}
@@ -367,23 +394,36 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 	if err := br.fillOrder(o, executionPrice(o, b)); err != nil {
 		return err
 	}
-	br.complete(o) // filled, or rejected by the account
+	br.finish(o) // filled, or rejected by the account
 	return nil
 }
 
-// shouldExecute reports whether the submitted order executes on bar b. Only
-// market orders execute so far, and only on a bar after the one that produced
-// them; limit and stop orders stay submitted until their trigger rules exist.
+// shouldExecute reports whether the submitted order executes on bar b. A
+// market order executes on a bar after the one that produced it; a stop order
+// when the bar trades through its price, including the bar it was placed on.
+// Limit orders stay submitted until their trigger rules exist.
 func (br *broker) shouldExecute(o *order, b bar) bool {
-	return o.state == stateSubmitted &&
-		o.orderType == marketOrder &&
-		o.instrument == b.instrument &&
-		b.Time.After(o.Time)
+	if o.state != stateSubmitted || o.instrument != b.instrument {
+		return false
+	}
+	switch o.orderType {
+	case marketOrder:
+		return b.Time.After(o.Time)
+	case stopOrder:
+		_, hit := stopFill(o.direction, o.price, b)
+		return hit
+	}
+	return false
 }
 
 // executionPrice is the price the order fills at on bar b: a market order
-// fills at the bar's open, the first price after the signal.
+// fills at the bar's open, the first price after the signal; a stop fills at
+// its price, or the open when the bar gapped past it.
 func executionPrice(o *order, b bar) price {
+	if o.orderType == stopOrder {
+		p, _ := stopFill(o.direction, o.price, b)
+		return p
+	}
 	return b.o
 }
 
@@ -413,5 +453,8 @@ func (br *broker) fillOrder(o *order, p price) error {
 		return nil
 	}
 	o.record(stateFilled, "")
+	if o.action == open {
+		br.placeStop(o)
+	}
 	return nil
 }
