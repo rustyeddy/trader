@@ -949,3 +949,29 @@ func TestAccount_ApplyFill_FailureChangesNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestAccount_ApplyFill_OpenChecksMarginAtTheFillPrice(t *testing.T) {
+	// 10000 units at 1.10000: margin 10000 * 1.1 * 2% = $220.
+	fill := func() *order {
+		return &order{instrument: "EURUSD", direction: long, action: open, units: 10000, fillPrice: 110000}
+	}
+	t.Run("exactly enough margin fills", func(t *testing.T) {
+		a := newAccount("a", usd(220))
+		require.NoError(t, a.applyFill(fill()))
+		assert.Contains(t, a.positions, "EURUSD")
+	})
+	t.Run("one cent short is rejected and changes nothing", func(t *testing.T) {
+		a := newAccount("a", usd(220)-1)
+		err := a.applyFill(fill())
+		require.ErrorIs(t, err, errInsufficientMargin)
+		assert.True(t, isRejection(err))
+		assert.Empty(t, a.positions)
+		assert.Equal(t, usd(220)-1, a.balance)
+	})
+	t.Run("a higher fill price needs more margin", func(t *testing.T) {
+		a := newAccount("a", usd(220))
+		o := fill()
+		o.fillPrice = 111000 // $222.00
+		require.ErrorIs(t, a.applyFill(o), errInsufficientMargin)
+	})
+}

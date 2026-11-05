@@ -22,8 +22,14 @@ func isRejection(err error) bool {
 	return errors.Is(err, errInsufficientMargin) ||
 		errors.Is(err, errOrderTooSmall) ||
 		errors.Is(err, errNoPosition) ||
-		errors.Is(err, errCloseoutGuard)
+		errors.Is(err, errCloseoutGuard) ||
+		errors.Is(err, errOpenPending)
 }
+
+// errOpenPending is an expected outcome: netting allows one position per
+// instrument, so a second opening order is refused while one is still waiting
+// for the account on that instrument.
+var errOpenPending = errors.New("an open is already pending")
 
 // errCloseoutGuard is an expected outcome: the account was margin-closed-out on
 // this bar, so a strategy open on the same observation is refused.

@@ -139,3 +139,106 @@ func TestBroker_OnBar_MarginCloseoutCancelsAWaitingLimit(t *testing.T) {
 	assert.Equal(t, stateCancelled, lim.state)
 	assert.Contains(t, br.completed, lim)
 }
+
+func TestBroker_OnBar_RestingLimitIsRejectedWhenEquityFellWhileItWaited(t *testing.T) {
+	captureLogs(t)
+	registerInstrument(t, testInstrument("GBPUSD"))
+	br, act := newFillBroker()
+	br.margin = func(*account) (marginStatus, error) { return marginHealthy, nil } // keep liquidation out of it
+	ctx := context.Background()
+	o := submitLimit(t, br, long, 109000)
+	units := o.units
+	require.Positive(t, units)
+
+	// While the limit waits, another position loses nearly everything:
+	// -$9,900 unrealized leaves too little margin for the limit's units.
+	act.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 100000,
+		entryPrice: 150000, markPrice: 140100}
+
+	hit := stopBar(109800, 110000, 108800, 109200)
+	hit.Time = hit.Time.AddDate(0, 0, 1)
+	require.NoError(t, br.onBar(ctx, hit), "a rejection is an outcome, not a failure")
+
+	assert.Equal(t, stateRejected, o.state)
+	assert.Contains(t, o.history[len(o.history)-1].reason, "insufficient margin")
+	assert.Equal(t, units, o.units, "the submitted size is never changed")
+	assert.Zero(t, o.fillPrice)
+	assert.NotContains(t, act.positions, "EURUSD")
+	assert.Equal(t, usd(10000), act.balance)
+	assert.Empty(t, br.orders["EURUSD"], "rejected: gone from the queue, and no stop was queued")
+	assert.Same(t, o, br.completed[0])
+}
+
+func TestBroker_OnBar_RestingLimitStillFillsWhenMarginHolds(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	o := submitLimit(t, br, long, 109000)
+
+	hit := stopBar(109800, 110000, 108800, 109200)
+	hit.Time = hit.Time.AddDate(0, 0, 1)
+	require.NoError(t, br.onBar(context.Background(), hit))
+
+	assert.Equal(t, stateFilled, o.state)
+	assert.Contains(t, act.positions, "EURUSD")
+}
+
+func TestBroker_Submit_SecondPendingOpenOnTheInstrumentIsRejected(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	first := submitLimit(t, br, long, 109000)
+
+	second := openOrderAt("EURUSD", long, 108500)
+	second.orderType, second.accountID = limitOrder, "a"
+	err := br.submit(context.Background(), second)
+
+	require.ErrorIs(t, err, errOpenPending)
+	assert.True(t, isRejection(err), "an expected trading outcome, not a fatal accounting error")
+	assert.Empty(t, second.id, "it never reached the queue")
+	assert.Equal(t, []*order{first}, br.orders["EURUSD"])
+}
+
+func TestBroker_Submit_PendingOpenOnlyBlocksTheSameAccountAndInstrument(t *testing.T) {
+	captureLogs(t)
+	registerInstrument(t, testInstrument("GBPUSD"))
+	br, _ := newFillBroker()
+	br.addAccount("b", usd(10000))
+	submitLimit(t, br, long, 109000)
+	ctx := context.Background()
+
+	otherAccount := brokerOpen("b")
+	otherInstrument := brokerOpen("a")
+	otherInstrument.instrument = "GBPUSD"
+	closing := &order{Time: testStart, accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder}
+
+	require.NoError(t, br.submit(ctx, otherAccount))
+	require.NoError(t, br.submit(ctx, otherInstrument))
+	require.NoError(t, br.submit(ctx, closing), "only opens compete")
+}
+
+func TestBroker_Submit_OpenIsAllowedOnceThePendingOneIsGone(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	first := submitLimit(t, br, long, 109000)
+	first.record(stateCancelled, "test")
+	br.prune("EURUSD")
+
+	require.NoError(t, br.submit(context.Background(), brokerOpen("a")))
+}
+
+func TestTrader_HandleOrder_DuplicatePendingOpenIsRecordedNotFatal(t *testing.T) {
+	captureLogs(t)
+	ctx := context.Background()
+	tr := newTestTrader()
+	mk := func(limit price) *order {
+		return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: limitOrder,
+			price: limit, stopLoss: limit - 1100}
+	}
+	first, second := mk(109000), mk(108500)
+
+	require.NoError(t, tr.handleOrder(ctx, first))
+	require.NoError(t, tr.handleOrder(ctx, second), "the run continues")
+
+	assert.Equal(t, stateSubmitted, first.state)
+	assert.Equal(t, stateRejected, second.state)
+	assert.Contains(t, second.history[len(second.history)-1].reason, "already pending")
+}

@@ -340,6 +340,21 @@ func (a *account) applyFill(o *order) error {
 		if pos != nil {
 			return fmt.Errorf("%w: %s is already %s", errPositionExists, o.instrument, pos.direction)
 		}
+		// Sizing checked the margin when the order was submitted, but a resting
+		// order fills later, after equity may have fallen. The instruction is
+		// never resized: it fills as submitted or is rejected.
+		need, err := marginFor(o.instrument, o.units, o.fillPrice)
+		if err != nil {
+			return err
+		}
+		avail, err := a.marginAvailable()
+		if err != nil {
+			return err
+		}
+		if need > avail {
+			return fmt.Errorf("%w: %s needs %d cents of margin at the fill, %d available",
+				errInsufficientMargin, o.instrument, need, avail)
+		}
 		a.positions[o.instrument] = &position{
 			instrument: o.instrument,
 			direction:  o.direction,

@@ -89,6 +89,11 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 		}
 	}
 
+	if o.action == open && br.hasPendingOpen(o.accountID, o.instrument) {
+		return fmt.Errorf("submit to broker %s: %w: account %s on %s",
+			br.id, errOpenPending, o.accountID, o.instrument)
+	}
+
 	reserved, err := br.reservedMargin(o.accountID)
 	if err != nil {
 		return fmt.Errorf("submit to broker %s: %w", br.id, err)
@@ -116,6 +121,17 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	}
 	br.orders[o.instrument] = append(br.orders[o.instrument], o)
 	return nil
+}
+
+// hasPendingOpen reports whether the account has a submitted open waiting on the
+// instrument.
+func (br *broker) hasPendingOpen(accountID, instrument string) bool {
+	for _, o := range br.orders[instrument] {
+		if o.accountID == accountID && o.state == stateSubmitted && o.action == open {
+			return true
+		}
+	}
+	return false
 }
 
 // nextID issues the next order id.

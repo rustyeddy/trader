@@ -120,7 +120,8 @@ func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
 	assert.Equal(t, "sim-1", o1.id)
 	assert.Equal(t, "sim-2", o2.id)
 
-	pre := brokerOpen("acct")
+	b.addAccount("other", usd(1000))
+	pre := brokerOpen("other")
 	pre.id = "mine"
 	require.NoError(t, b.submit(ctx, pre))
 	assert.Equal(t, "mine", pre.id, "an existing id is not overwritten")
@@ -245,7 +246,8 @@ func TestBroker_OnBar_IgnoresOtherInstrumentsAndUntouchedLimits(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
 	market := submittedOrder(t, br, open, long)
-	limit := brokerOpen("a")
+	br.addAccount("b", usd(10000))
+	limit := brokerOpen("b")
 	limit.orderType = limitOrder
 	require.NoError(t, br.submit(context.Background(), limit))
 
@@ -342,8 +344,16 @@ func TestBroker_OnBar_ErrorMidBatchLeavesFilledOrdersListed(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
 	first := submittedOrder(t, br, open, long)
-	second := submittedOrder(t, br, open, long) // fatal: the first one's position exists by then
-	third := submittedOrder(t, br, open, long)
+	// Queued directly: submit refuses a second pending open, but a fill can
+	// still meet an existing position (fatal: the first one's position exists by then).
+	queued := func(id string) *order {
+		o := brokerOpen("a")
+		o.id, o.units, o.state = id, 100, stateSubmitted
+		br.orders["EURUSD"] = append(br.orders["EURUSD"], o)
+		return o
+	}
+	second := queued("t-q2")
+	third := queued("t-q3")
 
 	err := br.onBar(context.Background(), fillBar(1, 111000))
 
@@ -442,7 +452,9 @@ func TestBroker_Submit_ReservedMarginShrinksTheNextOrder(t *testing.T) {
 	require.NoError(t, br.submit(ctx, first))
 	assert.Equal(t, int64(454545), first.units, "all the margin")
 
+	registerInstrument(t, testInstrument("GBPUSD"))
 	second := brokerOpen("a")
+	second.instrument = "GBPUSD" // another instrument, so only the margin can refuse it
 	err := br.submit(ctx, second)
 
 	require.ErrorIs(t, err, errInsufficientMargin, "the first order holds the margin until it fills")
@@ -562,7 +574,8 @@ func TestBroker_OnBar_RetainsCompletedOrdersInCompletionOrder(t *testing.T) {
 	br, _ := newFillBroker()
 	ctx := context.Background()
 	filled := submittedOrder(t, br, open, long)
-	limit := brokerOpen("a")
+	br.addAccount("b", usd(10000))
+	limit := brokerOpen("b")
 	limit.orderType = limitOrder
 	require.NoError(t, br.submit(ctx, limit))
 	assert.Empty(t, br.completed, "nothing has completed yet")
