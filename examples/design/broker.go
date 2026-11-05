@@ -190,24 +190,36 @@ func (o *order) phase() int {
 // produced it. Orders that are no longer submitted (filled or rejected) leave
 // the queue.
 func (br *broker) onBar(ctx context.Context, b bar) error {
-	// Market orders fill at the open, so they go first; limit and stop entries
-	// then fill on the rest of the bar's range, and the protective stops last.
-	// A stop placed by an entry filled above is live on this bar too.
+	// The open is the one price a bar is known to have printed first, so the
+	// orders it triggers go first, whatever else the bar later does: a market
+	// order, and any resting order the open is already through (a target the bar
+	// gaps over fills at the open even if the same bar later reaches the stop).
+	// Only then do the orders that depend on the rest of the range get their
+	// turn. Each stage considers orders in phases (see phase); a stop placed by
+	// an entry filled earlier in the stage is live in it too.
 	//
 	// Assumption: a bar gives only open, high, low and close, not the path
-	// between them. Within a bar we assume entries happen before protective
-	// stops, and that the stop then sees the bar's whole range. That is exact
-	// for a market entry (it fills at the open, before everything else), but
-	// for a limit or stop entry it is pessimistic when the extreme that hits the
-	// stop came before the entry (open, low, high, close for a long's stop). It
-	// can overstate stop-outs on entry bars; see the todo for options.
-	for phase := 0; phase < phases; phase++ {
-		for _, o := range append([]*order(nil), br.orders[b.instrument]...) {
-			if o.phase() != phase {
-				continue
-			}
-			if err := br.processOrder(ctx, b, o); err != nil {
-				return err
+	// between the extremes. After the open we assume entries happen before
+	// protective stops, stops before targets, and that a stop then sees the
+	// bar's whole range. That is exact for a market entry (it fills at the
+	// open), but for a limit or stop entry it is pessimistic when the extreme
+	// that hits the stop came before the entry (open, low, high, close for a
+	// long's stop), and a bar reaching both stop and target is taken as the
+	// stop. That can overstate stop-outs on entry bars. The same blindness is
+	// optimistic for a target: a limit or stop entry's new target can fill
+	// against an extreme (a long's high) that came before the entry. See the
+	// todo for options.
+	atOpen := b
+	atOpen.h, atOpen.l = b.o, b.o // all that is known to have happened so far
+	for _, seen := range []bar{atOpen, b} {
+		for phase := 0; phase < phases; phase++ {
+			for _, o := range append([]*order(nil), br.orders[b.instrument]...) {
+				if o.phase() != phase {
+					continue
+				}
+				if err := br.processOrder(ctx, seen, o); err != nil {
+					return err
+				}
 			}
 		}
 	}

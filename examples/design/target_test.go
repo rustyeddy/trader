@@ -206,3 +206,64 @@ func TestOrder_Validate_TakeProfit(t *testing.T) {
 func TestOrderReason_TakeProfitString(t *testing.T) {
 	assert.Equal(t, "take profit", reasonTakeProfit.String())
 }
+
+// A bar opens beyond the target and later crosses the stop. The open is known
+// to come first, so the target fills there; the stop-first policy only applies
+// to what the open does not settle.
+func TestBroker_OnBar_TargetAlreadyReachedAtTheOpenBeatsALaterStop(t *testing.T) {
+	tests := []struct {
+		name  string
+		d     direction
+		tp    price
+		bar   ohlc
+		fill  price
+		gain  func(units int64) money // cents
+		stopP price
+	}{
+		{"long", long, 112000, ohlc{o: 112500, h: 113000, l: 108500, c: 111000}, 112500,
+			func(u int64) money { return money(u * 5 / 2) }, 108900},
+		{"short", short, 108000, ohlc{o: 107500, h: 111500, l: 107000, c: 109000}, 107500,
+			func(u int64) money { return money(u * 5 / 2) }, 111100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			captureLogs(t)
+			br, act := newFillBroker()
+			ctx := context.Background()
+			op := submitWithTarget(t, br, tt.d, tt.tp)
+			require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
+			require.Len(t, br.orders["EURUSD"], 2)
+			stop := br.orders["EURUSD"][0]
+			require.Equal(t, tt.stopP, stop.price)
+
+			require.NoError(t, br.onBar(ctx, bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: tt.bar}))
+
+			assert.Empty(t, act.positions)
+			tp := br.completed[len(br.completed)-2]
+			assert.Equal(t, reasonTakeProfit, tp.reason, "the target won")
+			assert.Equal(t, tt.fill, tp.fillPrice, "at the open, which is better than the target")
+			assert.Equal(t, stateCancelled, stop.state, "the stop was cancelled, never executed")
+			assert.Equal(t, usd(10000)+tt.gain(op.units), act.balance)
+		})
+	}
+}
+
+// The mirror case: the open is already through the stop, and the same bar later
+// reaches the target. The stop fills at the open and cancels the target.
+func TestBroker_OnBar_StopAlreadyReachedAtTheOpenBeatsALaterTarget(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	ctx := context.Background()
+	submitWithTarget(t, br, long, 112000)
+	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
+	target := br.orders["EURUSD"][1]
+
+	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 108000, h: 112500, l: 107500, c: 111000}}
+	require.NoError(t, br.onBar(ctx, gap))
+
+	assert.Empty(t, act.positions)
+	stop := br.completed[len(br.completed)-2]
+	assert.Equal(t, reasonStopLoss, stop.reason)
+	assert.Equal(t, price(108000), stop.fillPrice)
+	assert.Equal(t, stateCancelled, target.state)
+}
