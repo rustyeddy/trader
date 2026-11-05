@@ -31,7 +31,9 @@ type broker struct {
 
 	// completed keeps every order that has left the queue (filled, rejected by
 	// the broker or cancelled), in the order it completed, for the journal.
-	// closeouts is the subset the broker made itself to liquidate positions.
+	// Only complete appends to it.
+	// closeouts is every liquidation order the broker made itself, including a
+	// failed attempt; completed holds only orders in a terminal state.
 	completed []*order
 	closeouts []*order
 }
@@ -181,15 +183,13 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 	return nil
 }
 
-// prune moves the instrument's orders that are no longer submitted from the
-// queue to the completed list.
+// prune drops the instrument's orders that are no longer submitted from the
+// queue. It does not record them: complete does that when they finish.
 func (br *broker) prune(instrument string) {
 	var waiting []*order
 	for _, o := range br.orders[instrument] {
 		if o.state == stateSubmitted {
 			waiting = append(waiting, o)
-		} else {
-			br.completed = append(br.completed, o)
 		}
 	}
 	br.orders[instrument] = waiting
@@ -253,6 +253,7 @@ func (br *broker) cancelOpens(accountID string, at time.Time, reason string) {
 			if o.accountID == accountID && o.state == stateSubmitted && o.action == open {
 				o.Time = at // the cancellation happens now, not when the order was made
 				o.record(stateCancelled, reason)
+				br.complete(o)
 				cancelled = true
 			}
 		}
@@ -277,15 +278,22 @@ func (br *broker) closeoutPosition(b bar, act *account, pos *position) error {
 	}
 	o.record(stateRequested, "")
 	o.record(stateSubmitted, "")
-	br.closeouts = append(br.closeouts, o)
-	br.completed = append(br.completed, o)
+	br.closeouts = append(br.closeouts, o) // the attempt is kept even if it fails
 	if err := br.fillOrder(o, pos.markPrice); err != nil {
 		return err
 	}
 	if o.state != stateFilled {
 		return fmt.Errorf("closeout %s: the order was %s", pos.instrument, o.state)
 	}
+	br.complete(o) // only a filled closeout is complete
 	return nil
+}
+
+// complete is the one place a terminal order is recorded as completed, so
+// completed is in the order the transitions actually happened, whatever the
+// queue order or a later cleanup.
+func (br *broker) complete(o *order) {
+	br.completed = append(br.completed, o)
 }
 
 // processOrder gives a submitted order its chance to execute on bar b.
@@ -298,7 +306,11 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 	}
 
 	o.Time = b.Time // the order is now on the fill bar
-	return br.fillOrder(o, executionPrice(o, b))
+	if err := br.fillOrder(o, executionPrice(o, b)); err != nil {
+		return err
+	}
+	br.complete(o) // filled, or rejected by the account
+	return nil
 }
 
 // shouldExecute reports whether the submitted order executes on bar b. Only

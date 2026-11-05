@@ -363,3 +363,35 @@ func TestBroker_OnBar_CompleteCloseoutRecordsEveryPosition(t *testing.T) {
 	assert.Equal(t, "GBPUSD", br.closeouts[1].instrument)
 	assert.Len(t, br.completed, 2)
 }
+
+func TestBroker_OnBar_FailedCloseoutIsKeptButNotCompleted(t *testing.T) {
+	br, _ := liquidationBroker(t, usd(2000))
+	// A policy that names a position the account does not hold: the closing
+	// order is rejected, so the closeout fails.
+	br.closeout = func(*account) (*position, error) {
+		return &position{instrument: "USDJPY", markPrice: 150000}, nil
+	}
+
+	err := br.onBar(context.Background(), lossBar())
+
+	require.Error(t, err)
+	require.Len(t, br.closeouts, 1, "the attempt is kept for diagnostics")
+	assert.NotEqual(t, stateFilled, br.closeouts[0].state)
+	assert.Empty(t, br.completed, "a failed closeout is not a completed order")
+}
+
+func TestBroker_OnBar_CompletedFollowsEventOrderNotQueueOrder(t *testing.T) {
+	br, _ := liquidationBroker(t, usd(1000))
+	later := brokerOpen("a") // first in the queue, cancelled by the closeout
+	later.id, later.state, later.Time = "t-8", stateSubmitted, testStart.AddDate(0, 0, 5)
+	fills := &order{id: "t-9", accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder,
+		state: stateSubmitted, Time: testStart} // second in the queue, fills first
+	br.orders = map[string][]*order{"EURUSD": {later, fills}}
+
+	require.NoError(t, br.onBar(context.Background(), lossBar()))
+
+	require.Len(t, br.completed, 3)
+	assert.Same(t, fills, br.completed[0], "filled first, though second in the queue")
+	assert.Same(t, later, br.completed[1], "then cancelled by the closeout")
+	assert.Equal(t, "GBPUSD", br.completed[2].instrument, "then the liquidation")
+}
