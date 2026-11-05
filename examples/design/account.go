@@ -202,6 +202,9 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved money) error {
 	if err != nil {
 		return err
 	}
+	if err := checkTarget(o); err != nil {
+		return err
+	}
 
 	equity, err := act.equity()
 	if err != nil {
@@ -264,6 +267,20 @@ func stopDistance(o *order) (int64, error) {
 			errInvalidOrder, o.direction, o.stopLoss, o.price)
 	}
 	return dist, nil
+}
+
+// checkTarget checks that a take profit, when the strategy set one, is beyond
+// the entry price on the winning side. A target on the losing side is a
+// strategy bug and an invalid order.
+func checkTarget(o *order) error {
+	if o.takeProfit == 0 {
+		return nil
+	}
+	if (o.direction == long && o.takeProfit <= o.price) || (o.direction == short && o.takeProfit >= o.price) {
+		return fmt.Errorf("size open: %w: %s take profit %d is not beyond the entry price %d",
+			errInvalidOrder, o.direction, o.takeProfit, o.price)
+	}
+	return nil
 }
 
 // reject records the rejection on the order and returns err.

@@ -60,6 +60,7 @@ const (
 	reasonStrategy       orderReason = iota // the strategy asked for it
 	reasonStopLoss                          // a stop-loss triggered
 	reasonMarginCloseout                    // the broker liquidated the position
+	reasonTakeProfit                        // a take-profit limit triggered
 )
 
 func (r orderReason) String() string {
@@ -70,6 +71,8 @@ func (r orderReason) String() string {
 		return "stop loss"
 	case reasonMarginCloseout:
 		return "margin closeout"
+	case reasonTakeProfit:
+		return "take profit"
 	}
 	return "unknown"
 }
@@ -94,10 +97,11 @@ type order struct {
 	orderType  orderType
 	reason     orderReason // zero is reasonStrategy
 
-	price     price
-	fillPrice price
-	units     int64
-	stopLoss  price
+	price      price
+	fillPrice  price
+	units      int64
+	stopLoss   price
+	takeProfit price // optional target on an open; 0 means none
 
 	// Time is the simulated time of the step the order is on: the bar
 	// being processed. Whoever advances the order sets it (the trader when the
@@ -162,6 +166,9 @@ func (o *order) validate() error {
 		if o.price <= 0 {
 			return fmt.Errorf("%w: a %s order requires a trigger price", errInvalidOrder, o.orderType)
 		}
+	}
+	if o.takeProfit < 0 || (o.takeProfit != 0 && o.action != open) {
+		return fmt.Errorf("%w: take profit must be positive and only an open carries one", errInvalidOrder)
 	}
 	switch o.action {
 	case noAction:

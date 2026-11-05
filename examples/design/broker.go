@@ -162,19 +162,23 @@ func (br *broker) reservedMargin(accountID string) (money, error) {
 }
 
 // phases is how many passes onBar makes over an instrument's queue; see phase.
-const phases = 4
+const phases = 5
 
 // phase is the pass of a bar in which the order is considered: market orders
-// first (they fill at the open), then limit entries, stop entries and
-// protective stops.
+// first (they fill at the open), then limit entries, stop entries, protective
+// stops and last take profits: a bar that reaches both an exit's stop and its
+// target is taken as the stop (the pessimistic path), which then cancels the
+// target.
 func (o *order) phase() int {
 	switch {
 	case o.orderType == marketOrder:
 		return 0
-	case o.orderType == limitOrder:
+	case o.orderType == limitOrder && o.action == open:
 		return 1
 	case o.orderType == stopOrder && o.action == open:
 		return 2
+	case o.orderType == limitOrder: // a take profit: limit entries returned above
+		return 4
 	}
 	return 3
 }
@@ -333,18 +337,30 @@ func throughPrice(dir direction, p price, b bar) (price, bool) {
 // created: a resting close order the broker owns, like any other order waiting
 // on a trigger. An open without a stop gets none.
 func (br *broker) placeStop(o *order) {
-	if o.stopLoss <= 0 {
-		return
+	if o.stopLoss > 0 {
+		br.placeExit(o, stopOrder, reasonStopLoss, o.stopLoss)
 	}
+}
+
+// placeTarget queues the take-profit for the position the filled open o
+// created: a resting limit close. An open without a target gets none.
+func (br *broker) placeTarget(o *order) {
+	if o.takeProfit > 0 {
+		br.placeExit(o, limitOrder, reasonTakeProfit, o.takeProfit)
+	}
+}
+
+// placeExit queues a resting close for the position the filled open o created.
+func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) {
 	s := &order{
 		id:         br.nextID(),
 		accountID:  o.accountID,
 		instrument: o.instrument,
-		direction:  o.direction, // the direction of the position it protects
+		direction:  o.direction, // the direction of the position it closes
 		action:     close,
-		orderType:  stopOrder,
-		reason:     reasonStopLoss,
-		price:      o.stopLoss,
+		orderType:  typ,
+		reason:     why,
+		price:      p,
 		Time:       o.Time,
 	}
 	s.record(stateRequested, "")
@@ -355,11 +371,13 @@ func (br *broker) placeStop(o *order) {
 	br.orders[s.instrument] = append(br.orders[s.instrument], s)
 }
 
-// cancelStops cancels the account's resting stops on an instrument once its
-// position is gone: a stop must never open or close a later position.
-func (br *broker) cancelStops(accountID, instrument string, at time.Time) {
+// cancelExits cancels the account's resting stop and target on an instrument
+// once its position is gone: they must never close a later position. When one
+// exit fills the other is cancelled here, so the pair acts as one-cancels-other.
+func (br *broker) cancelExits(accountID, instrument string, at time.Time) {
 	for _, s := range br.orders[instrument] {
-		if s.accountID == accountID && s.state == stateSubmitted && s.reason == reasonStopLoss {
+		if s.accountID == accountID && s.state == stateSubmitted &&
+			(s.reason == reasonStopLoss || s.reason == reasonTakeProfit) {
 			s.Time = at
 			s.record(stateCancelled, "position closed")
 			br.complete(s)
@@ -369,11 +387,11 @@ func (br *broker) cancelStops(accountID, instrument string, at time.Time) {
 }
 
 // finish records an order that reached a terminal state. A filled close ends
-// the position, so its resting stops go with it.
+// the position, so its resting exits go with it.
 func (br *broker) finish(o *order) {
 	br.complete(o)
 	if o.action == close && o.state == stateFilled {
-		br.cancelStops(o.accountID, o.instrument, o.Time)
+		br.cancelExits(o.accountID, o.instrument, o.Time)
 	}
 }
 
@@ -475,7 +493,9 @@ func (br *broker) shouldExecute(o *order, b bar) bool {
 // it triggers the other way: a long's buy stop waits for the price to rise.
 func (o *order) trigger(b bar) (price, bool) {
 	dir := o.direction
-	if o.orderType == stopOrder && o.action == open {
+	// A stop entry and a take profit run against the grain of the other
+	// orders: they trigger the way the position they open or close profits.
+	if (o.orderType == stopOrder && o.action == open) || (o.orderType == limitOrder && o.action == close) {
 		switch dir {
 		case long:
 			dir = short
@@ -525,6 +545,7 @@ func (br *broker) fillOrder(o *order, p price) error {
 	o.record(stateFilled, "")
 	if o.action == open {
 		br.placeStop(o)
+		br.placeTarget(o)
 	}
 	return nil
 }
