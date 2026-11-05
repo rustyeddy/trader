@@ -220,3 +220,81 @@ func TestBroker_OnBar_EntryAlreadyBeyondTheStopIsClosedAtOnce(t *testing.T) {
 	assert.Equal(t, usd(10000), act.balance, "entered and exited at one price")
 	assert.Empty(t, br.orders["EURUSD"])
 }
+
+func TestBroker_OnBar_StopIgnoresABarOlderThanItself(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	s := restingStop(br, act, long, 108900)
+	s.Time = testStart.AddDate(0, 0, 5)
+	old := stopBar(108000, 108500, 107500, 108200) // day 1: trades through the stop, but before it existed
+
+	require.NoError(t, br.onBar(context.Background(), old))
+
+	assert.Equal(t, stateSubmitted, s.state)
+	assert.Contains(t, act.positions, "EURUSD")
+
+	same := old
+	same.Time = s.Time
+	require.NoError(t, br.onBar(context.Background(), same))
+	assert.Equal(t, stateFilled, s.state, "the bar it was placed on is eligible")
+}
+
+func TestBroker_OnBar_OnlyTheAccountWhoseStopTriggersIsClosed(t *testing.T) {
+	captureLogs(t)
+	br, a := newFillBroker()
+	b := br.addAccount("b", usd(10000))
+	stopA := restingStop(br, a, long, 108900)
+	stopB := restingStop(br, b, long, 108000)
+
+	// Low 1.08500 reaches a's stop but not b's.
+	require.NoError(t, br.onBar(context.Background(), stopBar(109500, 109600, 108500, 109000)))
+
+	assert.Empty(t, a.positions, "a was stopped out")
+	assert.Equal(t, stateFilled, stopA.state)
+	assert.Contains(t, b.positions, "EURUSD", "b's position is untouched")
+	assert.Equal(t, stateSubmitted, stopB.state)
+	assert.Equal(t, usd(10000), b.balance)
+	assert.Equal(t, []*order{stopB}, br.orders["EURUSD"])
+}
+
+func TestBroker_OnBar_ClosingOneAccountsPositionKeepsAnothersStop(t *testing.T) {
+	captureLogs(t)
+	br, a := newFillBroker()
+	b := br.addAccount("b", usd(10000))
+	stopA := restingStop(br, a, long, 108900)
+	stopB := restingStop(br, b, long, 108000)
+	cl := &order{accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder, Time: testStart}
+	require.NoError(t, br.submit(context.Background(), cl))
+
+	require.NoError(t, br.onBar(context.Background(), fillBar(1, 110500)))
+
+	assert.Equal(t, stateFilled, cl.state)
+	assert.Equal(t, stateCancelled, stopA.state, "a's stop went with a's position")
+	assert.Equal(t, stateSubmitted, stopB.state, "b's stop on the same instrument stays")
+	assert.Contains(t, b.positions, "EURUSD")
+}
+
+func TestBroker_OnBar_ShortGapsAboveTheStopAndClosesAtTheOpen(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	ctx := context.Background()
+	op := submittedOrder(t, br, open, short) // stop 111100
+	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
+	require.Equal(t, short, act.positions["EURUSD"].direction)
+	stop := br.orders["EURUSD"][0]
+	require.Equal(t, short, stop.direction)
+
+	// The next bar opens above the stop and never trades at it.
+	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 112000, h: 112500, l: 111800, c: 112200}}
+	require.NoError(t, br.onBar(ctx, gap))
+
+	assert.Empty(t, act.positions)
+	assert.Equal(t, stateFilled, stop.state)
+	assert.Equal(t, price(112000), stop.fillPrice, "the open, not the stop price that never traded")
+	assert.Equal(t, gap.Time, stop.Time)
+	assert.Equal(t, op.units, stop.units)
+	// A short from 1.10000 to 1.12000 loses 2000 points a unit: 2 cents a unit.
+	assert.Equal(t, usd(10000)-money(op.units*2), act.balance)
+	assert.Empty(t, br.orders["EURUSD"], "the filled stop left the queue")
+	assert.Same(t, stop, br.completed[len(br.completed)-1], "and is retained as completed")
+}

@@ -400,7 +400,8 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 
 // shouldExecute reports whether the submitted order executes on bar b. A
 // market order executes on a bar after the one that produced it; a stop order
-// when the bar trades through its price, including the bar it was placed on.
+// when the bar trades through its price, including the bar it was placed on but
+// never an earlier bar.
 // Limit orders stay submitted until their trigger rules exist.
 func (br *broker) shouldExecute(o *order, b bar) bool {
 	if o.state != stateSubmitted || o.instrument != b.instrument {
@@ -410,6 +411,9 @@ func (br *broker) shouldExecute(o *order, b bar) bool {
 	case marketOrder:
 		return b.Time.After(o.Time)
 	case stopOrder:
+		if b.Time.Before(o.Time) {
+			return false // never against an observation older than the stop
+		}
 		_, hit := stopFill(o.direction, o.price, b)
 		return hit
 	}
