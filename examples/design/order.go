@@ -103,6 +103,11 @@ type order struct {
 	stopLoss   price
 	takeProfit price // optional target on an open; 0 means none
 
+	// trail makes the protective stop trail the market by this distance, in
+	// price points, ratcheting toward profit and never back. 0 is a fixed stop.
+	// On the broker's stop order it is the distance the stop keeps.
+	trail price
+
 	// expires is the first bar time at which a waiting entry is no longer live:
 	// the broker cancels it instead of executing it on that bar or any later
 	// one. The zero time means good until cancelled.
@@ -188,6 +193,9 @@ func (o *order) validate() error {
 	}
 	if o.takeProfit < 0 || (o.takeProfit != 0 && o.action != open) {
 		return fmt.Errorf("%w: take profit must be positive and only an open carries one", errInvalidOrder)
+	}
+	if o.trail < 0 || (o.trail != 0 && o.action != open) {
+		return fmt.Errorf("%w: trail must be positive and only an open carries one", errInvalidOrder)
 	}
 	if !o.expires.IsZero() && (o.action != open || !o.expires.After(o.Time)) {
 		return fmt.Errorf("%w: expiry must be after the order's time and only an open has one", errInvalidOrder)

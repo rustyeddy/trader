@@ -231,6 +231,7 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 		}
 	}
 
+	br.trailStops(b)
 	for _, act := range br.accounts {
 		act.mark(b)
 	}
@@ -302,14 +303,14 @@ func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error 
 // open o carries them, as resting closes the broker owns.
 func (br *broker) placeExits(o *order) {
 	if o.stopLoss > 0 {
-		br.placeExit(o, stopOrder, reasonStopLoss, o.stopLoss)
+		br.placeExit(o, stopOrder, reasonStopLoss, o.stopLoss).trail = o.trail
 	}
 	if o.takeProfit > 0 {
 		br.placeExit(o, limitOrder, reasonTakeProfit, o.takeProfit)
 	}
 }
 
-func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) {
+func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) *order {
 	x := &order{
 		id:         br.nextID(),
 		accountID:  o.accountID,
@@ -323,6 +324,31 @@ func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) {
 	}
 	x.record(stateRequested, "")
 	br.enqueue(x)
+	return x
+}
+
+// trailStops moves the trailing stops waiting on b's instrument toward profit:
+// a long's stop up to the bar's high less the trail, a short's down to the low
+// plus it, never back. It runs after the bar's executions, so a stop is always
+// checked at its level from before the bar and a bar can never both raise a
+// stop and hit the raised level: the path within the bar is unknown, and this
+// takes no view on it. Each move is an event in the order's history.
+func (br *broker) trailStops(b bar) {
+	for _, o := range br.orders[b.instrument] {
+		if o.state != stateSubmitted || o.reason != reasonStopLoss || o.trail <= 0 {
+			continue
+		}
+		var moved price
+		if o.direction == long {
+			moved = max(o.price, b.h-o.trail)
+		} else {
+			moved = min(o.price, b.l+o.trail)
+		}
+		if moved != o.price {
+			o.price, o.Time = moved, b.Time
+			o.record(stateSubmitted, fmt.Sprintf("trailed to %d", moved))
+		}
+	}
 }
 
 // closePosition closes pos with a market order the broker makes itself, for the
