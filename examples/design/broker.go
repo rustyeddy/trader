@@ -189,6 +189,14 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 	// Market orders fill at the open, so they go first; limit and stop entries
 	// then fill on the rest of the bar's range, and the protective stops last.
 	// A stop placed by an entry filled above is live on this bar too.
+	//
+	// Assumption: a bar gives only open, high, low and close, not the path
+	// between them. Within a bar we assume entries happen before protective
+	// stops, and that the stop then sees the bar's whole range. That is exact
+	// for a market entry (it fills at the open, before everything else), but
+	// for a limit or stop entry it is pessimistic when the extreme that hits the
+	// stop came before the entry (open, low, high, close for a long's stop). It
+	// can overstate stop-outs on entry bars; see the todo for options.
 	for phase := 0; phase < phases; phase++ {
 		for _, o := range append([]*order(nil), br.orders[b.instrument]...) {
 			if o.phase() != phase {
