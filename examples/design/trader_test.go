@@ -68,13 +68,44 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 	t.Run("add and reduce are not supported yet", func(t *testing.T) {
 		tr := newTestTrader()
-		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: add}), errUnsupportedAction)
-		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: reduce}), errUnsupportedAction)
+		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: add, orderType: marketOrder}), errUnsupportedAction)
+		require.ErrorIs(t, tr.handleOrder(ctx, &order{Time: testStart, instrument: "EURUSD", action: reduce, orderType: marketOrder}), errUnsupportedAction)
 	})
 	t.Run("unknown account at the broker is an error", func(t *testing.T) {
 		tr := &trader{broker: newBroker("t"), account: newAccount("ghost", usd(1000))}
 		require.ErrorIs(t, tr.handleOrder(ctx, openO()), errUnknownAccount)
 	})
+}
+
+func TestTrader_HandleOrder_InvalidOrderType(t *testing.T) {
+	captureLogs(t)
+	for _, tt := range []struct {
+		name string
+		typ  orderType
+	}{
+		{"missing", noOrder},
+		{"unknown", orderType(99)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := newTestTrader()
+			o := openOrder()
+			o.orderType = tt.typ
+
+			err := tr.handleOrder(context.Background(), o)
+
+			require.ErrorIs(t, err, errInvalidOrder)
+			assert.False(t, isRejection(err), "an invalid request stops the run")
+			assert.Empty(t, o.history, "never recorded or sized")
+			assert.Empty(t, o.id)
+			assert.Zero(t, o.units)
+			assert.Empty(t, tr.broker.orders)
+			reserved, err := tr.broker.reservedMargin(tr.account.id)
+			require.NoError(t, err)
+			assert.Zero(t, reserved)
+			assert.Empty(t, tr.account.positions)
+			assert.Equal(t, usd(1000), tr.account.balance)
+		})
+	}
 }
 
 func TestTrader_HandleOrder_ConflictingAccountIsAnError(t *testing.T) {

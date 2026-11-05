@@ -98,7 +98,7 @@ func TestBroker_OnBar_ExpiryIsOnlyCheckedForTheBarsInstrument(t *testing.T) {
 
 func TestOrder_Validate_Expiry(t *testing.T) {
 	base := func() order {
-		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, stopLoss: 108900}
+		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}
 	}
 	ok := base()
 	ok.expires = day(1)
@@ -109,7 +109,7 @@ func TestOrder_Validate_Expiry(t *testing.T) {
 		o.expires = exp
 		require.ErrorIs(t, o.validate(), errInvalidOrder, name)
 	}
-	cl := order{Time: testStart, instrument: "EUR/USD", action: close, expires: day(1)}
+	cl := order{Time: testStart, instrument: "EUR/USD", action: close, orderType: marketOrder, expires: day(1)}
 	require.ErrorIs(t, cl.validate(), errInvalidOrder, "only an open expires")
 }
 

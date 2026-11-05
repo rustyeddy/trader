@@ -438,8 +438,13 @@ func (o *order) execution(b bar) (price, bool) {
 	if o.reason == reasonStrategy && !b.Time.After(o.Time) || b.Time.Before(o.Time) {
 		return 0, false
 	}
-	if o.orderType == marketOrder {
+	switch o.orderType {
+	case marketOrder:
 		return b.o, true
+	case limitOrder, stopOrder:
+		// Resting orders use the trigger calculation below.
+	default:
+		return 0, false
 	}
 	buys := (o.action == open) == (o.direction == long)
 	below := buys == (o.orderType == limitOrder)

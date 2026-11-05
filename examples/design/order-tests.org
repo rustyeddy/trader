@@ -25,6 +25,8 @@ scenarios. Items marked DONE are implemented and tested.
 - There is no Hold order. A strategy that has nothing to do on a bar returns
   a nil =*order=; the trader skips it (no validation, no sizing).
 - The zero-value order has no action and is INVALID. It is not a no-op.
+- Every request explicitly names =marketOrder=, =limitOrder= or =stopOrder=.
+  =noOrder= and unknown types are invalid; there is no default order type.
 - Every order a strategy emits names its instrument, so each order identifies
   what it refers to (needed once strategies cover several instruments and may
   return several orders per observation).
@@ -80,6 +82,9 @@ Everything below except the Add/Reduce size rules is implemented (DONE).
 - The zero-value order (no action) and an order with only an instrument.
 - Missing instrument on any order.
 - Unknown action.
+- Missing or unknown order type: fail before sizing or submission, leaving
+  the queue and reserved margin unchanged. Direct execution must return no
+  fill even when the bar crosses the order's price.
 - Open with noDirection or an unknown direction.
 - Open without a stop loss, or with a non-positive one: the strategy must
   set it, so the order is invalid before it reaches the account.

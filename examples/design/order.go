@@ -171,11 +171,14 @@ var errInvalidOrder = errors.New("invalid order")
 // stateful checks (such as a reduce larger than the position) belong to the
 // handler.
 //
+// Every request must explicitly name marketOrder, limitOrder or stopOrder;
+// noOrder and unknown types are invalid.
+//
 // An open must carry a positive stop price; whether it is on the losing side of
 // the entry is checked when the order is sized.
 //
-// Add and reduce are only checked for instrument and direction; their size
-// rules wait on the size type being defined.
+// Add and reduce use marketOrder; their size rules wait on the size type being
+// defined.
 func (o *order) validate() error {
 	if o.direction > short {
 		return fmt.Errorf("%w: unknown direction %d", errInvalidOrder, o.direction)
@@ -183,13 +186,17 @@ func (o *order) validate() error {
 	if o.Time.IsZero() {
 		return fmt.Errorf("%w: order requires the time of the bar it was made on", errInvalidOrder)
 	}
-	if o.orderType == limitOrder || o.orderType == stopOrder {
+	switch o.orderType {
+	case marketOrder:
+	case limitOrder, stopOrder:
 		if o.action != open {
 			return fmt.Errorf("%w: a %s order can only open (got %s)", errInvalidOrder, o.orderType, o.action)
 		}
 		if o.price <= 0 {
 			return fmt.Errorf("%w: a %s order requires a trigger price", errInvalidOrder, o.orderType)
 		}
+	default:
+		return fmt.Errorf("%w: unsupported order type %d", errInvalidOrder, o.orderType)
 	}
 	if o.takeProfit < 0 || (o.takeProfit != 0 && o.action != open) {
 		return fmt.Errorf("%w: take profit must be positive and only an open carries one", errInvalidOrder)

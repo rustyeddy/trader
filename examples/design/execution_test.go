@@ -50,6 +50,9 @@ func TestOrder_Execution(t *testing.T) {
 		// Market orders fill at the open, whatever the range.
 		{"market open", marketOrder, open, long, 0, stopBar(110000, 110400, 109500, 110200), 110000, true},
 		{"market close", marketOrder, close, noDirection, 0, stopBar(110000, 110400, 109500, 110200), 110000, true},
+		// Unsupported types never execute, even when the bar crosses their price.
+		{"missing order type", noOrder, open, long, 110000, stopBar(110000, 110400, 109500, 110200), 0, false},
+		{"unknown order type", orderType(99), open, long, 110000, stopBar(110000, 110400, 109500, 110200), 0, false},
 	}
 	for _, tt := range rows {
 		t.Run(tt.name, func(t *testing.T) {

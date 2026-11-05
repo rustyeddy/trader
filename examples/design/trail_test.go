@@ -133,13 +133,13 @@ func TestBroker_OnBar_TrailedStopIsCancelledWithThePosition(t *testing.T) {
 }
 
 func TestOrder_Validate_Trail(t *testing.T) {
-	ok := order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, stopLoss: 108900, trail: 1000}
+	ok := order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900, trail: 1000}
 	require.NoError(t, ok.validate())
 
 	neg := ok
 	neg.trail = -1
 	require.ErrorIs(t, neg.validate(), errInvalidOrder)
 
-	onClose := order{Time: testStart, instrument: "EUR/USD", action: close, trail: 1000}
+	onClose := order{Time: testStart, instrument: "EUR/USD", action: close, orderType: marketOrder, trail: 1000}
 	require.ErrorIs(t, onClose.validate(), errInvalidOrder, "only an open carries a trail")
 }

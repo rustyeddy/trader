@@ -256,7 +256,7 @@ func TestBacktestRun_OrderTooSmallIsARejectionToo(t *testing.T) {
 }
 
 func TestBacktestRun_InvalidOrderStopsRunBeforeSizing(t *testing.T) {
-	bad := &order{Time: testStart, instrument: "EURUSD", action: open, price: eurusd1_10, stopLoss: 108900} // open without a direction
+	bad := &order{Time: testStart, instrument: "EURUSD", action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900} // open without a direction
 	strat := &scriptStrategy{orders: []*order{nil, bad, openOrder()}}
 	tr := newTestTrader()
 

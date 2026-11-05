@@ -86,9 +86,9 @@ func TestOrder_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		// valid
-		{"open long", order{instrument: "EUR/USD", direction: long, action: open, stopLoss: 108900}, false},
-		{"open short", order{instrument: "EUR/USD", direction: short, action: open, stopLoss: 111100}, false},
-		{"close without direction", order{instrument: "EUR/USD", action: close}, false},
+		{"open long", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}, false},
+		{"open short", order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder, stopLoss: 111100}, false},
+		{"close without direction", order{instrument: "EUR/USD", action: close, orderType: marketOrder}, false},
 
 		// limit orders
 		{"limit open", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, price: 109000, stopLoss: 107900}, false},
@@ -100,33 +100,35 @@ func TestOrder_Validate(t *testing.T) {
 
 		// no action
 		{"zero value", order{}, true},
-		{"instrument only", order{instrument: "EUR/USD"}, true},
+		{"missing action", order{instrument: "EUR/USD", orderType: marketOrder}, true},
 
 		// missing instrument on every action
-		{"open missing instrument", order{direction: long, action: open, stopLoss: 108900}, true},
-		{"add missing instrument", order{action: add}, true},
-		{"reduce missing instrument", order{action: reduce}, true},
-		{"close missing instrument", order{action: close}, true},
+		{"open missing instrument", order{direction: long, action: open, orderType: marketOrder, stopLoss: 108900}, true},
+		{"add missing instrument", order{action: add, orderType: marketOrder}, true},
+		{"reduce missing instrument", order{action: reduce, orderType: marketOrder}, true},
+		{"close missing instrument", order{action: close, orderType: marketOrder}, true},
 
 		// invalid encodings
-		{"unknown action", order{instrument: "EUR/USD", action: action(99)}, true},
-		{"unknown action without instrument", order{action: action(99)}, true},
-		{"unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: close}, true},
+		{"missing order type", order{instrument: "EUR/USD", direction: long, action: open, price: 110000, stopLoss: 108900}, true},
+		{"unknown order type", order{instrument: "EUR/USD", direction: long, action: open, orderType: orderType(99), price: 110000, stopLoss: 108900}, true},
+		{"unknown action", order{instrument: "EUR/USD", action: action(99), orderType: marketOrder}, true},
+		{"unknown action without instrument", order{action: action(99), orderType: marketOrder}, true},
+		{"unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: close, orderType: marketOrder}, true},
 
 		// open needs a real direction
-		{"open no direction", order{instrument: "EUR/USD", action: open, stopLoss: 108900}, true},
-		{"open unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: open, stopLoss: 108900}, true},
+		{"open no direction", order{instrument: "EUR/USD", action: open, orderType: marketOrder, stopLoss: 108900}, true},
+		{"open unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: open, orderType: marketOrder, stopLoss: 108900}, true},
 
 		// the strategy must set the stop on every open
-		{"open long without a stop", order{instrument: "EUR/USD", direction: long, action: open}, true},
-		{"open short without a stop", order{instrument: "EUR/USD", direction: short, action: open}, true},
-		{"open with a negative stop", order{instrument: "EUR/USD", direction: long, action: open, stopLoss: -1}, true},
+		{"open long without a stop", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}, true},
+		{"open short without a stop", order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder}, true},
+		{"open with a negative stop", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: -1}, true},
 
 		// add/reduce/close act on the existing position and take no direction
-		{"close with long", order{instrument: "EUR/USD", direction: long, action: close}, true},
-		{"close with short", order{instrument: "EUR/USD", direction: short, action: close}, true},
-		{"add with direction", order{instrument: "EUR/USD", direction: long, action: add}, true},
-		{"reduce with direction", order{instrument: "EUR/USD", direction: short, action: reduce}, true},
+		{"close with long", order{instrument: "EUR/USD", direction: long, action: close, orderType: marketOrder}, true},
+		{"close with short", order{instrument: "EUR/USD", direction: short, action: close, orderType: marketOrder}, true},
+		{"add with direction", order{instrument: "EUR/USD", direction: long, action: add, orderType: marketOrder}, true},
+		{"reduce with direction", order{instrument: "EUR/USD", direction: short, action: reduce, orderType: marketOrder}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -142,20 +144,20 @@ func TestOrder_Validate(t *testing.T) {
 }
 
 func TestOrder_Validate_NeedsTheBarTime(t *testing.T) {
-	err := (&order{instrument: "EUR/USD", direction: long, action: open, stopLoss: 108900}).validate()
+	err := (&order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}).validate()
 
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "time")
 }
 
 func TestOrder_Validate_StopErrorNamesTheProblem(t *testing.T) {
-	err := (&order{Time: testStart, instrument: "EUR/USD", direction: long, action: open}).validate()
+	err := (&order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}).validate()
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "stop loss")
 }
 
 func TestOrder_Validate_CloseNeedsNoStop(t *testing.T) {
-	require.NoError(t, (&order{Time: testStart, instrument: "EUR/USD", action: close}).validate())
+	require.NoError(t, (&order{Time: testStart, instrument: "EUR/USD", action: close, orderType: marketOrder}).validate())
 }
 
 func TestOrder_RecordSetsStateAppendsTimestampedHistoryAndLogs(t *testing.T) {

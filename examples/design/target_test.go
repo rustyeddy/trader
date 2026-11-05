@@ -189,7 +189,7 @@ func TestAccount_Size_TakeProfitMustBeOnTheWinningSide(t *testing.T) {
 
 func TestOrder_Validate_TakeProfit(t *testing.T) {
 	base := func() order {
-		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, stopLoss: 108900}
+		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}
 	}
 	ok := base()
 	ok.takeProfit = 112000
@@ -199,7 +199,7 @@ func TestOrder_Validate_TakeProfit(t *testing.T) {
 	neg.takeProfit = -1
 	require.ErrorIs(t, neg.validate(), errInvalidOrder)
 
-	onClose := order{Time: testStart, instrument: "EUR/USD", action: close, takeProfit: 112000}
+	onClose := order{Time: testStart, instrument: "EUR/USD", action: close, orderType: marketOrder, takeProfit: 112000}
 	require.ErrorIs(t, onClose.validate(), errInvalidOrder, "only an open carries a target")
 }
 

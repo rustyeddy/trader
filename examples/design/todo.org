@@ -32,6 +32,9 @@ records the result. See =order-tests.org= for the scenarios.
 - [X] Define no-op/no signal, validation, and rejection semantics: a nil
   =*order= is no signal, =order.validate()= rejects malformed orders, and
   expected rejections are sentinel errors.
+- [X] Require an explicit supported order type: =marketOrder=, =limitOrder=
+  or =stopOrder=. Missing or unknown types fail validation before sizing or
+  submission, and =order.execution= never fills them if called directly.
 - [X] Demonstrate long entry/exit, short entry/exit, reversal and no-op
   (=emax=: a flip is a close, then the opposite open on the next bar).
 - [X] Keep one order per bar initially.
