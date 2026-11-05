@@ -161,6 +161,24 @@ func (br *broker) reservedMargin(accountID string) (money, error) {
 	return total, nil
 }
 
+// phases is how many passes onBar makes over an instrument's queue; see phase.
+const phases = 4
+
+// phase is the pass of a bar in which the order is considered: market orders
+// first (they fill at the open), then limit entries, stop entries and
+// protective stops.
+func (o *order) phase() int {
+	switch {
+	case o.orderType == marketOrder:
+		return 0
+	case o.orderType == limitOrder:
+		return 1
+	case o.orderType == stopOrder && o.action == open:
+		return 2
+	}
+	return 3
+}
+
 // onBar executes the orders waiting on b's instrument for every account, then
 // values each account's positions at the bar's close. The trader calls it at
 // the start of every bar, before the strategy sees the bar, so an order
@@ -168,12 +186,12 @@ func (br *broker) reservedMargin(accountID string) (money, error) {
 // produced it. Orders that are no longer submitted (filled or rejected) leave
 // the queue.
 func (br *broker) onBar(ctx context.Context, b bar) error {
-	// Market orders fill at the open, so they go first; limit entries then fill
-	// on the rest of the bar's range, and the resting stops last. A stop placed
-	// by a fill above is live on this bar too.
-	for _, kind := range []orderType{marketOrder, limitOrder, stopOrder} {
+	// Market orders fill at the open, so they go first; limit and stop entries
+	// then fill on the rest of the bar's range, and the protective stops last.
+	// A stop placed by an entry filled above is live on this bar too.
+	for phase := 0; phase < phases; phase++ {
 		for _, o := range append([]*order(nil), br.orders[b.instrument]...) {
-			if o.orderType != kind {
+			if o.phase() != phase {
 				continue
 			}
 			if err := br.processOrder(ctx, b, o); err != nil {
@@ -418,10 +436,10 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 }
 
 // shouldExecute reports whether the submitted order executes on bar b. A
-// market order executes on a bar after the one that produced it; a stop order
-// when the bar trades through its price, including the bar it was placed on but
-// never an earlier bar. A limit order also waits for a later bar, then fills
-// when the bar trades through its price.
+// market order executes on a bar after the one that produced it. Limit and stop
+// entries also wait for a later bar, then fill when the bar trades through
+// their price. A protective stop fills when the bar trades through its price,
+// including the bar it was placed on, but never against an earlier bar.
 func (br *broker) shouldExecute(o *order, b bar) bool {
 	if o.state != stateSubmitted || o.instrument != b.instrument {
 		return false
@@ -429,28 +447,43 @@ func (br *broker) shouldExecute(o *order, b bar) bool {
 	switch o.orderType {
 	case marketOrder:
 		return b.Time.After(o.Time)
-	case limitOrder:
-		if !b.Time.After(o.Time) {
-			return false // like a market order, never on the bar that produced it
+	case limitOrder, stopOrder:
+		if o.action == open && !b.Time.After(o.Time) {
+			return false // an entry never fills on the bar that produced it
 		}
-		_, hit := throughPrice(o.direction, o.price, b)
-		return hit
-	case stopOrder:
 		if b.Time.Before(o.Time) {
-			return false // never against an observation older than the stop
+			return false // never against an observation older than the order
 		}
-		_, hit := throughPrice(o.direction, o.price, b)
+		_, hit := o.trigger(b)
 		return hit
 	}
 	return false
 }
 
+// trigger reports whether bar b trades through the order's price and the price
+// it fills at. A limit entry and a protective stop trigger against the
+// direction of the position they open or protect: a long's buy limit and sell
+// stop wait for the price to fall. A stop entry buys or sells into the move, so
+// it triggers the other way: a long's buy stop waits for the price to rise.
+func (o *order) trigger(b bar) (price, bool) {
+	dir := o.direction
+	if o.orderType == stopOrder && o.action == open {
+		switch dir {
+		case long:
+			dir = short
+		case short:
+			dir = long
+		}
+	}
+	return throughPrice(dir, o.price, b)
+}
+
 // executionPrice is the price the order fills at on bar b: a market order
-// fills at the bar's open, the first price after the signal; a stop fills at
-// its price, or the open when the bar gapped past it.
+// fills at the bar's open, the first price after the signal; a limit or stop
+// fills at its price, or the open when the bar gapped past it.
 func executionPrice(o *order, b bar) price {
 	if o.orderType == stopOrder || o.orderType == limitOrder {
-		p, _ := throughPrice(o.direction, o.price, b)
+		p, _ := o.trigger(b)
 		return p
 	}
 	return b.o

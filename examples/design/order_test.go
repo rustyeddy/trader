@@ -93,6 +93,9 @@ func TestOrder_Validate(t *testing.T) {
 		// limit orders
 		{"limit open", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, price: 109000, stopLoss: 107900}, false},
 		{"limit without a price", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, stopLoss: 107900}, true},
+		{"stop entry", order{instrument: "EUR/USD", direction: long, action: open, orderType: stopOrder, price: 110500, stopLoss: 109400}, false},
+		{"stop entry without a price", order{instrument: "EUR/USD", direction: long, action: open, orderType: stopOrder, stopLoss: 109400}, true},
+		{"stop close is not a strategy order", order{instrument: "EUR/USD", action: close, orderType: stopOrder, price: 108900}, true},
 		{"limit close is not supported", order{instrument: "EUR/USD", action: close, orderType: limitOrder, price: 109000}, true},
 
 		// no action

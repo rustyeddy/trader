@@ -155,12 +155,12 @@ func (o *order) validate() error {
 	if o.Time.IsZero() {
 		return fmt.Errorf("%w: order requires the time of the bar it was made on", errInvalidOrder)
 	}
-	if o.orderType == limitOrder {
+	if o.orderType == limitOrder || o.orderType == stopOrder {
 		if o.action != open {
-			return fmt.Errorf("%w: a limit order can only open (got %s)", errInvalidOrder, o.action)
+			return fmt.Errorf("%w: a %s order can only open (got %s)", errInvalidOrder, o.orderType, o.action)
 		}
 		if o.price <= 0 {
-			return fmt.Errorf("%w: a limit order requires a limit price", errInvalidOrder)
+			return fmt.Errorf("%w: a %s order requires a trigger price", errInvalidOrder, o.orderType)
 		}
 	}
 	switch o.action {
