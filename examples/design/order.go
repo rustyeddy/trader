@@ -103,6 +103,11 @@ type order struct {
 	stopLoss   price
 	takeProfit price // optional target on an open; 0 means none
 
+	// expires is the first bar time at which a waiting entry is no longer live:
+	// the broker cancels it instead of executing it on that bar or any later
+	// one. The zero time means good until cancelled.
+	expires time.Time
+
 	// Time is the simulated time of the step the order is on: the bar
 	// being processed. Whoever advances the order sets it (the trader when the
 	// order is requested, the broker when it fills), and record stamps history
@@ -169,6 +174,9 @@ func (o *order) validate() error {
 	}
 	if o.takeProfit < 0 || (o.takeProfit != 0 && o.action != open) {
 		return fmt.Errorf("%w: take profit must be positive and only an open carries one", errInvalidOrder)
+	}
+	if !o.expires.IsZero() && (o.action != open || !o.expires.After(o.Time)) {
+		return fmt.Errorf("%w: expiry must be after the order's time and only an open has one", errInvalidOrder)
 	}
 	switch o.action {
 	case noAction:

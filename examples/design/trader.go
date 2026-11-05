@@ -23,8 +23,13 @@ func isRejection(err error) bool {
 		errors.Is(err, errOrderTooSmall) ||
 		errors.Is(err, errNoPosition) ||
 		errors.Is(err, errCloseoutGuard) ||
-		errors.Is(err, errOpenPending)
+		errors.Is(err, errOpenPending) ||
+		errors.Is(err, errNoOrder)
 }
+
+// errNoOrder is an expected outcome: a cancel names an order that is not
+// waiting, usually because it already filled, expired or was cancelled.
+var errNoOrder = errors.New("no such pending order")
 
 // errOpenPending is an expected outcome: netting allows one position per
 // instrument, so a second opening order is refused while one is still waiting

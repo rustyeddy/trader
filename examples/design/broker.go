@@ -123,6 +123,44 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	return nil
 }
 
+// expire cancels the orders waiting on b's instrument whose expiry has been
+// reached, before the bar can execute them.
+func (br *broker) expire(b bar) {
+	for _, o := range append([]*order(nil), br.orders[b.instrument]...) {
+		if o.state == stateSubmitted && !o.expires.IsZero() && !b.Time.Before(o.expires) {
+			br.cancelOrder(o, b.Time, "expired")
+		}
+	}
+	br.prune(b.instrument)
+}
+
+// cancel withdraws the account's waiting order id at time at, on request. The
+// order ends cancelled, leaves the queue and releases the margin it reserved.
+// An order that is not waiting (it filled, expired or was cancelled already, or
+// belongs to another account) is an expected rejection, errNoOrder.
+func (br *broker) cancel(ctx context.Context, accountID, orderID string, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for instrument, orders := range br.orders {
+		for _, o := range orders {
+			if o.id == orderID && o.accountID == accountID && o.state == stateSubmitted {
+				br.cancelOrder(o, at, "cancelled by request")
+				br.prune(instrument)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("cancel %s on broker %s: %w", orderID, br.id, errNoOrder)
+}
+
+// cancelOrder records the cancellation of a waiting order at time at.
+func (br *broker) cancelOrder(o *order, at time.Time, reason string) {
+	o.Time = at
+	o.record(stateCancelled, reason)
+	br.complete(o)
+}
+
 // hasPendingOpen reports whether the account has a submitted open waiting on the
 // instrument.
 func (br *broker) hasPendingOpen(accountID, instrument string) bool {
@@ -209,6 +247,7 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 	// optimistic for a target: a limit or stop entry's new target can fill
 	// against an extreme (a long's high) that came before the entry. See the
 	// todo for options.
+	br.expire(b)
 	atOpen := b
 	atOpen.h, atOpen.l = b.o, b.o // all that is known to have happened so far
 	for _, seen := range []bar{atOpen, b} {
@@ -312,9 +351,7 @@ func (br *broker) cancelOpens(accountID string, at time.Time, reason string) {
 		cancelled := false
 		for _, o := range orders {
 			if o.accountID == accountID && o.state == stateSubmitted && o.action == open {
-				o.Time = at // the cancellation happens now, not when the order was made
-				o.record(stateCancelled, reason)
-				br.complete(o)
+				br.cancelOrder(o, at, reason) // stamped now, not when the order was made
 				cancelled = true
 			}
 		}
@@ -390,9 +427,7 @@ func (br *broker) cancelExits(accountID, instrument string, at time.Time) {
 	for _, s := range br.orders[instrument] {
 		if s.accountID == accountID && s.state == stateSubmitted &&
 			(s.reason == reasonStopLoss || s.reason == reasonTakeProfit) {
-			s.Time = at
-			s.record(stateCancelled, "position closed")
-			br.complete(s)
+			br.cancelOrder(s, at, "position closed")
 		}
 	}
 	br.prune(instrument)
