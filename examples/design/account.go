@@ -345,6 +345,7 @@ func (a *account) applyFill(o *order) error {
 			direction:  o.direction,
 			units:      o.units,
 			entryPrice: o.fillPrice,
+			stopLoss:   o.stopLoss,
 			markPrice:  o.fillPrice,
 		}
 	case close:

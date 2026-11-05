@@ -154,7 +154,8 @@ records the result. See =order-tests.org= for the scenarios.
   GBPUSD at different observation times that verifies the intended behavior.
   This is *deferred*, not a blocker for the single-instrument prototype.
 - [X] The broker retains every order that leaves its queue in =broker.completed= (completion order) including its own liquidation orders (=broker.closeouts()= filters them by reason). Orders rejected before submit (sizing) never reach the broker and stay with the trader.
-- [ ] Stop-loss enforcement (=reasonStopLoss=); limit and stop triggers.
+- [X] Protective stops: a position keeps the stop of the order that opened it. Each bar the broker checks it before valuing positions and the margin rules: a long triggers when the low reaches the stop, a short when the high does. It closes with a =reasonStopLoss= order filled at the stop, or at the bar's open when the bar gaps beyond it. A position with no stop (0) never triggers. A stop that fires on the entry bar is honoured. No trailing stops, no slippage or spread yet.
+- [ ] Limit and stop entry triggers.
 ** TODO Market data acquisition and storage
 - Download and validate provider observations; convert to canonical.
 - Detect/report coverage and expected closures vs unexpected gaps.

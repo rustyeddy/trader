@@ -191,7 +191,7 @@ func brokerOpen(accountID string) *order {
 
 // fillBar is a EURUSD bar on day d (0 = testStart) opening at o.
 func fillBar(d int, o price) bar {
-	return bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, c: o + 100}}
+	return bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, h: o + 100, l: o, c: o + 100}}
 }
 
 // submitted is an order the broker has accepted on day 0.
@@ -236,7 +236,7 @@ func TestBroker_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.Time, "stamped with the fill bar")
 	assert.Equal(t, stateFilled, o.history[len(o.history)-1].state)
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[len(o.history)-1].time)
-	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: 111500, markPrice: 111600}, act.positions["EURUSD"])
+	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: 111500, stopLoss: 108900, markPrice: 111600}, act.positions["EURUSD"])
 	assert.Empty(t, br.orders["EURUSD"], "a filled order is no longer waiting")
 }
 
@@ -264,16 +264,16 @@ func TestBroker_OnBar_CloseTakesThePositionsSizeAndRemovesIt(t *testing.T) {
 	br, act := newFillBroker()
 	ctx := context.Background()
 	open1 := submittedOrder(t, br, open, short)
-	require.NoError(t, br.onBar(ctx, fillBar(1, 111000)))
+	require.NoError(t, br.onBar(ctx, fillBar(1, 110500)))
 	require.Equal(t, stateFilled, open1.state)
-	assert.Equal(t, price(111000), act.positions["EURUSD"].entryPrice, "the position remembers its fill price")
+	assert.Equal(t, price(110500), act.positions["EURUSD"].entryPrice, "the position remembers its fill price")
 
 	cl := &order{accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder, Time: testStart.AddDate(0, 0, 1)}
 	require.NoError(t, br.submit(ctx, cl))
 	require.NoError(t, br.onBar(ctx, fillBar(2, 112000)))
 
 	assert.Equal(t, stateFilled, cl.state)
-	assert.Equal(t, price(111000), open1.fillPrice)
+	assert.Equal(t, price(110500), open1.fillPrice)
 	assert.Equal(t, open1.units, cl.units, "the order records what was closed")
 	assert.Equal(t, price(112000), cl.fillPrice)
 	assert.Empty(t, act.positions)
@@ -449,15 +449,15 @@ func TestBroker_OnBar_BooksRealizedPnLToTheBalance(t *testing.T) {
 	br, act := newFillBroker()
 	ctx := context.Background()
 	op := submittedOrder(t, br, open, short)
-	require.NoError(t, br.onBar(ctx, fillBar(1, 111000)))
+	require.NoError(t, br.onBar(ctx, fillBar(1, 110500)))
 	require.Equal(t, usd(10000), act.balance, "an open realizes nothing")
 
 	cl := &order{accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder, Time: testStart.AddDate(0, 0, 1)}
 	require.NoError(t, br.submit(ctx, cl))
 	require.NoError(t, br.onBar(ctx, fillBar(2, 112000)))
 
-	// A short from 1.11000 to 1.12000 loses 1000 points a unit: units cents.
-	assert.Equal(t, usd(10000)-money(op.units), act.balance)
+	// A short from 1.10500 to 1.12000 loses 1500 points a unit: 1.5 cents a unit.
+	assert.Equal(t, usd(10000)-money(op.units*3/2), act.balance)
 }
 
 func TestBroker_OnBar_RejectedCloseLeavesTheBalance(t *testing.T) {

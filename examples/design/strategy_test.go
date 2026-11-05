@@ -19,7 +19,7 @@ func closes(vals ...float64) []bar {
 		bars[i] = bar{
 			instrument: "TEST",
 			Time:       testStart.AddDate(0, 0, i),
-			ohlc:       ohlc{c: price(v * priceScale)},
+			ohlc:       ohlc{o: price(v * priceScale), h: price(v * priceScale), l: price(v * priceScale), c: price(v * priceScale)},
 		}
 	}
 	return bars

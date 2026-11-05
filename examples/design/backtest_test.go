@@ -359,7 +359,10 @@ func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	assert.Equal(t, stateRejected, s.got[1].state, "the close has no position: its open was rejected")
 	assert.Contains(t, s.got[1].history[len(s.got[1].history)-1].reason, "no position")
 	assert.Equal(t, stateFilled, s.got[2].state, "the fresh opportunity is accepted")
-	assert.Equal(t, stateFilled, s.got[3].state)
+	// The rise to 6 gaps through the short's protective stop, so the position
+	// is already closed when the strategy's own close arrives.
+	assert.Equal(t, stateRejected, s.got[3].state, "stopped out before the strategy closed")
+	assert.Contains(t, s.got[3].history[len(s.got[3].history)-1].reason, "no position")
 	assert.Equal(t, stateFilled, s.got[4].state)
 	require.Contains(t, tr.account.positions, "EURUSD")
 	assert.Equal(t, long, tr.account.positions["EURUSD"].direction)

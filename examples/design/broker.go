@@ -163,16 +163,22 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 	if len(pending) > 0 {
 		br.prune(b.instrument)
 	}
-	for _, act := range br.accounts {
-		act.mark(b)
-	}
 
-	// Judge every account against the margin rules, in a fixed order.
+	// Protective stops trigger on the bar's range, before positions are valued
+	// and judged against the margin rules, in a fixed account order.
 	ids := make([]string, 0, len(br.accounts))
 	for id := range br.accounts {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	for _, id := range ids {
+		if err := br.enforceStop(b, br.accounts[id]); err != nil {
+			return fmt.Errorf("stop check %s: %w", id, err)
+		}
+	}
+	for _, act := range br.accounts {
+		act.mark(b)
+	}
 	for _, id := range ids {
 		if err := br.enforceMargin(ctx, b, br.accounts[id]); err != nil {
 			return fmt.Errorf("margin check %s: %w", id, err)
@@ -261,27 +267,70 @@ func (br *broker) cancelOpens(accountID string, at time.Time, reason string) {
 	}
 }
 
-// closeoutPosition closes pos at its latest mark with a market order the
-// broker makes itself. It fills at once, on this bar.
+// enforceStop closes the account's position in b's instrument at its stop when
+// the bar trades through it. The close is an order the broker makes itself,
+// with reasonStopLoss, and it fills at once on this bar.
+func (br *broker) enforceStop(b bar, act *account) error {
+	pos := act.positions[b.instrument]
+	if pos == nil {
+		return nil
+	}
+	p, hit := stopFill(pos, b)
+	if !hit {
+		return nil
+	}
+	slog.Warn("stop loss", "broker", br.id, "account", act.id, "instrument", pos.instrument,
+		"stop", pos.stopLoss, "fill", p, "time", b.Time)
+	return br.closePosition(b, act, pos, reasonStopLoss, p)
+}
+
+// stopFill reports whether bar b trades through the position's stop and, if so,
+// the price the stop fills at: the stop itself, or the bar's open when it gaps
+// beyond the stop (the stop cannot fill at a price that never traded). A
+// position with no stop never triggers.
+func stopFill(pos *position, b bar) (price, bool) {
+	if pos.stopLoss == 0 {
+		return 0, false
+	}
+	switch pos.direction {
+	case long:
+		if b.l <= pos.stopLoss {
+			return min(pos.stopLoss, b.o), true
+		}
+	case short:
+		if b.h >= pos.stopLoss {
+			return max(pos.stopLoss, b.o), true
+		}
+	}
+	return 0, false
+}
+
+// closeoutPosition liquidates pos at its latest mark.
 func (br *broker) closeoutPosition(b bar, act *account, pos *position) error {
+	return br.closePosition(b, act, pos, reasonMarginCloseout, pos.markPrice)
+}
+
+// closePosition closes pos with a market order the broker makes itself, for the
+// given reason, filled at once on this bar at p.
+func (br *broker) closePosition(b bar, act *account, pos *position, why orderReason, p price) error {
 	o := &order{
 		id:         br.nextID(),
 		accountID:  act.id,
 		instrument: pos.instrument,
 		action:     close,
 		orderType:  marketOrder,
-		reason:     reasonMarginCloseout,
-		price:      pos.markPrice,
+		reason:     why,
+		price:      p,
 		Time:       b.Time,
 	}
 	o.record(stateRequested, "")
 	o.record(stateSubmitted, "")
-	if err := br.fillOrder(o, pos.markPrice); err != nil {
+	if err := br.fillOrder(o, p); err != nil {
 		return err // not terminal: the run stops and the error is logged
 	}
 	br.complete(o)
 	if o.state != stateFilled {
-		return fmt.Errorf("closeout %s: the order was %s", pos.instrument, o.state)
+		return fmt.Errorf("%s %s: the order was %s", why, pos.instrument, o.state)
 	}
 	return nil
 }
