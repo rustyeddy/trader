@@ -106,6 +106,8 @@ records the result. See =order-tests.org= for the scenarios.
 
 * Milestone — Review Before Production Refactoring
 ** TODO Run and document three executable examples
+- EMAX validation (issues #545-#551): rules, event datasets and independently
+  calculated expected results are in =emax-validation.org= and =testdata/emax=.
 - EMA cross: single instrument, long/short orders and trader handler
   (working today: sized from risk and the strategy's stop, submitted to the
   simulated broker; fills are not built yet).
