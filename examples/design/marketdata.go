@@ -10,6 +10,7 @@ import (
 	"iter"
 	"math/rand"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -97,9 +98,10 @@ func (md *marketData) synthesize(seed int64, start price) {
 
 const (
 	barSchema     = "design-bars-v1"
-	barColumns    = "time,open,high,low,close,volume"
 	barTimeLayout = "2006-01-02T15:04:05Z" // always UTC
 )
+
+var barColumns = []string{"time", "open", "high", "low", "close", "volume"}
 
 // loadBars reads the bars in the file at path; see readBars.
 func loadBars(path string) (*marketData, error) {
@@ -147,8 +149,10 @@ func readBars(r io.Reader) (*marketData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bars columns: %w", err)
 	}
-	if got := strings.Join(cols, ","); got != barColumns {
-		return nil, fmt.Errorf("bars columns %q: want %q", got, barColumns)
+	// Compare fields, not joined text: a quoted comma would hide a missing column
+	// and let shorter rows through to parseBar.
+	if !slices.Equal(cols, barColumns) {
+		return nil, fmt.Errorf("bars columns %q: want %q", cols, barColumns)
 	}
 
 	md := &marketData{instrument: meta["instrument"], interval: meta["tf"]}

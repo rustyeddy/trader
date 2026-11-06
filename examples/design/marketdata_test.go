@@ -221,6 +221,10 @@ func TestReadBars_RefusesMalformedInput(t *testing.T) {
 		"no interval":      "# schema=design-bars-v1 instrument=EURUSD\ntime,open,high,low,close,volume\n" + row,
 		"no columns":       "# schema=design-bars-v1 instrument=EURUSD tf=d1\n",
 		"wrong columns":    "# schema=design-bars-v1 instrument=EURUSD tf=d1\ntime,high,open,low,close,volume\n" + row,
+		"quoted five-field columns": "# schema=design-bars-v1 instrument=EURUSD tf=d1\n\"time,open\",high,low,close,volume\n" +
+			"2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.10050\n",
+		"quoted one-field columns": "# schema=design-bars-v1 instrument=EURUSD tf=d1\n\"time,open,high,low,close,volume\"\n" +
+			"2010-01-04T00:00:00Z\n",
 		"no rows":          barsHeader,
 		"short row":        barsHeader + "2010-01-04T00:00:00Z,1.10000,1.10100\n",
 		"date only":        barsHeader + "2010-01-04,1.10000,1.10100,1.09900,1.10050,1000\n",
