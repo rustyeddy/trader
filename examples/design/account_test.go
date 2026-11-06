@@ -975,3 +975,59 @@ func TestAccount_ApplyFill_OpenChecksMarginAtTheFillPrice(t *testing.T) {
 		require.ErrorIs(t, a.applyFill(o), errInsufficientMargin)
 	})
 }
+
+func TestApplyFill_CloseRecordsTheTrade(t *testing.T) {
+	entered, exited := testStart, testStart.AddDate(0, 0, 7)
+	for name, tc := range map[string]struct {
+		direction direction
+		exit      price
+		reason    orderReason
+		pnl       money
+	}{
+		"long profit":    {long, 110364, reasonStrategy, 3276},    // +$32.76364 floors to +$32.76
+		"long loss":      {long, 109999, reasonStopLoss, -10},     // -$0.09001 floors to -$0.10
+		"short profit":   {short, 109999, reasonStrategy, 9},      // +$0.09001 floors to +$0.09
+		"short loss":     {short, 110001, reasonStopLoss, -10},    // -$0.09001 floors to -$0.10
+		"margin closing": {long, 110000, reasonMarginCloseout, 0}, // break-even is still a trade
+	} {
+		t.Run(name, func(t *testing.T) {
+			units := int64(9001)
+			a := newAccount("a", usd(1000))
+			a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: tc.direction, units: units,
+				entryPrice: 110000, entryTime: entered, markPrice: 110000}
+			o := &order{instrument: "EURUSD", action: close, reason: tc.reason, fillPrice: tc.exit, Time: exited}
+
+			require.NoError(t, a.applyFill(o))
+
+			assert.Equal(t, []trade{{instrument: "EURUSD", direction: tc.direction, units: units,
+				entryPrice: 110000, entryTime: entered, exitPrice: tc.exit, exitTime: exited,
+				reason: tc.reason, pnl: tc.pnl}}, a.trades)
+			assert.Equal(t, usd(1000)+tc.pnl, a.balance)
+		})
+	}
+}
+
+func TestApplyFill_OpenRecordsItsEntryTimeAndNoTrade(t *testing.T) {
+	a := newAccount("a", usd(10000))
+	o := &order{instrument: "EURUSD", action: open, direction: long, units: 100, fillPrice: 110000, Time: testStart}
+
+	require.NoError(t, a.applyFill(o))
+
+	assert.Equal(t, testStart, a.positions["EURUSD"].entryTime)
+	assert.Empty(t, a.trades, "an open position is not a trade yet")
+}
+
+func TestApplyFill_FailedCloseRecordsNoTrade(t *testing.T) {
+	t.Run("no position", func(t *testing.T) {
+		a := newAccount("a", usd(10000))
+		require.ErrorIs(t, a.applyFill(&order{instrument: "EURUSD", action: close, fillPrice: 110000}), errNoPosition)
+		assert.Empty(t, a.trades)
+	})
+	t.Run("balance overflow", func(t *testing.T) {
+		a := newAccount("a", money(math.MaxInt64))
+		a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 100000, entryPrice: 110000, markPrice: 110000}
+		require.ErrorIs(t, a.applyFill(&order{instrument: "EURUSD", action: close, fillPrice: 120000}), errSizeOverflow)
+		assert.Empty(t, a.trades)
+		assert.Contains(t, a.positions, "EURUSD", "a failed fill leaves the account as it was")
+	})
+}

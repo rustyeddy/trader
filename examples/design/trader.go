@@ -67,6 +67,11 @@ type trader struct {
 	broker   *broker
 	account  *account
 	strategy strategy
+
+	// rejected keeps the orders refused before they reached the broker's queue,
+	// in the order they were refused. They never join broker.completed, which
+	// keeps the rejections that happen at the fill, so no order is in both.
+	rejected []*order
 }
 
 // onBar advances the broker (fills and marks) to the bar, then lets the
@@ -106,9 +111,12 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 	}
 
 	o.record(stateRequested, "")
-	if err := tr.broker.submit(ctx, o); err != nil && !isRejection(err) {
-		return fmt.Errorf("handling %s %s at %s: %w",
-			o.action, o.instrument, o.Time.Format(time.DateOnly), err)
+	if err := tr.broker.submit(ctx, o); err != nil {
+		if !isRejection(err) {
+			return fmt.Errorf("handling %s %s at %s: %w",
+				o.action, o.instrument, o.Time.Format(time.DateOnly), err)
+		}
+		tr.rejected = append(tr.rejected, o)
 	}
 	return nil
 }

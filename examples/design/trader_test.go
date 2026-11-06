@@ -130,3 +130,38 @@ func TestTrader_HandleOrder_MatchingAccountIsKept(t *testing.T) {
 	assert.Equal(t, "a", o.accountID)
 	assert.Equal(t, stateSubmitted, o.state)
 }
+
+func TestTrader_HandleOrder_KeepsOrdersRefusedBeforeTheBroker(t *testing.T) {
+	captureLogs(t)
+	tr := newTestTraderWithBalance(0)
+	o := openOrder()
+
+	require.NoError(t, tr.handleOrder(context.Background(), o), "a refusal does not stop the run")
+
+	assert.Equal(t, []*order{o}, tr.rejected)
+	assert.Equal(t, stateRejected, o.state)
+	assert.Empty(t, tr.broker.completed, "kept once, by the trader")
+	assert.Empty(t, tr.broker.orders["EURUSD"])
+}
+
+func TestTrader_HandleOrder_KeepsASecondOpenRefusedWhileOneIsPending(t *testing.T) {
+	captureLogs(t)
+	tr := newTestTraderWithBalance(usd(10000))
+	first, second := openOrder(), openOrder()
+
+	require.NoError(t, tr.handleOrder(context.Background(), first))
+	require.NoError(t, tr.handleOrder(context.Background(), second))
+
+	assert.Equal(t, []*order{second}, tr.rejected, "the accepted open is not kept here")
+	assert.Equal(t, []*order{first}, tr.broker.orders["EURUSD"])
+}
+
+func TestTrader_HandleOrder_FailureIsReturnedNotKeptAsRejected(t *testing.T) {
+	captureLogs(t)
+	tr := newTestTraderWithBalance(usd(10000))
+	o := openOrder()
+	o.instrument = "NOSUCH"
+
+	require.ErrorIs(t, tr.handleOrder(context.Background(), o), errUnknownInstrument)
+	assert.Empty(t, tr.rejected)
+}
