@@ -202,7 +202,7 @@ def read_bars(name):
     rows = []
     for line in csv_path(name).read_text().splitlines()[2:]:
         t, o, h, l, c, _ = line.split(",")
-        rows.append((t[:10], read_points(o), read_points(h), read_points(l), read_points(c)))
+        rows.append((t, read_points(o), read_points(h), read_points(l), read_points(c)))
     return rows
 
 
@@ -210,6 +210,8 @@ def check_bars(name, bars):
     """The fixture rules: wrong-field and wrong-bar mistakes must change a result."""
     prev_close = None
     for i, (t, o, h, l, c) in enumerate(bars):
+        want = f"{bar_date(i).isoformat()}T00:00:00Z"
+        assert t == want, f"{name} bar {i}: timestamp {t}, want {want}"
         assert h > max(o, c) and l < min(o, c), f"{name} bar {i}: high and low must straddle open and close"
         if prev_close is not None:
             assert o != prev_close, f"{name} bar {i}: open must differ from the previous close"
@@ -422,7 +424,7 @@ def render(name, scen, bars, res):
     rows = [["bar", "date", "open", "high", "low", "close", "EMA(2)", "EMA(4)", "EMA(2) - EMA(4), points"], "-"]
     for i, (t, o, h, l, c) in enumerate(bars):
         s, l_ = res["emas"][i]
-        rows.append([i, t, fmt_price(o), fmt_price(h), fmt_price(l), fmt_price(c),
+        rows.append([i, t[:10], fmt_price(o), fmt_price(h), fmt_price(l), fmt_price(c),
                      fmt_ema(s) if s is not None else "not warm", fmt_ema(l_) if l_ is not None else "not warm",
                      f"{float(s - l_):+.2f}" if s is not None and l_ is not None else ""])
     out.append(table(rows) + "\n")

@@ -90,7 +90,11 @@ would still agree. *Reviewing the rules below is what guards against that.*
     win or a loss.
 
 * Fixture rules
-The script refuses bars that break the first three.
+The script refuses bars that break the first four.
+- Timestamps are exactly the weekday sequence from 2010-01-04 at =00:00:00Z=, so a
+  duplicate, out-of-order or intraday bar cannot pass. The broker fills an order
+  only on a bar strictly later than the one that made it, so the expected results
+  depend on this.
 - Each bar's open differs from the previous close, so filling at the signal close
   instead of the next open changes the result.
 - High and low are strictly outside open and close, so using the wrong field
@@ -143,6 +147,7 @@ Deliberately left out; none of these is exercised by this validation:
 From =testdata/emax=:
 - =python3 emax_expected.py bars= overwrites the CSVs from the bars in the script.
 - =python3 emax_expected.py tables= reads the CSVs and rewrites the tables below.
+- =python3 test_emax_expected.py= tests that bad timestamps are refused.
 
 Overwriting bars is fine; review the diff. Never change an expected value only to
 make a Go test pass: find out which side is wrong.
