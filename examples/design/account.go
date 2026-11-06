@@ -17,6 +17,7 @@ type account struct {
 	riskPct rate // fraction of the account risked per trade
 
 	positions map[string]*position
+	trades    []trade // closed positions, in the order they closed
 
 	closedOutAt time.Time // the bar of the latest margin closeout; zero if none
 }
@@ -362,6 +363,7 @@ func (a *account) applyFill(o *order) error {
 			direction:  o.direction,
 			units:      o.units,
 			entryPrice: o.fillPrice,
+			entryTime:  o.Time,
 			markPrice:  o.fillPrice,
 		}
 	case close:
@@ -379,6 +381,17 @@ func (a *account) applyFill(o *order) error {
 		// Nothing can fail from here on.
 		a.balance = balance
 		o.units = pos.units
+		a.trades = append(a.trades, trade{
+			instrument: pos.instrument,
+			direction:  pos.direction,
+			units:      pos.units,
+			entryPrice: pos.entryPrice,
+			entryTime:  pos.entryTime,
+			exitPrice:  o.fillPrice,
+			exitTime:   o.Time,
+			reason:     o.reason,
+			pnl:        pnl,
+		})
 		delete(a.positions, o.instrument)
 	default:
 		return fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)

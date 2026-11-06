@@ -57,7 +57,9 @@ review any change to them the same way.
     already through then fills at the open.
 13. *The range:* a long's stop triggers when the low is at or below it and fills
     at the stop. A short's triggers when the high is at or above it and fills at
-    the stop. An exact touch triggers.
+    the stop. An exact touch triggers, and so does going past it: a bar does not show
+    when it passed the stop, so the fill is the stop price. Only a gap at the open
+    fills worse (rule 12).
 14. *The close:* the position is marked at the close. Margin rules are checked
     and do not fire in any scenario here.
 15. *The strategy* then sees the bar and may submit an order. It can never fill
@@ -135,14 +137,17 @@ This is independent of the script. Check it against the tables.
 
 * Not covered
 Deliberately left out; none of these is exercised by this validation:
+- a short's stop at an exact touch, end to end: D's high goes past the stop, which
+  is what proves a stop fires when it is passed. Unit tests cover the short's touch,
+  and B1 and B2 cover both cases for a long;
 - a profitable short closed by a reversal (the rounding and P/L formula are covered
   by D and C's unrealized value);
 - an entry gapping past its own stop, and a reversal where the trend turns back on
   the next bar (rule 10);
 - margin limits, warnings and closeouts, take profits, trailing stops, limit and stop
   entries, expiry and cancellation, all of which have their own tests;
-- orders rejected at sizing: they are not retained anywhere yet, and that decision is
-  deferred to the #546 harness.
+- orders rejected at sizing, in the tables: no scenario here produces one. A separate
+  test in =emax_backtest_test.go= runs EMAX on a one-cent account to cover them.
 
 * Regenerating
 From =testdata/emax=:
@@ -151,7 +156,9 @@ From =testdata/emax=:
 - =python3 test_emax_expected.py= tests that bad timestamps are refused.
 
 Overwriting bars is fine; review the diff. Never change an expected value only to
-make a Go test pass: find out which side is wrong.
+make a Go test pass: find out which side is wrong. =emax_backtest_test.go= holds
+these values as fixed literals and never runs the script, so a change to the bars
+that changes a result fails until the literals are reviewed and updated.
 
 The CSVs follow the storage contract beneath =testdata/emax/<scenario>/data/=. Their
 =design-bars-v1= header is deliberately not =canonical-v1=, which needs a manifest

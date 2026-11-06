@@ -214,7 +214,7 @@ func TestBroker_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.Time, "stamped with the fill bar")
 	assert.Equal(t, stateFilled, o.history[len(o.history)-1].state)
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[len(o.history)-1].time)
-	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: 111500, markPrice: 111600}, act.positions["EURUSD"])
+	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: 111500, entryTime: o.Time, markPrice: 111600}, act.positions["EURUSD"])
 	require.Len(t, br.orders["EURUSD"], 1, "the filled open left the queue; only its stop waits")
 	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][0].reason)
 }
@@ -581,4 +581,19 @@ func TestBroker_OnBar_RetainsRejectedOrders(t *testing.T) {
 
 	assert.Equal(t, stateRejected, cl.state)
 	assert.Equal(t, []*order{cl}, br.completed)
+}
+
+func TestBroker_OnBar_MarginCloseoutRecordsATrade(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	act.balance = usd(1000)
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000,
+		entryPrice: eurusd1_10, entryTime: testStart, markPrice: eurusd1_10}
+	b := fillBar(1, 90000)
+
+	require.NoError(t, br.onBar(context.Background(), b))
+
+	assert.Equal(t, []trade{{instrument: "EURUSD", direction: long, units: 10000,
+		entryPrice: eurusd1_10, entryTime: testStart, exitPrice: b.c, exitTime: b.Time,
+		reason: reasonMarginCloseout, pnl: -usd(1990)}}, act.trades)
 }
