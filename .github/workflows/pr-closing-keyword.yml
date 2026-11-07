@@ -1,0 +1,43 @@
+name: PR closing keyword
+
+# A branch from `gh issue develop` or the <type>/<N>-<description> convention
+# names its issue, so a new PR from one gets `Closes #N` if its body lacks it.
+# GitHub acts on the keyword only when the PR merges into the default branch.
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: write
+
+jobs:
+  closing-keyword:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add the closing keyword
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          issue=$(printf '%s' "$HEAD_REF" | sed -nE 's#^([a-z]+/)?([0-9]+)-.*#\2#p')
+          if [ -z "$issue" ]; then
+            echo "Branch $HEAD_REF names no issue."
+            exit 0
+          fi
+          if [ "$(gh api "repos/$REPO/issues/$issue" --jq '.pull_request != null' 2>/dev/null || echo true)" != false ]; then
+            echo "#$issue is not an issue in this repository."
+            exit 0
+          fi
+          body=$(gh api "repos/$REPO/pulls/$PR" --jq '.body // ""')
+          if printf '%s' "$body" | grep -Eiq "\b(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+#$issue\b"; then
+            echo "The PR already closes #$issue."
+            exit 0
+          fi
+          gh api -X PATCH "repos/$REPO/pulls/$PR" -f body="$body
+
+          Closes #$issue" --silent

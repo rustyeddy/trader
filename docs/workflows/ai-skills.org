@@ -30,7 +30,9 @@ Input: an issue number.
    the reason.  Record each command and its exit status, and never claim a
    check passed that was not run.
 7. Push and open a PR that closes the issue, using the PR template and the
-   completed checklist.
+   completed checklist.  A workflow adds =Closes #N= if the branch names the
+   issue and the body lacks it, but GitHub only acts on the keyword for merges
+   into the default branch.
 8. Post a handoff (=docs/workflows/ai-development.org=) and stop pushing while
    review runs.  Reply to every review comment: with the fixing commit when you
    change something, or with a reason or evidence when you decline a
