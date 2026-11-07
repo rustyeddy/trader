@@ -111,7 +111,8 @@ records the result. See =order-tests.org= for the scenarios.
   =emax_backtest_test.go= runs the real path over them against fixed expected
   values (#546). =readBars= reads the CSVs, =account.trades= keeps each closed
   position, and =trader.rejected= keeps the orders refused before the broker's
-  queue. =main= still runs the random walk until #551.
+  queue. =main= still runs the random walk until #551. Scenario A is also checked
+  bar by bar (#547).
 - EMA cross: single instrument, long/short orders and trader handler
   (working today: sized from risk and the strategy's stop, submitted to the
   simulated broker; fills are not built yet).
