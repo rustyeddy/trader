@@ -12,7 +12,15 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/rustyeddy/trader/cmd/internal/marketdatacfg"
 )
+
+func TestMain(m *testing.M) {
+	// Hermetic: never read a developer's or a server's real config file.
+	marketdatacfg.DefaultConfigPath = ""
+	os.Exit(m.Run())
+}
 
 // baseEnv points every data root at a temp dir and logs to a file, so a
 // test never touches real data or writes to the test's stdout. The roots
