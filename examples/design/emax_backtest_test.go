@@ -94,14 +94,14 @@ func orderResults(orders []*order) []orderResult {
 	return out
 }
 
-// emaxFinal is the state at the end of the data.
-type emaxFinal struct {
+// emaxState is the account, margin and signal state at one moment in a run.
+type emaxState struct {
 	balance, unrealized, equity, used, reserved money
 	signal, pending                             direction
 	position                                    *position
 }
 
-func finalState(t *testing.T, r emaxRun) emaxFinal {
+func snapshotState(t *testing.T, r emaxRun) emaxState {
 	t.Helper()
 	unrealized, err := r.account.unrealizedPnL()
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func finalState(t *testing.T, r emaxRun) emaxFinal {
 	require.NoError(t, err)
 	reserved, err := r.broker.reservedMargin(r.account.id)
 	require.NoError(t, err)
-	f := emaxFinal{
+	f := emaxState{
 		balance: r.account.balance, unrealized: unrealized, equity: equity, used: used, reserved: reserved,
 		signal: r.emax.pos, pending: r.emax.pending,
 	}
@@ -126,7 +126,7 @@ func finalState(t *testing.T, r emaxRun) emaxFinal {
 // strategy's reaction included.
 type barState struct {
 	at        time.Time
-	state     emaxFinal
+	state     emaxState
 	waiting   []string // order ids, in queue order
 	completed []string // order ids, in the order they ended
 }
@@ -152,7 +152,7 @@ func watchEMAX(t *testing.T, r emaxRun, bars iter.Seq2[bar, error]) []barState {
 			}
 			states = append(states, barState{
 				at:        b.Time,
-				state:     finalState(t, r),
+				state:     snapshotState(t, r),
 				waiting:   orderIDs(r.broker.orders["EURUSD"]),
 				completed: orderIDs(r.broker.completed),
 			})
@@ -195,7 +195,7 @@ var emaxScenarios = []struct {
 	trades    []trade
 	completed []orderResult
 	waiting   []orderResult
-	final     emaxFinal
+	final     emaxState
 }{
 	{
 		name:      "a-reversal-exit",
@@ -203,14 +203,14 @@ var emaxScenarios = []struct {
 		completed: []orderResult{longEntry, reversalClose, stopCancelled},
 		waiting: []orderResult{waiting(orderResult{id: "sim-4", action: open, direction: short, orderType: marketOrder,
 			price: 110450, stopLoss: 111554, units: 9087}, jan(15))},
-		final: emaxFinal{balance: 1003300, equity: 1003300, reserved: 20074, signal: short},
+		final: emaxState{balance: 1003300, equity: 1003300, reserved: 20074, signal: short},
 	},
 	{
 		name: "b1-stop-wick",
 		trades: []trade{{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8),
 			exitPrice: 109197, exitTime: jan(11), reason: reasonStopLoss, pnl: -10209}},
 		completed: []orderResult{longEntry, withEnd(longStop, stateFilled, 9066, 109197, jan(11), "")},
-		final:     emaxFinal{balance: 989791, equity: 989791, signal: long},
+		final:     emaxState{balance: 989791, equity: 989791, signal: long},
 	},
 	{
 		name: "b2-stop-cross",
@@ -226,7 +226,7 @@ var emaxScenarios = []struct {
 		},
 		waiting: []orderResult{waiting(orderResult{id: "sim-5", action: close, direction: short, orderType: stopOrder,
 			reason: reasonStopLoss, price: 109585}, jan(13))},
-		final: emaxFinal{balance: 989791, unrealized: 3557, equity: 993348, used: 19722, signal: short,
+		final: emaxState{balance: 989791, unrealized: 3557, equity: 993348, used: 19722, signal: short,
 			position: &position{instrument: "EURUSD", direction: short, units: 9122, entryPrice: 108490, entryTime: jan(13), markPrice: 108100}},
 	},
 	{
@@ -234,7 +234,7 @@ var emaxScenarios = []struct {
 		trades: []trade{{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8),
 			exitPrice: 108900, exitTime: jan(11), reason: reasonStopLoss, pnl: -12901}},
 		completed: []orderResult{longEntry, withEnd(longStop, stateFilled, 9066, 108900, jan(11), "")},
-		final:     emaxFinal{balance: 987099, equity: 987099, signal: long},
+		final:     emaxState{balance: 987099, equity: 987099, signal: long},
 	},
 	{
 		name:   "c-reversal",
@@ -246,7 +246,7 @@ var emaxScenarios = []struct {
 		},
 		waiting: []orderResult{waiting(orderResult{id: "sim-5", action: close, direction: short, orderType: stopOrder,
 			reason: reasonStopLoss, price: 111554}, jan(18))},
-		final: emaxFinal{balance: 1003300, unrealized: 4243, equity: 1007543, used: 19986, signal: short,
+		final: emaxState{balance: 1003300, unrealized: 4243, equity: 1007543, used: 19986, signal: short,
 			position: &position{instrument: "EURUSD", direction: short, units: 9087, entryPrice: 110437, entryTime: jan(18), markPrice: 109970}},
 	},
 	{
@@ -259,7 +259,7 @@ var emaxScenarios = []struct {
 			{id: "sim-2", action: close, direction: short, orderType: stopOrder, reason: reasonStopLoss, state: stateFilled,
 				price: 110797, units: 9115, fillPrice: 110797, at: jan(11)},
 		},
-		final: emaxFinal{balance: 989818, equity: 989818, signal: short},
+		final: emaxState{balance: 989818, equity: 989818, signal: short},
 	},
 }
 
@@ -272,7 +272,7 @@ func TestEMAXBacktest_MatchesApprovedResults(t *testing.T) {
 			assert.Equal(t, want.completed, orderResults(r.broker.completed))
 			assert.Equal(t, orderResults(nil), orderResults(r.trader.rejected), "no scenario is refused before the broker's queue")
 			assert.Equal(t, want.waiting, nilIfEmpty(orderResults(r.broker.orders["EURUSD"])))
-			assert.Equal(t, want.final, finalState(t, r))
+			assert.Equal(t, want.final, snapshotState(t, r))
 
 			var realized money
 			for _, tr := range want.trades {
@@ -298,7 +298,7 @@ func TestEMAXBacktest_RepeatsExactlyFromFreshInstances(t *testing.T) {
 
 			assert.Equal(t, first.account.trades, second.account.trades)
 			assert.True(t, slices.Equal(orderResults(first.broker.completed), orderResults(second.broker.completed)))
-			assert.Equal(t, finalState(t, first), finalState(t, second))
+			assert.Equal(t, snapshotState(t, first), snapshotState(t, second))
 		})
 	}
 }
@@ -324,7 +324,7 @@ func TestEMAXBacktest_OpensRefusedAtSizingStayWithTheTrader(t *testing.T) {
 	}, orderResults(r.broker.completed))
 	assert.Empty(t, r.broker.orders["EURUSD"])
 	assert.Empty(t, r.account.trades)
-	assert.Equal(t, emaxFinal{balance: 1, equity: 1, signal: short}, finalState(t, r), "the signal state moves on regardless")
+	assert.Equal(t, emaxState{balance: 1, equity: 1, signal: short}, snapshotState(t, r), "the signal state moves on regardless")
 }
 
 // Scenario C's reversal, seen between bars: never long and short at once, and flat
@@ -351,21 +351,21 @@ func TestEMAXBacktest_ScenarioAProfitableLongBarByBar(t *testing.T) {
 	r := newEMAXRun(t, usd(10000))
 	states := watchEMAX(t, r, scenarioBars(t, "a-reversal-exit"))
 
-	holding := func(mark price, unrealized, used money) emaxFinal {
-		return emaxFinal{balance: 1000000, unrealized: unrealized, equity: 1000000 + unrealized, used: used, signal: long,
+	holding := func(mark price, unrealized, used money) emaxState {
+		return emaxState{balance: 1000000, unrealized: unrealized, equity: 1000000 + unrealized, used: used, signal: long,
 			position: &position{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8), markPrice: mark}}
 	}
 	afterCrossover := holding(110700, 3417, 20073)
 	afterCrossover.signal, afterCrossover.pending = noDirection, short
 
-	flat := emaxFinal{balance: 1000000, equity: 1000000}
+	flat := emaxState{balance: 1000000, equity: 1000000}
 	assert.Equal(t, []barState{
 		{at: jan(4), state: flat},
 		{at: jan(5), state: flat},
 		{at: jan(6), state: flat},
 		// First warm bar, EMA(2) above EMA(4): the long is sized from this close.
 		{at: jan(7), waiting: []string{"sim-1"},
-			state: emaxFinal{balance: 1000000, equity: 1000000, reserved: 20000, signal: long}},
+			state: emaxState{balance: 1000000, equity: 1000000, reserved: 20000, signal: long}},
 		// Fills at this bar's open and places its stop.
 		{at: jan(8), waiting: []string{"sim-2"}, completed: []string{"sim-1"}, state: holding(110600, 2511, 20054)},
 		// The low is one point above the stop: still open.
@@ -377,7 +377,7 @@ func TestEMAXBacktest_ScenarioAProfitableLongBarByBar(t *testing.T) {
 		// The close fills at the open and cancels the stop, so sim-3 ends before
 		// sim-2. The short is sized from the new balance and left waiting.
 		{at: jan(15), waiting: []string{"sim-4"}, completed: []string{"sim-1", "sim-3", "sim-2"},
-			state: emaxFinal{balance: 1003300, equity: 1003300, reserved: 20074, signal: short}},
+			state: emaxState{balance: 1003300, equity: 1003300, reserved: 20074, signal: short}},
 	}, states)
 }
 
