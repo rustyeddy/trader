@@ -247,7 +247,7 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 // reached, before the bar can execute them.
 func (br *broker) expire(b bar) {
 	br.cancelWhere(b.Time, "expired", func(o *order) bool {
-		return o.instrument == b.instrument && !o.expires.IsZero() && !b.Time.Before(o.expires)
+		return o.instrument == b.instrument && !o.expires.IsZero() && !b.Before(o.expires)
 	})
 }
 
@@ -435,7 +435,7 @@ func (o *order) execution(b bar) (price, bool) {
 	if o.state != stateSubmitted || o.instrument != b.instrument {
 		return 0, false
 	}
-	if o.reason == reasonStrategy && !b.Time.After(o.Time) || b.Time.Before(o.Time) {
+	if o.reason == reasonStrategy && !b.After(o.Time) || b.Before(o.Time) {
 		return 0, false
 	}
 	switch o.orderType {
