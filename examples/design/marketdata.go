@@ -169,8 +169,8 @@ func readBars(r io.Reader) (*marketData, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bars line %d: %w", line, err)
 		}
-		if n := len(md.data); n > 0 && !b.Time.After(md.data[n-1].Time) {
-			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.data[n-1].Time.Format(barTimeLayout))
+		if n := len(md.data); n > 0 && !b.After(md.data[n-1].Time) {
+			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.data[n-1].Format(barTimeLayout))
 		}
 		md.data = append(md.data, b)
 	}

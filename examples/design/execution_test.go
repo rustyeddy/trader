@@ -83,7 +83,7 @@ func TestOrder_Execution_StateInstrumentAndTime(t *testing.T) {
 	assert.False(t, ok, "another instrument's bar says nothing")
 
 	o = mk()
-	o.Time = hit.Time.AddDate(0, 0, 1)
+	o.Time = hit.AddDate(0, 0, 1)
 	_, ok = o.execution(hit)
 	assert.False(t, ok, "never against a bar older than the order")
 

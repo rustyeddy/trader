@@ -80,7 +80,7 @@ type trader struct {
 // and queue it, and records an expected rejection without stopping the run.
 func (tr *trader) onBar(ctx context.Context, b bar) error {
 	if err := tr.broker.onBar(ctx, b); err != nil {
-		return fmt.Errorf("broker on bar %s %s: %w", b.instrument, b.Time.Format(time.DateOnly), err)
+		return fmt.Errorf("broker on bar %s %s: %w", b.instrument, b.Format(time.DateOnly), err)
 	}
 
 	o := tr.strategy.onBar(ctx, b)

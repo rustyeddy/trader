@@ -42,7 +42,7 @@ func TestBroker_OnBar_LongLimitWaitsThenFillsAtTheLimit(t *testing.T) {
 	assert.Empty(t, act.positions)
 
 	hit := stopBar(109800, 110000, 108800, 109200)
-	hit.Time = hit.Time.AddDate(0, 0, 1)
+	hit.Time = hit.AddDate(0, 0, 1)
 	require.NoError(t, br.onBar(ctx, hit))
 
 	assert.Equal(t, stateFilled, o.state)
@@ -131,7 +131,7 @@ func TestBroker_OnBar_RestingLimitIsRejectedWhenEquityFellWhileItWaited(t *testi
 		entryPrice: 150000, markPrice: 140100}
 
 	hit := stopBar(109800, 110000, 108800, 109200)
-	hit.Time = hit.Time.AddDate(0, 0, 1)
+	hit.Time = hit.AddDate(0, 0, 1)
 	require.NoError(t, br.onBar(ctx, hit), "a rejection is an outcome, not a failure")
 
 	assert.Equal(t, stateRejected, o.state)
@@ -150,7 +150,7 @@ func TestBroker_OnBar_RestingLimitStillFillsWhenMarginHolds(t *testing.T) {
 	o := submitLimit(t, br, long, 109000)
 
 	hit := stopBar(109800, 110000, 108800, 109200)
-	hit.Time = hit.Time.AddDate(0, 0, 1)
+	hit.Time = hit.AddDate(0, 0, 1)
 	require.NoError(t, br.onBar(context.Background(), hit))
 
 	assert.Equal(t, stateFilled, o.state)

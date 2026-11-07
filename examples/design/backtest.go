@@ -17,7 +17,7 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], tr *tra
 			if last.instrument == "" {
 				return fmt.Errorf("reading bars: %w", err)
 			}
-			return fmt.Errorf("reading bars after %s %s: %w", last.instrument, last.Time.Format(time.DateOnly), err)
+			return fmt.Errorf("reading bars after %s %s: %w", last.instrument, last.Format(time.DateOnly), err)
 		}
 		last = b
 
@@ -28,9 +28,11 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], tr *tra
 	return nil
 }
 
+//nolint:unused // placeholder until #551
 type result struct {
 }
 
+//nolint:unused // placeholder until #551
 func (r *result) writeJournal() error {
 	return nil
 }
