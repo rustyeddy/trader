@@ -5,7 +5,7 @@
 DRAFT for review. This is a test plan for Claude, NOT an approved final API.
 Implement in =examples/design= one small step at a time. Keep
 =make check && make run= green after every step. Read =AGENTS.md= and
-=../../.agents/skills/go-testing/SKILL.md= first.
+the /Go testing/ section of =../../docs/workflows/ai-skills.org= first.
 
 This plan was written when requests were called intents. An =order= now carries
 a request through its whole life, so the former intent scenarios are order
