@@ -343,14 +343,12 @@ func TestEMAXBacktest_BarsCanBeWrappedToWatchStateBetweenBars(t *testing.T) {
 	assert.Equal(t, []direction{none, none, none, none, long, long, long, long, long, none, short, short}, sides)
 }
 
-// Scenario A, bar by bar, from emax-validation.org. The money here is worked by
-// hand from the rules, independently of the page's generated end state: unrealized
-// is (close - 1.10323) * 9066 floored to the cent, used margin is 9066 * close * 2%
-// rounded up, and reserved margin is units * signal close * 2% rounded up.
-func TestEMAXBacktest_ScenarioAProfitableLongBarByBar(t *testing.T) {
-	r := newEMAXRun(t, usd(10000))
-	states := watchEMAX(t, r, scenarioBars(t, "a-reversal-exit"))
-
+// reversalBarStates is the bars scenarios A and C share, through the close's fill on
+// the 15th, from emax-validation.org. The money here is worked by hand from the
+// rules, independently of the page's generated end state: unrealized is (close -
+// 1.10323) * 9066 floored to the cent, used margin is 9066 * close * 2% rounded up,
+// and reserved margin is units * signal close * 2% rounded up.
+func reversalBarStates() []barState {
 	holding := func(mark price, unrealized, used money) emaxState {
 		return emaxState{balance: 1000000, unrealized: unrealized, equity: 1000000 + unrealized, used: used, signal: long,
 			position: &position{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8), markPrice: mark}}
@@ -359,7 +357,7 @@ func TestEMAXBacktest_ScenarioAProfitableLongBarByBar(t *testing.T) {
 	afterCrossover.signal, afterCrossover.pending = noDirection, short
 
 	flat := emaxState{balance: 1000000, equity: 1000000}
-	assert.Equal(t, []barState{
+	return []barState{
 		{at: jan(4), state: flat},
 		{at: jan(5), state: flat},
 		{at: jan(6), state: flat},
@@ -378,20 +376,28 @@ func TestEMAXBacktest_ScenarioAProfitableLongBarByBar(t *testing.T) {
 		// sim-2. The short is sized from the new balance and left waiting.
 		{at: jan(15), waiting: []string{"sim-4"}, completed: []string{"sim-1", "sim-3", "sim-2"},
 			state: emaxState{balance: 1003300, equity: 1003300, reserved: 20074, signal: short}},
-	}, states)
+	}
 }
 
-// Every step of every order, so the signal, submission and fill bars are told
-// apart: an order's Time moves when it fills, its history does not.
-func TestEMAXBacktest_ScenarioAOrderHistories(t *testing.T) {
-	r := runEMAX(t, "a-reversal-exit")
+func TestEMAXBacktest_ScenarioAProfitableLongBarByBar(t *testing.T) {
+	r := newEMAXRun(t, usd(10000))
+	assert.Equal(t, reversalBarStates(), watchEMAX(t, r, scenarioBars(t, "a-reversal-exit")))
+}
 
-	all := slices.Concat(r.broker.completed, r.broker.orders["EURUSD"])
-	histories := make(map[string][]orderEvent, len(all))
-	for _, o := range all {
+// orderHistories is every order's history, by id, wherever the order now is.
+func orderHistories(r emaxRun) map[string][]orderEvent {
+	histories := make(map[string][]orderEvent)
+	for _, o := range slices.Concat(r.broker.completed, r.broker.orders["EURUSD"]) {
 		histories[o.id] = o.history
 	}
-	assert.Equal(t, map[string][]orderEvent{
+	return histories
+}
+
+// reversalHistories is every step of the orders in scenarios A and C, through the
+// 15th, so the signal, submission and fill bars are told apart: an order's Time moves
+// when it fills, its history does not.
+func reversalHistories() map[string][]orderEvent {
+	return map[string][]orderEvent{
 		"sim-1": {
 			{state: stateRequested, time: jan(7)},
 			{state: stateSized, time: jan(7)},
@@ -414,7 +420,11 @@ func TestEMAXBacktest_ScenarioAOrderHistories(t *testing.T) {
 			{state: stateSized, time: jan(15)},
 			{state: stateSubmitted, time: jan(15)},
 		},
-	}, histories)
+	}
+}
+
+func TestEMAXBacktest_ScenarioAOrderHistories(t *testing.T) {
+	assert.Equal(t, reversalHistories(), orderHistories(runEMAX(t, "a-reversal-exit")))
 }
 
 // assertEMAs compares the EMAs after each bar with the page's exact fractions in
@@ -422,6 +432,7 @@ func TestEMAXBacktest_ScenarioAOrderHistories(t *testing.T) {
 // within far less than the fixture rule's 5 points between them.
 func assertEMAs(t *testing.T, scenario string, exact []struct{ short, long float64 }) {
 	t.Helper()
+	require.Len(t, scenarioPrices(t, scenario).data, len(exact)+3)
 	r := newEMAXRun(t, usd(10000))
 	bars := scenarioBars(t, scenario)
 
@@ -627,6 +638,7 @@ func TestEMAXBacktest_StopOutOrderHistories(t *testing.T) {
 	}{
 		{"b1-stop-wick", map[string][]orderEvent{"sim-1": entry, "sim-2": stop}},
 		{"b3-stop-gap", map[string][]orderEvent{"sim-1": entry, "sim-2": stop}},
+		{"d-short-stop", map[string][]orderEvent{"sim-1": entry, "sim-2": stop}},
 		{"b2-stop-cross", map[string][]orderEvent{
 			"sim-1": entry,
 			"sim-2": stop,
@@ -651,20 +663,17 @@ func TestEMAXBacktest_StopOutOrderHistories(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := runEMAX(t, tc.name)
 
-			got := make(map[string][]orderEvent)
-			for _, o := range slices.Concat(r.broker.completed, r.broker.orders["EURUSD"]) {
-				got[o.id] = o.history
-			}
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, orderHistories(r))
 		})
 	}
 }
 
 // Each loss is calculated from its fill, then compared with the trade, its orders and
-// the balance: -1126 points * 9066 units = -$102.08316, floored to -$102.09, and -1423
-// points * 9066 units = -$129.00918, floored to -$129.01. 1% is planned risk, not a
-// cap: the budget is $100.00 and both losses are larger, because the entry was past
-// the signal close and, in B3, the stop filled at the gap's open.
+// the balance: -1126 points * 9066 units = -$102.08316, floored to -$102.09, -1423
+// points * 9066 units = -$129.00918, floored to -$129.01, and D's short, 1.09680 -
+// 1.10797 = -1117 points * 9115 units = -$101.81455, floored to -$101.82. 1% is planned
+// risk, not a cap: the budget is $100.00 and every loss is larger, because the entry
+// was past the signal close and, in B3, the stop filled at the gap's open.
 func TestEMAXBacktest_StopLossIsExactAndExceedsThePlannedRisk(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -674,6 +683,7 @@ func TestEMAXBacktest_StopLossIsExactAndExceedsThePlannedRisk(t *testing.T) {
 		{"b1-stop-wick", 109197, -10209},
 		{"b2-stop-cross", 109197, -10209},
 		{"b3-stop-gap", 108900, -12901},
+		{"d-short-stop", 110797, -10182},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := runEMAX(t, tc.name)
@@ -742,4 +752,160 @@ func TestEMAXBacktest_StopOutFixturesHoldTheirBoundaries(t *testing.T) {
 	b3 := scenarioPrices(t, "b3-stop-gap").data[5]
 	assert.Less(t, b3.o, stop, "B3's open is already past the stop")
 	assert.Greater(t, b3.c, stop, "and the bar recovers")
+}
+
+// Scenario C is scenario A with two more bars, so the reversal plays out in full: flat
+// on the 15th, short from the 18th, and never both. The short is sized from the balance
+// after the close: $100.33 / 0.01104 is 9087 units, where the $100.00 from before it
+// would give 9057. It fills at the open, which is not the signal close. Worked by hand:
+// on the 18th unrealized is 217 points * 9087 = $19.71879 and margin 9087 * 1.1022 * 2%
+// = $200.313828; on the 19th they are 467 points = $42.43629 and $199.859478. The data
+// ends with the short open and its stop resting: nothing closes it.
+func TestEMAXBacktest_ScenarioCFullReversalBarByBar(t *testing.T) {
+	r := newEMAXRun(t, usd(10000))
+	states := watchEMAX(t, r, scenarioBars(t, "c-reversal"))
+
+	holdingShort := func(mark price, unrealized, used money) emaxState {
+		return emaxState{balance: 1003300, unrealized: unrealized, equity: 1003300 + unrealized, used: used, signal: short,
+			position: &position{instrument: "EURUSD", direction: short, units: 9087, entryPrice: 110437, entryTime: jan(18), markPrice: mark}}
+	}
+	completed := []string{"sim-1", "sim-3", "sim-2", "sim-4"}
+	assert.Equal(t, slices.Concat(reversalBarStates(), []barState{
+		{at: jan(18), waiting: []string{"sim-5"}, completed: completed, state: holdingShort(110220, 1971, 20032)},
+		{at: jan(19), waiting: []string{"sim-5"}, completed: completed, state: holdingShort(109970, 4243, 19986)},
+	}), states)
+	assert.Len(t, r.account.trades, 1, "the open short is not a trade yet")
+}
+
+func TestEMAXBacktest_ScenarioCOrderHistories(t *testing.T) {
+	want := reversalHistories()
+	want["sim-4"] = append(want["sim-4"], orderEvent{state: stateFilled, time: jan(18)})
+	want["sim-5"] = []orderEvent{
+		{state: stateRequested, time: jan(18)},
+		{state: stateSubmitted, time: jan(18)},
+	}
+	assert.Equal(t, want, orderHistories(runEMAX(t, "c-reversal")))
+}
+
+// Rule 10 pinned, not endorsed: EMAX opens its pending side without re-checking the
+// trend. The bars follow scenario C through the crossover on the 14th, then jump back
+// up, so the EMAs have crossed back by the time the short is emitted on the 15th. The
+// short still goes in, and the bar it fills on reverses it again: a round trip the
+// trend never asked for, which costs -$4.48 here. They are Go bars, not a scenario on
+// the page, because only this behavior needs them.
+//
+// Worked by hand. On the 15th the EMAs are about 1.11655 and 1.11396. The short: $100.33
+// / 0.0112 is 8958 units, reserve 8958 * 1.12 * 2% = $200.6592. On the 18th unrealized is
+// -40 points * 8958 = -$3.5832, floored, and margin 8958 * 1.1205 * 2% = $200.74878. On
+// the 19th it closes at -50 points * 8958 = -$4.479, floored. The long: $100.2852 /
+// 0.01121 is 8946 units, reserve 8946 * 1.121 * 2% = $200.56932. On the 20th unrealized
+// is 60 points * 8946 = $5.3676 and margin 8946 * 1.1218 * 2% = $200.712456.
+func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
+	r := newEMAXRun(t, usd(10000))
+	prices := scenarioPrices(t, "c-reversal")
+	next := func(day int, o, h, l, c price) bar {
+		return bar{instrument: "EURUSD", Time: jan(day), ohlc: ohlc{o: o, h: h, l: l, c: c, v: 1000}}
+	}
+	prices.data = append(slices.Clone(prices.data[:9]),
+		next(15, 110687, 112050, 110650, 112000),
+		next(18, 112010, 112100, 111950, 112050),
+		next(19, 112060, 112150, 112000, 112100),
+		next(20, 112120, 112200, 112100, 112180),
+	)
+
+	bars := func(yield func(bar, error) bool) {
+		for b, err := range prices.bars(context.Background()) {
+			if !yield(b, err) {
+				return
+			}
+			if b.Equal(jan(15)) {
+				assert.Greater(t, r.emax.emaShort.value, r.emax.emaLong.value, "the trend is long again when the short goes in")
+			}
+		}
+	}
+	states := watchEMAX(t, r, bars)
+
+	assert.Equal(t, []barState{
+		{at: jan(15), waiting: []string{"sim-4"}, completed: []string{"sim-1", "sim-3", "sim-2"},
+			state: emaxState{balance: 1003300, equity: 1003300, reserved: 20066, signal: short}},
+		{at: jan(18), waiting: []string{"sim-5", "sim-6"}, completed: []string{"sim-1", "sim-3", "sim-2", "sim-4"},
+			state: emaxState{balance: 1003300, unrealized: -359, equity: 1002941, used: 20075, pending: long,
+				position: &position{instrument: "EURUSD", direction: short, units: 8958, entryPrice: 112010, entryTime: jan(18), markPrice: 112050}}},
+		{at: jan(19), waiting: []string{"sim-7"}, completed: []string{"sim-1", "sim-3", "sim-2", "sim-4", "sim-6", "sim-5"},
+			state: emaxState{balance: 1002852, equity: 1002852, reserved: 20057, signal: long}},
+		{at: jan(20), waiting: []string{"sim-8"}, completed: []string{"sim-1", "sim-3", "sim-2", "sim-4", "sim-6", "sim-5", "sim-7"},
+			state: emaxState{balance: 1002852, unrealized: 536, equity: 1003388, used: 20072, signal: long,
+				position: &position{instrument: "EURUSD", direction: long, units: 8946, entryPrice: 112120, entryTime: jan(20), markPrice: 112180}}},
+	}, states[9:])
+
+	assert.Equal(t, []trade{
+		profitTrade,
+		{instrument: "EURUSD", direction: short, units: 8958, entryPrice: 112010, entryTime: jan(18),
+			exitPrice: 112060, exitTime: jan(19), reason: reasonStrategy, pnl: -448},
+	}, r.account.trades)
+}
+
+// The short's stop is above it, so the high is what fires it, and the fill is the stop
+// price: not the high, and not the close far below. Afterwards EMAX's signal state still
+// says short (rule 11), so it stays flat. Worked by hand: $100.00 / 0.01097 is 9115
+// units, reserve 9115 * 1.097 * 2% = $199.9831; on the 8th unrealized is 280 points *
+// 9115 = $25.522 and margin 9115 * 1.094 * 2% = $199.4362.
+func TestEMAXBacktest_ScenarioDShortStoppedByTheHighBarByBar(t *testing.T) {
+	r := newEMAXRun(t, usd(10000))
+	states := watchEMAX(t, r, scenarioBars(t, "d-short-stop"))
+
+	flat := emaxState{balance: 1000000, equity: 1000000}
+	stopped := emaxState{balance: 989818, equity: 989818, signal: short}
+	completed := []string{"sim-1", "sim-2"}
+	assert.Equal(t, []barState{
+		{at: jan(4), state: flat},
+		{at: jan(5), state: flat},
+		{at: jan(6), state: flat},
+		{at: jan(7), waiting: []string{"sim-1"},
+			state: emaxState{balance: 1000000, equity: 1000000, reserved: 19999, signal: short}},
+		{at: jan(8), waiting: []string{"sim-2"}, completed: []string{"sim-1"},
+			state: emaxState{balance: 1000000, unrealized: 2552, equity: 1002552, used: 19944, signal: short,
+				position: &position{instrument: "EURUSD", direction: short, units: 9115, entryPrice: 109680, entryTime: jan(8), markPrice: 109400}}},
+		{at: jan(11), completed: completed, state: stopped},
+		{at: jan(12), completed: completed, state: stopped},
+	}, states)
+	assert.Empty(t, r.trader.rejected)
+}
+
+func TestEMAXBacktest_ReversalAndShortStopEMAs(t *testing.T) {
+	assertEMAs(t, "c-reversal", []struct{ short, long float64 }{
+		{110250, 110150},
+		{331450.0 / 3, 110330},
+		{997150.0 / 9, 110578},
+		{2999650.0 / 27, 554234.0 / 5},
+		{9031450.0 / 81, 2779702.0 / 25},
+		{26964850.0 / 243, 13874106.0 / 125},
+		{80643550.0 / 729, 69234818.0 / 625},
+		{241344310.0 / 2187, 345479454.0 / 3125},
+		{722353090.0 / 6561, 1723750862.0 / 15625},
+	})
+	assertEMAs(t, "d-short-stop", []struct{ short, long float64 }{
+		{109750, 109850},
+		{328550.0 / 3, 109670},
+		{983150.0 / 9, 109442},
+		{2941550.0 / 27, 545926.0 / 5},
+	})
+}
+
+// C extends A, and its short's stop is never reached, so the data ends with it live.
+// D's high goes past its stop and comes back, so the bar's close cannot be what fired it.
+func TestEMAXBacktest_ReversalAndShortStopFixturesHoldTheirBoundaries(t *testing.T) {
+	c := scenarioPrices(t, "c-reversal").data
+	assert.Equal(t, scenarioPrices(t, "a-reversal-exit").data, c[:10], "C is A with more bars")
+	assert.NotEqual(t, c[9].c, c[10].o, "the short fills away from its signal close")
+	for i, b := range c[10:] {
+		assert.Less(t, b.h, price(111554), "bar %d stays below the short's stop", i+10)
+	}
+
+	const stop = price(110797)
+	d := scenarioPrices(t, "d-short-stop").data
+	assert.Less(t, d[4].h, stop, "the entry bar stays below the stop")
+	assert.Less(t, d[5].o, stop)
+	assert.Equal(t, stop+3, d[5].h, "the high goes past the stop")
+	assert.Less(t, d[5].c, stop, "and the bar closes back below it")
 }
