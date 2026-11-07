@@ -57,6 +57,12 @@ func (e *emax) init(cfg map[string]any) error {
 // the opposite open on the next bar: an onBar returns one order, and there is
 // no atomic reverse. An open that is rejected is not retried; the next order
 // comes only from the next crossover.
+//
+// The signal state is what the strategy last asked for, not the position. A
+// broker stop-out does not change it, so after one the strategy stays flat
+// until the trend turns, then emits a close the broker rejects with
+// errNoPosition, then the opposite open. This is the current contract, not an
+// oversight; see rule 11 in emax-validation.org and TODO 1 in todo.org.
 func (e *emax) onBar(ctx context.Context, b bar) *order {
 	// Feed both EMAs every bar so the long one warms up on the same data.
 	s, sok := e.emaShort.onBar(ctx, b)
