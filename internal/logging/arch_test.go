@@ -34,7 +34,11 @@ import (
 // Its own WithLogger option lets a guest author inject a real logger; the
 // slog.Default() fallback only supplies a reasonable value when the guest's
 // own main() never bothered to configure one.
-var globalLoggerExemptPrefixes = []string{"internal/logging", "cmd", "test", "sdk", ".git"}
+//
+// examples/design is a single-package design prototype, not domain code, and
+// is not imported by anything. Its logging moves behind this rule if and when
+// it migrates to production packages.
+var globalLoggerExemptPrefixes = []string{"internal/logging", "cmd", "test", "sdk", "examples/design", ".git"}
 
 // slog identifiers that read or mutate the mutable package-level default
 // logger. slog.New, slog.NewTextHandler, slog.NewJSONHandler,

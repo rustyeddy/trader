@@ -158,7 +158,8 @@ Prioritize, in order:
   race detector.
 - See `docs/workflows/workflows.org` for workflow
   details. `docs/workflows/testing.org` documents the verification
-  commands.
+  commands, and the Go testing section of
+  `docs/workflows/ai-skills.org` has the rules for writing tests.
 
 ### Test Data Organization
 

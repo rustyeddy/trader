@@ -49,7 +49,7 @@ func TestBroker_OnBar_LongStopEntryWaitsThenFillsAtTheStop(t *testing.T) {
 	assert.Equal(t, stateSubmitted, o.state, "price has not risen to the stop")
 
 	hit := stopBar(110200, 110600, 109800, 110550)
-	hit.Time = hit.Time.AddDate(0, 0, 1)
+	hit.Time = hit.AddDate(0, 0, 1)
 	require.NoError(t, br.onBar(ctx, hit))
 
 	assert.Equal(t, stateFilled, o.state)
