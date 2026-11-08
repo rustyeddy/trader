@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"math/rand"
 	"os"
 	"slices"
 	"strconv"
@@ -46,8 +45,7 @@ type marketData struct {
 	timerange  timeRange
 	interval   string
 
-	data  []bar
-	index int
+	data []bar
 }
 
 // bars returns an iterator over the bars in order. If ctx is cancelled the
@@ -64,35 +62,6 @@ func (md *marketData) bars(ctx context.Context) iter.Seq2[bar, error] {
 				return
 			}
 		}
-	}
-}
-
-// synthesize fills md.data with one daily bar per weekday in md.timerange,
-// stamped with md.instrument and the day's date, following a seeded random
-// walk so runs are deterministic. Prices are
-// integer points (1/100000), e.g. 110000 == 1.10000.
-func (md *marketData) synthesize(seed int64, start price) {
-	rng := rand.New(rand.NewSource(seed))
-	md.data = md.data[:0]
-	md.index = 0
-
-	px := start
-	step := func() price { return price(rng.Intn(601) - 300) } // +/- 30 pips
-	for d := md.timerange.start; !d.After(md.timerange.end); d = d.AddDate(0, 0, 1) {
-		if wd := d.Weekday(); wd == time.Saturday || wd == time.Sunday {
-			continue
-		}
-		o := px
-		c := o + step()
-		h, l := max(o, c), min(o, c)
-		h += price(rng.Intn(151))
-		l -= price(rng.Intn(151))
-		md.data = append(md.data, bar{
-			instrument: md.instrument,
-			Time:       d,
-			ohlc:       ohlc{o: o, h: h, l: l, c: c, v: 1000 + rng.Intn(9000)},
-		})
-		px = c
 	}
 }
 
