@@ -88,9 +88,15 @@ review any change to them the same way.
 20. *No invented fills.* An open position stays open and is reported with
     unrealized P/L at the last close; its stop is reported as still waiting. An
     order that has not filled is reported as still waiting, and an open's reserved
-    margin is reported at its reference price.
+    margin is reported at its reference price. (Decided: the data ending closes
+    nothing and fills nothing.)
 21. A closed trade is a position that actually closed. An open position is not a
     win or a loss.
+
+The tests reconcile each scenario without deriving one value from another: each
+trade's P/L from its fills, then their sum against the balance change; unrealized
+P/L from the position and the last close, then equity; reserved margin from the
+waiting opens. They check that every order ends at most once, on its last event.
 
 * Fixture rules
 The script refuses bars that break the first four.
