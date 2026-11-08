@@ -1,0 +1,187 @@
+#+TITLE: Trader Design — Prioritized TODOs
+#+STARTUP: overview
+
+* Ground Rules
+- Design APIs first; keep everything in =examples/design= private
+  until settled.
+- After EACH task, =make check && make run= must succeed with small
+  deterministic synthetic data.
+- Prefer concrete types and one readable call path; no new framework
+  or interface without a demonstrated need.
+- Preserve causal backtest timing; distinguish simulated broker
+  rejection from infrastructure failure.
+- Do not start retrofitting production packages until the milestone
+  below is reviewed.
+
+* P0 — Core Contracts (next iteration)
+
+** TODO 1. Define Order semantics and errors
+An order carries one request through its whole life: the strategy asks, the
+account sizes (or rejects), the broker fills (or rejects), and the trader
+records the result. See =order-tests.org= for the scenarios.
+- [X] Decide what an order expresses: a small action (open/add/reduce/close)
+  plus direction for opens, not a broker order and not a position target.
+- [ ] Decide whether a strategy can query *read-only* current positions;
+  separate signal generation from portfolio/account sizing and execution.
+  (Optional snapshot function at construction; not built yet.)
+- [X] Specify instrument, direction, close, stop, and size without requiring
+  account knowledge: the strategy sets instrument, action, direction (open),
+  price and stop (open); the account sets units. Target is not required.
+- [ ] Decide whether signal quality (A/B/C, score) is optional metadata that
+  risk/sizing *may* use, not a hidden sizing rule.
+- [X] Define no-op/no signal, validation, and rejection semantics: a nil
+  =*order= is no signal, =order.validate()= rejects malformed orders, and
+  expected rejections are sentinel errors.
+- [X] Require an explicit supported order type: =marketOrder=, =limitOrder=
+  or =stopOrder=. Missing or unknown types fail validation before sizing or
+  submission, and =order.execution= never fills them if called directly.
+- [X] Demonstrate long entry/exit, short entry/exit, reversal and no-op
+  (=emax=: a flip is a close, then the opposite open on the next bar).
+- [X] Keep one order per bar initially.
+- [ ] Test whether multiple orders per bar are truly needed (multi-symbol
+  strategies, TODO 4).
+- [X] Acceptance: no stringly typed ambiguous =side= values; direction and
+  action are separate typed enums.
+
+** DONE 2. Propagate handler errors predictably
+- [X] The trader owns the order lifecycle: =backtest.run= feeds bars to
+  =trader.onBar=, which validates, records, sizes and submits the strategy's
+  order and propagates errors with instrument/time context. Errors from the
+  broker's and account's =onBar= are returned too.
+- [X] Separate expected decision outcomes (insufficient margin, order too
+  small: =isRejection=) from fatal runtime/data/broker failures. Rejections
+  are recorded in the order history, logged, and the run continues; invalid
+  orders and other errors stop it.
+- [X] Verify context cancellation; the channel/goroutine loop is gone (bars
+  are an =iter.Seq2=).
+- [X] Acceptance: tests for accepted, rejected, fatal and cancelled processing.
+
+** TODO 3. Define Study, Scanner, Strategy, Indicator roles
+- Strategy generates *trading* orders; study gathers analysis/results;
+  scanner classifies/selects instruments; indicators compute measurements.
+- Test one EMA trading strategy, one ATR study, one multi-symbol scanner.
+- Explore shared bar consumption without forcing non-trading outputs into
+  trading orders or inventing generic event/handler hierarchies.
+- Choose minimal =OnBar= / =OnBars= contracts (or adapters) based on examples;
+  avoid defining four parallel interfaces just because names differ.
+- Acceptance: each use case reads naturally and compiles; write down why
+  any introduced interface is necessary.
+
+* P1 — Multi-Instrument Market Data and Shared Runner
+
+** TODO 4. Make bars self-contained and decide multi-symbol observation semantics
+- Include observed timestamp, instrument identity, OHLCV and price basis
+  (bid/ask/trade; spread provenance as needed) in an observation.
+  (=bar= has instrument, time and OHLCV; the price basis is still open.)
+- Compare =OnBar(bar)= versus =OnBars(frame)= with a single- and two-symbol
+  example. Decide whether frame contains only fresh bars or carried values.
+- Define deterministic time ordering, simultaneous timestamps, missing
+  symbols, sparse instruments and no look-ahead; never silently synthesize bars.
+- Consider a multi-symbol strategy that produces 0, 1, or several orders.
+- Acceptance: two synthetic datasets interleave correctly, with an
+  incomplete/missing observation test.
+
+** TODO 5. Extract or rename the shared data runner only if it simplifies
+- Try one small =run(ctx, observations, onBar)= loop for historical
+  trading, live trading and trade-signal studies.
+- Do not force indicator-only studies/scanners to return =*order=.
+- Backtest retains simulated clock, pending-order eligibility, fill sequencing
+  and results; common loop must not cause same-bar look-ahead.
+- Prefer a concrete function over a =DataRunner= interface until there is a
+  real substitution need.
+- Acceptance: identical test strategy logic runs in historical and
+  live-like synthetic scenarios.
+
+** TODO 6. Establish Query / Dataset / Load API contracts
+- Define query: instruments, interval, [start,end), provider/basis and
+  explicit coverage/gap policy.
+- Compare =dataset, err := marketdata.Load(ctx, query)= followed by
+  =dataset.Bars(ctx)= with a stateful =md.Load(); md.Bars()= API.
+- Keep =iter.Seq2[Observation, error]= as the current lazy baseline;
+  assess slice and channel alternatives only against concrete use cases.
+- Dataset hides multi-file assembly, time ordering, caching and resource
+  lifetime; define ownership/closing only where genuinely needed.
+- Acceptance: an in-memory synthetic dataset satisfies the selected API;
+  disk/network loading not required yet.
+
+* Milestone — Review Before Production Refactoring
+** TODO Run and document three executable examples
+- EMAX validation (issues #545-#551): rules, event datasets and independently
+  calculated expected results are in =emax-validation.org= and =testdata/emax=.
+  =emax_backtest_test.go= runs the real path over them against fixed expected
+  values (#546). =readBars= reads the CSVs, =account.trades= keeps each closed
+  position, and =trader.rejected= keeps the orders refused before the broker's
+  queue. =make run= prints one summary per scenario on stdout, with logs on stderr
+  (#551); see the page for how to compare runs and what is not modelled. Scenarios
+  A (#547), B1, B2 and B3 (#548), and C and D (#549) are also checked bar by bar.
+  Each scenario's money is reconciled from its fills, and every order's lifecycle
+  is checked (#550).
+- EMA cross: single instrument, long/short orders and trader handler
+  (working today: sized from risk and the strategy's stop, filled by the
+  simulated broker, and validated end to end over the six scenarios above).
+- Cross-instrument strategy: two symbols, including missing bar behavior.
+- ATR study or scanner: results without broker/account or forced order.
+- Ensure =make check && make run= green after every change.
+- Review package boundaries, GoDoc, order semantics and run diagrams.
+- Confirm reduction in interfaces/layers before migrating current Trader.
+
+* P2 — Follow-on Implementation (after milestone)
+** TODO Account / portfolio / risk
+- Account facts, open positions, balance/equity, margin available,
+  position sizing, and portfolio risk policies; wire simple synthetic fills.
+- [X] Instrument registry (=instrument=, keyed by symbol) and fixed-point
+  =rate= (=rateScale= 1_000_000).
+- [X] Open orders sized from =riskPct= and the strategy's stop, limited by the
+  margin available (50:1 for EURUSD): units are the smaller of the risk limit
+  and the margin limit, rounded to the unit step and capped at the maximum.
+  A margin shortfall shrinks the trade; the order is rejected only when the
+  result is below the instrument's minimum.
+- [X] Positions in =account.positions=, created and updated when a fill comes
+  back (netting: one position per instrument).
+- [X] =close= resolves to the real position size at the fill.
+- [ ] add/reduce sizing once their size type is defined.
+- [X] Margin available accounts for margin already used; equity includes
+  unrealized P/L at the latest mark.
+- [ ] Quote-to-account currency conversion (account currency is assumed to be
+  the quote currency today).
+** TODO Broker and execution
+- [X] Simplification pass (2026-11-04): one function decides execution (=order.execution=), one ends an order (=broker.complete= removes it from the queue, journals it and cancels the position's other exits), one cancels (=cancelWhere=), one records a rejection (=reject=, which also logs the warning). Expected outcomes are wrapped in the =rejection= type, so =isRejection= is =errors.As= and no longer a list. =newBroker= replaces the global registry. The account carries =closedOutAt=. =sizeOpen= validates before it rejects and rounds to the unit step once.
+- Submit/cancel; fills, partial fills, rejects; simulated prices,
+  bid/ask spread, slippage, commission, execution events and reconciliation.
+- Maintain next-bar-open causal execution in backtests.
+- [X] =broker.submit= assigns the order id, marks it submitted and logs it.
+- [X] Simulated fills (next-bar-open): the broker fills or rejects the
+  submitted order and the trader records the result as an open position or a
+  closed trade (the order moves to filled or rejected).
+- [X] Order history is stamped with simulated time: =order.timestamp= is the bar being processed (set by the trader; the broker will set it on fills). A live clock can set it the same way.
+- [X] Margin closeout: =marginPolicy= and =closeoutPolicy= (progressive or complete); a liquidation is a closing order with =reasonMarginCloseout= that ends filled.
+- [X] Closeout guard: after a margin closeout the broker refuses =open= and =add= for that account on the same bar (=errCloseoutGuard=, an expected rejection); closes and later bars are unaffected. Re-entry rules are a later policy.
+- [ ] *Stale-price margin liquidation (multi-instrument).* Currently Broker
+  checks margin after marking the instrument of the incoming bar, but it may
+  select and instantly close a different instrument at that position's
+  older =markPrice= while recording the liquidation at the current bar's time.
+  Define a price-freshness/executable-quote policy before relying on
+  multi-instrument closeout results; never silently treat an old accounting
+  mark as a contemporaneous executable fill. Address asynchronous quotes,
+  instrument market closures, deterministic timestamp grouping, and
+  intrabar trigger/closeout ordering. Add a regression with EURUSD and
+  GBPUSD at different observation times that verifies the intended behavior.
+  This is *deferred*, not a blocker for the single-instrument prototype.
+- [X] The broker retains every order that leaves its queue in =broker.completed= (completion order) including its own liquidation orders (=broker.closeouts()= filters them by reason). Orders rejected before submit (sizing) never reach the broker and stay with the trader.
+- [X] Protective stops are resting orders the broker owns: when an open fills with a stop, the broker queues a =stopOrder= close (=reasonStopLoss=, direction of the position it protects) alongside any other waiting order. Each bar market orders fill at the open first, then stop orders trigger on the bar's range (a long when the low reaches the stop, a short when the high does), at the stop or at the open on a gap, before positions are valued and the margin rules run. A stop can trigger on its entry bar. Any filled close (strategy, stop or margin closeout) cancels the position's other resting stops (=stateCancelled=, "position closed"). No trailing stops, slippage or spread yet.
+- [X] Limit entries: a =limitOrder= open rests in the broker's queue, sized and margin-reserved at its limit price, and never fills on the bar that produced it. On a later bar it fills when the bar trades through the limit (a long's low reaches it, a short's high does), at the limit or at the open when the bar gaps to a better price. It stays until filled or cancelled (by a margin closeout); there is no expiry. Because it can wait many bars, =account.applyFill= re-checks margin at the fill price when any open fills: if equity has fallen so the submitted units no longer fit, the order is rejected (=errInsufficientMargin=, recorded and the run continues). It is never silently resized. Netting also means one pending open per account and instrument: =broker.submit= rejects a second one (=errOpenPending=, an expected rejection) rather than letting the later fill hit =errPositionExists=. Opens on other instruments or by other accounts, and closes, are unaffected. A fill queues the entry's protective stop like any open. Limit closes (take profit) are rejected by =validate=.
+- [X] Stop entries: a =stopOrder= open buys or sells into the move, so it triggers the other way from a limit: a long's buy stop waits for the high to reach it, a short's sell stop for the low. Like a limit it never fills on the bar that produced it, fills at its price or at the (worse) open when the bar gaps past it, is margin re-checked at the fill and competes with other pending opens. =order.execution= decides whether and where any order fills (a buy limit and a sell stop wait for a fall, a sell limit and a buy stop for a rise); each bar considers orders in four phases: market, resting entries, protective stops, take profits, so a protective stop queued by an entry can fire on the same bar. =validate= allows limit and stop orders only as opens, with a trigger price.
+- [ ] Intrabar path assumption: bars carry no order between high and low, so an entry and its protective stop on the same bar are resolved as entry first, then the stop against the bar's whole range. That is exact for market entries but pessimistic for limit and stop entries when the stop's extreme came before the entry (it can overstate stop-outs on entry bars). The same blindness cuts the other way for take profits: a limit or stop entry's new target can fill against an extreme that came before the entry (a long buy limit that triggers on the way down, with the bar's high earlier), which is an optimistic outcome, unlike the pessimistic stop-first rule. Market entries are unaffected because they fill at the open. Options when it matters: only let the stop see the part of the range after the entry, use a deterministic OHLC path model (for example open, then the nearer extreme, then the other, then close), or use lower-timeframe data. Neither is worth building for the prototype. Tests documenting the current behavior: =TestBroker_OnBar_StopOrderCanTriggerOnTheEntryBar=, =TestBroker_OnBar_StopEntryProtectiveStopCanTriggerOnTheSameBar=. No test yet pins the optimistic target case; add one with the model.
+- [X] Take profit: an open may carry =takeProfit= (optional; the account rejects one that is not beyond the entry on the winning side as a strategy bug). When the open fills the broker queues, beside the protective stop, a resting limit close with =reasonTakeProfit= that triggers the way the position profits (a long's sell limit waits for the high to reach it) and fills at the target or at the better open on a gap. The stop and target act as one-cancels-other: any filled close (stop, target, strategy or margin closeout) cancels the position's remaining exits. Each bar is processed in two stages: first everything the open alone triggers (market orders and any resting order the open is already through, so a target the bar gaps over fills at the open even if the bar later reaches the stop), then the rest of the range. In the range stage a bar that reaches both is taken as the stop (the pessimistic path; stops are considered before targets). Strategy-made limit closes are still rejected by =validate=; targets come from the open.
+- [X] Expiry and cancellation: an open may carry =expires=, the first bar time at which it is no longer live (the broker cancels it with reason "expired" before the bar can execute it, even if that bar trades through its price; zero means good until cancelled; checked only when a bar for the order's instrument arrives). =broker.cancel(ctx, accountID, orderID, at)= withdraws a waiting order on request (reason "cancelled by request"); an order that is not waiting (filled, expired, already cancelled or another account's) is the expected rejection =errNoOrder=. Both end =stateCancelled=, stamped with the event time, leave the queue, release reserved margin and the pending-open slot, and are kept in =completed=. Any waiting order can be cancelled, a protective exit included (the position stays open).
+- [X] Trailing stops: an open may carry =trail=, a distance in price points; the broker copies it to the protective stop it queues. After a bar's executions (=broker.trailStops=) a long's stop moves up to the bar's high less the trail, a short's down to the low plus it, never back; each move is a history event ("trailed to N", state stays submitted). The stop is always checked at its level from before the bar, so a bar can never both raise a stop and hit the raised level: no view is taken on the path within the bar (slightly optimistic: a high-then-low bar that would have stopped out live does not here). A fixed stop is =trail= 0. The trail has no relation to the initial stop; the strategy sets both.
+- [ ] A strategy cannot request a cancel yet: it only emits orders, so a cancel intent (and who may issue one) is a design decision.
+** TODO Market data acquisition and storage
+- Download and validate provider observations; convert to canonical.
+- Detect/report coverage and expected closures vs unexpected gaps.
+- Choose explicit gap policy; do not silently fill missing bars.
+- Store/retrieve across multiple files, cache, and bound memory use.
+** TODO Incrementally retrofit production packages
+- Preserve financial regression tests; keep CLI/transport thin.
+- Delete redundant interfaces, service forwarding and factories rather
+  than moving them; prune obsolete architecture documents.

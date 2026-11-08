@@ -32,7 +32,13 @@ ADR-020 sections; it need not load broker or logging decisions.
 - For non-trivial work, post the implementation plan on the issue
   before coding when the issue workflow calls for plan review.
 - Use a short-lived branch and open a PR; all changes require review
-  before merge.
+  before merge. Create the branch from the issue so the PR is attached
+  to it.
+- Merge only a PR you own, and only when the maintainer explicitly
+  says `merge` for it. Green CI or a clean automated review is not
+  approval, and a new commit cancels an approval. After merging, close
+  the issue if GitHub did not and delete the local and remote branches.
+  The steps are in implement-issue in `docs/workflows/ai-skills.org`.
 - Keep changes focused; document architecture changes and do not
   silently contradict accepted ADRs.
 - Run `make check` (the canonical verification: tidy, fmt, vet, lint,
@@ -158,7 +164,8 @@ Prioritize, in order:
   race detector.
 - See `docs/workflows/workflows.org` for workflow
   details. `docs/workflows/testing.org` documents the verification
-  commands.
+  commands, and the Go testing section of
+  `docs/workflows/ai-skills.org` has the rules for writing tests.
 
 ### Test Data Organization
 

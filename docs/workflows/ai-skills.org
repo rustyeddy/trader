@@ -2,14 +2,16 @@
 #+STARTUP: showall
 
 Two reusable workflows, written once and provider-neutral, for the roles in
-=docs/workflows/ai-development.org=.  They add no orchestration: a person
-starts each one, and a human merges.  This document is the canonical source;
-any future tool-specific wrapper would only point here.
+=docs/workflows/ai-development.org=, and the Go testing rules they share.  They
+add no orchestration: a person starts each one, and nothing merges without
+the maintainer's explicit word.  This document is the canonical source; any future tool-specific wrapper would only
+point here.
 
 * Scope
 
 - Exactly two workflows: *implement-issue* and *review-pr*.  Add a third only
-  after one of these has proved its value and the maintainer asks.
+  after one of these has proved its value and the maintainer asks.  /Go testing/
+  below is a set of rules both workflows apply, not a third workflow.
 - No multi-agent framework, no runtime LLM integration, no MCP servers.  Those
   are deferred to a future milestone and are out of scope for this repository's
   current process.
@@ -22,20 +24,36 @@ Input: an issue number.
    or architecture is unclear, stop, label =needs-design=, and ask.
 2. Read =AGENTS.md= and =CONTRIBUTING.org=; inspect the affected packages and
    tests; read only the relevant ADR sections.
-3. Create a branch =<type>/<N>-<short-description>= from =main=.
+3. Create a branch =<type>/<N>-<short-description>= from the issue, so the PR
+   is attached to it: =gh issue develop N --base <base> --name <branch>
+   --checkout=.  The base is =main= unless the issue names another, such as
+   =design= for =examples/design=.
 4. Post or keep a plan using =docs/workflows/implementation-checklist.org=.
 5. Implement the smallest change that meets the criteria, with tests and docs.
+   Write Go tests per /Go testing/ below.
 6. Verify per =docs/workflows/testing.org=: run =make check= before pushing
    code changes; for documentation-only changes record the permitted skip and
    the reason.  Record each command and its exit status, and never claim a
    check passed that was not run.
 7. Push and open a PR that closes the issue, using the PR template and the
-   completed checklist.
+   completed checklist.  A workflow adds =Closes #N= if the branch names the
+   issue and the body lacks it, but GitHub only acts on the keyword for merges
+   into the default branch.
 8. Post a handoff (=docs/workflows/ai-development.org=) and stop pushing while
    review runs.  Reply to every review comment: with the fixing commit when you
    change something, or with a reason or evidence when you decline a
    suggestion or answer a question.  Push fixes and re-verify as in step 6.
-9. Do not merge; the maintainer merges.
+   Reviewers are the maintainer, other assistants and Copilot; the Implementer's
+   own checks never count as a review.  The maintainer says when reviews have
+   landed, so do not poll for them.
+9. Merge only when the maintainer explicitly says =merge= for this PR.  Green CI
+   or a clean automated review is not approval, and a new commit cancels an
+   approval.  Before merging, confirm the head is the commit that was approved
+   and that required CI passed on it, then merge with
+   =gh pr merge <pr-number> --merge --match-head-commit <sha>=.
+10. After the merge, close the linked issue by hand if the PR's base is not the
+    default branch, delete the local and remote branches, and update the base
+    branch locally.
 
 * Workflow 2: review-pr
 
@@ -47,10 +65,78 @@ Input: a PR number.
 3. Check the CI result (=gh pr checks N=) and the evidence in the PR; optionally
    run =make check= on the PR head and record the result.  The reviewer's own
    verification follows =docs/workflows/testing.org= too.
-4. Apply =docs/workflows/ai-review-rubric.org=: label every finding blocker,
-   suggestion or question; cite its source; list what you did not verify.
+4. Apply =docs/workflows/ai-review-rubric.org=, and /Go testing/ below to any Go
+   tests: label every finding blocker, suggestion or question; cite its source;
+   list what you did not verify.
 5. Post the review as PR comments.  Do not approve, merge, or push to the
    branch.
+
+* Go testing
+
+Use these rules whenever creating, modifying, or reviewing Go tests, along with
+any applicable =AGENTS.md=.  A test's job is to prove behavior and catch
+regressions, not merely increase a coverage number.
+
+** Organization and assertions
+
+- Use =github.com/stretchr/testify/require= for prerequisites and fatal
+  assertions; use =github.com/stretchr/testify/assert= for independent checks.
+- Put tests in the corresponding =*_test.go= file beside the source (=intent.go=
+  → =intent_test.go=); create a separate integration test file only when behavior
+  spans multiple files/packages.
+- Prefer same-package tests for private implementation behavior; use external
+  =_test= packages when testing the exported API as a consumer.
+- Use descriptive =TestXxx_Scenario= names and table-driven subtests when they
+  clarify related cases; don't force unrelated scenarios into tables.
+- Test observable behavior and invariants; avoid brittle assertions against
+  incidental implementation details.
+
+** Coverage and cases
+
+- Strive for as close to *100% meaningful coverage* as practical, with particular
+  attention to domain logic and financial calculations.  Respect
+  repository-required coverage gates; never add meaningless assertions just to
+  inflate coverage.
+- Cover happy paths, invalid input, errors, zero values, first/last items, empty
+  and single-element collections, boundaries, cancellation and early termination.
+- Test both sides of a condition.  Where relevant, cover overflow/rounding
+  boundaries, known-zero vs unknown, positive/negative amounts, long/short and
+  open/close/reversal transitions.
+- Every bug fix needs a regression test that fails against the broken
+  implementation.  Test error wrapping/classification with =require.ErrorIs= or
+  =require.ErrorAs= when appropriate.
+- Favor explicit input/output expectations and small fixtures; compare exact
+  monetary and price values without floats or approximate assertions when exact
+  arithmetic is required.
+
+** Deterministic, isolated tests
+
+- Use synthetic bars with fixed timestamps and random seeds; avoid network access,
+  real sleeps, wall-clock assumptions, and production data paths.
+- Use =t.TempDir()= for file fixtures and =t.Setenv()= for controlled environment
+  changes.  Do not touch =/srv/trading= or rely on developer secrets or
+  environment.
+- Keep test state independent; use =t.Parallel()= only when safe.  Use the race
+  detector for concurrent changes.
+- For iterators, test all items in order, empty input, cancellation, error
+  propagation and early break.  For market data, include gaps, duplicates, time
+  ordering, and multi-instrument behavior where applicable.
+- For trading/execution tests, verify intent validity, risk/rejection outcomes,
+  no-look-ahead timing, fill price and costs, financial reconciliation, and
+  deterministic repeatability when those behaviors are in scope.
+
+** Verify each change
+
+- During iteration run targeted =go test ./<package>=; before finishing run
+  =go test ./...=, =go vet ./...=, and =go test -race ./...= when feasible.  Report
+  any check not run or failures observed.
+- For =examples/design=, run =make check && make run= from that directory after
+  every change.  Keep the synthetic example executable throughout the design
+  phase.
+- Inspect coverage with =go test -cover ./...= or focused =-coverprofile= when
+  useful; explain meaningful untested paths instead of concealing them.
+- Keep scope tight: tests should support the approved API and TODO, not motivate
+  new production abstractions.
 
 * ChatGPT and other chat assistants
 

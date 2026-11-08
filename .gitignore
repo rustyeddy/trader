@@ -29,6 +29,8 @@ coverage.html
 # examples/*/main.go adds one more of these to guard against.
 /sma-long-hold
 /trader
+!/trader/
+/trader/trader
 
 # Go workspace file
 go.work

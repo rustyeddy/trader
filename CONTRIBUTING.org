@@ -32,7 +32,8 @@ issue
 1. *Issue*: Every change is associated with a corresponding GitHub issue.
    There is no code or documentation change without an issue to justify it.
 2. *Branch*: Create a short-lived branch from the default branch, named
-   according to the conventions below.
+   according to the conventions below.  An issue may name another base
+   instead, such as =design= for =examples/design=.
 3. *Implementation*: Make the minimal, focused change required to satisfy
    the issue's acceptance criteria.
 4. *Tests*: Add or update tests that cover the new or changed behavior,
@@ -41,10 +42,12 @@ issue
    comments, examples, and README instructions as required by the
    Definition of Done below.
 6. *Pull request*: Push the branch and open a pull request against the
-   default branch.
+   branch it was created from.
 7. *Review*: All new code is reviewed before merge.
 8. *CI*: Continuous integration must pass before merge.
-9. *Merge*: Once approved and green, the pull request is merged.
+9. *Merge*: Once approved and green, the pull request is merged.  An
+   assistant merges only a pull request it owns, and only when the
+   maintainer explicitly says to; see =docs/workflows/ai-skills.org=.
 
 * Branch Naming
 

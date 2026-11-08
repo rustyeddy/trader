@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/rustyeddy/trader/internal/accountactivity"
 	"github.com/rustyeddy/trader/internal/executionquality"
@@ -84,8 +83,6 @@ func jStreamOf(k accountactivity.SyncKey) jStream {
 	return jStream{Provider: k.Provider, Environment: k.Environment.String(), Account: k.ProviderAccountID}
 }
 
-func tstr(t time.Time) string { return timeText(t) }
-
 type jRange struct {
 	From string `json:"from,omitempty"`
 	To   string `json:"to,omitempty"`
@@ -112,7 +109,7 @@ func (f jsonFormatter) FormatSync(w io.Writer, o SyncOutput) error {
 		OtherEvents: o.Result.Other, Cursor: o.Result.Cursor,
 	}
 	if o.HasCheckpoint {
-		out.CheckpointAt = tstr(o.Checkpoint.UpdatedAt)
+		out.CheckpointAt = timeText(o.Checkpoint.UpdatedAt)
 	}
 	return f.encode(w, out)
 }
@@ -195,7 +192,7 @@ func ptr(v jval) *jval { return &v }
 func jActivityOf(a accountactivity.Activity) jActivity {
 	j := jActivity{
 		Key: a.Key().String(), ActivityID: a.ProviderActivityID, ProviderType: a.ProviderType,
-		Kind: a.Kind.String(), OccurredAt: tstr(a.OccurredAt), Instrument: a.Instrument.String(),
+		Kind: a.Kind.String(), OccurredAt: timeText(a.OccurredAt), Instrument: a.Instrument.String(),
 		BrokerOrderID: a.BrokerOrderID, BrokerBatchID: a.BrokerBatchID, TradeEffects: []jEff{},
 	}
 	switch a.Kind {
@@ -224,7 +221,7 @@ func jActivityOf(a accountactivity.Activity) jActivity {
 	}
 	if q, ok := a.ExecutionQuote.Get(); ok {
 		j.ExecutionQuote = &jQuote{
-			Basis: a.ExecutionQuote.Basis().String(), Source: a.ExecutionQuote.Source(), At: tstr(q.At),
+			Basis: a.ExecutionQuote.Basis().String(), Source: a.ExecutionQuote.Source(), At: timeText(q.At),
 			Bids: jLevels(q.Bids), Asks: jLevels(q.Asks), CloseoutBid: jPrice(q.CloseoutBid), CloseoutAsk: jPrice(q.CloseoutAsk),
 		}
 	}
@@ -259,11 +256,11 @@ type jCheck struct {
 func (f jsonFormatter) FormatList(w io.Writer, o ListOutput) error {
 	r := o.Result
 	out := jList{
-		SchemaVersion: schemaVersion, Stream: jStreamOf(r.Stream), Range: jRange{From: tstr(o.From), To: tstr(o.To)},
+		SchemaVersion: schemaVersion, Stream: jStreamOf(r.Stream), Range: jRange{From: timeText(o.From), To: timeText(o.To)},
 		Matched: r.Matched, Limit: r.Limit, Truncated: r.Truncated(), Activities: []jActivity{},
 	}
 	if r.HasCheckpoint {
-		out.Checkpoint = &jCheck{Cursor: r.Checkpoint.Cursor, UpdatedAt: tstr(r.Checkpoint.UpdatedAt)}
+		out.Checkpoint = &jCheck{Cursor: r.Checkpoint.Cursor, UpdatedAt: timeText(r.Checkpoint.UpdatedAt)}
 	}
 	for _, a := range r.Activities {
 		out.Activities = append(out.Activities, jActivityOf(a))
@@ -289,7 +286,7 @@ func jLegs(ls []tradehistory.Leg) []jLeg {
 	out := make([]jLeg, 0, len(ls))
 	for _, l := range ls {
 		out = append(out, jLeg{
-			Source: l.Source.String(), At: tstr(l.At), Quantity: l.Quantity.String(), Price: jPrice(l.Price),
+			Source: l.Source.String(), At: timeText(l.At), Quantity: l.Quantity.String(), Price: jPrice(l.Price),
 			BrokerTradeID: l.BrokerTradeID, CandidateTradeIDs: l.CandidateTradeIDs, DivisionDerived: l.Split,
 		})
 	}
@@ -328,7 +325,7 @@ type jTrade struct {
 func jTradeOf(t tradehistory.Trade) jTrade {
 	return jTrade{
 		ID: t.ID, Instrument: t.Instrument.String(), Side: strings.ToLower(t.Side.String()),
-		OpenedAt: tstr(t.OpenedAt), ClosedAt: tstr(t.ClosedAt), Quantity: t.EntryQuantity.String(),
+		OpenedAt: timeText(t.OpenedAt), ClosedAt: timeText(t.ClosedAt), Quantity: t.EntryQuantity.String(),
 		AvgEntryPrice: jPrice(t.AvgEntryPrice), AvgExitPrice: jPrice(t.AvgExitPrice),
 		GrossPL: jMoney(t.GrossPL), SpreadCost: jMoney(t.SpreadCost), Commission: jMoney(t.Commission),
 		Financing: jMoney(t.Financing), OtherFees: jMoney(t.OtherFees), Net: jMoney(t.Net),
@@ -351,7 +348,7 @@ type jOpen struct {
 func jOpenOf(o tradehistory.OpenPosition) jOpen {
 	return jOpen{
 		ID: o.ID, Instrument: o.Instrument.String(), Side: strings.ToLower(o.Side.String()),
-		OpenedAt: tstr(o.OpenedAt), Remaining: o.Remaining.String(), AvgEntryPrice: jPrice(o.AvgEntryPrice),
+		OpenedAt: timeText(o.OpenedAt), Remaining: o.Remaining.String(), AvgEntryPrice: jPrice(o.AvgEntryPrice),
 		Entries: jLegs(o.Entries), Exits: jLegs(o.Exits), Sources: keyStrings(o.Sources),
 	}
 }
@@ -400,7 +397,7 @@ func jBenchOf(b *executionquality.Benchmark) *jBench {
 	if b == nil {
 		return nil
 	}
-	return &jBench{Kind: string(b.Kind), Price: decimal(b.Price.String()), At: tstr(b.At), Source: b.Source, IntervalMS: b.Interval.Milliseconds()}
+	return &jBench{Kind: string(b.Kind), Price: decimal(b.Price.String()), At: timeText(b.At), Source: b.Source, IntervalMS: b.Interval.Milliseconds()}
 }
 
 func jQualityOf(q *rpt.Quality) *jQuality {
@@ -478,7 +475,7 @@ func (f jsonFormatter) FormatTrades(w io.Writer, o TradesOutput) error {
 		return f.encode(w, out)
 	}
 	out := jTrades{
-		SchemaVersion: schemaVersion, View: "completed", Stream: jStreamOf(r.Stream), Range: jRange{From: tstr(r.From), To: tstr(r.To)},
+		SchemaVersion: schemaVersion, View: "completed", Stream: jStreamOf(r.Stream), Range: jRange{From: timeText(r.From), To: timeText(r.To)},
 		Benchmark: string(r.Benchmark), AccountCurrency: jCurrencyOf(r.AccountCurrency),
 		Trades: make([]jTrade, 0, len(r.Trades)), Orphans: jOrphans(r.Orphans), Unattributed: keyStrings(r.Unattributed),
 	}
