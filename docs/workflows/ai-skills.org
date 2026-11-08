@@ -50,7 +50,7 @@ Input: an issue number.
    or a clean automated review is not approval, and a new commit cancels an
    approval.  Before merging, confirm the head is the commit that was approved
    and that required CI passed on it, then merge with
-   =gh pr merge N --merge --match-head-commit <sha>=.
+   =gh pr merge <pr-number> --merge --match-head-commit <sha>=.
 10. After the merge, close the linked issue by hand if the PR's base is not the
     default branch, delete the local and remote branches, and update the base
     branch locally.
