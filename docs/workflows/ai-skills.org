@@ -3,8 +3,8 @@
 
 Two reusable workflows, written once and provider-neutral, for the roles in
 =docs/workflows/ai-development.org=, and the Go testing rules they share.  They
-add no orchestration: a person starts each one, and a human merges.  This
-document is the canonical source; any future tool-specific wrapper would only
+add no orchestration: a person starts each one, and nothing merges without
+the maintainer's explicit word.  This document is the canonical source; any future tool-specific wrapper would only
 point here.
 
 * Scope
@@ -24,7 +24,10 @@ Input: an issue number.
    or architecture is unclear, stop, label =needs-design=, and ask.
 2. Read =AGENTS.md= and =CONTRIBUTING.org=; inspect the affected packages and
    tests; read only the relevant ADR sections.
-3. Create a branch =<type>/<N>-<short-description>= from =main=.
+3. Create a branch =<type>/<N>-<short-description>= from the issue, so the PR
+   is attached to it: =gh issue develop N --base <base> --name <branch>
+   --checkout=.  The base is =main= unless the issue names another, such as
+   =design= for =examples/design=.
 4. Post or keep a plan using =docs/workflows/implementation-checklist.org=.
 5. Implement the smallest change that meets the criteria, with tests and docs.
    Write Go tests per /Go testing/ below.
@@ -40,7 +43,17 @@ Input: an issue number.
    review runs.  Reply to every review comment: with the fixing commit when you
    change something, or with a reason or evidence when you decline a
    suggestion or answer a question.  Push fixes and re-verify as in step 6.
-9. Do not merge; the maintainer merges.
+   Reviewers are the maintainer, other assistants and Copilot; the Implementer's
+   own checks never count as a review.  The maintainer says when reviews have
+   landed, so do not poll for them.
+9. Merge only when the maintainer explicitly says =merge= for this PR.  Green CI
+   or a clean automated review is not approval, and a new commit cancels an
+   approval.  Before merging, confirm the head is the commit that was approved
+   and that required CI passed on it, then merge with
+   =gh pr merge N --merge --match-head-commit <sha>=.
+10. After the merge, close the linked issue by hand if the PR's base is not the
+    default branch, delete the local and remote branches, and update the base
+    branch locally.
 
 * Workflow 2: review-pr
 
