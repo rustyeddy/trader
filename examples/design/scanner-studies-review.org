@@ -1,0 +1,207 @@
+#+TITLE: Architecture Review — Post-EMAX, Pre-Study/Scanner
+#+SUBTITLE: Issue #571 · Reviewed against examples/design at main 879ae93 (2026-11-08)
+#+STARTUP: overview
+
+* Decision
+*Keep the validated EMAX architecture.* No general runner, handler hierarchy, or
+production migration is justified yet. Prove one broker-free ATR Study, a
+two-symbol observation stream and Scanner, then a two-symbol trading Strategy.
+Only then consolidate common delivery and decide the production boundaries.
+
+This is a design review, not an implementation change. The six EMAX fixture
+results remain the regression baseline.
+
+* Implemented boundaries — what the code actually does
+| Component | Scope | Current responsibility | Review |
+|-----------+-------+------------------------+--------|
+| =bar= | Generic | One instrument's OHLCV, stamped with its opening time | No interval or end time, so availability cannot be derived yet. |
+| =marketData= | Generic | Read one instrument's CSV into =[]bar=; expose =iter.Seq2[bar,error]= | Good prototype; no multi-file/query/coverage API yet. |
+| =ema= | Generic | Consume a bar, return a =float64= value once warmed up | Reusable by a Scanner; state is per instance, so one per instrument. |
+| =backtest.run= | Trading | Iterate the sequence, propagate data/context/handler errors | Small historical wrapper, but it takes =*trader=, so a Study cannot use it. |
+| =trader.onBar= | Trading | Advance Broker for a bar, then call Strategy, then submit an optional Order | Correct single-symbol sequencing. Owns Broker advancement. |
+| =strategy.onBar= | Trading | EMAX consumes a bar, tracks EMA signal/pending side, returns =*order= or nil | Trading-only API. Signal state deliberately differs from Account exposure. |
+| =broker= | Trading | Queue and execute orders, manage protective exits, mark accounts and enforce margin | Simulation-specific execution; no Study dependency. |
+| =account= | Trading | Size Orders, hold Positions, margin/equity/trades, apply fills | Keep inside trading path. USD quote/account assumption remains. |
+| =result= | Trading | Read completed trades/Orders/Account and print a stable summary | Proven for EMAX; don't turn into a universal Study result model. |
+
+Actual single-symbol order within a processed bar:
+=Broker expiry/open fills/range fills -> trailing stops -> account marks/margin -> Strategy.onBar -> Trader.handleOrder -> Broker.submit -> Account.size=.
+An order generated from a bar cannot fill on that same bar. The Broker may
+place and trigger a protective exit in an entry bar, per documented OHLC
+assumptions. Results leave outstanding Orders/Positions at end-of-data.
+
+* Opening, availability and fill times
+These are three different times, and only the first is represented today.
+
+| Time | Meaning | In the code at 879ae93 |
+|------+---------+------------------------|
+| Opening | Start of the bar's interval | =bar.Time= |
+| Availability | When the full OHLC is known; the earliest a consumer may see the bar or decide from it | Not represented: =bar= has no interval or end, and =marketData.interval= is an unparsed string |
+| Eligible fill | The earliest an Order may execute | Approximated by =b.After(o.Time)= in =order.execution= |
+
+*Requirement:* a fill's time must not precede the availability of the bar that
+caused the Order.
+
+The current check meets this only within one instrument and interval. A
+strategy stamps =o.Time= with the opening time of the bar it saw, so =o.Time=
+means "open of the signal bar", not "decision time", and the check compares two
+opening times. Probe at 879ae93: a EURUSD H1 bar stamped 10:00 (known at 11:00)
+produced a GBPUSD market Order, and an offset GBPUSD H1 bar stamped 10:30 then
+filled it at 10:30, before the decision could have been made.
+
+Recorded fill timestamps also need a decision before #573–#575 rely on them. A
+market fill at the open is stamped correctly. A range-triggered fill happens
+later in the bar and a margin closeout executes at the close, but both are
+stamped with the bar's opening time. No EMAX change is required.
+
+* Documentation drift to reconcile
+The code and EMAX tests are authoritative here; do not change tested semantics
+to match these documents. The corrections below are not applied in this memo.
+#576 already carries the update of =architecture.org= and =todo.org=.
+
+- =architecture.org:64,155,161= say Trader sizes and then submits. The code does
+  the reverse: =trader.handleOrder -> broker.submit -> account.size=, because
+  sizing needs =broker.reservedMargin=. This decides who controls margin
+  admission in #575, so the documents should follow the code unless #575 shows
+  otherwise.
+- =architecture.org:70-75= is an illustrative loop that omits the prior Broker
+  step.
+- =architecture.org:171-173= is partly stale. Fills and cancellation are built
+  and validated. Partial fills, asynchronous broker events and account
+  reconciliation remain deferred.
+- =architecture.org:215= still lists order execution timing and rejection as
+  open.
+- =todo.org:88= and #576 say Backtest retains the simulated clock, pending-order
+  eligibility and fill sequencing. =backtest.run= is only a loop; eligibility is
+  in =order.execution= and sequencing is in =trader.onBar=.
+- =todo.org:156= names =order.timestamp=; the field is =order.Time=.
+- =todo.org:171-172= say there are no trailing stops and no expiry; both now
+  exist (=todo.org:176-177=).
+
+* Contract decisions for #572–#576
+These issues carry the work of =todo.org= TODO 3 (#572, #574), TODO 4 (#573,
+#575), and TODOs 5 and 6 (#576).
+
+** #572 — ATR Study
+- Process a deterministic single-instrument bar sequence, without creating
+  =trader=, =broker=, =account= or =order=.
+- Use a concrete Study with indicator state and a small typed result (instrument,
+  timestamp, ATR value); independently verify warm-up, true ranges, smoothing,
+  error/cancellation propagation and repeated results.
+- #572 comes before #573 decides availability. Until then, report the bar's
+  opening time, labelled as such, and prove no look-ahead by showing that the
+  ATR for bar N does not change when later bars are added.
+- State before implementing: the numeric type (=ema= uses =float64=; say whether
+  ATR follows it as a research measurement or stays in fixed-point =price=) with
+  its rounding or test tolerance, the first bar's true range when there is no
+  previous close, and the seed (SMA of the first N true ranges or Wilder's).
+- The previous close across a missing bar depends on #573's missing-bar policy.
+- Start by directly iterating =marketData.bars(ctx)= in a focused example/test.
+  *Do not* extract a general Study interface or shared runner just yet.
+- An Indicator computes measurements; a Study decides what to collect/report.
+  A Scanner classifies/selects instruments; a trading Strategy requests Orders.
+
+** #573 — Observation availability and multi-symbol data
+- A bar's =Time= currently stores its *open* timestamp. Its full OHLC values
+  become known at the end of its interval; event ordering for research
+  consumers and decisions must use *availability/completion* time as well as
+  distinguish the quoted bar start. Historical fixtures only establish
+  next-bar execution on a single D1 stream; they do not validate H1/live
+  availability or cross-interval ordering.
+- Add what availability needs to be computed, and meet the fill-time requirement
+  above across instruments; see "Opening, availability and fill times".
+- Begin with two instruments on the same interval, then include offset
+  observation times and a deliberately missing bar. Specify deterministic
+  tie-breaking for simultaneous available observations. For trading consumers
+  the tie-break changes financial results; see #575.
+- Do not silently synthesize missing bars or pass a carried stale value as
+  newly observed. Whether a frame holds only fresh bars or marked carried values
+  stays open (decision 2).
+- Compare =OnBar(bar)= and =OnBars(frame)= with tests, including whether the
+  Broker must advance per timestamp group; the frame grouping policy is
+  undecided. Avoid a universal callback hierarchy or map iteration order in
+  observable output. Preserve =iter.Seq2= as the working baseline.
+
+** #574 — EMA Scanner
+- At least two instruments, distinct EMA state per instrument, explicit
+  warm-up and deterministic classification output.
+- No Account, Broker, Trader, or trading Order. Validate missing-symbol and
+  simultaneous-observation behavior using #573's decided delivery semantics.
+
+** #575 — Two-symbol trading Strategy
+- One Broker and one Account with Positions for both symbols. The present
+  =emax= object contains only one pair of EMA states and one signal state, so
+  *do not reuse it as a two-instrument strategy without partitioning state*.
+- Partitioning must keep the invariant in =single-vs-multi-trader.org=: a shared
+  Broker has one market-event advancement path. =trader.onBar= advances the
+  Broker itself, so fanning one bar out to two Traders would advance it twice.
+  How to compose this is open (decision 7).
+- Test two signals at one effective time; decide ordering and whether callback
+  returns 0, 1 or multiple Orders. Account equity/margin must remain shared;
+  deterministic order admission matters when both signals compete for margin.
+- *Known unsafe multi-symbol behavior:* Broker can margin-liquidate a different
+  instrument at its older mark while timestamping the close on the new bar.
+  Test and define a freshness/executable-quote policy; don't imply a stale
+  mark was an actual contemporaneous fill. This was already flagged in
+  =todo.org= and is not an EMAX regression.
+- *Stale marks affect more than fills, even on aligned data.* =broker.onBar=
+  marks only the bar's instrument and then checks margin, so when two instruments
+  share a timestamp the check after the first bar values the second at its
+  previous close. Margin evaluation, equity and sizing all need a defined
+  valuation point. Refusing stale fills is not enough: in the probe below the
+  closeout fills at a fresh price and only its trigger is stale.
+- Probe at 879ae93, one bar each at the same timestamp, $10,000 account, long
+  200,000 units of each from 1.00000, EURUSD closing 0.96500 and GBPUSD 1.03500:
+  EUR then GBP gives one closeout and leaves only GBPUSD open; GBP then EUR gives
+  no closeout. A separate sizing probe, $10,000 account, long 20,000 GBPUSD from
+  1.00000 closing 0.95000, EURUSD open at 1.00000 with a 0.99000 stop: the open
+  sizes to 10,000 units before GBPUSD's bar at that timestamp is processed and
+  9,000 after it.
+- USD-only quote currency and fixed price scaling are *prototype constraints*;
+  for two-symbol validation use symbols with compatible account/quote
+  currency or explicitly defer conversion. The =instruments= registry holds only
+  EURUSD, so #575 must register a second USD-quoted symbol such as GBPUSD;
+  =parsePrice= requires five decimals, which rules out JPY pairs at their usual
+  three.
+
+** #576 — Shared runner / Dataset API decision
+- After the three examples, compare their iteration paths. Extract only
+  genuine shared concerns (cancellation, data error delivery, deterministic
+  sequencing) into a small function if that reduces total code.
+- Keep Broker-before-Strategy sequencing in the trading composition, not in a
+  universal market-data runner. Studies/Scanners must not return dummy Orders.
+- Explore an *in-memory* Query/Dataset/Load contract with instruments,
+  interval, source/basis, [start,end), explicit gap policy and ordered Bars.
+  Disk assembly, caching, provider adapters, durable journals and migration
+  remain later implementation work.
+
+* Open decisions (do not resolve speculatively)
+1. Do strategy callbacks need a read-only Position/Account snapshot? EMAX
+   currently intentionally tracks signal state, not exposure.
+2. Are frames needed for simultaneous multi-symbol observations? If so, how
+   are missing and carried bars represented and when is a frame considered
+   complete?
+3. Should multiple Orders be returned from one callback, and in what stable
+   priority/order are they admitted for margin?
+4. When bars have different intervals or venue sessions, what is their
+   effective availability time and how does that relate to Broker execution?
+5. At what valuation point are margin, equity and sizing evaluated across
+   instruments, and how is execution safely inhibited when an instrument has no
+   current executable quote, especially during portfolio margin liquidation?
+6. What is the minimal dataset ownership/coverage contract before bringing
+   over the legacy marketdata code?
+7. How does a two-symbol Strategy keep one Broker advancement path: one Trader
+   with per-instrument state, each bar routed to exactly one Trader, or Broker
+   advancement moved out of =trader.onBar=?
+8. What do recorded fill timestamps mean for range-triggered fills and margin
+   closeouts?
+
+* Gates
+- No EMAX semantic changes as part of #571; compare the approved six-scenario
+  stdout as a permanent baseline.
+- Each implementation PR under #572–#576 runs
+  =cd examples/design && make check && make run= and the repository CI.
+- Review code for fewer layers, explicit temporal semantics, deterministic
+  output and no external broker/account dependency for research consumers.
+- Do not begin production migration until EMAX, Study, Scanner and
+  two-instrument Strategy examples have passed a collective architecture review.
