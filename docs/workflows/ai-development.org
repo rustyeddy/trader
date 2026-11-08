@@ -20,16 +20,18 @@ instructions).  There is no automated orchestration: people start each step.
   (=AGENTS.md=, =CONTRIBUTING.org=, =Makefile=, this file).  Assistant-specific
   files (=CLAUDE.md=, =.github/copilot-instructions.md=) only point to them.
   Any assistant can take any role below.
-- *Humans decide.*  The maintainer approves and merges.  An assistant never
-  merges its own pull request.
+- *Humans decide.*  The maintainer decides every merge.  An assistant merges
+  only a pull request it owns, and only when the maintainer explicitly says
+  =merge= for it; a new commit cancels that approval.  See implement-issue in
+  =docs/workflows/ai-skills.org=.
 
 * Roles
 
-| Role           | Who                      | Responsibilities                                                   |
-|----------------+--------------------------+--------------------------------------------------------------------|
-| Maintainer     | Human                    | Writes or approves issues, resolves =needs-design=, merges         |
-| Implementer    | One assistant per issue  | Owns the branch and PR; plan, code, tests, docs, replies to review |
-| Reviewer       | A different assistant    | Independent review; reports findings; does not push to the branch  |
+| Role           | Who                      | Responsibilities                                                                     |
+|----------------+--------------------------+--------------------------------------------------------------------------------------|
+| Maintainer     | Human                    | Writes or approves issues, resolves =needs-design=, says when to merge               |
+| Implementer    | One assistant per issue  | Owns the branch and PR; plan, code, tests, docs, replies to review, merges when told |
+| Reviewer       | A different assistant    | Independent review; reports findings; does not push to the branch                    |
 
 Rules:
 
@@ -93,10 +95,10 @@ Issue #123, "marketdata: reject bars outside their span".
 2. *Plan.*  Claude Code reads the issue, =AGENTS.md=, the =marketdata=
    package and tests, and the matching ADR sections only.  It comments a short
    plan and its assumptions on #123.
-3. *Implementation.*  It creates =fix/123-bar-span-check=, implements the
-   change with tests and docs, runs =make check= (and =make lint=), and opens a
-   PR that closes #123, stating what changed, why, how it was tested, and which
-   docs changed.
+3. *Implementation.*  It creates =fix/123-bar-span-check= from the issue,
+   implements the change with tests and docs, runs =make check= (and
+   =make lint=), and opens a PR that closes #123, stating what changed, why,
+   how it was tested, and which docs changed.
 4. *Handoff.*  It posts the handoff comment on the PR with the commit SHA,
    changed files, test evidence, and open risks, then pauses pushes while
    review is in progress.  Ownership of the branch stays with Claude Code.
@@ -109,8 +111,10 @@ Issue #123, "marketdata: reject bars outside their span".
    declines).  If the fix is non-trivial, it posts a new handoff and the
    Reviewer re-checks.
 7. *Merge.*  When CI is green and blocking findings are resolved, the
-   maintainer approves and merges.  The issue closes.
-8. *Clean-up.*  The merged branch is deleted.
+   maintainer says =merge=.  Claude Code confirms the head is the approved
+   commit and merges.  The issue closes, by hand if the PR's base is not the
+   default branch.
+8. *Clean-up.*  Claude Code deletes the local and remote branches.
 
 * Posting guidance
 
