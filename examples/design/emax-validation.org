@@ -142,8 +142,9 @@ Deliberately left out; none of these is exercised by this validation:
   and B1 and B2 cover both cases for a long;
 - a profitable short closed by a reversal (the rounding and P/L formula are covered
   by D and C's unrealized value);
-- an entry gapping past its own stop, and a reversal where the trend turns back on
-  the next bar (rule 10);
+- an entry gapping past its own stop;
+- a reversal where the trend turns back on the next bar, in the tables. A separate
+  test in =emax_backtest_test.go= pins it on its own bars (rule 10);
 - margin limits, warnings and closeouts, take profits, trailing stops, limit and stop
   entries, expiry and cancellation, all of which have their own tests;
 - orders rejected at sizing, in the tables: no scenario here produces one. A separate
