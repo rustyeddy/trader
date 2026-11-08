@@ -11,6 +11,21 @@ Claude wrote this calculator and much of the engine, so a rule misread in both
 would still agree. *Reviewing the rules below is what guards against that*, so
 review any change to them the same way.
 
+* Running the example
+From =examples/design=, =make check && make run=. The run backtests the six
+scenarios below through the real path, each on fresh instances, and prints one
+summary each to stdout. Logs go to stderr and carry wall-clock times, so compare
+stdout only: =go run . 2>/dev/null= prints the same bytes every time.
+=TestRun_PrintsTheApprovedSummaryOfEveryScenario= holds the expected output, which
+makes the example a permanent regression.
+
+In a summary a trade is a position that closed. An open position is listed on its
+own and is neither a win nor a loss, and a closed trade with zero P/L is a
+break-even. =rejected= includes opens refused at sizing, which never reach the
+broker. =submitted= is everything the broker queued, its own stops included, and
+=pending= is what is still waiting when the data ends, including an open position's
+stop.
+
 * Configuration
 | setting          | value                                        |
 |------------------+----------------------------------------------|
@@ -140,6 +155,17 @@ This is independent of the script. Check it against the tables.
 | B3       | #548  | gap through the stop                              |
 | C        | #549  | full reversal, position open at the end of data   |
 | D        | added | short closed by its stop                          |
+
+* Limitations
+What these results do not model. None of this is hidden in the numbers:
+- *Bars do not show the path inside them.* A bar gives only open, high, low and
+  close, so the engine cannot tell what came first. Rules 12 and 13 say what it
+  assumes: the open first, then stops against the whole range.
+- *No costs.* There is no spread, commission or slippage, and a stop fills at its
+  price unless the bar gaps past it, so results are better than a real account's.
+- *1% is planned risk, not a cap* (rule 17).
+- *EMAX's signal state is not the account's exposure* (rule 11). After a stop-out
+  EMAX still believes it holds the position.
 
 * Not covered
 Deliberately left out; none of these is exercised by this validation:

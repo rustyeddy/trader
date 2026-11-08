@@ -111,12 +111,14 @@ records the result. See =order-tests.org= for the scenarios.
   =emax_backtest_test.go= runs the real path over them against fixed expected
   values (#546). =readBars= reads the CSVs, =account.trades= keeps each closed
   position, and =trader.rejected= keeps the orders refused before the broker's
-  queue. =main= still runs the random walk until #551. Scenarios A (#547), B1, B2 and
-  B3 (#548), and C and D (#549) are also checked bar by bar. Each scenario's money
-  is reconciled from its fills, and every order's lifecycle is checked (#550).
+  queue. =make run= prints one summary per scenario on stdout, with logs on stderr
+  (#551); see the page for how to compare runs and what is not modelled. Scenarios
+  A (#547), B1, B2 and B3 (#548), and C and D (#549) are also checked bar by bar.
+  Each scenario's money is reconciled from its fills, and every order's lifecycle
+  is checked (#550).
 - EMA cross: single instrument, long/short orders and trader handler
-  (working today: sized from risk and the strategy's stop, submitted to the
-  simulated broker; fills are not built yet).
+  (working today: sized from risk and the strategy's stop, filled by the
+  simulated broker, and validated end to end over the six scenarios above).
 - Cross-instrument strategy: two symbols, including missing bar behavior.
 - ATR study or scanner: results without broker/account or forced order.
 - Ensure =make check && make run= green after every change.
