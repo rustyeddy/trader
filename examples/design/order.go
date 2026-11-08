@@ -113,23 +113,23 @@ type order struct {
 	// one. The zero time means good until cancelled.
 	expires time.Time
 
-	// Time is the simulated time of the step the order is on: the bar
-	// being processed. Whoever advances the order sets it (the trader when the
-	// order is requested, the broker when it fills), and record stamps history
-	// with it. The managed clock for live trading will set it the same way.
+	// Time is the simulated time of the step the order is on: the bar being
+	// processed. The strategy sets it on a new order and record moves it, so it
+	// is when the order last changed. The managed clock for live trading will
+	// supply the times the same way.
 	Time time.Time
 
 	state   orderState
 	history []orderEvent
 }
 
-// record moves the order to state s, appends a timestamped event to its
-// history (stamped with o.Time) and logs the change. Every step an order takes goes through here.
-func (o *order) record(s orderState, reason string) {
+// record moves the order to state s at time at, appends the event to its
+// history and logs the change. Every step an order takes goes through here.
+func (o *order) record(s orderState, at time.Time, reason string) {
 	from := o.state
 	first := len(o.history) == 0
-	o.state = s
-	o.history = append(o.history, orderEvent{state: s, time: o.Time, reason: reason})
+	o.state, o.Time = s, at
+	o.history = append(o.history, orderEvent{state: s, time: at, reason: reason})
 
 	attrs := []any{
 		"order", o.id,
@@ -149,11 +149,13 @@ func (o *order) record(s orderState, reason string) {
 	slog.Info("order state", attrs...)
 }
 
-// reject records the expected rejection err on the order, logs it and returns
-// it. It is the one place a rejection is recorded, so every refusal looks the
-// same in the history and the log, whoever made it.
-func reject(o *order, err error) error {
-	o.record(stateRejected, err.Error())
+// reject records an expected rejection on the order at time at, logs it and
+// returns it. The format should wrap the sentinel that names the rejection. It is
+// the one place a rejection is recorded, so every refusal looks the same in the
+// history and the log, whoever made it.
+func reject(o *order, at time.Time, format string, args ...any) error {
+	err := rejected(format, args...)
+	o.record(stateRejected, at, err.Error())
 	slog.Warn("order rejected",
 		"reason", err,
 		"time", o.Time,
@@ -174,8 +176,9 @@ var errInvalidOrder = errors.New("invalid order")
 // Every request must explicitly name marketOrder, limitOrder or stopOrder;
 // noOrder and unknown types are invalid.
 //
-// An open must carry a positive stop price; whether it is on the losing side of
-// the entry is checked when the order is sized.
+// An open must carry a reference price and a stop on the losing side of it, and
+// any target on the winning side. Prices above maxPrice are refused here, so the
+// money math cannot overflow.
 //
 // Add and reduce use marketOrder; their size rules wait on the size type being
 // defined.
@@ -197,6 +200,9 @@ func (o *order) validate() error {
 		}
 	default:
 		return fmt.Errorf("%w: unsupported order type %d", errInvalidOrder, o.orderType)
+	}
+	if max(o.price, o.stopLoss, o.takeProfit) > maxPrice {
+		return fmt.Errorf("%w: prices must not exceed %d", errInvalidOrder, maxPrice)
 	}
 	if o.takeProfit < 0 || (o.takeProfit != 0 && o.action != open) {
 		return fmt.Errorf("%w: take profit must be positive and only an open carries one", errInvalidOrder)
@@ -222,6 +228,17 @@ func (o *order) validate() error {
 		if o.stopLoss <= 0 {
 			return fmt.Errorf("%w: open requires a stop loss set by the strategy", errInvalidOrder)
 		}
+		if o.price <= 0 {
+			return fmt.Errorf("%w: open requires a reference price", errInvalidOrder)
+		}
+		if !o.beyond(o.stopLoss, true) {
+			return fmt.Errorf("%w: %s stop %d is not beyond the entry price %d",
+				errInvalidOrder, o.direction, o.stopLoss, o.price)
+		}
+		if o.takeProfit != 0 && !o.beyond(o.takeProfit, false) {
+			return fmt.Errorf("%w: %s take profit %d is not beyond the entry price %d",
+				errInvalidOrder, o.direction, o.takeProfit, o.price)
+		}
 	case add, reduce, close:
 		if o.instrument == "" {
 			return fmt.Errorf("%w: %s requires an instrument", errInvalidOrder, o.action)
@@ -233,6 +250,16 @@ func (o *order) validate() error {
 		return fmt.Errorf("%w: unknown action %d", errInvalidOrder, o.action)
 	}
 	return nil
+}
+
+// beyond reports whether p lies past the order's entry price on its losing
+// side (where a stop belongs) or, with losing false, its winning side (where a
+// target belongs). For a long the losing side is below the entry.
+func (o *order) beyond(p price, losing bool) bool {
+	if (o.direction == long) == losing {
+		return p < o.price
+	}
+	return p > o.price
 }
 
 func (d direction) String() string {

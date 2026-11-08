@@ -66,7 +66,7 @@ func runScenario(scenario string) (*result, error) {
 	}
 
 	slog.Info("backtest complete", "scenario", scenario, "strategy", tr.strategy.name())
-	return newResult(scenario, len(prices.data), tr)
+	return newResult(scenario, len(prices.data), tr), nil
 }
 
 // scenarioPath is where a scenario's bars are, relative to examples/design.
@@ -96,5 +96,5 @@ func getStrategy() (strategy, error) {
 		long:    4,
 		stopPct: rateOnePercent,
 	}
-	return emax, emax.init(nil)
+	return emax, emax.init()
 }

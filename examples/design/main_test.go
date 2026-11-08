@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -94,9 +93,8 @@ func TestResult_ZeroPnLIsABreakEven(t *testing.T) {
 	act := br.addAccount("a", usd(10000))
 	act.trades = []trade{{pnl: 3}, {pnl: -1}, {pnl: 0}, {pnl: 0}} // the balance is left alone
 
-	r, err := newResult("s", 0, &trader{broker: br, account: act})
+	r := newResult("s", 0, &trader{broker: br, account: act})
 
-	require.NoError(t, err)
 	assert.Equal(t, 4, r.trades)
 	assert.Equal(t, 1, r.wins)
 	assert.Equal(t, 1, r.losses)
@@ -110,25 +108,13 @@ func TestResult_ZeroPnLIsABreakEven(t *testing.T) {
 func TestResult_CountsRefusalsWithoutDuplication(t *testing.T) {
 	refused := runEMAXWithBalance(t, "a-reversal-exit", 1)
 
-	r, err := newResult("s", 10, refused.trader)
+	r := newResult("s", 10, refused.trader)
 
-	require.NoError(t, err)
 	assert.Equal(t, 3, r.rejected)
 	assert.Equal(t, 1, r.submitted)
 	assert.Zero(t, r.filled)
 	assert.Zero(t, r.pending)
 	assert.Zero(t, r.trades)
-}
-
-func TestResult_ReportsARealizedTotalThatOverflows(t *testing.T) {
-	br := newBroker("sim")
-	act := br.addAccount("a", usd(10000))
-	act.trades = []trade{{pnl: money(math.MaxInt64)}, {pnl: 1}}
-
-	_, err := newResult("s", 0, &trader{broker: br, account: act})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "realized P/L")
 }
 
 type failingWriter struct{}

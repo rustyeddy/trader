@@ -136,12 +136,12 @@ records the result. See =order-tests.org= for the scenarios.
   and the margin limit, rounded to the unit step and capped at the maximum.
   A margin shortfall shrinks the trade; the order is rejected only when the
   result is below the instrument's minimum.
-- [ ] Positions in =account.positions=, created and updated when a fill comes
+- [X] Positions in =account.positions=, created and updated when a fill comes
   back (netting: one position per instrument).
-- [ ] =close= resolves to the real position size (units 0 means "whole
-  position" today); add/reduce sizing once their size type is defined.
-- [ ] Margin available accounts for margin already used; equity includes
-  unrealized P/L (needs mark prices).
+- [X] =close= resolves to the real position size at the fill.
+- [ ] add/reduce sizing once their size type is defined.
+- [X] Margin available accounts for margin already used; equity includes
+  unrealized P/L at the latest mark.
 - [ ] Quote-to-account currency conversion (account currency is assumed to be
   the quote currency today).
 ** TODO Broker and execution
@@ -150,7 +150,7 @@ records the result. See =order-tests.org= for the scenarios.
   bid/ask spread, slippage, commission, execution events and reconciliation.
 - Maintain next-bar-open causal execution in backtests.
 - [X] =broker.submit= assigns the order id, marks it submitted and logs it.
-- [ ] Simulated fills (next-bar-open): the broker fills or rejects the
+- [X] Simulated fills (next-bar-open): the broker fills or rejects the
   submitted order and the trader records the result as an open position or a
   closed trade (the order moves to filled or rejected).
 - [X] Order history is stamped with simulated time: =order.timestamp= is the bar being processed (set by the trader; the broker will set it on fills). A live clock can set it the same way.

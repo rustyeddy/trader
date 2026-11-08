@@ -21,7 +21,7 @@ type scriptStrategy struct {
 
 func (s *scriptStrategy) name() string { return "script" }
 
-func (s *scriptStrategy) init(map[string]any) error { return nil }
+func (s *scriptStrategy) init() error { return nil }
 
 func (s *scriptStrategy) onBar(_ context.Context, b bar) *order {
 	i := len(s.seen)

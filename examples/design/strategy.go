@@ -7,12 +7,12 @@ import (
 
 type strategy interface {
 	name() string
-	init(cfg map[string]any) error
+	init() error
 	onBar(ctx context.Context, b bar) *order
 }
 
-// emax is concrete implementation of emax
-// will need to become an interface certainly
+// emax is the EMA crossover strategy: long while the short EMA is above the long
+// one, short while it is below.
 type emax struct {
 	id    string
 	short int
@@ -34,7 +34,7 @@ func (e *emax) name() string {
 	return e.id
 }
 
-func (e *emax) init(cfg map[string]any) error {
+func (e *emax) init() error {
 	if e.short <= 0 || e.long <= 0 {
 		return fmt.Errorf("emax: windows must be > 0 (short=%d long=%d)", e.short, e.long)
 	}
@@ -65,8 +65,8 @@ func (e *emax) init(cfg map[string]any) error {
 // oversight; see rule 11 in emax-validation.org and TODO 1 in todo.org.
 func (e *emax) onBar(ctx context.Context, b bar) *order {
 	// Feed both EMAs every bar so the long one warms up on the same data.
-	s, sok := e.emaShort.onBar(ctx, b)
-	l, lok := e.emaLong.onBar(ctx, b)
+	s, sok := e.emaShort.onBar(b)
+	l, lok := e.emaLong.onBar(b)
 	if !sok || !lok {
 		return nil
 	}

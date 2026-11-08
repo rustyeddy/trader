@@ -96,9 +96,7 @@ func TestBroker_UnfilledLimitReservesItsMargin(t *testing.T) {
 	br, _ := newFillBroker()
 	submitLimit(t, br, long, 109000)
 
-	reserved, err := br.reservedMargin("a")
-
-	require.NoError(t, err)
+	reserved := br.reservedMargin("a")
 	assert.Positive(t, reserved, "a waiting limit holds margin like any submitted open")
 }
 
@@ -194,7 +192,7 @@ func TestBroker_Submit_OpenIsAllowedOnceThePendingOneIsGone(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
 	first := submitLimit(t, br, long, 109000)
-	first.record(stateCancelled, "test")
+	first.record(stateCancelled, first.Time, "test")
 	br.complete(first)
 
 	require.NoError(t, br.submit(context.Background(), brokerOpen("a")))

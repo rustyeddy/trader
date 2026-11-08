@@ -26,7 +26,7 @@ func newEMAXRun(t *testing.T, balance money) emaxRun {
 	t.Helper()
 	captureLogs(t)
 	e := &emax{id: "emax", short: 2, long: 4, stopPct: rateOnePercent}
-	require.NoError(t, e.init(nil))
+	require.NoError(t, e.init())
 	br := newBroker("sim")
 	tr := &trader{broker: br, account: br.addAccount("sim123", balance), strategy: e}
 	return emaxRun{trader: tr, broker: br, account: tr.account, emax: e}
@@ -102,16 +102,9 @@ type emaxState struct {
 
 func snapshotState(t *testing.T, r emaxRun) emaxState {
 	t.Helper()
-	unrealized, err := r.account.unrealizedPnL()
-	require.NoError(t, err)
-	equity, err := r.account.equity()
-	require.NoError(t, err)
-	used, err := r.account.usedMargin()
-	require.NoError(t, err)
-	reserved, err := r.broker.reservedMargin(r.account.id)
-	require.NoError(t, err)
 	f := emaxState{
-		balance: r.account.balance, unrealized: unrealized, equity: equity, used: used, reserved: reserved,
+		balance: r.account.balance, unrealized: r.account.unrealizedPnL(), equity: r.account.equity(),
+		used: r.account.usedMargin(), reserved: r.broker.reservedMargin(r.account.id),
 		signal: r.emax.pos, pending: r.emax.pending,
 	}
 	if p := r.account.positions["EURUSD"]; p != nil {

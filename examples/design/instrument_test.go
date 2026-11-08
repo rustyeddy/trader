@@ -11,8 +11,6 @@ func TestGetInstrument(t *testing.T) {
 	inst, ok := getInstrument("EURUSD")
 	require.True(t, ok)
 	assert.Equal(t, "EURUSD", inst.symbol)
-	assert.Equal(t, "EUR", inst.base)
-	assert.Equal(t, "USD", inst.quote)
 	assert.Positive(t, inst.minUnits)
 	assert.Positive(t, inst.unitStep)
 

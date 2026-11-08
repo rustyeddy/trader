@@ -49,9 +49,12 @@ type result struct {
 	open                                  []position
 }
 
-func newResult(scenario string, bars int, tr *trader) (*result, error) {
+func newResult(scenario string, bars int, tr *trader) *result {
 	act := tr.account
-	r := &result{scenario: scenario, bars: bars, balance: act.balance, rejected: len(tr.rejected)}
+	r := &result{
+		scenario: scenario, bars: bars, rejected: len(tr.rejected),
+		balance: act.balance, unrealized: act.unrealizedPnL(), equity: act.equity(),
+	}
 
 	for _, o := range tr.broker.completed {
 		r.submitted++
@@ -69,7 +72,6 @@ func newResult(scenario string, bars int, tr *trader) (*result, error) {
 		r.pending += len(waiting)
 	}
 
-	var err error
 	for _, t := range act.trades {
 		r.trades++
 		switch {
@@ -80,20 +82,12 @@ func newResult(scenario string, bars int, tr *trader) (*result, error) {
 		default:
 			r.breakEven++
 		}
-		if r.realized, err = checkedAdd(r.realized, t.pnl); err != nil {
-			return nil, fmt.Errorf("realized P/L: %w", err)
-		}
-	}
-	if r.unrealized, err = act.unrealizedPnL(); err != nil {
-		return nil, err
-	}
-	if r.equity, err = act.equity(); err != nil {
-		return nil, err
+		r.realized += t.pnl
 	}
 	for _, instrument := range act.positionSymbols() {
 		r.open = append(r.open, *act.positions[instrument])
 	}
-	return r, nil
+	return r
 }
 
 // write prints the summary. It holds nothing that varies between runs.

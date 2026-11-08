@@ -36,7 +36,7 @@ func actionOf(o *order) action {
 func newTestEmax(t *testing.T, short, long int) *emax {
 	t.Helper()
 	e := &emax{short: short, long: long, stopPct: rateOnePercent}
-	require.NoError(t, e.init(nil))
+	require.NoError(t, e.init())
 	return e
 }
 
@@ -59,7 +59,7 @@ func TestEmax_LongWarmsOnSameBars(t *testing.T) {
 	}
 	// Regression: the long EMA must be seeded from bars 1-4 (value 2.5). If it
 	// were only fed after the short EMA warmed, the next value would differ.
-	v, ok := e.emaLong.onBar(ctx, bar{ohlc: ohlc{c: price(4 * priceScale)}})
+	v, ok := e.emaLong.onBar(bar{ohlc: ohlc{c: price(4 * priceScale)}})
 	require.True(t, ok)
 	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
@@ -176,7 +176,7 @@ func TestEmax_Init(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := &emax{short: tt.short, long: tt.long, stopPct: tt.stopPct}
-			err := e.init(nil)
+			err := e.init()
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, e.emaShort)
@@ -301,7 +301,7 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := &emax{short: 2, long: 4, stopPct: tt.stopPct}
-			require.NoError(t, e.init(nil))
+			require.NoError(t, e.init())
 
 			var got *order
 			for _, b := range closes(tt.series...) {
@@ -323,7 +323,7 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 
 func TestEmax_StopDistanceRoundsDownAndIsAtLeastOnePoint(t *testing.T) {
 	e := &emax{short: 2, long: 4, stopPct: rateOnePercent}
-	require.NoError(t, e.init(nil))
+	require.NoError(t, e.init())
 
 	// 1% of 12_345_678 is 123456.78, which rounds down to 123456.
 	assert.Equal(t, price(12_345_678-123_456), e.stopFor(12_345_678, long))

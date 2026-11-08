@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"math/big"
 	"sort"
 )
@@ -40,14 +39,7 @@ type closeoutPolicy func(*account) (*position, error)
 // warn it is in warning. An account that uses no margin is healthy.
 func marginLevelPolicy(warn, closeout rate) marginPolicy {
 	return func(a *account) (marginStatus, error) {
-		eq, err := a.equity()
-		if err != nil {
-			return marginHealthy, err
-		}
-		used, err := a.usedMargin()
-		if err != nil {
-			return marginHealthy, err
-		}
+		eq, used := a.equity(), a.usedMargin()
 		switch {
 		case used <= 0:
 			return marginHealthy, nil
@@ -80,10 +72,7 @@ func closeWorstLoser(a *account) (*position, error) {
 	var worstPnL money
 	for _, sym := range a.positionSymbols() {
 		pos := a.positions[sym]
-		pnl, err := pos.unrealizedPnL()
-		if err != nil {
-			return nil, fmt.Errorf("closeout %s: %w", sym, err)
-		}
+		pnl := pos.unrealizedPnL()
 		if worst == nil || pnl < worstPnL {
 			worst, worstPnL = pos, pnl
 		}
@@ -98,10 +87,7 @@ func closeLargestMargin(a *account) (*position, error) {
 	var largestMargin money
 	for _, sym := range a.positionSymbols() {
 		pos := a.positions[sym]
-		m, err := marginFor(pos.instrument, pos.units, pos.markPrice)
-		if err != nil {
-			return nil, fmt.Errorf("closeout %s: %w", sym, err)
-		}
+		m := marginFor(pos.instrument, pos.units, pos.markPrice)
 		if largest == nil || m > largestMargin {
 			largest, largestMargin = pos, m
 		}

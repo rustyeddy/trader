@@ -60,14 +60,12 @@ func TestBroker_OnBar_ExpiredOrderReleasesItsMarginAndThePendingSlot(t *testing.
 	captureLogs(t)
 	br, _ := newFillBroker()
 	limitUntil(t, br, 2)
-	reserved, err := br.reservedMargin("a")
-	require.NoError(t, err)
+	reserved := br.reservedMargin("a")
 	require.Positive(t, reserved)
 
 	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110000, 110500, 109500, 110200)))
 
-	reserved, err = br.reservedMargin("a")
-	require.NoError(t, err)
+	reserved = br.reservedMargin("a")
 	assert.Zero(t, reserved)
 	again := openOrderAt("EURUSD", long, 109000)
 	again.orderType, again.accountID, again.Time = limitOrder, "a", day(2)
@@ -98,7 +96,7 @@ func TestBroker_OnBar_ExpiryIsOnlyCheckedForTheBarsInstrument(t *testing.T) {
 
 func TestOrder_Validate_Expiry(t *testing.T) {
 	base := func() order {
-		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}
+		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}
 	}
 	ok := base()
 	ok.expires = day(1)
@@ -126,8 +124,7 @@ func TestBroker_Cancel_WithdrawsAWaitingOrder(t *testing.T) {
 	assert.Equal(t, day(2), last.time)
 	assert.Empty(t, br.orders["EURUSD"])
 	assert.Same(t, o, br.completed[0])
-	reserved, err := br.reservedMargin("a")
-	require.NoError(t, err)
+	reserved := br.reservedMargin("a")
 	assert.Zero(t, reserved, "its margin is released")
 }
 

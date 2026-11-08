@@ -157,7 +157,7 @@ func TestBroker_OnBar_ShortTakeProfit(t *testing.T) {
 	assert.Equal(t, price(108000), tp.fillPrice)
 }
 
-func TestAccount_Size_TakeProfitMustBeOnTheWinningSide(t *testing.T) {
+func TestOrder_Validate_TakeProfitMustBeOnTheWinningSide(t *testing.T) {
 	tests := []struct {
 		name string
 		d    direction
@@ -173,10 +173,9 @@ func TestAccount_Size_TakeProfitMustBeOnTheWinningSide(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			captureLogs(t)
 			o := openOrderAt("EURUSD", tt.d, eurusd1_10)
 			o.takeProfit = tt.tp
-			err := newAccount("a", usd(10000)).size(o, 0)
+			err := o.validate()
 			if tt.ok {
 				require.NoError(t, err)
 				return
@@ -189,7 +188,7 @@ func TestAccount_Size_TakeProfitMustBeOnTheWinningSide(t *testing.T) {
 
 func TestOrder_Validate_TakeProfit(t *testing.T) {
 	base := func() order {
-		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}
+		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}
 	}
 	ok := base()
 	ok.takeProfit = 112000
