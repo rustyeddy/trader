@@ -121,7 +121,7 @@ func Load(environ []string, overrides map[string]string) (Config, error) {
 	if environ == nil {
 		environ = os.Environ()
 	}
-	path, err := configFile(environ)
+	path, err := ConfigFile(environ)
 	if err != nil {
 		return Config{}, err
 	}
@@ -138,7 +138,7 @@ func Load(environ []string, overrides map[string]string) (Config, error) {
 		return cfg, err
 	}
 	if cfg.OANDAToken == "" && cfg.OANDATokenFile != "" {
-		token, err := readTokenFile(cfg.OANDATokenFile)
+		token, err := ReadTokenFile(cfg.OANDATokenFile)
 		if err != nil {
 			return cfg, fmt.Errorf("oanda_token_file: %w", err)
 		}
@@ -147,10 +147,10 @@ func Load(environ []string, overrides map[string]string) (Config, error) {
 	return cfg, nil
 }
 
-// configFile returns the config file to read, or "" for none: the file
+// ConfigFile returns the config file to read, or "" for none: the file
 // TRADER_CONFIG names (an error if it does not exist), else
-// DefaultConfigPath when it exists.
-func configFile(environ []string) (string, error) {
+// DefaultConfigPath when it exists. Composition roots share this selection rule.
+func ConfigFile(environ []string) (string, error) {
 	prefix := ConfigPathEnv + "="
 	for i := len(environ) - 1; i >= 0; i-- {
 		if v, ok := strings.CutPrefix(environ[i], prefix); ok && v != "" {
@@ -172,9 +172,9 @@ func configFile(environ []string) (string, error) {
 	return DefaultConfigPath, nil
 }
 
-// readTokenFile reads a secret from path, expanding a leading ~/ . Errors
+// ReadTokenFile reads a secret from path, expanding a leading ~/. Errors
 // name the path, never the contents.
-func readTokenFile(path string) (string, error) {
+func ReadTokenFile(path string) (string, error) {
 	if rest, ok := strings.CutPrefix(path, "~/"); ok {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -363,12 +363,3 @@ func newBundle(cfg Config, logger *slog.Logger, writeLock *marketruntime.WriteLo
 
 	return Bundle{Service: service, Manager: manager, Resolver: resolver, Provider: cfg.Provider, ArchiveRoot: cfg.ArchiveRoot, writeLock: writeLock}, nil
 }
-
-// ConfigFile returns the config file the TRADER_CONFIG variable or
-// DefaultConfigPath selects, or "" for none, so another composition root
-// reads the same file by the same rule.
-func ConfigFile(environ []string) (string, error) { return configFile(environ) }
-
-// ReadTokenFile reads a secret from a token file, expanding a leading ~/.
-// Errors name the path, never the contents.
-func ReadTokenFile(path string) (string, error) { return readTokenFile(path) }

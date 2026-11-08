@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -94,9 +93,8 @@ func TestResult_ZeroPnLIsABreakEven(t *testing.T) {
 	act := br.addAccount("a", usd(10000))
 	act.trades = []trade{{pnl: 3}, {pnl: -1}, {pnl: 0}, {pnl: 0}} // the balance is left alone
 
-	r, err := newResult("s", 0, &trader{broker: br, account: act})
+	r := newResult("s", 0, &trader{broker: br, account: act})
 
-	require.NoError(t, err)
 	assert.Equal(t, 4, r.trades)
 	assert.Equal(t, 1, r.wins)
 	assert.Equal(t, 1, r.losses)
@@ -110,9 +108,8 @@ func TestResult_ZeroPnLIsABreakEven(t *testing.T) {
 func TestResult_CountsRefusalsWithoutDuplication(t *testing.T) {
 	refused := runEMAXWithBalance(t, "a-reversal-exit", 1)
 
-	r, err := newResult("s", 10, refused.trader)
+	r := newResult("s", 10, refused.trader)
 
-	require.NoError(t, err)
 	assert.Equal(t, 3, r.rejected)
 	assert.Equal(t, 1, r.submitted)
 	assert.Zero(t, r.filled)
@@ -120,15 +117,30 @@ func TestResult_CountsRefusalsWithoutDuplication(t *testing.T) {
 	assert.Zero(t, r.trades)
 }
 
-func TestResult_ReportsARealizedTotalThatOverflows(t *testing.T) {
+func TestResult_CountsOnlyItsAccountOrders(t *testing.T) {
 	br := newBroker("sim")
-	act := br.addAccount("a", usd(10000))
-	act.trades = []trade{{pnl: money(math.MaxInt64)}, {pnl: 1}}
+	a := br.addAccount("a", usd(10000))
+	br.addAccount("b", usd(20000))
+	for _, id := range []string{"a", "b"} {
+		br.completed = append(br.completed,
+			&order{accountID: id, state: stateFilled},
+			&order{accountID: id, state: stateRejected},
+			&order{accountID: id, state: stateCancelled})
+		for _, symbol := range []string{"EURUSD", "GBPUSD"} {
+			br.orders[symbol] = append(br.orders[symbol],
+				&order{accountID: id, instrument: symbol, state: stateSubmitted})
+		}
+	}
+	tr := &trader{broker: br, account: a, rejected: []*order{{accountID: "a", state: stateRejected}}}
 
-	_, err := newResult("s", 0, &trader{broker: br, account: act})
+	r := newResult("a", 0, tr)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "realized P/L")
+	assert.Equal(t, 5, r.submitted, "three completed and two pending for account a")
+	assert.Equal(t, 1, r.filled)
+	assert.Equal(t, 2, r.rejected, "one before submission and one at the broker")
+	assert.Equal(t, 1, r.cancelled)
+	assert.Equal(t, 2, r.pending)
+	assert.Equal(t, usd(10000), r.balance)
 }
 
 type failingWriter struct{}

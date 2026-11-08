@@ -86,8 +86,8 @@ func TestOrder_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		// valid
-		{"open long", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}, false},
-		{"open short", order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder, stopLoss: 111100}, false},
+		{"open long", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, false},
+		{"open short", order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder, price: 110000, stopLoss: 111100}, false},
 		{"close without direction", order{instrument: "EUR/USD", action: close, orderType: marketOrder}, false},
 
 		// limit orders
@@ -103,7 +103,7 @@ func TestOrder_Validate(t *testing.T) {
 		{"missing action", order{instrument: "EUR/USD", orderType: marketOrder}, true},
 
 		// missing instrument on every action
-		{"open missing instrument", order{direction: long, action: open, orderType: marketOrder, stopLoss: 108900}, true},
+		{"open missing instrument", order{direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, true},
 		{"add missing instrument", order{action: add, orderType: marketOrder}, true},
 		{"reduce missing instrument", order{action: reduce, orderType: marketOrder}, true},
 		{"close missing instrument", order{action: close, orderType: marketOrder}, true},
@@ -116,8 +116,8 @@ func TestOrder_Validate(t *testing.T) {
 		{"unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: close, orderType: marketOrder}, true},
 
 		// open needs a real direction
-		{"open no direction", order{instrument: "EUR/USD", action: open, orderType: marketOrder, stopLoss: 108900}, true},
-		{"open unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: open, orderType: marketOrder, stopLoss: 108900}, true},
+		{"open no direction", order{instrument: "EUR/USD", action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, true},
+		{"open unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, true},
 
 		// the strategy must set the stop on every open
 		{"open long without a stop", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}, true},
@@ -144,7 +144,7 @@ func TestOrder_Validate(t *testing.T) {
 }
 
 func TestOrder_Validate_NeedsTheBarTime(t *testing.T) {
-	err := (&order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: 108900}).validate()
+	err := (&order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}).validate()
 
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "time")
@@ -165,9 +165,9 @@ func TestOrder_RecordSetsStateAppendsTimestampedHistoryAndLogs(t *testing.T) {
 	t0 := time.Date(2010, 1, 4, 9, 30, 0, 0, time.UTC)
 	o := &order{id: "sim-1", instrument: "EUR/USD", direction: long, action: open, Time: t0}
 
-	o.record(stateRequested, "")
+	o.record(stateRequested, o.Time, "")
 	o.Time = t0.Add(time.Second)
-	o.record(stateRejected, "insufficient margin")
+	o.record(stateRejected, o.Time, "insufficient margin")
 
 	assert.Equal(t, stateRejected, o.state)
 	assert.Equal(t, []orderEvent{
@@ -192,18 +192,19 @@ func TestOrder_RecordSetsStateAppendsTimestampedHistoryAndLogs(t *testing.T) {
 	assert.Contains(t, lines[1], `reason="insufficient margin"`)
 }
 
-func TestOrder_RecordStampsHistoryWithTheOrderTimestamp(t *testing.T) {
+func TestOrder_RecordStampsHistoryAndMovesTheOrderTime(t *testing.T) {
 	captureLogs(t)
 	first := time.Date(2030, 6, 1, 12, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
 
-	o := &order{Time: first}
-	o.record(stateSized, "")
-	o.Time = second
-	o.record(stateSubmitted, "")
+	o := &order{}
+	o.record(stateSized, first, "")
+	assert.Equal(t, first, o.Time)
+	o.record(stateSubmitted, second, "")
 
 	assert.Equal(t, first, o.history[0].time)
 	assert.Equal(t, second, o.history[1].time, "a later step carries the later bar's time")
+	assert.Equal(t, second, o.Time, "the order is on its latest step")
 }
 
 func TestOrderReason_String(t *testing.T) {
@@ -220,9 +221,71 @@ func TestOrder_ReasonDefaultsToTheStrategy(t *testing.T) {
 func TestOrder_RecordLogsTheCauseOnlyWhenItIsNotTheStrategy(t *testing.T) {
 	logs := captureLogs(t)
 
-	(&order{id: "1", action: open}).record(stateRequested, "")
+	(&order{id: "1", action: open}).record(stateRequested, time.Time{}, "")
 	assert.NotContains(t, logs.String(), "cause=")
 
-	(&order{id: "2", action: close, reason: reasonMarginCloseout}).record(stateRequested, "")
+	(&order{id: "2", action: close, reason: reasonMarginCloseout}).record(stateRequested, time.Time{}, "")
 	assert.Contains(t, logs.String(), `cause="margin closeout"`)
+}
+
+func TestOrder_Validate_OpenNeedsAStopFromTheStrategy(t *testing.T) {
+	for _, d := range []direction{long, short} {
+		o := openOrderAt("EURUSD", d, eurusd1_10)
+		o.stopLoss = 0 // the strategy did not set one
+
+		err := o.validate()
+
+		require.ErrorIs(t, err, errInvalidOrder, d.String())
+		assert.Contains(t, err.Error(), "requires a stop loss")
+		assert.False(t, isRejection(err), "a missing stop is a strategy bug, not a trading outcome")
+		assert.Zero(t, o.stopLoss, "the account never invents a stop")
+	}
+}
+
+func TestOrder_Validate_StopMustBeOnTheLosingSide(t *testing.T) {
+	for _, tt := range []struct {
+		d    direction
+		stop price
+	}{
+		{long, 111000},  // above a long entry
+		{long, 110000},  // at the entry
+		{short, 109000}, // below a short entry
+		{short, 110000},
+	} {
+		o := openOrderAt("EURUSD", tt.d, eurusd1_10)
+		o.stopLoss = tt.stop
+
+		err := o.validate()
+
+		require.ErrorIs(t, err, errInvalidOrder, "%s stop %d", tt.d, tt.stop)
+		assert.False(t, isRejection(err), "a bad stop is a strategy bug, not a trading outcome")
+	}
+}
+
+func TestOrder_Validate_OpenNeedsAReferencePrice(t *testing.T) {
+	o := openOrderAt("EURUSD", long, 0)
+	o.stopLoss = 1
+
+	err := o.validate()
+
+	require.ErrorIs(t, err, errInvalidOrder)
+	assert.Contains(t, err.Error(), "requires a reference price")
+}
+
+func TestOrder_Validate_RefusesPricesAboveTheBound(t *testing.T) {
+	over := func(set func(*order)) *order {
+		o := openOrderAt("EURUSD", long, eurusd1_10)
+		set(o)
+		return o
+	}
+	for name, o := range map[string]*order{
+		"price":       over(func(o *order) { o.price = maxPrice + 1 }),
+		"stop loss":   over(func(o *order) { o.stopLoss = maxPrice + 1 }),
+		"take profit": over(func(o *order) { o.takeProfit = maxPrice + 1 }),
+	} {
+		assert.ErrorIs(t, o.validate(), errInvalidOrder, name)
+	}
+
+	atTheBound := openOrderAt("EURUSD", long, maxPrice)
+	assert.NoError(t, atTheBound.validate(), "the bound itself is allowed")
 }

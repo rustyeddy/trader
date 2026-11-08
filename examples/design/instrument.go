@@ -3,9 +3,6 @@ package main
 var instruments = map[string]*instrument{
 	"EURUSD": {
 		symbol:     "EURUSD",
-		base:       "EUR",
-		quote:      "USD",
-		pipSize:    10,             // appropriate to our price representation
 		marginRate: rateTwoPercent, // 50:1 leverage
 		minUnits:   1,
 		unitStep:   1,
@@ -26,19 +23,10 @@ const (
 )
 
 type instrument struct {
-	symbol string
-	base   string
-	quote  string
-
-	pipSize    price
+	symbol     string
 	marginRate rate
 
 	minUnits int64 // smallest tradable size
 	maxUnits int64 // largest order size; 0 means no limit
 	unitStep int64 // sizes are whole multiples of this
-}
-
-func getInstrument(symbol string) (*instrument, bool) {
-	inst, ok := instruments[symbol]
-	return inst, ok
 }

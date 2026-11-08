@@ -46,11 +46,6 @@ func (br *broker) addAccount(id string, balance money) *account {
 	return act
 }
 
-func (br *broker) getAccount(id string) (*account, bool) {
-	a, ok := br.accounts[id]
-	return a, ok
-}
-
 // submit has the order's account size it, assigns it an id and queues it to
 // await execution. The order is filled (or rejected) on a later bar by onBar;
 // submit itself never fills. An expected rejection is recorded on the order
@@ -68,19 +63,15 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 		// A margin closeout is not undone by a new open on the same observation;
 		// later re-entry rules are a future policy.
 		if !o.Time.After(act.closedOutAt) {
-			return reject(o, rejected("%w: account %s at %s",
-				errCloseoutGuard, o.accountID, act.closedOutAt.Format(time.DateOnly)))
+			return reject(o, o.Time, "%w: account %s at %s",
+				errCloseoutGuard, o.accountID, act.closedOutAt.Format(time.DateOnly))
 		}
 		if br.hasPendingOpen(o.accountID, o.instrument) {
-			return reject(o, rejected("%w: account %s on %s", errOpenPending, o.accountID, o.instrument))
+			return reject(o, o.Time, "%w: account %s on %s", errOpenPending, o.accountID, o.instrument)
 		}
 	}
 
-	reserved, err := br.reservedMargin(o.accountID)
-	if err != nil {
-		return fmt.Errorf("submit to broker %s: %w", br.id, err)
-	}
-	if err := act.size(o, reserved); err != nil {
+	if err := act.size(o, br.reservedMargin(o.accountID)); err != nil {
 		return err
 	}
 
@@ -102,7 +93,7 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 
 // enqueue marks the order submitted and adds it to the instrument's queue.
 func (br *broker) enqueue(o *order) {
-	o.record(stateSubmitted, "")
+	o.record(stateSubmitted, o.Time, "")
 	br.orders[o.instrument] = append(br.orders[o.instrument], o)
 }
 
@@ -130,9 +121,8 @@ func (br *broker) cancelWhere(at time.Time, reason string, match func(*order) bo
 	n := 0
 	for _, instrument := range slices.Sorted(maps.Keys(br.orders)) {
 		for _, o := range slices.Clone(br.orders[instrument]) {
-			if o.state == stateSubmitted && match(o) {
-				o.Time = at // the cancellation happens now, not when the order was made
-				o.record(stateCancelled, reason)
+			if match(o) {
+				o.record(stateCancelled, at, reason)
 				br.complete(o)
 				n++
 			}
@@ -145,7 +135,7 @@ func (br *broker) cancelWhere(at time.Time, reason string, match func(*order) bo
 // instrument.
 func (br *broker) hasPendingOpen(accountID, instrument string) bool {
 	return slices.ContainsFunc(br.orders[instrument], func(o *order) bool {
-		return o.accountID == accountID && o.state == stateSubmitted && o.action == open
+		return o.accountID == accountID && o.action == open
 	})
 }
 
@@ -157,23 +147,16 @@ func (br *broker) nextID() string {
 
 // reservedMargin is the margin held by the account's submitted opens that have
 // not filled yet, at each order's reference price. Closes reserve nothing.
-func (br *broker) reservedMargin(accountID string) (money, error) {
+func (br *broker) reservedMargin(accountID string) money {
 	var total money
 	for _, orders := range br.orders {
 		for _, o := range orders {
-			if o.accountID != accountID || o.state != stateSubmitted || o.action != open {
-				continue
-			}
-			m, err := marginFor(o.instrument, o.units, o.price)
-			if err != nil {
-				return 0, err
-			}
-			if total, err = checkedAdd(total, m); err != nil {
-				return 0, err
+			if o.accountID == accountID && o.action == open {
+				total += marginFor(o.instrument, o.units, o.price)
 			}
 		}
 	}
-	return total, nil
+	return total
 }
 
 // phases is how many passes onBar makes over an instrument's queue; see phase.
@@ -322,7 +305,7 @@ func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) *
 		price:      p,
 		Time:       o.Time,
 	}
-	x.record(stateRequested, "")
+	x.record(stateRequested, x.Time, "")
 	br.enqueue(x)
 	return x
 }
@@ -335,7 +318,7 @@ func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) *
 // takes no view on it. Each move is an event in the order's history.
 func (br *broker) trailStops(b bar) {
 	for _, o := range br.orders[b.instrument] {
-		if o.state != stateSubmitted || o.reason != reasonStopLoss || o.trail <= 0 {
+		if o.reason != reasonStopLoss || o.trail <= 0 {
 			continue
 		}
 		var moved price
@@ -345,8 +328,8 @@ func (br *broker) trailStops(b bar) {
 			moved = min(o.price, b.l+o.trail)
 		}
 		if moved != o.price {
-			o.price, o.Time = moved, b.Time
-			o.record(stateSubmitted, fmt.Sprintf("trailed to %d", moved))
+			o.price = moved
+			o.record(stateSubmitted, b.Time, fmt.Sprintf("trailed to %d", moved))
 		}
 	}
 }
@@ -365,9 +348,9 @@ func (br *broker) closePosition(b bar, act *account, pos *position, why orderRea
 		price:      p,
 		Time:       b.Time,
 	}
-	o.record(stateRequested, "")
-	o.record(stateSubmitted, "")
-	err := br.fill(o, p)
+	o.record(stateRequested, b.Time, "")
+	o.record(stateSubmitted, b.Time, "")
+	err := br.fill(o, p, b.Time)
 	if err == nil || isRejection(err) {
 		br.complete(o) // a rejected closeout is terminal too, and kept
 	}
@@ -413,8 +396,7 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 	if !ok {
 		return nil
 	}
-	o.Time = b.Time // the order is now on the fill bar
-	if err := br.fill(o, p); err != nil && !isRejection(err) {
+	if err := br.fill(o, p, b.Time); err != nil && !isRejection(err) {
 		return err
 	}
 	br.complete(o) // filled, or rejected by the account
@@ -457,25 +439,24 @@ func (o *order) execution(b bar) (price, bool) {
 	return 0, false
 }
 
-// fill reports the execution at p to the order's account, which validates it
+// fill reports the execution at p, at time at, to the order's account, which validates it
 // and updates its balance and positions together. A fill that cannot apply (a
 // close with no position, too little margin now) is an expected rejection,
 // recorded on the order and returned; anything else is a failure. A filled
 // open places its exits.
-func (br *broker) fill(o *order, p price) error {
+func (br *broker) fill(o *order, p price, at time.Time) error {
 	act, ok := br.accounts[o.accountID]
 	if !ok {
 		return fmt.Errorf("fill order %s: %w: %s", o.id, errUnknownAccount, o.accountID)
 	}
-	o.fillPrice = p
-	if err := act.applyFill(o); err != nil {
+	if err := act.applyFill(o, p, at); err != nil {
 		if isRejection(err) {
-			o.fillPrice = 0 // a rejected order never filled
-			return reject(o, err)
+			return reject(o, at, "%w", err)
 		}
 		return fmt.Errorf("fill order %s: %w", o.id, err)
 	}
-	o.record(stateFilled, "")
+	o.fillPrice = p
+	o.record(stateFilled, at, "")
 	if o.action == open {
 		br.placeExits(o)
 	}

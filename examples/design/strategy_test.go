@@ -36,7 +36,7 @@ func actionOf(o *order) action {
 func newTestEmax(t *testing.T, short, long int) *emax {
 	t.Helper()
 	e := &emax{short: short, long: long, stopPct: rateOnePercent}
-	require.NoError(t, e.init(nil))
+	require.NoError(t, e.init())
 	return e
 }
 
@@ -59,7 +59,7 @@ func TestEmax_LongWarmsOnSameBars(t *testing.T) {
 	}
 	// Regression: the long EMA must be seeded from bars 1-4 (value 2.5). If it
 	// were only fed after the short EMA warmed, the next value would differ.
-	v, ok := e.emaLong.onBar(ctx, bar{ohlc: ohlc{c: price(4 * priceScale)}})
+	v, ok := e.emaLong.onBar(bar{ohlc: ohlc{c: price(4 * priceScale)}})
 	require.True(t, ok)
 	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
@@ -176,7 +176,7 @@ func TestEmax_Init(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := &emax{short: tt.short, long: tt.long, stopPct: tt.stopPct}
-			err := e.init(nil)
+			err := e.init()
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, e.emaShort)
@@ -301,7 +301,7 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := &emax{short: 2, long: 4, stopPct: tt.stopPct}
-			require.NoError(t, e.init(nil))
+			require.NoError(t, e.init())
 
 			var got *order
 			for _, b := range closes(tt.series...) {
@@ -323,7 +323,7 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 
 func TestEmax_StopDistanceRoundsDownAndIsAtLeastOnePoint(t *testing.T) {
 	e := &emax{short: 2, long: 4, stopPct: rateOnePercent}
-	require.NoError(t, e.init(nil))
+	require.NoError(t, e.init())
 
 	// 1% of 12_345_678 is 123456.78, which rounds down to 123456.
 	assert.Equal(t, price(12_345_678-123_456), e.stopFor(12_345_678, long))
@@ -331,6 +331,33 @@ func TestEmax_StopDistanceRoundsDownAndIsAtLeastOnePoint(t *testing.T) {
 	// 1% of 10 points is 0.1: never a zero-distance stop.
 	assert.Equal(t, price(9), e.stopFor(10, long))
 	assert.Equal(t, price(11), e.stopFor(10, short))
+}
+
+func TestEmax_OpenRequiresAStopWithinPriceBounds(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		entry price
+		dir   direction
+		stop  price // zero means skip the entry
+	}{
+		{"long stop below minimum", 1, long, 0},
+		{"long stop at minimum", 2, long, 1},
+		{"long at maximum price", maxPrice, long, 990_000_000},
+		{"short stop at maximum", 990_099_010, short, maxPrice},
+		{"short stop above maximum", 990_099_011, short, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEmax(t, 2, 4)
+			o := e.openOrder(bar{instrument: "EURUSD", Time: testStart, ohlc: ohlc{c: tt.entry}}, tt.dir)
+			if tt.stop == 0 {
+				assert.Nil(t, o, "skip rather than clamp the configured stop")
+				return
+			}
+			require.NotNil(t, o)
+			require.NoError(t, o.validate())
+			assert.Equal(t, tt.stop, o.stopLoss)
+		})
+	}
 }
 
 func TestEmax_ClosesCarryNoStop(t *testing.T) {

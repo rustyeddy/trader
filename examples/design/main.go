@@ -59,14 +59,13 @@ func runScenario(scenario string) (*result, error) {
 		"interval", prices.interval,
 		"bars", len(prices.data))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 	if err := (&backtest{}).run(ctx, prices.bars(ctx), tr); err != nil {
 		return nil, err
 	}
 
 	slog.Info("backtest complete", "scenario", scenario, "strategy", tr.strategy.name())
-	return newResult(scenario, len(prices.data), tr)
+	return newResult(scenario, len(prices.data), tr), nil
 }
 
 // scenarioPath is where a scenario's bars are, relative to examples/design.
@@ -75,9 +74,15 @@ func scenarioPath(scenario string) string {
 		"data", "synthetic", "canonical", "EURUSD", "2010", "01", "EURUSD-2010-01-D1.csv")
 }
 
+// getTrader builds the configuration the scenarios were worked out for.
 func getTrader() (*trader, error) {
-	strat, err := getStrategy()
-	if err != nil {
+	strat := &emax{
+		id:      "emax",
+		short:   2,
+		long:    4,
+		stopPct: rateOnePercent,
+	}
+	if err := strat.init(); err != nil {
 		return nil, err
 	}
 	br := newBroker("sim")
@@ -86,15 +91,4 @@ func getTrader() (*trader, error) {
 		account:  br.addAccount("sim123", usd(10000)),
 		strategy: strat,
 	}, nil
-}
-
-// getStrategy is the configuration the scenarios were worked out for.
-func getStrategy() (strategy, error) {
-	emax := &emax{
-		id:      "emax",
-		short:   2,
-		long:    4,
-		stopPct: rateOnePercent,
-	}
-	return emax, emax.init(nil)
 }

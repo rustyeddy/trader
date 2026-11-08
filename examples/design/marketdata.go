@@ -35,14 +35,8 @@ type bar struct {
 	ohlc
 }
 
-type timeRange struct {
-	start time.Time
-	end   time.Time
-}
-
 type marketData struct {
 	instrument string
-	timerange  timeRange
 	interval   string
 
 	data []bar
@@ -146,7 +140,6 @@ func readBars(r io.Reader) (*marketData, error) {
 	if len(md.data) == 0 {
 		return nil, errors.New("bars: no rows")
 	}
-	md.timerange = timeRange{start: md.data[0].Time, end: md.data[len(md.data)-1].Time}
 	return md, nil
 }
 
@@ -190,6 +183,9 @@ func parsePrice(s string) (price, error) {
 	}
 	if n == 0 {
 		return 0, fmt.Errorf("price %q: must be positive", s)
+	}
+	if n > uint64(maxPrice) {
+		return 0, fmt.Errorf("price %q: above the maximum %d", s, maxPrice)
 	}
 	return price(n), nil
 }

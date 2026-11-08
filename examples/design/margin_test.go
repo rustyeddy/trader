@@ -71,19 +71,6 @@ func TestDefaultMarginPolicy_UnrealizedLossCountsTowardEquity(t *testing.T) {
 	assert.Equal(t, marginWarning, got)
 }
 
-func TestMarginLevelPolicy_ErrorsAreReturnedNotHidden(t *testing.T) {
-	a := newAccount("a", usd(1))
-	a.positions["EURUSD"] = &position{instrument: "EURUSD", units: math.MaxInt64, markPrice: math.MaxInt64, entryPrice: 1}
-
-	_, err := defaultMarginPolicy(a)
-	require.ErrorIs(t, err, errSizeOverflow)
-
-	a = newAccount("a", usd(1))
-	a.positions["XXXYYY"] = &position{instrument: "XXXYYY", units: 1, markPrice: 1}
-	_, err = defaultMarginPolicy(a)
-	require.ErrorIs(t, err, errUnknownInstrument)
-}
-
 func TestLevelBelow_IsExactAtTheBoundary(t *testing.T) {
 	assert.False(t, levelBelow(50, 100, rate(rateScale/2)), "50/100 is not below 50%")
 	assert.True(t, levelBelow(49, 100, rate(rateScale/2)))
@@ -138,18 +125,6 @@ func TestCloseLargestMargin(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "GBPUSD", got.instrument)
-}
-
-func TestCloseoutPolicies_ReturnErrors(t *testing.T) {
-	a := newAccount("a", usd(1))
-	a.positions["XXXYYY"] = &position{instrument: "XXXYYY", units: 1, markPrice: 1}
-	_, err := closeLargestMargin(a)
-	require.ErrorIs(t, err, errUnknownInstrument)
-
-	a = newAccount("a", usd(1))
-	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: math.MaxInt64, entryPrice: 1, markPrice: math.MaxInt64}
-	_, err = closeWorstLoser(a)
-	require.ErrorIs(t, err, errSizeOverflow)
 }
 
 func TestAccount_PositionSymbolsAreSorted(t *testing.T) {

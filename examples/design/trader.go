@@ -48,8 +48,8 @@ var errOpenPending = errors.New("an open is already pending")
 // this bar, so a strategy open on the same observation is refused.
 var errCloseoutGuard = errors.New("margin closeout on this bar")
 
-// errNoPosition is also an expected outcome: a close arrives for a position
-// that never opened (its open was rejected), so there is nothing to close.
+// errNoPosition is also an expected outcome: a close arrives when there is no
+// position, because its open was rejected or a stop has already closed it.
 var errNoPosition = errors.New("no position to close")
 
 // errPositionExists is a fatal error: netting allows one position per
@@ -110,7 +110,7 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 		return fmt.Errorf("strategy order at %s %s: %w", o.instrument, o.Time.Format(time.DateOnly), err)
 	}
 
-	o.record(stateRequested, "")
+	o.record(stateRequested, o.Time, "")
 	if err := tr.broker.submit(ctx, o); err != nil {
 		if !isRejection(err) {
 			return fmt.Errorf("handling %s %s at %s: %w",

@@ -108,7 +108,6 @@ func TestReadBars_ParsesExactPointsInOrder(t *testing.T) {
 	assert.Equal(t, "d1", md.interval)
 	first := time.Date(2010, time.January, 4, 0, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
-	assert.Equal(t, timeRange{start: first, end: second}, md.timerange)
 	assert.Equal(t, []bar{
 		{instrument: "EURUSD", Time: first, ohlc: ohlc{o: 110323, h: 110650, l: 109197, c: 110001, v: 1000}},
 		{instrument: "EURUSD", Time: second, ohlc: ohlc{o: 110015, h: 110130, l: 110005, c: 110100}},
@@ -141,6 +140,7 @@ func TestReadBars_RefusesMalformedInput(t *testing.T) {
 		"signed fraction":  barsHeader + "2010-01-04T00:00:00Z,1.+1000,1.10100,1.09900,1.10050,1000\n",
 		"zero price":       barsHeader + "2010-01-04T00:00:00Z,0.00000,1.10100,1.09900,1.10050,1000\n",
 		"overflow":         barsHeader + "2010-01-04T00:00:00Z,99999999999999999.00000,1.10100,1.09900,1.10050,1000\n",
+		"above the bound":  barsHeader + "2010-01-04T00:00:00Z,10000.00001,10000.00002,10000.00001,10000.00001,1000\n",
 		"high below open":  barsHeader + "2010-01-04T00:00:00Z,1.10200,1.10100,1.09900,1.10050,1000\n",
 		"high below close": barsHeader + "2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.10150,1000\n",
 		"low above open":   barsHeader + "2010-01-04T00:00:00Z,1.09800,1.10100,1.09900,1.10050,1000\n",
