@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -36,8 +35,7 @@ func newEMAXRun(t *testing.T, balance money) emaxRun {
 // scenarioPrices reads a scenario's reviewed CSV.
 func scenarioPrices(t *testing.T, scenario string) *marketData {
 	t.Helper()
-	prices, err := loadBars(filepath.Join("testdata", "emax", scenario,
-		"data", "synthetic", "canonical", "EURUSD", "2010", "01", "EURUSD-2010-01-D1.csv"))
+	prices, err := loadBars(scenarioPath(scenario))
 	require.NoError(t, err)
 	return prices
 }
@@ -1041,18 +1039,24 @@ func assertLifecycles(t *testing.T, r emaxRun) {
 		}
 	}
 
+	endsLast := func(o *order) {
+		last := o.history[len(o.history)-1]
+		assert.Equal(t, o.state, last.state, "%s ends on its last event", o.id)
+		assert.Equal(t, o.Time, last.time, "%s's time is when it ended", o.id)
+	}
+
 	for _, o := range r.trader.rejected {
 		ordered(o)
 		assert.Empty(t, o.id, "refused before the broker issued an id")
 		assert.Equal(t, stateRejected, o.state)
 		assert.Equal(t, 1, ends(o))
+		endsLast(o)
 	}
 	var previous time.Time
 	for _, o := range r.broker.completed {
 		ordered(o)
 		assert.Equal(t, 1, ends(o), "%s ends exactly once", o.id)
-		assert.Equal(t, o.state, o.history[len(o.history)-1].state, "%s ends on its last event", o.id)
-		assert.Equal(t, o.Time, o.history[len(o.history)-1].time, "%s's time is when it ended", o.id)
+		endsLast(o)
 		assert.False(t, o.Time.Before(previous), "%s completes in time order", o.id)
 		previous = o.Time
 	}
