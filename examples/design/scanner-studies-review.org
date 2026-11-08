@@ -1,0 +1,122 @@
+#+TITLE: Architecture Review — Post-EMAX, Pre-Study/Scanner
+#+SUBTITLE: Issue #571 · Reviewed against examples/design on main (2026-11-08)
+#+STARTUP: overview
+
+* Decision
+*Keep the validated EMAX architecture.* No general runner, handler hierarchy, or
+production migration is justified yet. Prove one broker-free ATR Study, a
+two-symbol observation stream and Scanner, then a two-symbol trading Strategy.
+Only then consolidate common delivery and decide the production boundaries.
+
+This is a design review, not an implementation change. The six EMAX fixture
+results remain the regression baseline.
+
+* Implemented boundaries — what the code actually does
+| Component | Current responsibility | Review |
+|-----------+------------------------+--------|
+| =marketData= | Read one instrument's CSV into =[]bar=; expose =iter.Seq2[bar,error]= | Good prototype; no multi-file/query/coverage API yet. |
+| =backtest.run= | Iterate the sequence, propagate data/context/handler errors | Small, appropriate historical wrapper. |
+| =trader.onBar= | Advance Broker for a bar, then call Strategy, then submit an optional Order | Correct single-symbol sequencing. |
+| =strategy.onBar= | EMAX consumes a bar, tracks EMA signal/pending side, returns =*order= or nil | Trading-only API. Signal state deliberately differs from Account exposure. |
+| =broker= | Queue and execute orders, manage protective exits, mark accounts and enforce margin | Simulation-specific execution; no Study dependency. |
+| =account= | Size Orders, hold Positions, margin/equity/trades, apply fills | Keep inside trading path. USD quote/account assumption remains. |
+| =result= | Read completed trades/Orders/Account and print a stable summary | Proven for EMAX; don't turn into a universal Study result model. |
+
+Actual single-symbol order within a processed bar:
+=Broker expiry/open/range/exits -> account marks/margin -> Strategy.onBar -> Trader.handleOrder -> Broker.submit=.
+An order generated from a bar cannot fill on that same bar. The Broker may
+place and trigger a protective exit in an entry bar, per documented OHLC
+assumptions. Results leave outstanding Orders/Positions at end-of-data.
+
+The north-star diagram in =architecture.org= is an illustrative request path;
+it omits the prior Broker step. Its sentence that the milestone ends at
+Broker.Submit and fills/reconciliation are deferred is *stale*: EMAX already
+validates fills, exits, trade results, balance and equity. Update that text in
+a later documentation-only edit, without changing execution behavior.
+
+* Contract decisions for #572–#576
+** #572 — ATR Study
+- Process a deterministic single-instrument bar sequence, without creating
+  =trader=, =broker=, =account= or =order=.
+- Use a concrete Study with indicator state and a small typed result (instrument,
+  effective observation time, ATR value); independently verify warm-up, true
+  ranges, smoothing, error/cancellation propagation and repeated results.
+- Start by directly iterating =marketData.bars(ctx)= in a focused example/test.
+  *Do not* extract a general Study interface or shared runner just yet.
+- An Indicator computes measurements; a Study decides what to collect/report.
+  A Scanner classifies/selects instruments; a trading Strategy requests Orders.
+
+** #573 — Observation availability and multi-symbol data
+- A bar's =Time= currently stores its *open* timestamp. Its full OHLC values
+  become known at the end of its interval; event ordering for research
+  consumers and decisions must use *availability/completion* time as well as
+  distinguish the quoted bar start. Historical fixtures only establish
+  next-bar execution on a single D1 stream; they do not validate H1/live
+  availability or cross-interval ordering.
+- Begin with two instruments on the same interval, then include offset
+  observation times and a deliberately missing bar. Specify deterministic
+  tie-breaking for simultaneous available observations.
+- Do not silently synthesize missing bars or pass a carried stale value as
+  newly observed. If =OnBars= uses a frame, each item must say whether it is
+  fresh; choose fresh-only frames unless a concrete use case proves otherwise.
+- Compare =OnBar(bar)= and =OnBars(frame)= with tests; the frame grouping policy
+  is undecided. Avoid a universal callback hierarchy or map iteration order
+  in observable output. Preserve =iter.Seq2= as the working baseline.
+
+** #574 — EMA Scanner
+- At least two instruments, distinct EMA state per instrument, explicit
+  warm-up and deterministic classification output.
+- No Account, Broker, Trader, or trading Order. Validate missing-symbol and
+  simultaneous-observation behavior using #573's decided delivery semantics.
+
+** #575 — Two-symbol trading Strategy
+- One Broker and one Account with Positions for both symbols. The present
+  =emax= object contains only one pair of EMA states and one signal state, so
+  *do not reuse it as a two-instrument strategy without partitioning state*.
+- Test two signals at one effective time; decide ordering and whether callback
+  returns 0, 1 or multiple Orders. Account equity/margin must remain shared;
+  deterministic order admission matters when both signals compete for margin.
+- *Known unsafe multi-symbol behavior:* Broker can margin-liquidate a different
+  instrument at its older mark while timestamping the close on the new bar.
+  Test and define a freshness/executable-quote policy; don't imply a stale
+  mark was an actual contemporaneous fill. This was already flagged in
+  =todo.org= and is not an EMAX regression.
+- USD-only quote currency and fixed price scaling are *prototype constraints*;
+  for two-symbol validation use symbols with compatible account/quote
+  currency or explicitly defer conversion.
+
+** #576 — Shared runner / Dataset API decision
+- After the three examples, compare their iteration paths. Extract only
+  genuine shared concerns (cancellation, data error delivery, deterministic
+  sequencing) into a small function if that reduces total code.
+- Keep Broker-before-Strategy sequencing in the trading composition, not in a
+  universal market-data runner. Studies/Scanners must not return dummy Orders.
+- Explore an *in-memory* Query/Dataset/Load contract with instruments,
+  interval, source/basis, [start,end), explicit gap policy and ordered Bars.
+  Disk assembly, caching, provider adapters, durable journals and migration
+  remain later implementation work.
+
+* Open decisions (do not resolve speculatively)
+1. Do strategy callbacks need a read-only Position/Account snapshot? EMAX
+   currently intentionally tracks signal state, not exposure.
+2. Are frames needed for simultaneous multi-symbol observations? If so, how
+   are missing and carried bars represented and when is a frame considered
+   complete?
+3. Should multiple Orders be returned from one callback, and in what stable
+   priority/order are they admitted for margin?
+4. When bars have different intervals or venue sessions, what is their
+   effective availability time and how does that relate to Broker execution?
+5. How is execution safely inhibited when an instrument has no current
+   executable quote, especially during portfolio margin liquidation?
+6. What is the minimal dataset ownership/coverage contract before bringing
+   over the legacy marketdata code?
+
+* Gates
+- No EMAX semantic changes as part of #571; compare the approved six-scenario
+  stdout as a permanent baseline.
+- Each implementation PR under #572–#576 runs
+  =cd examples/design && make check && make run= and the repository CI.
+- Review code for fewer layers, explicit temporal semantics, deterministic
+  output and no external broker/account dependency for research consumers.
+- Do not begin production migration until EMAX, Study, Scanner and
+  two-instrument Strategy examples have passed a collective architecture review.
