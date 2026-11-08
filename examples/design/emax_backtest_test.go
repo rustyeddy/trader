@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"path/filepath"
 	"slices"
@@ -298,6 +299,9 @@ func TestEMAXBacktest_RepeatsExactlyFromFreshInstances(t *testing.T) {
 
 			assert.Equal(t, first.account.trades, second.account.trades)
 			assert.True(t, slices.Equal(orderResults(first.broker.completed), orderResults(second.broker.completed)))
+			assert.Equal(t, orderResults(first.broker.orders["EURUSD"]), orderResults(second.broker.orders["EURUSD"]))
+			assert.Equal(t, orderResults(first.trader.rejected), orderResults(second.trader.rejected))
+			assert.Equal(t, orderHistories(first), orderHistories(second))
 			assert.Equal(t, snapshotState(t, first), snapshotState(t, second))
 		})
 	}
@@ -908,4 +912,186 @@ func TestEMAXBacktest_ReversalAndShortStopFixturesHoldTheirBoundaries(t *testing
 	assert.Less(t, d[5].o, stop)
 	assert.Equal(t, stop+3, d[5].h, "the high goes past the stop")
 	assert.Less(t, d[5].c, stop, "and the bar closes back below it")
+}
+
+// floorDiv divides, rounding toward negative infinity.
+func floorDiv(a, b int64) int64 {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
+}
+
+// pnlFromFills is rule 2 worked from the prices alone: the points the position
+// moved in its favour, times its units, floored to the cent.
+func pnlFromFills(d direction, units int64, entry, exit price) money {
+	points := int64(exit - entry)
+	if d == short {
+		points = -points
+	}
+	return money(floorDiv(points*units*moneyScale, priceScale))
+}
+
+// marginAt is rule 5: units * price * 2%, rounded up to the cent.
+func marginAt(units int64, p price) money {
+	return money(-floorDiv(-units*int64(p)*2*moneyScale, 100*priceScale))
+}
+
+// Each realized P/L is worked from the fills alone: a filled open, then the filled
+// close that ends it, in the order they completed. Only then is the sum compared with
+// the balance, so the balance check cannot pass by being derived from itself.
+func TestEMAXBacktest_RealizedPnLReconcilesFromTheFills(t *testing.T) {
+	for _, want := range emaxScenarios {
+		t.Run(want.name, func(t *testing.T) {
+			r := runEMAX(t, want.name)
+
+			var entry *order
+			var realized []money
+			for _, o := range r.broker.completed {
+				if o.state != stateFilled {
+					continue
+				}
+				if o.action == open {
+					require.Nil(t, entry, "%s opens while %s is still open", o.id, entry)
+					entry = o
+					continue
+				}
+				require.NotNil(t, entry, "%s closes nothing", o.id)
+				assert.Equal(t, entry.units, o.units, "%s closes the whole position", o.id)
+				realized = append(realized, pnlFromFills(entry.direction, entry.units, entry.fillPrice, o.fillPrice))
+				entry = nil
+			}
+
+			var approved []money
+			for _, tr := range want.trades {
+				approved = append(approved, tr.pnl)
+			}
+			require.Equal(t, approved, realized, "each trade's P/L from its fills")
+			var recorded []money
+			for _, tr := range r.account.trades {
+				recorded = append(recorded, tr.pnl)
+			}
+			assert.Equal(t, realized, recorded, "the account's trades")
+			var sum money
+			for _, pnl := range realized {
+				sum += pnl
+			}
+			assert.Equal(t, usd(10000)+sum, r.account.balance)
+			assert.Equal(t, entry != nil, r.account.positions["EURUSD"] != nil, "an open fill with no close is the live position")
+		})
+	}
+}
+
+// What is still open is valued from the position and the last bar alone, and equity
+// is the balance plus it. B2 and C end short with a profit that is not whole cents, 390
+// points * 9122 = 3557.58 cents and 467 points * 9087 = 4243.629, so the floor goes
+// against the account. Reserved margin is the waiting opens' margin at their
+// reference prices.
+func TestEMAXBacktest_OpenPositionReconcilesAtTheLastMark(t *testing.T) {
+	for _, want := range emaxScenarios {
+		t.Run(want.name, func(t *testing.T) {
+			r := runEMAX(t, want.name)
+			data := scenarioPrices(t, want.name).data
+			last := data[len(data)-1]
+			st := snapshotState(t, r)
+
+			var unrealized, used, reserved money
+			if p := st.position; p != nil {
+				assert.Equal(t, last.c, p.markPrice, "marked at the last close")
+				assert.Equal(t, short, p.direction)
+				points := int64(p.entryPrice - last.c)
+				assert.NotZero(t, points*p.units*moneyScale%priceScale, "a fraction of a cent to floor")
+				unrealized = pnlFromFills(p.direction, p.units, p.entryPrice, last.c)
+				used = marginAt(p.units, last.c)
+			}
+			for _, o := range r.broker.orders["EURUSD"] {
+				if o.action == open {
+					reserved += marginAt(o.units, o.price)
+				}
+			}
+			assert.Equal(t, unrealized, st.unrealized)
+			assert.Equal(t, st.balance+unrealized, st.equity)
+			assert.Equal(t, used, st.used)
+			assert.Equal(t, reserved, st.reserved)
+		})
+	}
+}
+
+// assertLifecycles checks every order the run made: the trader's refusals, the
+// broker's completed orders and those still waiting. Each order reaches at most one
+// end, and only as its last event; the broker's ids are each issued once and all
+// accounted for; and the exits still waiting are the live position's stop, if any.
+func assertLifecycles(t *testing.T, r emaxRun) {
+	t.Helper()
+	ends := func(o *order) int {
+		n := 0
+		for _, ev := range o.history {
+			if ev.state == stateFilled || ev.state == stateRejected || ev.state == stateCancelled {
+				n++
+			}
+		}
+		return n
+	}
+	ordered := func(o *order) {
+		require.NotEmpty(t, o.history, o.id)
+		assert.Equal(t, stateRequested, o.history[0].state, "%s starts requested", o.id)
+		for i := 1; i < len(o.history); i++ {
+			assert.False(t, o.history[i].time.Before(o.history[i-1].time), "%s's history is in time order", o.id)
+		}
+	}
+
+	for _, o := range r.trader.rejected {
+		ordered(o)
+		assert.Empty(t, o.id, "refused before the broker issued an id")
+		assert.Equal(t, stateRejected, o.state)
+		assert.Equal(t, 1, ends(o))
+	}
+	var previous time.Time
+	for _, o := range r.broker.completed {
+		ordered(o)
+		assert.Equal(t, 1, ends(o), "%s ends exactly once", o.id)
+		assert.Equal(t, o.state, o.history[len(o.history)-1].state, "%s ends on its last event", o.id)
+		assert.Equal(t, o.Time, o.history[len(o.history)-1].time, "%s's time is when it ended", o.id)
+		assert.False(t, o.Time.Before(previous), "%s completes in time order", o.id)
+		previous = o.Time
+	}
+	pos := r.account.positions["EURUSD"]
+	stops := 0
+	for _, o := range r.broker.orders["EURUSD"] {
+		ordered(o)
+		assert.Equal(t, stateSubmitted, o.state, "%s waits submitted", o.id)
+		assert.Zero(t, ends(o), "%s has not ended", o.id)
+		if o.reason != reasonStrategy {
+			require.NotNil(t, pos, "%s is an exit with no position", o.id)
+			assert.Equal(t, pos.direction, o.direction, "%s protects the live position", o.id)
+			stops++
+		}
+	}
+	if pos != nil {
+		assert.Equal(t, 1, stops, "the live position's stop is still waiting")
+	}
+	assert.LessOrEqual(t, len(r.account.positions), 1)
+
+	var ids, issued []string
+	for _, o := range slices.Concat(r.broker.completed, r.broker.orders["EURUSD"]) {
+		ids = append(ids, o.id)
+	}
+	for i := 1; i <= r.broker.seq; i++ {
+		issued = append(issued, fmt.Sprintf("sim-%d", i))
+	}
+	assert.ElementsMatch(t, issued, ids, "every id issued once, and none lost")
+}
+
+func TestEMAXBacktest_EveryOrderEndsAtMostOnce(t *testing.T) {
+	for _, s := range emaxScenarios {
+		t.Run(s.name, func(t *testing.T) {
+			assertLifecycles(t, runEMAX(t, s.name))
+		})
+	}
+	t.Run("refused at sizing", func(t *testing.T) {
+		r := runEMAXWithBalance(t, "a-reversal-exit", 1)
+		require.NotEmpty(t, r.trader.rejected)
+		assertLifecycles(t, r)
+	})
 }
