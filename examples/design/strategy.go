@@ -22,7 +22,7 @@ type emax struct {
 	// fraction of that price. Every open order carries the stop it produces.
 	stopPct rate
 
-	// signal state, not the actual position: what the strategy last asked for
+	// signal state, not the actual position: the last entry signal consumed
 	pos     direction // side it is in (noDirection: flat)
 	pending direction // side to open on the next bar, after a flipping close
 
@@ -52,13 +52,14 @@ func (e *emax) init() error {
 // onBar returns the order the strategy wants for this bar, or nil when there
 // is nothing to do.
 //
-// The strategy is always long when the short EMA is above the long EMA and
+// The strategy signals long when the short EMA is above the long EMA and
 // short when it is below. A flip is a close on the crossover bar followed by
 // the opposite open on the next bar: an onBar returns one order, and there is
 // no atomic reverse. An open that is rejected is not retried; the next order
-// comes only from the next crossover.
+// comes only from the next crossover. An entry whose stop falls outside the
+// supported price range is skipped, with the same no-retry behavior.
 //
-// The signal state is what the strategy last asked for, not the position. A
+// The signal state is the last entry signal consumed, not the position. A
 // broker stop-out does not change it, so after one the strategy stays flat
 // until the trend turns, then emits a close the broker rejects with
 // errNoPosition, then the opposite open. This is the current contract, not an
@@ -111,10 +112,14 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 }
 
 func (e *emax) openOrder(b bar, d direction) *order {
+	stop := e.stopFor(b.c, d)
+	if stop <= 0 || stop > maxPrice {
+		return nil // skip the entry; clamping would change the configured risk
+	}
 	return &order{
 		instrument: b.instrument,
 		price:      b.c,
-		stopLoss:   e.stopFor(b.c, d),
+		stopLoss:   stop,
 		action:     open,
 		orderType:  marketOrder,
 		direction:  d,

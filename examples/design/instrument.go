@@ -30,8 +30,3 @@ type instrument struct {
 	maxUnits int64 // largest order size; 0 means no limit
 	unitStep int64 // sizes are whole multiples of this
 }
-
-func getInstrument(symbol string) (*instrument, bool) {
-	inst, ok := instruments[symbol]
-	return inst, ok
-}

@@ -333,6 +333,33 @@ func TestEmax_StopDistanceRoundsDownAndIsAtLeastOnePoint(t *testing.T) {
 	assert.Equal(t, price(11), e.stopFor(10, short))
 }
 
+func TestEmax_OpenRequiresAStopWithinPriceBounds(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		entry price
+		dir   direction
+		stop  price // zero means skip the entry
+	}{
+		{"long stop below minimum", 1, long, 0},
+		{"long stop at minimum", 2, long, 1},
+		{"long at maximum price", maxPrice, long, 990_000_000},
+		{"short stop at maximum", 990_099_010, short, maxPrice},
+		{"short stop above maximum", 990_099_011, short, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEmax(t, 2, 4)
+			o := e.openOrder(bar{instrument: "EURUSD", Time: testStart, ohlc: ohlc{c: tt.entry}}, tt.dir)
+			if tt.stop == 0 {
+				assert.Nil(t, o, "skip rather than clamp the configured stop")
+				return
+			}
+			require.NotNil(t, o)
+			require.NoError(t, o.validate())
+			assert.Equal(t, tt.stop, o.stopLoss)
+		})
+	}
+}
+
 func TestEmax_ClosesCarryNoStop(t *testing.T) {
 	e := newTestEmax(t, 2, 4)
 	for _, b := range closes(flipSeries...) {

@@ -74,7 +74,7 @@ func (act *account) usedMargin() money {
 // cent: units * p * marginRate. Sizing refuses an unknown instrument, so only a
 // bug can reach here with one.
 func marginFor(symbol string, units int64, p price) money {
-	inst, ok := getInstrument(symbol)
+	inst, ok := instruments[symbol]
 	if !ok {
 		panic(fmt.Sprintf("margin for %q: %v", symbol, errUnknownInstrument))
 	}
@@ -86,8 +86,9 @@ func marginFor(symbol string, units int64, p price) money {
 
 // maxPrice and maxOrderUnits bound what reaches the money math: bars and orders
 // above maxPrice are refused and sizing caps units at maxOrderUnits. One position's
-// P/L or margin then stays within $10 trillion, so balances and totals are plain
-// sums that cannot overflow in any real run.
+// P/L or margin then stays within $10 trillion. Aggregate balances and totals
+// use ordinary int64 cents; runs approaching its roughly $92 quadrillion limit
+// are outside this prototype's intended range.
 const (
 	maxPrice      price = 1_000_000_000 // 10,000.00000
 	maxOrderUnits int64 = 1_000_000_000
@@ -120,7 +121,7 @@ var errUnsupportedAction = errors.New("action not supported yet")
 //   - add, reduce and anything else: errUnsupportedAction until their size
 //     rules are defined.
 func (act *account) size(o *order, reserved money) error {
-	inst, ok := getInstrument(o.instrument)
+	inst, ok := instruments[o.instrument]
 	if !ok {
 		return fmt.Errorf("size %s: %w: %q", o.action, errUnknownInstrument, o.instrument)
 	}

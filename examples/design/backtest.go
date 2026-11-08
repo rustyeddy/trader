@@ -34,8 +34,9 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], tr *tra
 // an open position is listed on its own and is neither a win nor a loss, and a
 // closed trade with zero P/L is a break-even.
 //
-// The order counts come from where the orders ended up. rejected includes the
-// opens the trader kept after sizing refused them, which never reached the
+// The order counts cover this trader's account and come from where the orders
+// ended up. rejected includes the opens the trader kept after sizing refused
+// them, which never reached the
 // broker; submitted is everything the broker accepted into its queue, its own
 // stops included; pending is what is still waiting when the data ends.
 type result struct {
@@ -57,6 +58,9 @@ func newResult(scenario string, bars int, tr *trader) *result {
 	}
 
 	for _, o := range tr.broker.completed {
+		if o.accountID != act.id {
+			continue
+		}
 		r.submitted++
 		switch o.state {
 		case stateFilled:
@@ -68,8 +72,12 @@ func newResult(scenario string, bars int, tr *trader) *result {
 		}
 	}
 	for _, waiting := range tr.broker.orders {
-		r.submitted += len(waiting)
-		r.pending += len(waiting)
+		for _, o := range waiting {
+			if o.accountID == act.id {
+				r.submitted++
+				r.pending++
+			}
+		}
 	}
 
 	for _, t := range act.trades {

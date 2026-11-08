@@ -117,6 +117,32 @@ func TestResult_CountsRefusalsWithoutDuplication(t *testing.T) {
 	assert.Zero(t, r.trades)
 }
 
+func TestResult_CountsOnlyItsAccountOrders(t *testing.T) {
+	br := newBroker("sim")
+	a := br.addAccount("a", usd(10000))
+	br.addAccount("b", usd(20000))
+	for _, id := range []string{"a", "b"} {
+		br.completed = append(br.completed,
+			&order{accountID: id, state: stateFilled},
+			&order{accountID: id, state: stateRejected},
+			&order{accountID: id, state: stateCancelled})
+		for _, symbol := range []string{"EURUSD", "GBPUSD"} {
+			br.orders[symbol] = append(br.orders[symbol],
+				&order{accountID: id, instrument: symbol, state: stateSubmitted})
+		}
+	}
+	tr := &trader{broker: br, account: a, rejected: []*order{{accountID: "a", state: stateRejected}}}
+
+	r := newResult("a", 0, tr)
+
+	assert.Equal(t, 5, r.submitted, "three completed and two pending for account a")
+	assert.Equal(t, 1, r.filled)
+	assert.Equal(t, 2, r.rejected, "one before submission and one at the broker")
+	assert.Equal(t, 1, r.cancelled)
+	assert.Equal(t, 2, r.pending)
+	assert.Equal(t, usd(10000), r.balance)
+}
+
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }

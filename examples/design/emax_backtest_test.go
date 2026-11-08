@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,42 @@ func runEMAXWithBalance(t *testing.T, scenario string, balance money) emaxRun {
 	r := newEMAXRun(t, balance)
 	r.run(t, scenarioBars(t, scenario))
 	return r
+}
+
+func TestEMAX_SkipsUnrepresentableStopsWithoutRetrying(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		closes     []int // whole-dollar prices, all within the parser's bounds
+		skippedBar int
+		filled     int
+	}{
+		{"initial short", []int{10000, 9999, 9998, 9997, 9900}, 3, 0},
+		{"reversal short", []int{9990, 9991, 9992, 9993, 9994, 9990, 9990, 9800}, 6, 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var csv strings.Builder
+			csv.WriteString("# schema=design-bars-v1 instrument=EURUSD tf=d1\ntime,open,high,low,close,volume\n")
+			for i, p := range tt.closes {
+				fmt.Fprintf(&csv, "%s,%d.00000,%d.00000,%d.00000,%d.00000,1000\n",
+					testStart.AddDate(0, 0, i).Format(barTimeLayout), p, p, p, p)
+			}
+			prices, err := readBars(strings.NewReader(csv.String()))
+			require.NoError(t, err)
+			r := newEMAXRun(t, usd(10000))
+			states := watchEMAX(t, r, prices.bars(context.Background()))
+			require.Len(t, states, len(tt.closes), "the backtest processes every valid bar")
+			for _, i := range []int{tt.skippedBar, tt.skippedBar + 1} {
+				assert.Empty(t, states[i].waiting, "bar %d: no invalid entry or retry", i)
+				assert.Nil(t, states[i].state.position)
+				assert.Equal(t, short, states[i].state.signal)
+				assert.Equal(t, noDirection, states[i].state.pending)
+			}
+			result := newResult("bounds", len(tt.closes), r.trader)
+			assert.Equal(t, tt.filled, result.filled)
+			assert.Zero(t, result.rejected, "an unsupported stop never reaches the trader")
+			assert.Zero(t, result.pending)
+		})
+	}
 }
 
 // orderResult is the part of an order the expected tables pin. at is when the

@@ -601,19 +601,13 @@ func TestPosition_UnrealizedPnL(t *testing.T) {
 
 func TestAccount_UnrealizedPnL_SumsEveryPosition(t *testing.T) {
 	a := newAccount("a", usd(1000))
-	require.Zero(t, mustPnL(t, a), "no positions")
+	require.Zero(t, a.unrealizedPnL(), "no positions")
 
 	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000, entryPrice: 110000, markPrice: 111000} // +100
 	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: short, units: 5000, entryPrice: 150000, markPrice: 151000} // -50
 	a.positions["AUDUSD"] = &position{instrument: "AUDUSD", direction: long, units: 1000, entryPrice: 70000, markPrice: 69000}    // -10
 
-	assert.Equal(t, usd(40), mustPnL(t, a))
-}
-
-func mustPnL(t *testing.T, a *account) money {
-	t.Helper()
-	pnl := a.unrealizedPnL()
-	return pnl
+	assert.Equal(t, usd(40), a.unrealizedPnL())
 }
 
 func TestAccount_Size_Open_RiskIsMeasuredAgainstEquity(t *testing.T) {
@@ -664,7 +658,7 @@ func TestAccount_ApplyFill_OpenIsMarkedAtTheFillPrice(t *testing.T) {
 	require.NoError(t, fillOn(act, &order{instrument: "EURUSD", direction: short, action: open, units: 5, fillPrice: 110000}))
 
 	assert.Equal(t, price(110000), act.positions["EURUSD"].markPrice)
-	assert.Zero(t, mustPnL(t, act), "no profit or loss the moment it opens")
+	assert.Zero(t, act.unrealizedPnL(), "no profit or loss the moment it opens")
 }
 
 func TestPosition_RealizedPnL(t *testing.T) {
