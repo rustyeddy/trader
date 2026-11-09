@@ -52,6 +52,43 @@ func TestBars_ContextCancelled(t *testing.T) {
 	require.ErrorIs(t, gotErr, context.Canceled)
 }
 
+func TestBars_CancelledAfterTheLastBar(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md := &marketData{data: testBars(1)}
+
+	var bars, errs int
+	var gotErr error
+	for _, err := range md.bars(ctx) {
+		if err != nil {
+			errs++
+			gotErr = err
+			continue
+		}
+		bars++
+		cancel()
+	}
+
+	assert.Equal(t, 1, bars)
+	assert.Equal(t, 1, errs, "the error is yielded once")
+	require.ErrorIs(t, gotErr, context.Canceled)
+}
+
+func TestBars_EarlyBreakOnTheLastBarAfterCancelYieldsNothingMore(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md := &marketData{data: testBars(1)}
+
+	var items int
+	for range md.bars(ctx) {
+		items++
+		cancel()
+		break
+	}
+
+	assert.Equal(t, 1, items)
+}
+
 func TestBars_Empty(t *testing.T) {
 	md := &marketData{}
 	for range md.bars(context.Background()) {
@@ -394,6 +431,29 @@ func TestFrames_Cancelled(t *testing.T) {
 	}
 
 	require.ErrorIs(t, gotErr, context.Canceled)
+}
+
+// frames has already read the last bar when it delivers the frame before it, so
+// the end of the data must not publish that bar after a cancel.
+func TestFrames_CancelledAfterTheFrameBeforeTheLast(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	seq := frames(mergedBars(ctx, barSet("EURUSD", time.Hour, 0, time.Hour)))
+
+	var got []frame
+	var gotErr error
+	for f, err := range seq {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		got = append(got, f)
+		cancel()
+	}
+
+	require.ErrorIs(t, gotErr, context.Canceled)
+	require.Len(t, got, 1, "the last frame must not be delivered after the cancel")
+	assert.Equal(t, mergeStart, got[0].bars[0].Time)
 }
 
 func TestFrames_EarlyBreak(t *testing.T) {
