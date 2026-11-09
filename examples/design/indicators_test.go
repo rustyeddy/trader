@@ -91,13 +91,13 @@ func TestATR_DropsTheOldestTrueRange(t *testing.T) {
 	a.onBar(hlc(1000, 1000, 1000))
 	a.onBar(hlc(1100, 1000, 1000)) // true range 100
 
-	v, ok := a.onBar(hlc(1300, 1000, 1000)) // true range 300
+	v, ok := a.onBar(hlc(1301, 1000, 1000)) // true range 301
 	require.True(t, ok)
-	assert.Equal(t, 0.002, v) // (100+300)/2 = 200 points
+	assert.Equal(t, 0.002005, v) // (100+301)/2 = 200.5 points: the half point survives
 
 	v, ok = a.onBar(hlc(1500, 1000, 1000)) // true range 500; 100 leaves
 	require.True(t, ok)
-	assert.Equal(t, 0.004, v) // (300+500)/2 = 400 points, not an average of all three
+	assert.Equal(t, 0.004005, v) // (301+500)/2 = 400.5 points, not an average of all three
 }
 
 func TestATR_InvalidWindowPanics(t *testing.T) {
