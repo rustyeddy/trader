@@ -75,7 +75,9 @@ records the result. See =order-tests.org= for the scenarios.
 ** TODO 4. Make bars self-contained and decide multi-symbol observation semantics
 - Include observed timestamp, instrument identity, OHLCV and price basis
   (bid/ask/trade; spread provenance as needed) in an observation.
-  (=bar= has instrument, time and OHLCV; the price basis is still open.)
+  (=bar= has instrument, opening time, =availableAt= and OHLCV; the price basis
+  is still open. Delivery is done, #573: =mergedBars= and =frames=; see
+  =scanner-studies-review.org=. Multi-order strategies remain for #575.)
 - Compare =OnBar(bar)= versus =OnBars(frame)= with a single- and two-symbol
   example. Decide whether frame contains only fresh bars or carried values.
 - Define deterministic time ordering, simultaneous timestamps, missing
