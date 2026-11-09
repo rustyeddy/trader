@@ -56,3 +56,51 @@ func TestEMA_InvalidWindowPanics(t *testing.T) {
 	assert.Panics(t, func() { newEMA(0) })
 	assert.Panics(t, func() { newEMA(-1) })
 }
+
+func hlc(h, l, c price) bar {
+	return bar{ohlc: ohlc{o: l, h: h, l: l, c: c}}
+}
+
+func TestATR_TrueRangeUsesThePreviousClose(t *testing.T) {
+	tests := []struct {
+		name    string
+		bar     bar
+		wantATR float64
+	}{
+		{"own range is largest", hlc(1100, 800, 1000), 0.003},  // 300 > 100, 200
+		{"gap up above the bar", hlc(1500, 1400, 1450), 0.005}, // 1500-1000
+		{"gap down below the bar", hlc(700, 600, 650), 0.004},  // 1000-600
+		{"no movement is a known zero", hlc(1000, 1000, 1000), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newATR(1)
+			_, ok := a.onBar(hlc(1000, 1000, 1000))
+			require.False(t, ok, "the first bar has no previous close")
+
+			got, ok := a.onBar(tt.bar)
+
+			require.True(t, ok)
+			assert.Equal(t, tt.wantATR, got)
+		})
+	}
+}
+
+func TestATR_DropsTheOldestTrueRange(t *testing.T) {
+	a := newATR(2)
+	a.onBar(hlc(1000, 1000, 1000))
+	a.onBar(hlc(1100, 1000, 1000)) // true range 100
+
+	v, ok := a.onBar(hlc(1301, 1000, 1000)) // true range 301
+	require.True(t, ok)
+	assert.Equal(t, 0.002005, v) // (100+301)/2 = 200.5 points: the half point survives
+
+	v, ok = a.onBar(hlc(1500, 1000, 1000)) // true range 500; 100 leaves
+	require.True(t, ok)
+	assert.Equal(t, 0.004005, v) // (301+500)/2 = 400.5 points, not an average of all three
+}
+
+func TestATR_InvalidWindowPanics(t *testing.T) {
+	assert.Panics(t, func() { newATR(0) })
+	assert.Panics(t, func() { newATR(-1) })
+}

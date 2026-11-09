@@ -60,6 +60,9 @@ records the result. See =order-tests.org= for the scenarios.
 - Strategy generates *trading* orders; study gathers analysis/results;
   scanner classifies/selects instruments; indicators compute measurements.
 - Test one EMA trading strategy, one ATR study, one multi-symbol scanner.
+  (ATR study done, #572: =runATRStudy= in =study.go= iterates the bars directly,
+  with no broker, account or order and no new interface. Definitions and open
+  decisions are in =scanner-studies-review.org=.)
 - Explore shared bar consumption without forcing non-trading outputs into
   trading orders or inventing generic event/handler hierarchies.
 - Choose minimal =OnBar= / =OnBars= contracts (or adapters) based on examples;
@@ -121,6 +124,7 @@ records the result. See =order-tests.org= for the scenarios.
   simulated broker, and validated end to end over the six scenarios above).
 - Cross-instrument strategy: two symbols, including missing bar behavior.
 - ATR study or scanner: results without broker/account or forced order.
+  (ATR study: focused tests in =study_test.go=, #572; scanner is #574.)
 - Ensure =make check && make run= green after every change.
 - Review package boundaries, GoDoc, order semantics and run diagrams.
 - Confirm reduction in interfaces/layers before migrating current Trader.
