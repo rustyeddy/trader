@@ -108,19 +108,34 @@ These issues carry the work of =todo.org= TODO 3 (#572, #574), TODO 4 (#573,
   distinguish the quoted bar start. Historical fixtures only establish
   next-bar execution on a single D1 stream; they do not validate H1/live
   availability or cross-interval ordering.
-- Add what availability needs to be computed, and meet the fill-time requirement
-  above across instruments; see "Opening, availability and fill times".
-- Begin with two instruments on the same interval, then include offset
-  observation times and a deliberately missing bar. Specify deterministic
-  tie-breaking for simultaneous available observations. For trading consumers
-  the tie-break changes financial results; see #575.
-- Do not silently synthesize missing bars or pass a carried stale value as
-  newly observed. Whether a frame holds only fresh bars or marked carried values
-  stays open (decision 2).
-- Compare =OnBar(bar)= and =OnBars(frame)= with tests, including whether the
-  Broker must advance per timestamp group; the frame grouping policy is
-  undecided. Avoid a universal callback hierarchy or map iteration order in
-  observable output. Preserve =iter.Seq2= as the working baseline.
+
+Decided and implemented in #573:
+- *Availability* is the field =bar.availableAt=, calculated once when the bar is
+  built and read by consumers, never recomputed. It is not stored in the
+  canonical file for now. In the prototype =parseBar= sets it to open plus the
+  interval; only =h1= and =d1= are supported, because weekly and session-based
+  bars do not end at open plus a fixed duration. In production the
+  raw-to-canonical conversion owns the rule per source. It is expected to be
+  stored in the canonical format eventually, which should touch only loading.
+- *Bars:* =mergedBars= delivers one =iter.Seq2[bar, error]= ordered by
+  =availableAt=, then instrument name, independent of argument order. Delivering
+  by availability is the no-look-ahead rule: a D1 bar arrives after that day's
+  earlier H1 bars although it opened first. The sets must have different
+  instruments and strictly increasing availability, or the sequence reports an
+  error.
+- *Frames:* =frames= groups bars with the same =availableAt=, in instrument
+  order. Frames are fresh-only.
+- *Which to use:* a per-instrument consumer can read bars. A consumer that
+  relates instruments at one moment needs frames, because between the bars of a
+  moment it would see one instrument's new close beside another's old one.
+- *Missing:* the instrument is absent from that frame. Nothing is synthesized or
+  carried. A consumer that wants a last value keeps its own.
+- *Late:* cannot occur in a sorted in-memory replay; out-of-order input is an
+  error. Late live arrival is deferred.
+- *Frame completeness:* in replay a frame is complete when the next bar is later.
+  Live completeness is deferred.
+- *Moved to #575:* the fill-time requirement above and the question of whether
+  the Broker must advance per frame. #573 changes delivery only.
 
 ** #574 — EMA Scanner
 - At least two instruments, distinct EMA state per instrument, explicit
@@ -136,6 +151,9 @@ These issues carry the work of =todo.org= TODO 3 (#572, #574), TODO 4 (#573,
   Broker has one market-event advancement path. =trader.onBar= advances the
   Broker itself, so fanning one bar out to two Traders would advance it twice.
   How to compose this is open (decision 7).
+- Meet the fill-time requirement across instruments, moved here from #573, taking
+  availability only from the delivered bar. Decide whether the Broker advances
+  per frame, using #573's =frames=.
 - Test two signals at one effective time; decide ordering and whether callback
   returns 0, 1 or multiple Orders. Account equity/margin must remain shared;
   deterministic order admission matters when both signals compete for margin.
@@ -178,13 +196,12 @@ These issues carry the work of =todo.org= TODO 3 (#572, #574), TODO 4 (#573,
 * Open decisions (do not resolve speculatively)
 1. Do strategy callbacks need a read-only Position/Account snapshot? EMAX
    currently intentionally tracks signal state, not exposure.
-2. Are frames needed for simultaneous multi-symbol observations? If so, how
-   are missing and carried bars represented and when is a frame considered
-   complete?
+2. How is frame completeness decided for live data? Replay frames, missing bars
+   and carried values were decided in #573.
 3. Should multiple Orders be returned from one callback, and in what stable
    priority/order are they admitted for margin?
-4. When bars have different intervals or venue sessions, what is their
-   effective availability time and how does that relate to Broker execution?
+4. What is the availability rule for weekly and session-based bars, and how does
+   availability relate to Broker execution?
 5. At what valuation point are margin, equity and sizing evaluated across
    instruments, and how is execution safely inhibited when an instrument has no
    current executable quote, especially during portfolio margin liquidation?
