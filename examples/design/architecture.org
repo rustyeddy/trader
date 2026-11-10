@@ -20,22 +20,22 @@ behavior lives without tracing through layers of indirection.
 - Optimize for a single developer's ability to understand, maintain, and extend
   the system.
 
-* Working Method: Architecture First, Proven in Code
 
-The current phase is *high-level architectural design*, not detailed
-production hardening. We will establish a simple coherent design
-through small, executable Go examples and focused tests before
-retrofitting the production codebase.
+* Working Method: Validate in Code, Then Migrate Selectively
 
-- Propose a small API and demonstrate it in working code.
-- Test the important end-to-end behavior and architectural boundaries.
-- Challenge each abstraction: does it simplify the caller's job?
-- Make one architectural decision at a time, then move forward.
-- Avoid premature refinements, edge-case debates, and pedantic correctness that
-  do not materially affect the shape of the architecture.
-- Record open questions without letting them block the core design.
-- Do not begin broad production refactoring until the simple prototype hangs
-  together and demonstrates the central workflows.
+Issues #571–#575 validated the essential architecture in =examples/design=
+using executable Go examples and independently checked tests. This document
+now records the *approved prototype baseline*, not a proposal to build a new
+framework.
+
+- Keep the working examples and their behavioral regression tests.
+- Confirm any shared abstraction *reduces* the caller's complexity.
+- Treat #576 as the final consolidation and migration-boundary review.
+- After acceptance, handle Market Data in its own milestone alongside
+  Account activity/journaling, then real backtests, studies and reporting.
+- Preserve useful production implementation and tests when migrating;
+  production migration is out of scope for #576.
+- Add multi-provider or multi-timeframe trading only for a concrete use case.
 
 * Functional Model
 
@@ -56,175 +56,256 @@ Reporting, journaling, configuration, and logging support these
 responsibilities; they are not automatically separate subsystems or
 service layers.
 
-* The Essential Execution Path
 
-A trading workflow should remain recognizable at a glance:
+* The Essential Execution Paths
+
+The Broker advances existing orders and valuations *before* the Strategy
+receives a completed observation. Trader then validates, timestamps and submits
+any requested =*order=; the Broker delegates sizing to Account because it
+must account for margin reserved by other outstanding orders.
 
 #+begin_src text
-MarketData -> Bar(s) -> Strategy -> *Order -> Trader -> Account.Size -> Broker.Submit
+Single instrument:
+  MarketData.bars -> backtest.run -> trader.onBar
+    -> broker.onFrame(single bar): eligible fills, marks, margin
+    -> strategy.onBar -> optional *order
+    -> trader.handleOrder -> broker.submit -> account.size -> queue
+
+Multiple instruments:
+  mergedBars -> frames (fresh bars grouped by availableAt)
+    -> trader.onFrame -> broker.onFrame (once per frame)
+    -> each instrument's strategy.onBar (deterministic order)
+    -> optional orders submitted sequentially, using shared Account margin
+
+Non-trading consumers:
+  iter.Seq2[bar,error] -> runATRStudy -> ATR observations
+  iter.Seq2[bar,error] -> runEMAScan -> per-instrument trend readings
 #+end_src
 
-Illustrative pseudo-Go (not a frozen interface):
+Studies and scanners own neither Broker nor Account. They do not fabricate
+Orders. Trading-specific processing must not leak into their APIs.
 
-#+begin_src go
-for bar, err := range data.Bars(ctx) {
-    if err != nil { return err }
-    order := strategy.OnBar(ctx, bar)
-    if order == nil { continue }
-    if err := trader.HandleOrder(ctx, order); err != nil { return err }
-}
-#+end_src
-
-The goal is to reuse market-observation processing across backtests
-and live trading. Studies and scanners should share the
-data-consumption mechanics where useful, *without being forced to
-create orders or depend on brokers/accounts*.
-
-An =OrderHandler= is a useful small boundary for trading, but not a universal
-interface for all consumers.
+The working iterator is =iter.Seq2[bar,error]=; the common observation contract
+does not imply that all consumers need one generic Runner or Handler interface.
 
 * Key Architectural Decisions
 
+
 ** Market data owns assembly; consumers see observations
 
-MarketData is responsible for retrieving and combining data from
-potentially multiple files or providers, putting observations in
-order, and managing coverage/gaps, caching, and memory. Consumers must
-not need to know how stored bars were located or assembled.
+MarketData locates and assembles observations, validates their order and
+coverage, and ultimately manages storage, cache and resource lifetime.
+Consumers must not need to know which source files hold the bars.
 
-A Go iterator is the current working baseline. Slices and channels remain
-possible alternatives or complements when a concrete use case justifies them.
-Do not add mechanisms simply for symmetry.
+The working prototype uses =marketData.bars(ctx)=, =mergedBars(ctx, sets...)=
+and =frames(bars)=. These are concrete, deterministic functions, not a new
+package/interface hierarchy. Slices and channels can be considered against
+future measured needs; the iterator is the accepted baseline.
 
-** Keep Bar and Bars
 
-A =Bar= is one observation for one instrument. A =Bars= collection groups
-observations keyed by instrument, allowing multi-instrument consumers.
+** Keep single bars and fresh-only frames
 
-#+begin_src go
-// Illustrative, not an approved final type signature.
-type Bars map[Instrument]Bar
-#+end_src
+A =bar= represents one genuine instrument OHLCV observation, including its
+opening time and =availableAt=. A =frame= groups the bars that become available
+at the *same moment*, sorted by instrument. Only newly available bars appear;
+missing symbols are absent, never replaced by old or synthetic prices.
 
-Preserve single-bar use cases. Decide how multi-instrument observations are
-aligned and delivered through working two-instrument examples rather than by
-building a generic framework in advance.
+=frames= is a general MarketData grouping mechanism. The *trading-run* input
+contract is deliberately narrower:
+
+- One provider (or canonical source) per run.
+- One configured timeframe and common opening/availability alignment.
+- Multiple instruments; they need not all have a bar in every frame.
+- Group by =availableAt= and deliver frames chronologically.
+- Reject inconsistent alignment, overlapping execution windows or unsupported
+  bar timing; do not silently approximate an executable price.
+
+The current Broker validates frame consistency and rejects cross-frame
+overlaps. The dedicated Market Data milestone will define the production Query/Dataset/Run
+loading boundary that enforces provider, timeframe and alignment.
+Mixed providers and mixed timeframes remain deferred.
+
 
 ** Bar timestamp and causal availability
 
-A bar's timestamp denotes its *opening* time. A completed bar must not be
-presented to a strategy or study until *after its closing time*.
+=bar.Time= denotes the interval *opening*. =bar.availableAt= is the earliest
+moment its completed OHLCV can be used. =order.decidedAt= records when a
+Strategy was allowed to decide, stamped from the delivered observation.
+A strategy order cannot fill on a bar whose opening precedes =decidedAt=.
 
-Example: an H1 bar stamped 10:00 covers 10:00–11:00 and becomes available at
-11:00. The bar's opening timestamp, the time its full data becomes available,
-and the time an order can actually fill are distinct concepts.
+For example, an H1 bar stamped 10:00 is completed at 11:00. A strategy
+decision based on it must never fill at 10:30. Observations are fresh-only,
+and the Broker rejects unsupported overlapping replay intervals rather than
+using a future portfolio mark for earlier fill-time margin admission.
 
-This causal rule must hold in historical replay as well as live processing.
-Do not silently provide future bars or fabricate missing observations.
+In the design fixtures =availableAt= is constructed by the fixture/CSV loader.
+In production it is computed at the *raw-to-canonical conversion* boundary
+according to source rules and **persisted in canonical data**. This requires
+a schema ADR. Consumers do not recalculate it.
+
 
 ** Strategies request transactions using Orders
 
-Strategies return =*Order= when requesting a transaction and =nil= when there
-is no change. No separate =Intent= or =Hold= transaction is necessary.
-Each Order identifies its instrument, action (open/add/reduce/close), position
-direction when relevant, entry order type (market/limit/stop), intended entry
-price, and protective stop-loss price. A nil Order says nothing about whether
-the strategy is bullish, bearish, or currently holding a position.
+A Strategy returns an optional =*order= per delivered bar: =nil= means no
+transaction. An Order identifies the instrument, action, direction, order
+type, requested entry and stop; the Strategy does not calculate account units
+or reserve margin. Signal state is independent of actual Account positions.
 
-The strategy chooses entry and stop prices, not account risk budgets or units.
-Trader coordinates account sizing and broker submission; a strategy does not
-submit broker orders directly. Where decisions depend on actual exposure, a
-small read-only account/position view may be provided without expanding =OnBar=.
-Keep indicator/signal state separate from actual account position state.
+The current two-instrument example (=emaxEach=) maintains one EMAX indicator
+and signal state per instrument. One frame may therefore produce several
+orders, submitted sequentially in deterministic instrument order; each sees
+the Account's shared margin and existing reservations.
 
-** A shared data-processing mechanism, not one universal application
+There is no demonstrated need yet for a Strategy Order slice, a read-only
+position snapshot, generic Intent/Hold events or a frame-aware Strategy API.
+Introduce these only when a concrete strategy requires them.
 
-Backtest and live trading should reuse the same essential decision path, with
-historical versus live data and simulated versus real broker mechanics differing
-at their natural boundaries.
 
-Studies produce research measurements; scanners identify conditions or
-instruments. Neither should be required to manufacture =Intent= values.
+** Shared observations, consumer-specific behavior
+
+Backtest, Study and Scanner each have a short, readable iterator loop.
+A shared function such as =run(ctx, observations, handle)= is *optional*, not a
+design goal: extract it only if direct code comparison proves a net reduction
+in complexity and preserves trading order, contextual errors and cancellation.
+A documented decision to retain small loops is an acceptable #576 outcome.
+
+Backtest advances a simulated Broker/Account before generating new orders;
+ATR Study returns measurements; EMA Scanner returns instrument classifications.
+Their results and lifecycle semantics differ intentionally. Do not route
+research consumers through Broker or trading-Order machinery.
 
 
 ** Order sizing, lifecycle, and execution boundary
 
-Trader handles a strategy's requested =*Order= using the small path:
+The proven order path is:
 
 #+begin_src text
-Strategy -> *Order -> Trader.HandleOrder -> Account.Size -> Broker.Submit
+Strategy -> *Order -> Trader.handleOrder -> Broker.submit
+  -> Account.size (including Broker's outstanding margin reservations)
+  -> Broker queues Order -> eligible later bar -> Broker fills or rejects
 #+end_src
 
-Account owns balance, equity, margin availability, and the risk budget/policy.
-Position size is bounded by both planned stop-loss risk and available margin.
-The strategy does not calculate units or need to know account balance.
-The account sizes a requested order; Trader then submits the sized request to
-the broker. Keep sizing inside the Account domain for now: no new risk service.
+The Account owns balance, positions, equity, margin and risk/sizing arithmetic.
+The Broker owns queued orders, fills, cancellation and pending-order margin
+reservations. Trader coordinates execution and decisions without duplicating
+those responsibilities.
 
-An Order carries its *current* mutable values and lifecycle state, plus a
-history slice of timestamped state changes and reasons. The initial working
-states are requested, sized, submitted, filled, rejected, and cancelled. Preserve enough
-history to explain changes later, but do not build event sourcing now.
-The requested market price serves as the reference for eventual slippage
-analysis; limit and stop-entry types use their specified entry prices.
+An Order tracks its current state and a timestamped history. The prototype
+implements validation, sizing, submission, market/limit/stop execution,
+protective stops/targets, cancellation, expiry, trailing behavior, margin
+rejection, and completed-trade accounting. It distinguishes expected Order
+rejections from fatal run/data failures.
 
-The immediate architectural milestone ends at broker submission. Actual
-fills, partial fills, cancellation, asynchronous broker events, and account
-reconciliation are important but deferred to a separate design discussion.
-A reversal may eventually produce an ordered slice of close/open Orders;
-currently one optional =*Order= per strategy evaluation is sufficient.
+For synchronized frames the Broker marks frame positions at their opening
+prices, processes eligible opening executions, then OHLC range executions,
+then marks closes and checks portfolio margin once. Trader evaluates each
+instrument only *after* the Broker advances the frame. One Broker and one
+Account serve every instrument. Margin closeout uses a fresh bar for the
+position being closed; stale-position liquidation is deferred. An incomplete
+*complete closeout* remains pending over later frames; progressive closeout
+re-evaluates margin on each frame.
 
-* Validate with Three Small Executable Examples
+The OHLC path inside a bar is unknown. Real spread/slippage, partial fills,
+asynchronous/live Broker events, quote conversion and some execution-time
+accounting are deferred. Do not mistake a historical latest mark for a live,
+executable quote.
 
-1. *Single-instrument trading:* An EMA-cross strategy consumes bars, emits
-   Orders (or nil), and uses a simple Trader handler against a simulated account/broker.
-2. *Multi-instrument processing:* A two-instrument strategy or scanner consumes
-   =Bars= and demonstrates chronological delivery and a missing-bar case.
-3. *Non-trading research:* An ATR study consumes market data and produces
-   results without creating an account, broker, or Order.
 
-Each example should be easy to read and should have focused tests proving its
-important behavior. The aim is architectural confidence, not exhaustive
-production-level completeness.
+* Validated Executable Examples
 
-* Results and Journaling: Important, Deferred Design
+1. *Single-instrument EMAX backtest:* six independent scenarios verify order
+   lifecycle, risk and margin sizing, fills and results, including expected
+   rejections. =make run= output is a regression baseline.
+2. *Two-instrument trading:* EURUSD and GBPUSD use one Trader, Broker and
+   Account with independent EMAX state, deterministic order admission,
+   missing-bar behavior, fill-time margin and causal =decidedAt= eligibility.
+3. *ATR Study:* a non-trading iterator consumer; its result is a measurement,
+   not an Order.
+4. *EMA Scanner:* per-instrument EMA state and fresh-only trend classifications;
+   it reads merged bars without a Broker or Account.
 
-Backtests, studies, and scanners must eventually yield *durable, reviewable,
-comparable, and reproducible* results. Keep these concepts distinct:
+These examples are the approved evidence for migration. They do not require
+creating a general-purpose runner, a generic observation handler hierarchy or
+additional package layers.
 
-- Trading journal: order requests, state changes, fills, positions, and completed trades.
-- Backtest results: performance and simulated execution outcomes.
-- Study results: measurements, observations, and statistical findings.
-- Scanner results: classifications and instrument selections.
-- Reports: human-readable views derived from recorded facts.
 
-The engine generates observations and outcomes; reporting should not dictate
-its architecture. We will design run identity, provenance, persistence, Org
-reports, and comparison facilities together *after* the high-level execution
-and data-consumption architecture is demonstrated. No storage backend or
-reporting interface is selected here.
+* Results and Journaling: Next Implementation Work
 
-* Open Questions — Resolve by Examples, Not Speculation
+The existing Broker retains completed Orders and timestamped state histories;
+the Account retains positions and closed trades; a run can summarize fills,
+rejections and P&L. These are *in-memory facts*, not yet a durable journal.
 
-- Exact =OnBar= / =OnBars= signatures and when multiple Orders per cycle
-  become necessary.
-- How multi-instrument =Bars= frames handle sparse, asynchronous, or missing
-  observations.
-- Whether and when a slice or channel complements the current iterator.
-- The smallest useful read-only account/position view for strategies.
-- Order execution timing, rejection, and reversal details beyond the
-  initial Account.Size / Broker.Submit demonstration.
-- Durable result model and reporting/journaling storage formats.
+The next implementation phase must make results reproducible and reviewable:
 
-These are acknowledged questions, *not permission to expand the design now*.
+- Account activities/journal: Orders and their transitions, fills, closures,
+  positions, realized/unrealized P&L, Account equity and margin.
+- Backtest results: strategy, data/query/run provenance, measured performance
+  and execution assumptions.
+- Study and Scanner results: measurements/classifications with instrument and
+  availability timing.
+- Reports: derived presentations (including Org) from retained facts, rather
+  than reporting code directing core execution.
+
+Avoid premature event sourcing, reporting interfaces, or persistence layers.
+Choose durable formats when the real activity and research workflows establish
+their requirements.
+
+
+* #576 Acceptance and Migration Boundary
+
+#576 closes the *trading and research architecture-validation milestone*.
+It does not design, prototype, or implement Market Data. The shared iterator
+and fresh-only frame semantics are already proven by #571–#575. Keep Market
+Data tasks together in their own dedicated milestone.
+
+** #576 deliverables
+
+- Compare the existing EMAX backtest, ATR Study and EMA Scanner loops;
+  document whether a small shared runner would simplify the *actual* code.
+  Do not require a generic handler or Order-producing research API.
+- Reconcile the execution paths, API names, responsibilities, deferred Broker
+  behavior and existing tests against this baseline.
+- Prepare a concise *reuse / adapt / replace / defer* migration inventory for
+  trading, Account activities, journaling, Study/Scanner and results/reporting.
+- Preserve all six EMAX outputs and existing multi-instrument and research
+  tests; run repository and design =make check= and design =make run=.
+- No production migration; no new Market Data prototype as part of #576.
+
+** Dedicated Market Data milestone — separate work
+
+The next Market Data milestone owns and approves all of the following:
+
+- Query / Dataset / Load contract and minimal in-memory calling example.
+- OANDA historical data acquisition, raw import, normalization and canonical
+  conversion, with instrument/source/interval/price-basis provenance.
+- Half-open time ranges, coverage/gap policy, deterministic ordering, common
+  timeframe and alignment validation for trading datasets.
+- Raw-to-canonical =availableAt= calculation and *canonical persistence*,
+  including the necessary schema ADR.
+- Assembly across files, data validation, storage format, resource lifetime,
+  caching and production integration, as justified by real data.
+
+The trading-run *requirement* stays one provider, one timeframe, common
+alignment, multiple instruments grouped by =availableAt=, missing bars absent.
+How the Dataset and its loader enforce that belongs to the Market Data
+milestone, not to #576. Multiple providers/timeframes are deferred until a
+concrete use case demonstrates the need.
+
+** After #576
+
+Complete the separate Market Data milestone, Account activities and durable
+journaling, and real backtests and studies, in a practical sequence that gets
+useful research results into users' hands quickly. Avoid turning the architecture
+acceptance review into a new Market Data design project.
+
 
 * Migration Principle
 
-Keep the prototype isolated while the architecture is being validated. Once
-three small examples demonstrate the desired shape, selectively migrate working
-production functionality and tests. Measure success in *less code, fewer
-layers, understandable APIs, and a shorter path from market data to useful
-results*—not in the number of abstractions introduced.
+Selectively adapt tested behavior, not the prototype's private package or
+fixture layout. Optimize for *fewer layers, a shorter path from canonical
+data to results, and understandable Go APIs*. Existing working production
+data acquisition, Broker adapters, and reporting code should be assessed
+rather than reflexively replaced.
 
 * Architecture Review Test
 
