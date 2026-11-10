@@ -31,8 +31,8 @@ framework.
 - Keep the working examples and their behavioral regression tests.
 - Confirm any shared abstraction *reduces* the caller's complexity.
 - Treat #576 as the final consolidation and migration-boundary review.
-- After acceptance, move into canonical data, account activity/journaling,
-  real backtests and studies, and reporting.
+- After acceptance, handle Market Data in its own milestone alongside
+  Account activity/journaling, then real backtests, studies and reporting.
 - Preserve useful production implementation and tests when migrating;
   production migration is out of scope for #576.
 - Add multi-provider or multi-timeframe trading only for a concrete use case.
@@ -121,8 +121,8 @@ contract is deliberately narrower:
   bar timing; do not silently approximate an executable price.
 
 The current Broker validates frame consistency and rejects cross-frame
-overlaps. The production Query/Dataset/Run loading boundary must enforce
-provider, timeframe and alignment consistently across the dataset.
+overlaps. The dedicated Market Data milestone will define the production Query/Dataset/Run
+loading boundary that enforces provider, timeframe and alignment.
 Mixed providers and mixed timeframes remain deferred.
 
 
@@ -253,41 +253,50 @@ their requirements.
 
 * #576 Acceptance and Migration Boundary
 
-** Minimal Query / Dataset / Load contract
+#576 closes the *trading and research architecture-validation milestone*.
+It does not design, prototype, or implement Market Data. The shared iterator
+and fresh-only frame semantics are already proven by #571–#575. Keep Market
+Data tasks together in their own dedicated milestone.
 
-Prototype an *in-memory* Query/Dataset usage example that specifies:
-provider/source, common interval and alignment, instruments, price basis,
-half-open [start,end) coverage, and explicit gap/coverage expectations.
-A loader owns assembling/validating data and exposes the existing bar/frame
-iterators. Do not implement disk/network retrieval or a cache here, and
-do not invent an interface merely to make the example mockable. Persisted
-=availableAt= is a future canonical schema change with its own ADR.
+** #576 deliverables
 
-** Migration inventory
+- Compare the existing EMAX backtest, ATR Study and EMA Scanner loops;
+  document whether a small shared runner would simplify the *actual* code.
+  Do not require a generic handler or Order-producing research API.
+- Reconcile the execution paths, API names, responsibilities, deferred Broker
+  behavior and existing tests against this baseline.
+- Prepare a concise *reuse / adapt / replace / defer* migration inventory for
+  trading, Account activities, journaling, Study/Scanner and results/reporting.
+- Preserve all six EMAX outputs and existing multi-instrument and research
+  tests; run repository and design =make check= and design =make run=.
+- No production migration; no new Market Data prototype as part of #576.
 
-For each relevant existing production capability, label *reuse*, *adapt*,
-*replace* or *defer*, with a brief technical reason, before changing it.
-Keep the prototype isolated during #576. Its output is an approved boundary,
-not a bulk rewrite.
+** Dedicated Market Data milestone — separate work
 
-Prioritize:
-1. Historical OANDA acquisition and canonical data conversion, including
-   persisted =availableAt=, basis, gaps, provenance and coverage.
-2. Account activities and journaling.
-3. Real historical backtests and Studies using the same observation contract.
-4. Reports, comparison and analysis.
+The next Market Data milestone owns and approves all of the following:
 
-** Exit gate
+- Query / Dataset / Load contract and minimal in-memory calling example.
+- OANDA historical data acquisition, raw import, normalization and canonical
+  conversion, with instrument/source/interval/price-basis provenance.
+- Half-open time ranges, coverage/gap policy, deterministic ordering, common
+  timeframe and alignment validation for trading datasets.
+- Raw-to-canonical =availableAt= calculation and *canonical persistence*,
+  including the necessary schema ADR.
+- Assembly across files, data validation, storage format, resource lifetime,
+  caching and production integration, as justified by real data.
 
-- =make check= passes at repository root and in =examples/design=.
-- =make run= still produces the unchanged six EMAX scenario outputs.
-- Study, Scanner and multi-instrument regression tests all pass.
-- Shared-runner decision and Dataset caller example are documented.
-- Migration inventory and first actionable production issue exist.
-- No production package refactoring is part of #576.
+The trading-run *requirement* stays one provider, one timeframe, common
+alignment, multiple instruments grouped by =availableAt=, missing bars absent.
+How the Dataset and its loader enforce that belongs to the Market Data
+milestone, not to #576. Multiple providers/timeframes are deferred until a
+concrete use case demonstrates the need.
 
-Then stop architecture prototyping. Reopen a design decision only when
-observed usage or a reproducible test demonstrates the need.
+** After #576
+
+Complete the separate Market Data milestone, Account activities and durable
+journaling, and real backtests and studies, in a practical sequence that gets
+useful research results into users' hands quickly. Avoid turning the architecture
+acceptance review into a new Market Data design project.
 
 
 * Migration Principle
