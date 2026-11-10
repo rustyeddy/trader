@@ -143,6 +143,14 @@ Decided and implemented in #573:
 - No Account, Broker, Trader, or trading Order. Validate missing-symbol and
   simultaneous-observation behavior using #573's decided delivery semantics.
 
+Implemented in #574: =runEMAScan= reads the merged bars, since each
+classification depends on one instrument. Readings carry =availableAt=. Trend is
+up, down or flat, with flat meaning the EMAs agree within 1e-9. The tolerance
+exists because =ema= is =float64= and a constant 1.10000 series seeds the two EMAs
+a rounding error apart. =emax= still compares its EMAs exactly; that is tested
+EMAX behavior and is left unchanged, but a consumer built on it inherits the
+hazard.
+
 ** #575 — Two-symbol trading Strategy
 - One Broker and one Account with Positions for both symbols. The present
   =emax= object contains only one pair of EMA states and one signal state, so
