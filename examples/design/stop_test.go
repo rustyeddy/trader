@@ -9,7 +9,7 @@ import (
 )
 
 func stopBar(o, h, l, c price) bar {
-	return bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: o, h: h, l: l, c: c}}
+	return daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: o, h: h, l: l, c: c}})
 }
 
 // restingStop gives the account a long EURUSD position protected by a stop
@@ -60,7 +60,7 @@ func TestBroker_OnBar_StopOrderClosesThePositionAtTheStop(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 	require.Contains(t, act.positions, "EURUSD")
 
-	crash := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 109500, h: 109600, l: 108000, c: 108200}}
+	crash := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 109500, h: 109600, l: 108000, c: 108200}})
 	require.NoError(t, br.onBar(ctx, crash))
 
 	assert.Empty(t, act.positions, "stopped out")
@@ -154,7 +154,7 @@ func TestBroker_OnBar_GapThroughTheStopFillsAtTheOpen(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 
 	// The next bar opens below the stop and never trades at it.
-	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}}
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	assert.Empty(t, act.positions)
@@ -175,7 +175,7 @@ func TestBroker_OnBar_EntryAlreadyBeyondTheStopIsClosedAtOnce(t *testing.T) {
 
 	// The fill bar opens below the long's stop: the entry fills at that open,
 	// and its stop is already beyond it.
-	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}}
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	assert.Equal(t, stateFilled, op.state)
@@ -255,7 +255,7 @@ func TestBroker_OnBar_ShortGapsAboveTheStopAndClosesAtTheOpen(t *testing.T) {
 	require.Equal(t, short, stop.direction)
 
 	// The next bar opens above the stop and never trades at it.
-	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 112000, h: 112500, l: 111800, c: 112200}}
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 112000, h: 112500, l: 111800, c: 112200}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	assert.Empty(t, act.positions)

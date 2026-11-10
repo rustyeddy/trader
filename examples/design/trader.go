@@ -74,20 +74,39 @@ type trader struct {
 	rejected []*order
 }
 
-// onBar advances the broker (fills and marks) to the bar, then lets the
-// strategy react to it. The trader owns the order lifecycle from here: it
-// validates the strategy's order, records it as requested, has the broker size
-// and queue it, and records an expected rejection without stopping the run.
+// onBar handles one bar: onFrame with a frame of that bar alone.
 func (tr *trader) onBar(ctx context.Context, b bar) error {
-	if err := tr.broker.onBar(ctx, b); err != nil {
-		return fmt.Errorf("broker on bar %s %s: %w", b.instrument, b.Format(time.DateOnly), err)
+	return tr.onFrame(ctx, frame{availableAt: b.availableAt, bars: []bar{b}})
+}
+
+// onFrame advances the broker (fills and marks) through the whole frame once,
+// then lets the strategy react to each of its bars, in instrument order. The
+// trader owns the order lifecycle from here: it stamps when each order was
+// decided (the frame's availability), validates it, records it as requested,
+// has the broker size and queue it, and records an expected rejection without
+// stopping the run. Orders are submitted as they come, so when two compete for
+// margin the first instrument's is sized first and the second sees the margin
+// it reserved.
+func (tr *trader) onFrame(ctx context.Context, f frame) error {
+	if err := tr.broker.onFrame(ctx, f); err != nil {
+		if len(f.bars) == 1 {
+			b := f.bars[0]
+			return fmt.Errorf("broker on bar %s %s: %w", b.instrument, b.Format(time.DateOnly), err)
+		}
+		return fmt.Errorf("broker on frame at %s: %w", f.availableAt.Format(time.RFC3339), err)
 	}
 
-	o := tr.strategy.onBar(ctx, b)
-	if o == nil {
-		return nil
+	for _, b := range f.bars {
+		o := tr.strategy.onBar(ctx, b)
+		if o == nil {
+			continue
+		}
+		o.decidedAt = b.availableAt
+		if err := tr.handleOrder(ctx, o); err != nil {
+			return err
+		}
 	}
-	return tr.handleOrder(ctx, o)
+	return nil
 }
 
 // handleOrder submits the order to the broker, which has the account size it.

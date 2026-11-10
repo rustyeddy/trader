@@ -22,7 +22,7 @@ func limitUntil(t *testing.T, br *broker, exp int) *order {
 
 // dayBar is a EURUSD bar on day d with the given range.
 func dayBar(d int, o, h, l, c price) bar {
-	return bar{instrument: "EURUSD", Time: day(d), ohlc: ohlc{o: o, h: h, l: l, c: c}}
+	return daily(bar{instrument: "EURUSD", Time: day(d), ohlc: ohlc{o: o, h: h, l: l, c: c}})
 }
 
 func TestBroker_OnBar_OrderIsLiveBeforeItsExpiry(t *testing.T) {

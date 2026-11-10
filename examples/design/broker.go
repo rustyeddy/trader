@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -60,9 +61,11 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	}
 
 	if o.action == open {
-		// A margin closeout is not undone by a new open on the same observation;
-		// later re-entry rules are a future policy.
-		if !o.Time.After(act.closedOutAt) {
+		// A margin closeout is not undone by a new open decided on the same
+		// frame; later re-entry rules are a future policy. Both times are
+		// availabilities, the clock decisions are made on. An open with no
+		// decision time counts as decided before any closeout.
+		if !act.closedOutAt.IsZero() && !o.decidedAt.After(act.closedOutAt) {
 			return reject(o, o.Time, "%w: account %s at %s",
 				errCloseoutGuard, o.accountID, act.closedOutAt.Format(time.DateOnly))
 		}
@@ -179,48 +182,108 @@ func (o *order) phase() int {
 	return 3
 }
 
-// onBar executes the orders waiting on b's instrument for every account, then
-// values each account's positions at the bar's close and applies the margin
-// rules. The trader calls it at the start of every bar, before the strategy
-// sees the bar, so an order submitted on bar N can first fill on bar N+1 and
-// never on the bar that produced it.
+// onBar advances the broker by one bar: onFrame with a frame of that bar alone.
+func (br *broker) onBar(ctx context.Context, b bar) error {
+	return br.onFrame(ctx, frame{availableAt: b.availableAt, bars: []bar{b}})
+}
+
+// onFrame executes the orders waiting on the frame's instruments for every
+// account, then values each account's positions at the bars' closes and
+// applies the margin rules once, for the whole frame. The trader calls it
+// before the strategy sees any of the frame's bars, so an order cannot fill on
+// a bar that opened before the order was decided (see execution).
 //
 // The open is the one price a bar is known to have printed first, so the
-// orders it triggers go first, whatever else the bar later does. Only then do
-// the orders that depend on the rest of the range get their turn, in phases
-// (see phase); an exit placed by an entry filled earlier is live in the same
-// stage.
+// orders it triggers go first, whatever else the bar later does. Every
+// position in the frame is first valued at its bar's open, which is what is
+// known when those fills happen; a position without a bar in the frame keeps
+// its previous mark. Then the frame's at-open fills run, instrument by
+// instrument, and only then the orders that depend on the rest of each range,
+// in phases (see phase); an exit placed by an entry filled earlier is live in
+// the same stage. Closing marks come last, so no fill is admitted against a
+// price that had not happened yet.
 //
 // Assumption: a bar gives only open, high, low and close, not the path between
 // the extremes. After the open we take entries before stops and stops before
 // targets, each against the bar's whole range. That is pessimistic for a stop
 // on the bar a limit or stop entry fills (the low may have come before the
 // entry) and optimistic for a target on that bar (the high may have). See
-// todo.org for the options.
-func (br *broker) onBar(ctx context.Context, b bar) error {
-	br.expire(b)
-	atOpen := b
-	atOpen.h, atOpen.l = b.o, b.o // all that is known to have happened so far
-	for _, seen := range []bar{atOpen, b} {
-		for phase := 0; phase < phases; phase++ {
-			for _, o := range slices.Clone(br.orders[b.instrument]) {
-				if o.phase() != phase {
-					continue
-				}
-				if err := br.processOrder(ctx, seen, o); err != nil {
-					return err
+// todo.org for the options. Across instruments the ranges are taken one after
+// another, in instrument order: the path between them is unknown too.
+func (br *broker) onFrame(ctx context.Context, f frame) error {
+	if err := checkFrame(f); err != nil {
+		return err
+	}
+	atOpen := make([]bar, len(f.bars))
+	for i, b := range f.bars {
+		br.expire(b)
+		atOpen[i] = b
+		atOpen[i].h, atOpen[i].l, atOpen[i].c = b.o, b.o, b.o // all that is known to have happened so far
+		br.mark(atOpen[i])
+	}
+	for _, seen := range [][]bar{atOpen, f.bars} {
+		for _, b := range seen {
+			for phase := 0; phase < phases; phase++ {
+				for _, o := range slices.Clone(br.orders[b.instrument]) {
+					if o.phase() != phase {
+						continue
+					}
+					if err := br.processOrder(ctx, b, o); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
 
-	br.trailStops(b)
+	for _, b := range f.bars {
+		br.trailStops(b)
+		br.mark(b)
+	}
+	for _, id := range slices.Sorted(maps.Keys(br.accounts)) {
+		if err := br.enforceMargin(ctx, f, br.accounts[id]); err != nil {
+			return fmt.Errorf("margin check %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// mark values every account's position in b's instrument at b's close.
+func (br *broker) mark(b bar) {
 	for _, act := range br.accounts {
 		act.mark(b)
 	}
-	for _, id := range slices.Sorted(maps.Keys(br.accounts)) {
-		if err := br.enforceMargin(ctx, b, br.accounts[id]); err != nil {
-			return fmt.Errorf("margin check %s: %w", id, err)
+}
+
+// checkFrame refuses a frame the broker cannot advance through in a defined
+// order: it must hold at least one bar, every bar must carry the frame's
+// availability (unknown is not zero), the instruments must be distinct and in
+// order, and the bars must share an opening time. Ordering the fills of bars
+// that opened at different times needs an intrabar time policy, which does not
+// exist yet.
+func checkFrame(f frame) error {
+	if len(f.bars) == 0 {
+		return errors.New("frame has no bars")
+	}
+	if f.availableAt.IsZero() {
+		return fmt.Errorf("frame of %s at %s has no availability", f.bars[0].instrument, f.bars[0].Format(time.RFC3339))
+	}
+	for i, b := range f.bars {
+		if !b.availableAt.Equal(f.availableAt) {
+			return fmt.Errorf("frame at %s: %s bar is available at %s",
+				f.availableAt.Format(time.RFC3339), b.instrument, b.availableAt.Format(time.RFC3339))
+		}
+		if i == 0 {
+			continue
+		}
+		if prev := f.bars[i-1]; prev.instrument >= b.instrument {
+			return fmt.Errorf("frame at %s: %s after %s, want distinct instruments in order",
+				f.availableAt.Format(time.RFC3339), b.instrument, prev.instrument)
+		}
+		if !b.Equal(f.bars[0].Time) {
+			return fmt.Errorf("frame at %s: %s opened at %s, %s at %s; mixed opening times are not supported",
+				f.availableAt.Format(time.RFC3339), f.bars[0].instrument, f.bars[0].Format(time.RFC3339),
+				b.instrument, b.Format(time.RFC3339))
 		}
 	}
 	return nil
@@ -234,12 +297,24 @@ func (br *broker) expire(b bar) {
 	})
 }
 
-// enforceMargin applies the margin rules to one account on bar b. A warning is
-// logged. Liquidation cancels the account's unfilled opens, then closes
-// positions one at a time, as the closeout policy chooses. A progressive
+// enforceMargin applies the margin rules to one account after frame f. A
+// warning is logged. Liquidation cancels the account's unfilled opens, then
+// closes positions one at a time, as the closeout policy chooses. A progressive
 // closeout stops as soon as the margin policy is satisfied; a complete one
 // closes everything.
-func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error {
+//
+// The rules judge every position at its latest mark, which is valuation. A
+// close is execution, so it needs a price from this frame: when the policy
+// picks a position whose instrument has no bar in f, the closeout stops there,
+// leaving the account exposed until a later frame brings that instrument a
+// fresh bar and the rules run again. It is never filled at the old mark as
+// though that were a current quote.
+//
+// closedOutAt is the frame's availability, the clock decisions are made on, so
+// the guard in submit refuses every open decided on this frame, whichever of
+// its bars produced it.
+func (br *broker) enforceMargin(ctx context.Context, f frame, act *account) error {
+	at := f.bars[0].Time // the frame's bars share an opening time (checkFrame)
 	policy, pick := br.margin, br.closeout
 	if policy == nil {
 		policy = defaultMarginPolicy
@@ -253,15 +328,15 @@ func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error 
 		return err
 	}
 	if status == marginWarning {
-		slog.Warn("margin warning", "broker", br.id, "account", act.id, "time", b.Time)
+		slog.Warn("margin warning", "broker", br.id, "account", act.id, "time", at)
 	}
 	if status != marginLiquidate {
 		return nil
 	}
 
-	slog.Warn("margin closeout", "broker", br.id, "account", act.id, "time", b.Time)
-	act.closedOutAt = b.Time
-	br.cancelWhere(b.Time, "margin closeout", func(o *order) bool {
+	slog.Warn("margin closeout", "broker", br.id, "account", act.id, "time", at)
+	act.closedOutAt = f.availableAt
+	br.cancelWhere(at, "margin closeout", func(o *order) bool {
 		return o.accountID == act.id && o.action == open
 	})
 	for status == marginLiquidate || br.completeCloseout {
@@ -272,7 +347,13 @@ func (br *broker) enforceMargin(ctx context.Context, b bar, act *account) error 
 		if pos == nil {
 			return nil // nothing left to close
 		}
-		if err := br.closePosition(b, act, pos, reasonMarginCloseout, pos.markPrice); err != nil {
+		i := slices.IndexFunc(f.bars, func(b bar) bool { return b.instrument == pos.instrument })
+		if i < 0 {
+			slog.Warn("margin closeout deferred: no current price",
+				"broker", br.id, "account", act.id, "instrument", pos.instrument, "time", at)
+			return nil
+		}
+		if err := br.closePosition(f.bars[i], act, pos, reasonMarginCloseout, pos.markPrice); err != nil {
 			return err
 		}
 		if status, err = policy(act); err != nil {
@@ -408,7 +489,9 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 // A market order fills at the open. A resting order waits for the bar to trade
 // through its price and fills there, or at the open when the bar gaps past it
 // (nothing traded at the price). A strategy's order never fills on the bar
-// that produced it; the broker's own exits may, but never on an earlier one.
+// that produced it, nor on any bar that opened before the order was decided,
+// on any instrument; the broker's own exits may fill on the bar that placed
+// them, but never on an earlier one.
 //
 // Which side of the bar triggers a resting order follows from what it does: a
 // buy limit and a sell stop wait for the price to fall, a sell limit and a buy
@@ -417,7 +500,7 @@ func (o *order) execution(b bar) (price, bool) {
 	if o.state != stateSubmitted || o.instrument != b.instrument {
 		return 0, false
 	}
-	if o.reason == reasonStrategy && !b.After(o.Time) || b.Before(o.Time) {
+	if o.reason == reasonStrategy && (!b.After(o.Time) || b.Before(o.decidedAt)) || b.Before(o.Time) {
 		return 0, false
 	}
 	switch o.orderType {

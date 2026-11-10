@@ -19,7 +19,7 @@ type account struct {
 	positions map[string]*position
 	trades    []trade // closed positions, in the order they closed
 
-	closedOutAt time.Time // the bar of the latest margin closeout; zero if none
+	closedOutAt time.Time // availability of the frame of the latest margin closeout; zero if none
 }
 
 func newAccount(id string, balance money) *account {

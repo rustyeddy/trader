@@ -157,7 +157,7 @@ func brokerOpen(accountID string) *order {
 
 // fillBar is a EURUSD bar on day d (0 = testStart) opening at o.
 func fillBar(d int, o price) bar {
-	return bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, h: o + 100, l: o, c: o + 100}}
+	return daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, h: o + 100, l: o, c: o + 100}})
 }
 
 // submitted is an order the broker has accepted on day 0.
@@ -467,9 +467,11 @@ func TestBroker_OnBar_AppliesFillsToTheOrdersOwnAccount(t *testing.T) {
 func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
-	act.closedOutAt = testStart
+	closeoutBar := fillBar(0, eurusd1_10)
+	act.closedOutAt = closeoutBar.availableAt
 
 	o := brokerOpen("a")
+	o.decidedAt = closeoutBar.availableAt // decided on the closeout bar
 	err := br.submit(context.Background(), o)
 
 	require.ErrorIs(t, err, errCloseoutGuard)
@@ -479,8 +481,9 @@ func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	// A close is still allowed, and so is an open on a later bar.
 	cl := &order{Time: testStart, accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder}
 	require.NoError(t, br.submit(context.Background(), cl))
+	next := fillBar(1, eurusd1_10)
 	later := brokerOpen("a")
-	later.Time = testStart.AddDate(0, 0, 1)
+	later.Time, later.decidedAt = next.Time, next.availableAt // decided on the next bar
 	require.NoError(t, br.submit(context.Background(), later))
 }
 
@@ -496,7 +499,7 @@ func TestBroker_OnBar_CloseoutBlocksTheStrategyOpenOnTheSameBar(t *testing.T) {
 	require.Empty(t, act.positions, "liquidated")
 
 	o := brokerOpen("a")
-	o.Time = b.Time
+	o.Time, o.decidedAt = b.Time, b.availableAt // decided on the closeout bar
 	require.ErrorIs(t, br.submit(context.Background(), o), errCloseoutGuard)
 }
 

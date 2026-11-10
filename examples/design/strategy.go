@@ -140,3 +140,47 @@ func (e *emax) stopFor(entry price, d direction) price {
 	}
 	return entry - dist
 }
+
+// emaxEach trades EMAX on each of several instruments through one trader,
+// with separate EMA and signal state per instrument: one emax for each, built
+// from the same settings. A bar is handed to its instrument's emax alone, so
+// it returns at most one order, and a frame may produce one per instrument.
+// Bars of instruments it was not given are not traded.
+type emaxEach struct {
+	id          string
+	instruments []string
+	short, long int
+	stopPct     rate
+
+	byInstrument map[string]*emax
+}
+
+func (s *emaxEach) name() string {
+	return s.id
+}
+
+func (s *emaxEach) init() error {
+	if len(s.instruments) == 0 {
+		return fmt.Errorf("emax each: no instruments")
+	}
+	s.byInstrument = make(map[string]*emax, len(s.instruments))
+	for _, inst := range s.instruments {
+		if _, dup := s.byInstrument[inst]; dup {
+			return fmt.Errorf("emax each: instrument %q given twice", inst)
+		}
+		e := &emax{id: s.id + "/" + inst, short: s.short, long: s.long, stopPct: s.stopPct}
+		if err := e.init(); err != nil {
+			return fmt.Errorf("emax each %s: %w", inst, err)
+		}
+		s.byInstrument[inst] = e
+	}
+	return nil
+}
+
+func (s *emaxEach) onBar(ctx context.Context, b bar) *order {
+	e, ok := s.byInstrument[b.instrument]
+	if !ok {
+		return nil
+	}
+	return e.onBar(ctx, b)
+}

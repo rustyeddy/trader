@@ -836,7 +836,7 @@ func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 	r := newEMAXRun(t, usd(10000))
 	prices := scenarioPrices(t, "c-reversal")
 	next := func(day int, o, h, l, c price) bar {
-		return bar{instrument: "EURUSD", Time: jan(day), ohlc: ohlc{o: o, h: h, l: l, c: c, v: 1000}}
+		return daily(bar{instrument: "EURUSD", Time: jan(day), ohlc: ohlc{o: o, h: h, l: l, c: c, v: 1000}})
 	}
 	prices.data = append(slices.Clone(prices.data[:9]),
 		next(15, 110687, 112050, 110650, 112000),
