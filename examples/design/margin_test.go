@@ -201,6 +201,50 @@ func TestBroker_OnFrame_CompleteCloseoutClosesEverything(t *testing.T) {
 	assert.Equal(t, usd(1000), act.balance)
 }
 
+// A complete closeout that defers a position without a price stays owed,
+// though closing the first position restored margin health: with $2000,
+// closing EURUSD realizes -$1000, leaving $1000 against GBPUSD's $300 of
+// margin. GBPUSD has no bar until the third frame; meanwhile every open is
+// refused, and the third frame closes GBPUSD at its price.
+func TestBroker_OnFrame_DeferredCompleteCloseoutResumesUntilEverythingIsClosed(t *testing.T) {
+	br, act := liquidationBroker(t, usd(2000))
+	br.completeCloseout = true
+	ctx := context.Background()
+
+	require.NoError(t, br.onBar(ctx, lossBar()))
+	require.NotContains(t, act.positions, "EURUSD")
+	require.Contains(t, act.positions, "GBPUSD", "deferred: GBPUSD had no bar")
+	require.Equal(t, usd(1000), act.balance)
+	require.True(t, act.closeoutPending)
+
+	require.NoError(t, br.onBar(ctx, fillBar(2, 110000)))
+	assert.Contains(t, act.positions, "GBPUSD", "still no GBPUSD bar")
+	o := brokerOpen("a")
+	o.Time, o.decidedAt = testStart.AddDate(0, 0, 2), testStart.AddDate(0, 0, 3) // decided after the closeout's frame
+	err := br.submit(ctx, o)
+	require.ErrorIs(t, err, errCloseoutGuard, "the closeout is still owed")
+
+	gbp := daily(bar{instrument: "GBPUSD", Time: testStart.AddDate(0, 0, 3), ohlc: ohlc{o: 149000, h: 149000, l: 148000, c: 148000}})
+	require.NoError(t, br.onBar(ctx, gbp))
+	assert.Empty(t, act.positions)
+	assert.False(t, act.closeoutPending)
+	require.Len(t, act.trades, 2)
+	assert.Equal(t, price(148000), act.trades[1].exitPrice, "closed at GBPUSD's own bar")
+	assert.Equal(t, usd(800), act.balance, "10000 units lost 0.02000")
+}
+
+// A progressive closeout that defers is not owed: the next frame judges the
+// account afresh, and a healthy account keeps its position.
+func TestBroker_OnFrame_DeferredProgressiveCloseoutIsJudgedAfresh(t *testing.T) {
+	br, act := liquidationBroker(t, usd(2000))
+	br.closeout = func(a *account) (*position, error) { return a.positions["GBPUSD"], nil } // GBPUSD first: deferred
+	ctx := context.Background()
+
+	require.NoError(t, br.onBar(ctx, lossBar()))
+	require.Len(t, act.positions, 2)
+	assert.False(t, act.closeoutPending)
+}
+
 func TestBroker_OnBar_CompleteCloseoutNeedsALiquidationToStart(t *testing.T) {
 	br, act := liquidationBroker(t, usd(10000))
 	br.completeCloseout = true

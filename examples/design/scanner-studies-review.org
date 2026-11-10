@@ -196,9 +196,13 @@ Implemented in #575 (decisions on the issue):
   fills, instrument by instrument, marks at the closes and checks margin once.
   A fill is admitted against what is known when it happens, never against a
   close. =broker.onBar= is a one-bar frame, so EMAX is unchanged.
-- *A frame's bars must share an opening time and carry availability.* Mixed
-  opening times (H1 and D1 bars available together) are refused: ordering their
-  fills needs an intrabar time policy that does not exist.
+- *One provider, one timeframe, frames grouped by availability.* A frame's
+  bars must share an opening time and carry availability, and a frame may not
+  open before the previous frame was available (=errFrameOverlap=). Aligned
+  bars always satisfy both. Offset or overlapping bars (several timeframes,
+  providers, daily boundaries or sessions) are refused: they would margin a
+  fill against another instrument's close from after the fill. Supporting them
+  is deferred until there is a real use case.
 - *One Trader, one strategy.* =trader.onFrame= advances the Broker once, then
   hands each bar to the strategy in instrument order and submits each order as
   it comes, so competing opens are sized in instrument order against the margin
@@ -206,12 +210,17 @@ Implemented in #575 (decisions on the issue):
   slice of Orders and no position snapshot: nothing needed them.
 - *Fill eligibility.* The Trader stamps =order.decidedAt= with the availability
   of the bar the strategy saw; a strategy order cannot fill on a bar that opened
-  before it. The closeout guard compares =decidedAt= with =closedOutAt=, which is
+  before it. With aligned bars this is the same as filling after the order's
+  own bar; it stays as the decision clock. The closeout guard compares =decidedAt= with =closedOutAt=, which is
   now the frame's availability, so a closeout blocks opens from every bar of
   its frame.
 - *No liquidation at a stale mark.* Margin is evaluated on latest marks, but a
   closeout that picks a position without a bar in the frame stops there and
-  resumes on a later frame. Residual exposure: until that instrument's next bar,
+  resumes on a later frame. A complete closeout stays owed while deferred
+  (=account.closeoutPending=): it resumes on later frames even if the first
+  closes restored margin health, and the submit guard refuses opens until no
+  position is left. A progressive closeout is judged afresh on each frame.
+  Residual exposure: until that instrument's next bar,
   the account can stay below the closeout level with no position closed. An
   executable-quote policy, and whether a current position should be closed
   instead, remain open.

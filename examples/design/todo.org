@@ -181,6 +181,9 @@ records the result. See =order-tests.org= for the scenarios.
   (#575: the margin check runs once per frame, after every bar in it is marked,
   and a closeout that picks a position with no bar in the frame stops there
   instead of filling at the old mark; =TestBroker_OnFrame_DefersALiquidationWithoutACurrentPrice=.
+  A deferred complete closeout stays owed until every position is closed. Frames
+  must not overlap: one provider and one timeframe only, so bars line up;
+  several timeframes or providers are deferred until a real use case.
   Still open: an executable-quote policy for instruments without a current bar,
   and whether to close a current position instead while one is deferred.)
   This is *deferred*, not a blocker for the single-instrument prototype.

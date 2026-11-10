@@ -221,7 +221,7 @@ func TestBroker_OnBar_IgnoresOtherInstrumentsAndUntouchedLimits(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), other))
 	assert.Equal(t, stateSubmitted, market.state, "a bar for another instrument does not fill it")
 
-	require.NoError(t, br.onBar(context.Background(), fillBar(1, 111500)))
+	require.NoError(t, br.onBar(context.Background(), fillBar(2, 111500)))
 	assert.Equal(t, stateFilled, market.state)
 	assert.Equal(t, stateSubmitted, limit.state, "the limit is below the bar: not touched")
 	require.Len(t, br.orders["EURUSD"], 2)

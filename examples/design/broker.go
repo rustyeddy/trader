@@ -26,6 +26,10 @@ type broker struct {
 	// policy chooses, until the margin policy no longer demands more.
 	completeCloseout bool
 
+	// clock is the availability of the latest frame the broker advanced
+	// through; zero before the first. Every account is valued as of then.
+	clock time.Time
+
 	// completed keeps every order that has reached a terminal state (filled,
 	// rejected by the broker or cancelled), in the order it happened, for the
 	// journal. Only complete appends to it. The broker's own liquidations are in
@@ -65,7 +69,9 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 		// frame; later re-entry rules are a future policy. Both times are
 		// availabilities, the clock decisions are made on. An open with no
 		// decision time counts as decided before any closeout.
-		if !act.closedOutAt.IsZero() && !o.decidedAt.After(act.closedOutAt) {
+		// While a complete closeout is still waiting on a price, every open is
+		// refused: the closeout would liquidate it as soon as it filled.
+		if act.closeoutPending || !act.closedOutAt.IsZero() && !o.decidedAt.After(act.closedOutAt) {
 			return reject(o, o.Time, "%w: account %s at %s",
 				errCloseoutGuard, o.accountID, act.closedOutAt.Format(time.DateOnly))
 		}
@@ -214,6 +220,11 @@ func (br *broker) onFrame(ctx context.Context, f frame) error {
 	if err := checkFrame(f); err != nil {
 		return err
 	}
+	if f.bars[0].Before(br.clock) {
+		return fmt.Errorf("%w: frame at %s opens at %s, before %s, when the previous frame was available",
+			errFrameOverlap, f.availableAt.Format(time.RFC3339), f.bars[0].Format(time.RFC3339), br.clock.Format(time.RFC3339))
+	}
+	br.clock = f.availableAt
 	atOpen := make([]bar, len(f.bars))
 	for i, b := range f.bars {
 		br.expire(b)
@@ -254,6 +265,14 @@ func (br *broker) mark(b bar) {
 		act.mark(b)
 	}
 }
+
+// errFrameOverlap reports a frame whose bars opened before the previous frame
+// was available. The broker supports one provider and one timeframe, whose
+// bars line up: every frame then opens at or after the previous frame's
+// availability. Overlapping bars (mixed timeframes, providers or sessions)
+// would value fills against marks from after the fill; they are deferred until
+// there is a use case.
+var errFrameOverlap = errors.New("frame overlaps the previous one")
 
 // checkFrame refuses a frame the broker cannot advance through in a defined
 // order: it must hold at least one bar, every bar must carry the frame's
@@ -313,6 +332,11 @@ func (br *broker) expire(b bar) {
 // closedOutAt is the frame's availability, the clock decisions are made on, so
 // the guard in submit refuses every open decided on this frame, whichever of
 // its bars produced it.
+//
+// A complete closeout that defers a position stays pending on the account: it
+// resumes on every later frame, even when the margin policy is satisfied by
+// then, until no position is left. A progressive closeout is judged afresh on
+// each frame.
 func (br *broker) enforceMargin(ctx context.Context, f frame, act *account) error {
 	at := f.bars[0].Time // the frame's bars share an opening time (checkFrame)
 	policy, pick := br.margin, br.closeout
@@ -330,27 +354,32 @@ func (br *broker) enforceMargin(ctx context.Context, f frame, act *account) erro
 	if status == marginWarning {
 		slog.Warn("margin warning", "broker", br.id, "account", act.id, "time", at)
 	}
-	if status != marginLiquidate {
+	switch {
+	case status == marginLiquidate:
+		slog.Warn("margin closeout", "broker", br.id, "account", act.id, "time", at)
+		act.closedOutAt = f.availableAt
+		br.cancelWhere(at, "margin closeout", func(o *order) bool {
+			return o.accountID == act.id && o.action == open
+		})
+	case act.closeoutPending:
+		slog.Warn("margin closeout resumed", "broker", br.id, "account", act.id, "time", at)
+	default:
 		return nil
 	}
-
-	slog.Warn("margin closeout", "broker", br.id, "account", act.id, "time", at)
-	act.closedOutAt = f.availableAt
-	br.cancelWhere(at, "margin closeout", func(o *order) bool {
-		return o.accountID == act.id && o.action == open
-	})
 	for status == marginLiquidate || br.completeCloseout {
 		pos, err := pick(act)
 		if err != nil {
 			return err
 		}
 		if pos == nil {
+			act.closeoutPending = false
 			return nil // nothing left to close
 		}
 		i := slices.IndexFunc(f.bars, func(b bar) bool { return b.instrument == pos.instrument })
 		if i < 0 {
 			slog.Warn("margin closeout deferred: no current price",
 				"broker", br.id, "account", act.id, "instrument", pos.instrument, "time", at)
+			act.closeoutPending = br.completeCloseout
 			return nil
 		}
 		if err := br.closePosition(f.bars[i], act, pos, reasonMarginCloseout, pos.markPrice); err != nil {

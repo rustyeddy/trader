@@ -224,35 +224,38 @@ func TestTrader_OnFrame_SizesAnOpenAgainstTheWholeFrame(t *testing.T) {
 	assert.Equal(t, stateSubmitted, strat.made[0].state)
 }
 
-// A GBPUSD order made on EURUSD's 10:00 bar is decided when that bar is
-// complete, at 11:00. GBPUSD's bar opening at 10:30 is later than the EURUSD
-// bar but earlier than the decision, so the order waits for the 11:30 bar and
-// fills at its open, 1.30200.
-func TestTrader_OnFrame_ACrossInstrumentOrderNeverFillsBeforeItWasDecided(t *testing.T) {
+// One provider and one timeframe give bars that line up, so a frame never
+// opens before the previous one was available. Offset bars would let a GBPUSD
+// open at 10:30 be margined against EURUSD's 11:00 close, a price from after
+// the fill, so the broker refuses the frame before anything executes.
+func TestBroker_OnFrame_RefusesAFrameOverlappingThePreviousOne(t *testing.T) {
 	captureLogs(t)
-	strat := openOn("EURUSD", "GBPUSD", 130000, 128700)
-	tr, act := pairTrader(usd(10000), strat)
+	br := newBroker("t")
+	act := br.addAccount("a", usd(10000))
+	act.positions["EURUSD"] = longAt("EURUSD", 10000, 110000, 110000)
+	o := &order{accountID: "a", instrument: "GBPUSD", direction: long, action: open, orderType: marketOrder,
+		price: 130000, stopLoss: 128700, Time: hour(-1), decidedAt: hour(0)}
+	require.NoError(t, br.submit(context.Background(), o))
 
+	require.NoError(t, br.onFrame(context.Background(), pairFrame(hbar("EURUSD", hour(0), 110000, 100000))))
 	half := 30 * time.Minute
-	eur := &marketData{instrument: "EURUSD", data: []bar{hbar("EURUSD", hour(0), 110000, 110000)}}
-	gbp := &marketData{instrument: "GBPUSD", data: []bar{
-		hbar("GBPUSD", hour(0).Add(-half), 130000, 130000),
-		hbar("GBPUSD", hour(0).Add(half), 130100, 130100),
-		hbar("GBPUSD", hour(1).Add(half), 130200, 130200),
-	}}
-	for f, err := range frames(mergedBars(context.Background(), eur, gbp)) {
-		require.NoError(t, err)
-		require.NoError(t, tr.onFrame(context.Background(), f))
-	}
+	err := br.onFrame(context.Background(), pairFrame(hbar("GBPUSD", hour(0).Add(half), 130000, 130000)))
 
-	require.Len(t, strat.made, 1)
-	o := strat.made[0]
-	assert.Equal(t, hour(1), o.decidedAt, "EURUSD's 10:00 bar was available at 11:00")
-	assert.Equal(t, stateFilled, o.state)
-	assert.Equal(t, hour(1).Add(half), o.Time, "filled on the 11:30 bar, not the 10:30 one")
-	assert.Equal(t, price(130200), o.fillPrice)
-	require.Contains(t, act.positions, "GBPUSD")
-	assert.Equal(t, hour(1).Add(half), act.positions["GBPUSD"].entryTime)
+	require.ErrorIs(t, err, errFrameOverlap)
+	assert.Contains(t, err.Error(), "opens at 2010-01-04T10:30:00Z, before 2010-01-04T11:00:00Z")
+	assert.Equal(t, stateSubmitted, o.state, "nothing executes on a refused frame")
+	assert.Equal(t, hour(1), br.clock, "the refused frame does not advance the broker")
+}
+
+// A frame may open exactly when the previous one became available, or later
+// after a gap: those are the aligned bars the broker supports.
+func TestBroker_OnFrame_AcceptsContiguousAndGappedFrames(t *testing.T) {
+	captureLogs(t)
+	br := newBroker("t")
+	for _, h := range []int{0, 1, 3} {
+		require.NoError(t, br.onFrame(context.Background(), pairFrame(hbar("EURUSD", hour(h), 110000, 110000))))
+	}
+	assert.Equal(t, hour(4), br.clock)
 }
 
 // A closeout triggered by one instrument's bar blocks an open decided on

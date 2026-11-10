@@ -20,6 +20,9 @@ type account struct {
 	trades    []trade // closed positions, in the order they closed
 
 	closedOutAt time.Time // availability of the frame of the latest margin closeout; zero if none
+	// closeoutPending is set while a complete closeout has positions left that
+	// had no price in the frame; see enforceMargin.
+	closeoutPending bool
 }
 
 func newAccount(id string, balance money) *account {
