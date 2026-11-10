@@ -7,6 +7,12 @@ var instruments = map[string]*instrument{
 		minUnits:   1,
 		unitStep:   1,
 	},
+	"GBPUSD": {
+		symbol:     "GBPUSD",
+		marginRate: rateFivePercent, // 20:1 leverage
+		minUnits:   1,
+		unitStep:   1,
+	},
 }
 
 // rate is a fixed-point ratio (a margin rate, a risk fraction) held as an
@@ -18,8 +24,9 @@ type rate int64
 const rateScale int64 = 1_000_000
 
 const (
-	rateOnePercent rate = 10_000
-	rateTwoPercent rate = 20_000
+	rateOnePercent  rate = 10_000
+	rateTwoPercent  rate = 20_000
+	rateFivePercent rate = 50_000
 )
 
 type instrument struct {

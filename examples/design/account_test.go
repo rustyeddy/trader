@@ -31,8 +31,15 @@ func TestAccount_MarginAvailable_NoPositionsIsTheBalance(t *testing.T) {
 // registerInstrument adds a test instrument to the registry for one test.
 func registerInstrument(t *testing.T, inst *instrument) {
 	t.Helper()
+	was, ok := instruments[inst.symbol]
 	instruments[inst.symbol] = inst
-	t.Cleanup(func() { delete(instruments, inst.symbol) })
+	t.Cleanup(func() {
+		if ok {
+			instruments[inst.symbol] = was
+		} else {
+			delete(instruments, inst.symbol)
+		}
+	})
 }
 
 // testInstrument is EURUSD-like with overridable limits.

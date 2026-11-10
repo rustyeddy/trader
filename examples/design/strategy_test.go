@@ -12,6 +12,13 @@ import (
 // testStart is the fixed timestamp of the first test bar (a Monday).
 var testStart = time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
 
+// daily gives a hand-built bar the availability of a daily bar: complete a day
+// after it opened. The trading path refuses a bar without one.
+func daily(b bar) bar {
+	b.availableAt = b.AddDate(0, 0, 1)
+	return b
+}
+
 // closes builds consecutive daily test bars for "TEST" with the given closes.
 func closes(vals ...float64) []bar {
 	bars := make([]bar, len(vals))
@@ -21,6 +28,7 @@ func closes(vals ...float64) []bar {
 			Time:       testStart.AddDate(0, 0, i),
 			ohlc:       ohlc{o: price(v * priceScale), h: price(v * priceScale), l: price(v * priceScale), c: price(v * priceScale)},
 		}
+		bars[i] = daily(bars[i])
 	}
 	return bars
 }

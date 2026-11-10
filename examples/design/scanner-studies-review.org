@@ -158,7 +158,7 @@ hazard.
 - Partitioning must keep the invariant in =single-vs-multi-trader.org=: a shared
   Broker has one market-event advancement path. =trader.onBar= advances the
   Broker itself, so fanning one bar out to two Traders would advance it twice.
-  How to compose this is open (decision 7).
+  #575 decided it: one Trader, one advancement per frame.
 - Meet the fill-time requirement across instruments, moved here from #573, taking
   availability only from the delivered bar. Decide whether the Broker advances
   per frame, using #573's =frames=.
@@ -190,6 +190,41 @@ hazard.
   =parsePrice= requires five decimals, which rules out JPY pairs at their usual
   three.
 
+Implemented in #575 (decisions on the issue):
+- *One Broker advancement per frame.* =broker.onFrame= marks every position in
+  the frame at its bar's open, runs the frame's at-open fills and then its range
+  fills, instrument by instrument, marks at the closes and checks margin once.
+  A fill is admitted against what is known when it happens, never against a
+  close. =broker.onBar= is a one-bar frame, so EMAX is unchanged.
+- *One provider, one timeframe, frames grouped by availability.* A frame's
+  bars must share an opening time and carry availability, and a frame may not
+  open before the previous frame was available (=errFrameOverlap=). Aligned
+  bars always satisfy both. Offset or overlapping bars (several timeframes,
+  providers, daily boundaries or sessions) are refused: they would margin a
+  fill against another instrument's close from after the fill. Supporting them
+  is deferred until there is a real use case.
+- *One Trader, one strategy.* =trader.onFrame= advances the Broker once, then
+  hands each bar to the strategy in instrument order and submits each order as
+  it comes, so competing opens are sized in instrument order against the margin
+  the earlier ones reserved. =emaxEach= keeps one =emax= per instrument. No
+  slice of Orders and no position snapshot: nothing needed them.
+- *Fill eligibility.* The Trader stamps =order.decidedAt= with the availability
+  of the bar the strategy saw; a strategy order cannot fill on a bar that opened
+  before it. With aligned bars this is the same as filling after the order's
+  own bar; it stays as the decision clock. The closeout guard compares =decidedAt= with =closedOutAt=, which is
+  now the frame's availability, so a closeout blocks opens from every bar of
+  its frame.
+- *No liquidation at a stale mark.* Margin is evaluated on latest marks, but a
+  closeout that picks a position without a bar in the frame stops there and
+  resumes on a later frame. A complete closeout stays owed while deferred
+  (=account.closeoutPending=): it resumes on later frames even if the first
+  closes restored margin health, and the submit guard refuses opens until no
+  position is left. A progressive closeout is judged afresh on each frame.
+  Residual exposure: until that instrument's next bar,
+  the account can stay below the closeout level with no position closed. An
+  executable-quote policy, and whether a current position should be closed
+  instead, remain open.
+
 ** #576 — Shared runner / Dataset API decision
 - After the three examples, compare their iteration paths. Extract only
   genuine shared concerns (cancellation, data error delivery, deterministic
@@ -203,22 +238,20 @@ hazard.
 
 * Open decisions (do not resolve speculatively)
 1. Do strategy callbacks need a read-only Position/Account snapshot? EMAX
-   currently intentionally tracks signal state, not exposure.
+   currently intentionally tracks signal state, not exposure. #575 needed none.
 2. How is frame completeness decided for live data? Replay frames, missing bars
    and carried values were decided in #573.
-3. Should multiple Orders be returned from one callback, and in what stable
-   priority/order are they admitted for margin?
+3. Should multiple Orders be returned from one callback? #575 kept one per
+   bar; orders are admitted for margin in instrument order within a frame.
 4. What is the availability rule for weekly and session-based bars, and how does
    availability relate to Broker execution?
-5. At what valuation point are margin, equity and sizing evaluated across
-   instruments, and how is execution safely inhibited when an instrument has no
-   current executable quote, especially during portfolio margin liquidation?
+5. How is execution safely done when an instrument has no current executable
+   quote, especially during portfolio margin liquidation? #575 set the valuation
+   points (opens for fills, closes for margin and sizing, once per frame) and
+   defers such a liquidation; the quote policy is still open.
 6. What is the minimal dataset ownership/coverage contract before bringing
    over the legacy marketdata code?
-7. How does a two-symbol Strategy keep one Broker advancement path: one Trader
-   with per-instrument state, each bar routed to exactly one Trader, or Broker
-   advancement moved out of =trader.onBar=?
-8. What do recorded fill timestamps mean for range-triggered fills and margin
+7. What do recorded fill timestamps mean for range-triggered fills and margin
    closeouts?
 
 * Gates

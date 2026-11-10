@@ -55,7 +55,7 @@ func TestBroker_OnBar_TakeProfitClosesAtTheTargetAndCancelsTheStop(t *testing.T)
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 	stop := br.orders["EURUSD"][0]
 
-	rally := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 111000, h: 112300, l: 110500, c: 112100}}
+	rally := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 111000, h: 112300, l: 110500, c: 112100}})
 	require.NoError(t, br.onBar(ctx, rally))
 
 	assert.Empty(t, act.positions)
@@ -79,7 +79,7 @@ func TestBroker_OnBar_TakeProfitGapFillsAtTheBetterOpen(t *testing.T) {
 	op := submitWithTarget(t, br, long, 112000)
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 
-	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 112500, h: 113000, l: 112200, c: 112800}}
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 112500, h: 113000, l: 112200, c: 112800}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	tp := br.completed[len(br.completed)-2]
@@ -96,7 +96,7 @@ func TestBroker_OnBar_StopCancelsTheTarget(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 	target := br.orders["EURUSD"][1]
 
-	crash := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 109500, h: 109600, l: 108000, c: 108200}}
+	crash := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 109500, h: 109600, l: 108000, c: 108200}})
 	require.NoError(t, br.onBar(ctx, crash))
 
 	assert.Empty(t, act.positions)
@@ -112,7 +112,7 @@ func TestBroker_OnBar_BarReachingBothStopAndTargetTakesTheStop(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 	target := br.orders["EURUSD"][1]
 
-	wide := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 110500, h: 112500, l: 108000, c: 110000}}
+	wide := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 110500, h: 112500, l: 108000, c: 110000}})
 	require.NoError(t, br.onBar(ctx, wide))
 
 	assert.Empty(t, act.positions)
@@ -148,7 +148,7 @@ func TestBroker_OnBar_ShortTakeProfit(t *testing.T) {
 	submitWithTarget(t, br, short, 108000) // entry 1.10000, stop 1.11100
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 
-	drop := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 109000, h: 109500, l: 107900, c: 108100}}
+	drop := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 109000, h: 109500, l: 107900, c: 108100}})
 	require.NoError(t, br.onBar(ctx, drop))
 
 	assert.Empty(t, act.positions)
@@ -235,7 +235,7 @@ func TestBroker_OnBar_TargetAlreadyReachedAtTheOpenBeatsALaterStop(t *testing.T)
 			stop := br.orders["EURUSD"][0]
 			require.Equal(t, tt.stopP, stop.price)
 
-			require.NoError(t, br.onBar(ctx, bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: tt.bar}))
+			require.NoError(t, br.onBar(ctx, daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: tt.bar})))
 
 			assert.Empty(t, act.positions)
 			tp := br.completed[len(br.completed)-2]
@@ -257,7 +257,7 @@ func TestBroker_OnBar_StopAlreadyReachedAtTheOpenBeatsALaterTarget(t *testing.T)
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 	target := br.orders["EURUSD"][1]
 
-	gap := bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 108000, h: 112500, l: 107500, c: 111000}}
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 108000, h: 112500, l: 107500, c: 111000}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	assert.Empty(t, act.positions)

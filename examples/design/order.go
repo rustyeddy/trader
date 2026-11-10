@@ -113,6 +113,12 @@ type order struct {
 	// one. The zero time means good until cancelled.
 	expires time.Time
 
+	// decidedAt is when the strategy decided on the order: the availability of
+	// the bar it saw, stamped by the trader. The order may not fill on a bar
+	// that opened before then, whatever the instrument. Zero only on orders
+	// made outside the trader, such as the broker's own exits.
+	decidedAt time.Time
+
 	// Time is the simulated time of the step the order is on: the bar being
 	// processed. The strategy sets it on a new order and record moves it, so it
 	// is when the order last changed. The managed clock for live trading will

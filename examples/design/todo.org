@@ -78,7 +78,9 @@ records the result. See =order-tests.org= for the scenarios.
   (bid/ask/trade; spread provenance as needed) in an observation.
   (=bar= has instrument, opening time, =availableAt= and OHLCV; the price basis
   is still open. Delivery is done, #573: =mergedBars= and =frames=; see
-  =scanner-studies-review.org=. Multi-order strategies remain for #575.)
+  =scanner-studies-review.org=. Trading on frames is done, #575: one broker
+  advancement and one margin check per frame, per-instrument =emax= state via
+  =emaxEach=, 0 or 1 order per bar and so 0..n per frame.)
 - Compare =OnBar(bar)= versus =OnBars(frame)= with a single- and two-symbol
   example. Decide whether frame contains only fresh bars or carried values.
 - Define deterministic time ordering, simultaneous timestamps, missing
@@ -126,6 +128,8 @@ records the result. See =order-tests.org= for the scenarios.
   (working today: sized from risk and the strategy's stop, filled by the
   simulated broker, and validated end to end over the six scenarios above).
 - Cross-instrument strategy: two symbols, including missing bar behavior.
+  (=emaxEach= over EURUSD and GBPUSD through one trader, broker and account:
+  =twosymbol_test.go=, #575.)
 - ATR study or scanner: results without broker/account or forced order.
   (ATR study: focused tests in =study_test.go=, #572; scanner: =scanner_test.go=,
   #574.)
@@ -174,6 +178,14 @@ records the result. See =order-tests.org= for the scenarios.
   instrument market closures, deterministic timestamp grouping, and
   intrabar trigger/closeout ordering. Add a regression with EURUSD and
   GBPUSD at different observation times that verifies the intended behavior.
+  (#575: the margin check runs once per frame, after every bar in it is marked,
+  and a closeout that picks a position with no bar in the frame stops there
+  instead of filling at the old mark; =TestBroker_OnFrame_DefersALiquidationWithoutACurrentPrice=.
+  A deferred complete closeout stays owed until every position is closed. Frames
+  must not overlap: one provider and one timeframe only, so bars line up;
+  several timeframes or providers are deferred until a real use case.
+  Still open: an executable-quote policy for instruments without a current bar,
+  and whether to close a current position instead while one is deferred.)
   This is *deferred*, not a blocker for the single-instrument prototype.
 - [X] The broker retains every order that leaves its queue in =broker.completed= (completion order) including its own liquidation orders (=broker.closeouts()= filters them by reason). Orders rejected before submit (sizing) never reach the broker and stay with the trader.
 - [X] Protective stops are resting orders the broker owns: when an open fills with a stop, the broker queues a =stopOrder= close (=reasonStopLoss=, direction of the position it protects) alongside any other waiting order. Each bar market orders fill at the open first, then stop orders trigger on the bar's range (a long when the low reaches the stop, a short when the high does), at the stop or at the open on a gap, before positions are valued and the margin rules run. A stop can trigger on its entry bar. Any filled close (strategy, stop or margin closeout) cancels the position's other resting stops (=stateCancelled=, "position closed"). No trailing stops, slippage or spread yet.

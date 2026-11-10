@@ -153,6 +153,17 @@ func liquidationBroker(t *testing.T, balance money) (*broker, *account) {
 // A bar that marks EURUSD at 1.10000 (the close is the open + 100).
 func lossBar() bar { return fillBar(1, 109900) }
 
+// lossFrame is lossBar with a GBPUSD bar at the same time, flat at 1.50, plus
+// a flat bar for each extra instrument, so every position has a current price.
+func lossFrame(extra ...string) frame {
+	b := lossBar()
+	f := frame{availableAt: b.availableAt, bars: []bar{b}}
+	for _, inst := range append([]string{"GBPUSD"}, extra...) {
+		f.bars = append(f.bars, daily(bar{instrument: inst, Time: b.Time, ohlc: ohlc{o: 150000, h: 150000, l: 150000, c: 150000}}))
+	}
+	return f
+}
+
 func TestBroker_OnBar_WarnsButClosesNothing(t *testing.T) {
 	br, act := liquidationBroker(t, usd(2400))
 	logs := captureLogs(t)
@@ -180,14 +191,58 @@ func TestBroker_OnBar_ProgressiveCloseoutStopsOnceHealthyEnough(t *testing.T) {
 	assert.Equal(t, usd(1000), act.balance, "the loss was booked")
 }
 
-func TestBroker_OnBar_CompleteCloseoutClosesEverything(t *testing.T) {
+func TestBroker_OnFrame_CompleteCloseoutClosesEverything(t *testing.T) {
 	br, act := liquidationBroker(t, usd(2000))
 	br.completeCloseout = true
 
-	require.NoError(t, br.onBar(context.Background(), lossBar()))
+	require.NoError(t, br.onFrame(context.Background(), lossFrame()))
 
 	assert.Empty(t, act.positions)
 	assert.Equal(t, usd(1000), act.balance)
+}
+
+// A complete closeout that defers a position without a price stays owed,
+// though closing the first position restored margin health: with $2000,
+// closing EURUSD realizes -$1000, leaving $1000 against GBPUSD's $300 of
+// margin. GBPUSD has no bar until the third frame; meanwhile every open is
+// refused, and the third frame closes GBPUSD at its price.
+func TestBroker_OnFrame_DeferredCompleteCloseoutResumesUntilEverythingIsClosed(t *testing.T) {
+	br, act := liquidationBroker(t, usd(2000))
+	br.completeCloseout = true
+	ctx := context.Background()
+
+	require.NoError(t, br.onBar(ctx, lossBar()))
+	require.NotContains(t, act.positions, "EURUSD")
+	require.Contains(t, act.positions, "GBPUSD", "deferred: GBPUSD had no bar")
+	require.Equal(t, usd(1000), act.balance)
+	require.True(t, act.closeoutPending)
+
+	require.NoError(t, br.onBar(ctx, fillBar(2, 110000)))
+	assert.Contains(t, act.positions, "GBPUSD", "still no GBPUSD bar")
+	o := brokerOpen("a")
+	o.Time, o.decidedAt = testStart.AddDate(0, 0, 2), testStart.AddDate(0, 0, 3) // decided after the closeout's frame
+	err := br.submit(ctx, o)
+	require.ErrorIs(t, err, errCloseoutGuard, "the closeout is still owed")
+
+	gbp := daily(bar{instrument: "GBPUSD", Time: testStart.AddDate(0, 0, 3), ohlc: ohlc{o: 149000, h: 149000, l: 148000, c: 148000}})
+	require.NoError(t, br.onBar(ctx, gbp))
+	assert.Empty(t, act.positions)
+	assert.False(t, act.closeoutPending)
+	require.Len(t, act.trades, 2)
+	assert.Equal(t, price(148000), act.trades[1].exitPrice, "closed at GBPUSD's own bar")
+	assert.Equal(t, usd(800), act.balance, "10000 units lost 0.02000")
+}
+
+// A progressive closeout that defers is not owed: the next frame judges the
+// account afresh, and a healthy account keeps its position.
+func TestBroker_OnFrame_DeferredProgressiveCloseoutIsJudgedAfresh(t *testing.T) {
+	br, act := liquidationBroker(t, usd(2000))
+	br.closeout = func(a *account) (*position, error) { return a.positions["GBPUSD"], nil } // GBPUSD first: deferred
+	ctx := context.Background()
+
+	require.NoError(t, br.onBar(ctx, lossBar()))
+	require.Len(t, act.positions, 2)
+	assert.False(t, act.closeoutPending)
 }
 
 func TestBroker_OnBar_CompleteCloseoutNeedsALiquidationToStart(t *testing.T) {
@@ -199,15 +254,15 @@ func TestBroker_OnBar_CompleteCloseoutNeedsALiquidationToStart(t *testing.T) {
 	assert.Len(t, act.positions, 2, "a healthy account is left alone")
 }
 
-func TestBroker_OnBar_CloseoutOrdersAreRecordedWithTheBarTime(t *testing.T) {
+func TestBroker_OnFrame_CloseoutOrdersAreRecordedWithTheBarTime(t *testing.T) {
 	br, _ := liquidationBroker(t, usd(2000))
 	br.completeCloseout = true
-	b := lossBar()
+	f := lossFrame()
 	// Capture the orders the broker makes through the log, as it has no other
 	// record of them yet.
 	logs := captureLogs(t)
 
-	require.NoError(t, br.onBar(context.Background(), b))
+	require.NoError(t, br.onFrame(context.Background(), f))
 
 	out := logs.String()
 	assert.Contains(t, out, "cause=\"margin closeout\"")
@@ -327,11 +382,11 @@ func TestBroker_OnBar_CloseoutOrdersAreRecorded(t *testing.T) {
 	assert.Equal(t, []*order{c}, br.completed, "a closeout is also a completed order")
 }
 
-func TestBroker_OnBar_CompleteCloseoutRecordsEveryPosition(t *testing.T) {
+func TestBroker_OnFrame_CompleteCloseoutRecordsEveryPosition(t *testing.T) {
 	br, _ := liquidationBroker(t, usd(2000))
 	br.completeCloseout = true
 
-	require.NoError(t, br.onBar(context.Background(), lossBar()))
+	require.NoError(t, br.onFrame(context.Background(), lossFrame()))
 
 	require.Len(t, br.closeouts(), 2)
 	assert.Equal(t, "EURUSD", br.closeouts()[0].instrument, "worst loser first")
@@ -339,7 +394,7 @@ func TestBroker_OnBar_CompleteCloseoutRecordsEveryPosition(t *testing.T) {
 	assert.Len(t, br.completed, 2)
 }
 
-func TestBroker_OnBar_RejectedCloseoutIsKeptAsCompleted(t *testing.T) {
+func TestBroker_OnFrame_RejectedCloseoutIsKeptAsCompleted(t *testing.T) {
 	br, _ := liquidationBroker(t, usd(2000))
 	// A policy that names a position the account does not hold: the closing
 	// order is rejected, so the closeout fails.
@@ -347,7 +402,7 @@ func TestBroker_OnBar_RejectedCloseoutIsKeptAsCompleted(t *testing.T) {
 		return &position{instrument: "USDJPY", markPrice: 150000}, nil
 	}
 
-	err := br.onBar(context.Background(), lossBar())
+	err := br.onFrame(context.Background(), lossFrame("USDJPY"))
 
 	require.Error(t, err)
 	require.Len(t, br.closeouts(), 1, "the attempt is kept for diagnostics")
@@ -355,7 +410,7 @@ func TestBroker_OnBar_RejectedCloseoutIsKeptAsCompleted(t *testing.T) {
 	assert.Equal(t, br.closeouts(), br.completed, "a rejected closeout is terminal, so completed")
 }
 
-func TestBroker_OnBar_CompletedFollowsEventOrderNotQueueOrder(t *testing.T) {
+func TestBroker_OnFrame_CompletedFollowsEventOrderNotQueueOrder(t *testing.T) {
 	br, _ := liquidationBroker(t, usd(1000))
 	later := brokerOpen("a") // first in the queue, cancelled by the closeout
 	later.id, later.state, later.Time = "t-8", stateSubmitted, testStart.AddDate(0, 0, 5)
@@ -363,7 +418,7 @@ func TestBroker_OnBar_CompletedFollowsEventOrderNotQueueOrder(t *testing.T) {
 		state: stateSubmitted, Time: testStart} // second in the queue, fills first
 	br.orders = map[string][]*order{"EURUSD": {later, fills}}
 
-	require.NoError(t, br.onBar(context.Background(), lossBar()))
+	require.NoError(t, br.onFrame(context.Background(), lossFrame()))
 
 	require.Len(t, br.completed, 3)
 	assert.Same(t, fills, br.completed[0], "filled first, though second in the queue")
