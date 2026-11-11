@@ -1,11 +1,24 @@
 BIN := bin/trader
 
-.PHONY: all check test race cover vet build run clean
+# LINT_VERSION is pinned so `make lint` behaves identically for every
+# contributor and in CI, rather than silently changing behavior when a
+# new golangci-lint release adds or reconfigures linters.
+LINT_VERSION := v2.13.0
+
+.PHONY: all check tidy-check fmt-check test race cover vet lint build run clean
 
 all: check build
 
-# vet + test + race, the verification gate
-check: vet test race
+# The verification gate: the same steps, in the same order, as CI.
+check: tidy-check fmt-check vet lint test race
+
+# tidy-check fails when go.mod/go.sum are not what `go mod tidy` would
+# produce, without modifying them. CI runs this same target.
+tidy-check:
+	go mod tidy -diff
+
+fmt-check:
+	test -z "$$(gofmt -l .)"
 
 test:
 	go test ./...
@@ -18,6 +31,9 @@ cover:
 
 vet:
 	go vet ./...
+
+lint:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION) run ./...
 
 build:
 	go build -o $(BIN) ./cmd/trader
