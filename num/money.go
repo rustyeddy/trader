@@ -21,7 +21,6 @@ import "github.com/rustyeddy/trader/num/internal/fixed"
 type Money struct {
 	amount   int64
 	currency Currency
-	valid    bool
 }
 
 // ParseMoney parses exact decimal text into a Money value denominated in
@@ -38,7 +37,7 @@ func ParseMoney(s string, currency Currency) (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: currency, valid: true}, nil
+	return Money{amount: raw, currency: currency}, nil
 }
 
 // MustParseMoney is like ParseMoney but panics on error.
@@ -56,7 +55,7 @@ func MustParseMoney(s string, currency Currency) Money {
 // IsValid reports whether m has a valid currency. The Go zero value of Money,
 // and any Money left unset, reports false.
 func (m Money) IsValid() bool {
-	return m.valid && m.currency.IsValid()
+	return m.currency.IsValid()
 }
 
 // Currency returns m's denomination.
@@ -113,7 +112,7 @@ func (m Money) Cmp(o Money) (int, error) {
 // currency. Unlike Cmp, Equal never errors: differing or invalid currencies
 // simply make two Money values unequal.
 func (m Money) Equal(o Money) bool {
-	return m.valid && o.valid && m.currency.Equal(o.currency) && m.amount == o.amount
+	return m.IsValid() && o.IsValid() && m.currency.Equal(o.currency) && m.amount == o.amount
 }
 
 // Add returns m+o using checked arithmetic.
@@ -128,7 +127,7 @@ func (m Money) Add(o Money) (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Sub returns m-o using checked arithmetic.
@@ -145,7 +144,7 @@ func (m Money) Sub(o Money) (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Neg returns -m, preserving currency.
@@ -160,7 +159,7 @@ func (m Money) Neg() (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Abs returns the absolute value of m, preserving currency.
@@ -175,7 +174,7 @@ func (m Money) Abs() (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // MulRate returns m*r, preserving currency and rounding to nearest with ties
@@ -192,7 +191,7 @@ func (m Money) MulRate(r Rate) (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Convert returns m's amount multiplied by rate and re-denominated in to,
@@ -216,7 +215,7 @@ func (m Money) Convert(to Currency, rate Rate) (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: to, valid: true}, nil
+	return Money{amount: raw, currency: to}, nil
 }
 
 // DivRate returns m/r, preserving currency and rounding to nearest with ties
@@ -231,7 +230,7 @@ func (m Money) DivRate(r Rate) (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Div returns m/o as a dimensionless Rate, rounded to nearest with ties to

@@ -174,10 +174,10 @@ func TestMoneyNegAbs(t *testing.T) {
 }
 
 func TestMoneyNegAbsMinInt64(t *testing.T) {
-	// Money{amount: ..., currency: ..., valid: true} is a
+	// Money{amount: ..., currency: ...} is a
 	// representation-boundary test construction, not a public API: num
 	// exports no raw-scaled constructor. See doc.go.
-	m := Money{amount: math.MinInt64, currency: MustParseCurrency("USD"), valid: true}
+	m := Money{amount: math.MinInt64, currency: MustParseCurrency("USD")}
 
 	_, err := m.Neg()
 	require.ErrorIs(t, err, ErrNotRepresentable)
@@ -187,7 +187,7 @@ func TestMoneyNegAbsMinInt64(t *testing.T) {
 }
 
 func TestMoneyOverflow(t *testing.T) {
-	max := Money{amount: math.MaxInt64, currency: MustParseCurrency("USD"), valid: true}
+	max := Money{amount: math.MaxInt64, currency: MustParseCurrency("USD")}
 	one := usd("0.00000001")
 
 	_, err := max.Add(one)

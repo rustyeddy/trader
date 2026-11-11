@@ -176,7 +176,7 @@ func (p Price) MulQuantity(q Quantity, currency Currency) (Money, error) {
 	if err != nil {
 		return Money{}, wrapFixedErr(err)
 	}
-	return Money{amount: raw, currency: currency, valid: true}, nil
+	return Money{amount: raw, currency: currency}, nil
 }
 
 // DivisibleBy reports whether p is an exact integer multiple of step, per
