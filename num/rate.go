@@ -1,6 +1,10 @@
 package num
 
-import "github.com/rustyeddy/trader/num/internal/fixed"
+import (
+	"cmp"
+
+	"github.com/rustyeddy/trader/num/internal/fixed"
+)
 
 // Rate is Trader's foundational exact dimensionless numeric type.
 //
@@ -27,7 +31,7 @@ type Rate struct {
 func ParseRate(s string) (Rate, error) {
 	raw, err := fixed.Parse(s)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -61,7 +65,7 @@ func (r Rate) Sign() int {
 
 // Cmp compares r and o, returning -1, 0, or +1.
 func (r Rate) Cmp(o Rate) int {
-	return fixed.Cmp(r.raw, o.raw)
+	return cmp.Compare(r.raw, o.raw)
 }
 
 // Equal reports whether r and o are the exact same value.
@@ -73,7 +77,7 @@ func (r Rate) Equal(o Rate) bool {
 func (r Rate) Add(o Rate) (Rate, error) {
 	raw, err := fixed.Add(r.raw, o.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -82,7 +86,7 @@ func (r Rate) Add(o Rate) (Rate, error) {
 func (r Rate) Sub(o Rate) (Rate, error) {
 	raw, err := fixed.Sub(r.raw, o.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -94,7 +98,7 @@ func (r Rate) Sub(o Rate) (Rate, error) {
 func (r Rate) Neg() (Rate, error) {
 	raw, err := fixed.Neg(r.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -106,7 +110,7 @@ func (r Rate) Neg() (Rate, error) {
 func (r Rate) Abs() (Rate, error) {
 	raw, err := fixed.Abs(r.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -118,7 +122,7 @@ func (r Rate) Abs() (Rate, error) {
 func (r Rate) MulRate(o Rate) (Rate, error) {
 	raw, err := fixed.MulScaled(r.raw, o.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -129,7 +133,7 @@ func (r Rate) MulRate(o Rate) (Rate, error) {
 func (r Rate) DivRate(o Rate) (Rate, error) {
 	raw, err := fixed.DivScaled(r.raw, o.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }

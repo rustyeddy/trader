@@ -74,18 +74,3 @@ func Sign(a int64) int {
 		return 0
 	}
 }
-
-// Cmp compares two raw scaled values, returning -1, 0, or +1.
-//
-// Both operands share the common scale, so raw comparison is exact and needs
-// no widening.
-func Cmp(a, b int64) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
-	}
-}

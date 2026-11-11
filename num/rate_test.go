@@ -61,6 +61,11 @@ func TestRateComparison(t *testing.T) {
 	assert.Equal(t, -1, low.Cmp(high))
 	assert.Equal(t, 1, high.Cmp(low))
 	assert.Equal(t, 0, low.Cmp(low))
+	// Extremes: an ordering computed by subtraction would overflow here.
+	min, max := Rate{raw: math.MinInt64}, Rate{raw: math.MaxInt64}
+	assert.Equal(t, -1, min.Cmp(max))
+	assert.Equal(t, 1, max.Cmp(min))
+	assert.Equal(t, 0, min.Cmp(min))
 	assert.True(t, low.Equal(MustParseRate("1.00")))
 	assert.False(t, low.Equal(high))
 }

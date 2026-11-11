@@ -1,6 +1,9 @@
 package fixed
 
-import "math"
+import (
+	"math"
+	"strconv"
+)
 
 // Exact decimal text conversion.
 //
@@ -144,7 +147,7 @@ func Format(raw int64) string {
 	if raw < 0 {
 		buf = append(buf, '-')
 	}
-	buf = appendUint(buf, whole)
+	buf = strconv.AppendUint(buf, whole, 10)
 
 	if frac == 0 {
 		return string(buf)
@@ -165,23 +168,6 @@ func Format(raw int64) string {
 	buf = append(buf, '.')
 	buf = append(buf, digits[:end]...)
 	return string(buf)
-}
-
-// appendUint appends the decimal digits of v to buf without using strconv, so
-// that formatting stays a pure integer operation in one place.
-func appendUint(buf []byte, v uint64) []byte {
-	if v == 0 {
-		return append(buf, '0')
-	}
-
-	var digits [20]byte
-	i := len(digits)
-	for v > 0 {
-		i--
-		digits[i] = byte('0' + v%10)
-		v /= 10
-	}
-	return append(buf, digits[i:]...)
 }
 
 func isDigit(c byte) bool {

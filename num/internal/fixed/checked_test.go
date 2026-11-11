@@ -152,16 +152,10 @@ func TestAbs(t *testing.T) {
 	}
 }
 
-func TestSignAndCmp(t *testing.T) {
+func TestSign(t *testing.T) {
 	assert.Equal(t, -1, Sign(minRaw))
 	assert.Equal(t, -1, Sign(-1))
 	assert.Equal(t, 0, Sign(0))
 	assert.Equal(t, 1, Sign(1))
 	assert.Equal(t, 1, Sign(maxRaw))
-
-	assert.Equal(t, -1, Cmp(minRaw, maxRaw))
-	assert.Equal(t, 0, Cmp(0, 0))
-	assert.Equal(t, 0, Cmp(minRaw, minRaw))
-	assert.Equal(t, 1, Cmp(maxRaw, minRaw))
-	assert.Equal(t, 1, Cmp(1, 0))
 }

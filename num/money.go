@@ -1,6 +1,10 @@
 package num
 
-import "github.com/rustyeddy/trader/num/internal/fixed"
+import (
+	"cmp"
+
+	"github.com/rustyeddy/trader/num/internal/fixed"
+)
 
 // Money is an immutable, self-describing monetary amount: a signed scaled
 // int64 at the common 1e8 scale (ADR-004), paired with a mandatory Currency.
@@ -21,7 +25,6 @@ import "github.com/rustyeddy/trader/num/internal/fixed"
 type Money struct {
 	amount   int64
 	currency Currency
-	valid    bool
 }
 
 // ParseMoney parses exact decimal text into a Money value denominated in
@@ -36,9 +39,9 @@ func ParseMoney(s string, currency Currency) (Money, error) {
 	}
 	raw, err := fixed.Parse(s)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: currency, valid: true}, nil
+	return Money{amount: raw, currency: currency}, nil
 }
 
 // MustParseMoney is like ParseMoney but panics on error.
@@ -56,7 +59,7 @@ func MustParseMoney(s string, currency Currency) Money {
 // IsValid reports whether m has a valid currency. The Go zero value of Money,
 // and any Money left unset, reports false.
 func (m Money) IsValid() bool {
-	return m.valid && m.currency.IsValid()
+	return m.currency.IsValid()
 }
 
 // Currency returns m's denomination.
@@ -106,14 +109,14 @@ func (m Money) Cmp(o Money) (int, error) {
 	if err := m.sameCurrency(o); err != nil {
 		return 0, err
 	}
-	return fixed.Cmp(m.amount, o.amount), nil
+	return cmp.Compare(m.amount, o.amount), nil
 }
 
 // Equal reports whether m and o are the exact same amount in the same
 // currency. Unlike Cmp, Equal never errors: differing or invalid currencies
 // simply make two Money values unequal.
 func (m Money) Equal(o Money) bool {
-	return m.valid && o.valid && m.currency.Equal(o.currency) && m.amount == o.amount
+	return m.IsValid() && o.IsValid() && m.currency.Equal(o.currency) && m.amount == o.amount
 }
 
 // Add returns m+o using checked arithmetic.
@@ -126,9 +129,9 @@ func (m Money) Add(o Money) (Money, error) {
 	}
 	raw, err := fixed.Add(m.amount, o.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Sub returns m-o using checked arithmetic.
@@ -143,9 +146,9 @@ func (m Money) Sub(o Money) (Money, error) {
 	}
 	raw, err := fixed.Sub(m.amount, o.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Neg returns -m, preserving currency.
@@ -158,9 +161,9 @@ func (m Money) Neg() (Money, error) {
 	}
 	raw, err := fixed.Neg(m.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Abs returns the absolute value of m, preserving currency.
@@ -173,9 +176,9 @@ func (m Money) Abs() (Money, error) {
 	}
 	raw, err := fixed.Abs(m.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // MulRate returns m*r, preserving currency and rounding to nearest with ties
@@ -190,9 +193,9 @@ func (m Money) MulRate(r Rate) (Money, error) {
 	}
 	raw, err := fixed.MulScaled(m.amount, r.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Convert returns m's amount multiplied by rate and re-denominated in to,
@@ -214,9 +217,9 @@ func (m Money) Convert(to Currency, rate Rate) (Money, error) {
 	}
 	raw, err := fixed.MulScaled(m.amount, rate.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: to, valid: true}, nil
+	return Money{amount: raw, currency: to}, nil
 }
 
 // DivRate returns m/r, preserving currency and rounding to nearest with ties
@@ -229,9 +232,9 @@ func (m Money) DivRate(r Rate) (Money, error) {
 	}
 	raw, err := fixed.DivScaled(m.amount, r.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
-	return Money{amount: raw, currency: m.currency, valid: true}, nil
+	return Money{amount: raw, currency: m.currency}, nil
 }
 
 // Div returns m/o as a dimensionless Rate, rounded to nearest with ties to
@@ -245,32 +248,24 @@ func (m Money) Div(o Money) (Rate, error) {
 	}
 	raw, err := fixed.DivScaled(m.amount, o.amount, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
 
-// DivQuantity returns m/q as a Price, rounded to nearest with ties to
-// even (ADR-027) — the inverse of Price.MulQuantity. It is meaningful
-// as a weighted-average price: given a position's total cost basis
-// (m, in the listing's quote/settlement currency) and its total
-// quantity (q), DivQuantity recovers the average price per unit.
+// DivQuantity returns m/q as a Price, rounded to nearest with ties to even
+// (ADR-027): the inverse of Price.MulQuantity, meaningful as a weighted-average
+// price from a cost basis (m) and a total quantity (q).
 //
-// DivQuantity reports ErrMissingCurrency if m is invalid,
-// ErrDivideByZero when q is zero, and ErrNegative if the true
-// quotient would be negative — Price has no signed counterpart, the
-// same rule Price.Sub already applies. The underlying division uses
-// the same widened 128-bit intermediate (num/internal/fixed
-// .DivScaled) that already backs DivRate and Div, so it never
-// silently overflows or loses precision the way naive scaled-int64
-// division would.
+// It reports ErrMissingCurrency if m is invalid, ErrDivideByZero when q is
+// zero, and ErrNegative if the true quotient would be negative.
 func (m Money) DivQuantity(q Quantity) (Price, error) {
 	if !m.IsValid() {
 		return Price{}, ErrMissingCurrency
 	}
 	raw, err := fixed.DivScaled(m.amount, q.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Price{}, wrapFixedErr(err)
+		return Price{}, err
 	}
 	if raw < 0 {
 		return Price{}, ErrNegative
@@ -278,32 +273,22 @@ func (m Money) DivQuantity(q Quantity) (Price, error) {
 	return Price{raw: raw}, nil
 }
 
-// DivPrice returns m/p as a Quantity, rounded to nearest with ties to
-// even (ADR-030) — the inverse of Price.MulQuantity's own dimension,
-// arranged the other way around from DivQuantity: given a budget (m,
-// for example a risk budget) and a price-per-unit distance (p), how
-// many units does that budget correspond to.
+// DivPrice returns m/p as a Quantity, rounded to nearest with ties to even
+// (ADR-030): given a budget (m, such as a risk budget) and a per-unit price
+// distance (p), how many units that budget buys.
 //
-// DivPrice is pure numeric dimensional arithmetic only: neither Money
-// nor Price carries enough information for DivPrice to confirm p is
-// actually denominated in m's own currency — Price carries no currency
-// at all. Confirming that is the caller's responsibility (see
-// risk.FixedFractionSizer, which owns exactly this check before
-// calling DivPrice).
-//
-// DivPrice reports ErrMissingCurrency if m is invalid, ErrDivideByZero
-// when p is zero, and ErrNegative if the true quotient would be
-// negative — Quantity has no signed counterpart, the same rule
-// DivQuantity already applies. The underlying division uses the same
-// widened 128-bit intermediate (num/internal/fixed.DivScaled) that
-// already backs DivQuantity, DivRate, and Div.
+// This is dimensional arithmetic only. Price carries no currency, so confirming
+// that p is denominated in m's currency is the caller's job (see
+// risk.FixedFractionSizer). It reports ErrMissingCurrency if m is invalid,
+// ErrDivideByZero when p is zero, and ErrNegative if the true quotient would be
+// negative.
 func (m Money) DivPrice(p Price) (Quantity, error) {
 	if !m.IsValid() {
 		return Quantity{}, ErrMissingCurrency
 	}
 	raw, err := fixed.DivScaled(m.amount, p.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative

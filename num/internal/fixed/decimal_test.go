@@ -2,6 +2,7 @@ package fixed
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -174,7 +175,7 @@ func TestFormatIsCanonical(t *testing.T) {
 		assert.NotEqual(t, byte('.'), out[len(out)-1], "no trailing decimal point: %q", out)
 		assert.NotEqual(t, "-0", out, "negative zero is normalized: %q", out)
 
-		if i := indexByte(out, '.'); i >= 0 {
+		if i := strings.IndexByte(out, '.'); i >= 0 {
 			assert.NotEqual(t, byte('0'), out[len(out)-1],
 				"no unnecessary trailing zeros: %q", out)
 			assert.LessOrEqual(t, len(out)-i-1, places,
@@ -196,13 +197,4 @@ func TestParseFormatRoundTrip(t *testing.T) {
 		require.NoErrorf(t, err, "Format produced text Parse rejects: %q", text)
 		assert.Equalf(t, v, got, "round trip changed the value through %q", text)
 	}
-}
-
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
 }

@@ -1,6 +1,10 @@
 package num
 
-import "github.com/rustyeddy/trader/num/internal/fixed"
+import (
+	"cmp"
+
+	"github.com/rustyeddy/trader/num/internal/fixed"
+)
 
 // Quantity represents an authoritative order or position size.
 //
@@ -29,7 +33,7 @@ type Quantity struct {
 func ParseQuantity(s string) (Quantity, error) {
 	raw, err := fixed.Parse(s)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative
@@ -61,7 +65,7 @@ func (q Quantity) IsZero() bool {
 
 // Cmp compares q and o, returning -1, 0, or +1.
 func (q Quantity) Cmp(o Quantity) int {
-	return fixed.Cmp(q.raw, o.raw)
+	return cmp.Compare(q.raw, o.raw)
 }
 
 // Equal reports whether q and o are the exact same value.
@@ -73,7 +77,7 @@ func (q Quantity) Equal(o Quantity) bool {
 func (q Quantity) Add(o Quantity) (Quantity, error) {
 	raw, err := fixed.Add(q.raw, o.raw)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	return Quantity{raw: raw}, nil
 }
@@ -87,7 +91,7 @@ func (q Quantity) Add(o Quantity) (Quantity, error) {
 func (q Quantity) Sub(o Quantity) (Quantity, error) {
 	raw, err := fixed.Sub(q.raw, o.raw)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative
@@ -102,7 +106,7 @@ func (q Quantity) Sub(o Quantity) (Quantity, error) {
 func (q Quantity) MulRate(r Rate) (Quantity, error) {
 	raw, err := fixed.MulScaled(q.raw, r.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative
@@ -117,7 +121,7 @@ func (q Quantity) MulRate(r Rate) (Quantity, error) {
 func (q Quantity) Div(o Quantity) (Rate, error) {
 	raw, err := fixed.DivScaled(q.raw, o.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -135,21 +139,11 @@ func (q Quantity) DivisibleBy(step Quantity) (bool, error) {
 	return q.raw%step.raw == 0, nil
 }
 
-// RoundDown returns the largest multiple of step that is <= q:
-// floor(q/step) x step (ADR-030). Because q.raw and step.raw already
-// share the same fixed-point scale, their plain integer quotient is
-// already the exact, dimensionless multiple count — no rescaling or
-// rounding-mode decision is needed the way num/internal/fixed.DivScaled
-// requires for a ratio expressed in a different type's scale (compare
-// Money.DivQuantity/DivPrice). Go's integer division truncates toward
-// zero, which equals floor for the non-negative values Quantity always
-// holds.
+// RoundDown returns the largest multiple of step that is <= q (ADR-030).
 //
-// RoundDown reports ErrDivideByZero when step is zero, matching
-// DivisibleBy's own existing convention exactly. The result may
-// legitimately be zero, when q is smaller than one whole step;
-// RoundDown itself does not decide whether that is acceptable — that
-// is entirely a caller concern.
+// The result may be zero when q is smaller than one step; whether that is
+// acceptable is the caller's decision. RoundDown reports ErrDivideByZero when
+// step is zero.
 func (q Quantity) RoundDown(step Quantity) (Quantity, error) {
 	if step.raw == 0 {
 		return Quantity{}, ErrDivideByZero
