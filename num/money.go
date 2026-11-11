@@ -1,6 +1,10 @@
 package num
 
-import "github.com/rustyeddy/trader/num/internal/fixed"
+import (
+	"cmp"
+
+	"github.com/rustyeddy/trader/num/internal/fixed"
+)
 
 // Money is an immutable, self-describing monetary amount: a signed scaled
 // int64 at the common 1e8 scale (ADR-004), paired with a mandatory Currency.
@@ -105,7 +109,7 @@ func (m Money) Cmp(o Money) (int, error) {
 	if err := m.sameCurrency(o); err != nil {
 		return 0, err
 	}
-	return fixed.Cmp(m.amount, o.amount), nil
+	return cmp.Compare(m.amount, o.amount), nil
 }
 
 // Equal reports whether m and o are the exact same amount in the same

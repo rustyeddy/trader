@@ -1,6 +1,10 @@
 package num
 
-import "github.com/rustyeddy/trader/num/internal/fixed"
+import (
+	"cmp"
+
+	"github.com/rustyeddy/trader/num/internal/fixed"
+)
 
 // Rate is Trader's foundational exact dimensionless numeric type.
 //
@@ -61,7 +65,7 @@ func (r Rate) Sign() int {
 
 // Cmp compares r and o, returning -1, 0, or +1.
 func (r Rate) Cmp(o Rate) int {
-	return fixed.Cmp(r.raw, o.raw)
+	return cmp.Compare(r.raw, o.raw)
 }
 
 // Equal reports whether r and o are the exact same value.

@@ -1,6 +1,10 @@
 package num
 
-import "github.com/rustyeddy/trader/num/internal/fixed"
+import (
+	"cmp"
+
+	"github.com/rustyeddy/trader/num/internal/fixed"
+)
 
 // Price represents an authoritative instrument price.
 //
@@ -93,7 +97,7 @@ func (p Price) IsZero() bool {
 
 // Cmp compares p and o, returning -1, 0, or +1.
 func (p Price) Cmp(o Price) int {
-	return fixed.Cmp(p.raw, o.raw)
+	return cmp.Compare(p.raw, o.raw)
 }
 
 // Equal reports whether p and o are the exact same value.

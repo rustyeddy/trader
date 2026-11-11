@@ -3,6 +3,7 @@ package num
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/rustyeddy/trader/num/internal/fixed"
 )
@@ -173,16 +174,13 @@ func (m Money) MarshalText() ([]byte, error) {
 // "<amount> <currency>" form produced by MarshalText. Exactly one ASCII space
 // separates the two fields.
 func (m *Money) UnmarshalText(text []byte) error {
-	s := string(text)
-	i := indexByte(s, ' ')
-	if i < 0 {
+	amount, currencyCode, found := strings.Cut(string(text), " ")
+	if !found {
 		return fmt.Errorf("%w: missing currency separator", ErrSyntax)
 	}
-	if indexByte(s[i+1:], ' ') >= 0 {
+	if strings.Contains(currencyCode, " ") {
 		return fmt.Errorf("%w: too many fields", ErrSyntax)
 	}
-
-	amount, currencyCode := s[:i], s[i+1:]
 
 	var currency Currency
 	if err := currency.UnmarshalText([]byte(currencyCode)); err != nil {
@@ -195,15 +193,6 @@ func (m *Money) UnmarshalText(text []byte) error {
 	}
 	*m = v
 	return nil
-}
-
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
 }
 
 // moneyJSON is Money's structured JSON wire form (ADR-004): an explicit

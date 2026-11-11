@@ -1,6 +1,10 @@
 package num
 
-import "github.com/rustyeddy/trader/num/internal/fixed"
+import (
+	"cmp"
+
+	"github.com/rustyeddy/trader/num/internal/fixed"
+)
 
 // Quantity represents an authoritative order or position size.
 //
@@ -61,7 +65,7 @@ func (q Quantity) IsZero() bool {
 
 // Cmp compares q and o, returning -1, 0, or +1.
 func (q Quantity) Cmp(o Quantity) int {
-	return fixed.Cmp(q.raw, o.raw)
+	return cmp.Compare(q.raw, o.raw)
 }
 
 // Equal reports whether q and o are the exact same value.
