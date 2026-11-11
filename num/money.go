@@ -39,7 +39,7 @@ func ParseMoney(s string, currency Currency) (Money, error) {
 	}
 	raw, err := fixed.Parse(s)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: currency}, nil
 }
@@ -129,7 +129,7 @@ func (m Money) Add(o Money) (Money, error) {
 	}
 	raw, err := fixed.Add(m.amount, o.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: m.currency}, nil
 }
@@ -146,7 +146,7 @@ func (m Money) Sub(o Money) (Money, error) {
 	}
 	raw, err := fixed.Sub(m.amount, o.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: m.currency}, nil
 }
@@ -161,7 +161,7 @@ func (m Money) Neg() (Money, error) {
 	}
 	raw, err := fixed.Neg(m.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: m.currency}, nil
 }
@@ -176,7 +176,7 @@ func (m Money) Abs() (Money, error) {
 	}
 	raw, err := fixed.Abs(m.amount)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: m.currency}, nil
 }
@@ -193,7 +193,7 @@ func (m Money) MulRate(r Rate) (Money, error) {
 	}
 	raw, err := fixed.MulScaled(m.amount, r.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: m.currency}, nil
 }
@@ -217,7 +217,7 @@ func (m Money) Convert(to Currency, rate Rate) (Money, error) {
 	}
 	raw, err := fixed.MulScaled(m.amount, rate.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: to}, nil
 }
@@ -232,7 +232,7 @@ func (m Money) DivRate(r Rate) (Money, error) {
 	}
 	raw, err := fixed.DivScaled(m.amount, r.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: m.currency}, nil
 }
@@ -248,7 +248,7 @@ func (m Money) Div(o Money) (Rate, error) {
 	}
 	raw, err := fixed.DivScaled(m.amount, o.amount, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -273,7 +273,7 @@ func (m Money) DivQuantity(q Quantity) (Price, error) {
 	}
 	raw, err := fixed.DivScaled(m.amount, q.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Price{}, wrapFixedErr(err)
+		return Price{}, err
 	}
 	if raw < 0 {
 		return Price{}, ErrNegative
@@ -306,7 +306,7 @@ func (m Money) DivPrice(p Price) (Quantity, error) {
 	}
 	raw, err := fixed.DivScaled(m.amount, p.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative

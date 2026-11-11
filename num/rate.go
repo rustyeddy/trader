@@ -31,7 +31,7 @@ type Rate struct {
 func ParseRate(s string) (Rate, error) {
 	raw, err := fixed.Parse(s)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -77,7 +77,7 @@ func (r Rate) Equal(o Rate) bool {
 func (r Rate) Add(o Rate) (Rate, error) {
 	raw, err := fixed.Add(r.raw, o.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -86,7 +86,7 @@ func (r Rate) Add(o Rate) (Rate, error) {
 func (r Rate) Sub(o Rate) (Rate, error) {
 	raw, err := fixed.Sub(r.raw, o.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -98,7 +98,7 @@ func (r Rate) Sub(o Rate) (Rate, error) {
 func (r Rate) Neg() (Rate, error) {
 	raw, err := fixed.Neg(r.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -110,7 +110,7 @@ func (r Rate) Neg() (Rate, error) {
 func (r Rate) Abs() (Rate, error) {
 	raw, err := fixed.Abs(r.raw)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -122,7 +122,7 @@ func (r Rate) Abs() (Rate, error) {
 func (r Rate) MulRate(o Rate) (Rate, error) {
 	raw, err := fixed.MulScaled(r.raw, o.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -133,7 +133,7 @@ func (r Rate) MulRate(o Rate) (Rate, error) {
 func (r Rate) DivRate(o Rate) (Rate, error) {
 	raw, err := fixed.DivScaled(r.raw, o.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }

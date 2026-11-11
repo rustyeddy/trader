@@ -29,7 +29,7 @@ type Price struct {
 func ParsePrice(s string) (Price, error) {
 	raw, err := fixed.Parse(s)
 	if err != nil {
-		return Price{}, wrapFixedErr(err)
+		return Price{}, err
 	}
 	if raw < 0 {
 		return Price{}, ErrNegative
@@ -109,7 +109,7 @@ func (p Price) Equal(o Price) bool {
 func (p Price) Add(o Price) (Price, error) {
 	raw, err := fixed.Add(p.raw, o.raw)
 	if err != nil {
-		return Price{}, wrapFixedErr(err)
+		return Price{}, err
 	}
 	return Price{raw: raw}, nil
 }
@@ -122,7 +122,7 @@ func (p Price) Add(o Price) (Price, error) {
 func (p Price) Sub(o Price) (Price, error) {
 	raw, err := fixed.Sub(p.raw, o.raw)
 	if err != nil {
-		return Price{}, wrapFixedErr(err)
+		return Price{}, err
 	}
 	if raw < 0 {
 		return Price{}, ErrNegative
@@ -137,7 +137,7 @@ func (p Price) Sub(o Price) (Price, error) {
 func (p Price) MulRate(r Rate) (Price, error) {
 	raw, err := fixed.MulScaled(p.raw, r.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Price{}, wrapFixedErr(err)
+		return Price{}, err
 	}
 	if raw < 0 {
 		return Price{}, ErrNegative
@@ -152,7 +152,7 @@ func (p Price) MulRate(r Rate) (Price, error) {
 func (p Price) Div(o Price) (Rate, error) {
 	raw, err := fixed.DivScaled(p.raw, o.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
@@ -178,7 +178,7 @@ func (p Price) MulQuantity(q Quantity, currency Currency) (Money, error) {
 	}
 	raw, err := fixed.MulScaled(p.raw, q.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Money{}, wrapFixedErr(err)
+		return Money{}, err
 	}
 	return Money{amount: raw, currency: currency}, nil
 }
@@ -257,7 +257,7 @@ func (p Price) RoundUp(tick Price) (Price, error) {
 	}
 	raw, err := fixed.Add(down, tick.raw)
 	if err != nil {
-		return Price{}, wrapFixedErr(err)
+		return Price{}, err
 	}
 	return Price{raw: raw}, nil
 }

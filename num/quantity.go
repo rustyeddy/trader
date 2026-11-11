@@ -33,7 +33,7 @@ type Quantity struct {
 func ParseQuantity(s string) (Quantity, error) {
 	raw, err := fixed.Parse(s)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative
@@ -77,7 +77,7 @@ func (q Quantity) Equal(o Quantity) bool {
 func (q Quantity) Add(o Quantity) (Quantity, error) {
 	raw, err := fixed.Add(q.raw, o.raw)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	return Quantity{raw: raw}, nil
 }
@@ -91,7 +91,7 @@ func (q Quantity) Add(o Quantity) (Quantity, error) {
 func (q Quantity) Sub(o Quantity) (Quantity, error) {
 	raw, err := fixed.Sub(q.raw, o.raw)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative
@@ -106,7 +106,7 @@ func (q Quantity) Sub(o Quantity) (Quantity, error) {
 func (q Quantity) MulRate(r Rate) (Quantity, error) {
 	raw, err := fixed.MulScaled(q.raw, r.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Quantity{}, wrapFixedErr(err)
+		return Quantity{}, err
 	}
 	if raw < 0 {
 		return Quantity{}, ErrNegative
@@ -121,7 +121,7 @@ func (q Quantity) MulRate(r Rate) (Quantity, error) {
 func (q Quantity) Div(o Quantity) (Rate, error) {
 	raw, err := fixed.DivScaled(q.raw, o.raw, fixed.RoundHalfEven)
 	if err != nil {
-		return Rate{}, wrapFixedErr(err)
+		return Rate{}, err
 	}
 	return Rate{raw: raw}, nil
 }
