@@ -1,5 +1,7 @@
 # Claude Code Instructions
 
-@AGENTS.md
+Read and follow [AGENTS.md](./AGENTS.md) in this directory before working on the design prototype. Also follow applicable repository-root instructions.
 
-Follow the shared instructions above. Read only issue-relevant architecture and ADR sections as needed; do not preload the full architecture or ADR registry.
+For any Go test creation or modification, read and follow [the Go testing rules](../../docs/workflows/ai-skills.org).
+
+Keep architecture decisions in discussion until approved; follow [todo.org](./todo.org) one task at a time.
