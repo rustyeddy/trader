@@ -1,4 +1,4 @@
-package main
+package trader
 
 // ema is an exponential moving average of the close, seeded with the SMA
 // of the first window closes.

@@ -1,4 +1,4 @@
-BIN := bin/design
+BIN := bin/trader
 
 .PHONY: all check test race cover vet build run clean
 
@@ -20,10 +20,10 @@ vet:
 	go vet ./...
 
 build:
-	go build -o $(BIN) .
+	go build -o $(BIN) ./cmd/trader
 
 run:
-	go run .
+	go run ./cmd/trader
 
 clean:
 	rm -rf bin

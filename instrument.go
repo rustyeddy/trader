@@ -1,4 +1,4 @@
-package main
+package trader
 
 var instruments = map[string]*instrument{
 	"EURUSD": {

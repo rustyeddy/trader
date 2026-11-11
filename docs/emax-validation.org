@@ -15,7 +15,7 @@ review any change to them the same way.
 From =examples/design=, =make check && make run=. The run backtests the six
 scenarios below through the real path, each on fresh instances, and prints one
 summary each to stdout. Logs go to stderr and carry wall-clock times, so compare
-stdout only: =go run . 2>/dev/null= prints the same bytes every time.
+stdout only: =go run ./cmd/trader 2>/dev/null= prints the same bytes every time.
 =TestRun_PrintsTheApprovedSummaryOfEveryScenario= holds the expected output, which
 makes the example a permanent regression.
 

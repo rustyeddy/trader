@@ -1,20 +1,16 @@
-package main
+package trader
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 )
 
-func main() {
-	if err := run(os.Stdout); err != nil {
-		slog.Error("backtest failed", "error", err)
-		os.Exit(1)
-	}
-}
+// Run backtests every scenario and writes one summary each to w. It is the
+// entry point cmd/trader calls; see run for the output contract.
+func Run(w io.Writer) error { return run(w) }
 
 // scenarios are the reviewed datasets in emax-validation.org, in its order.
 var scenarios = []string{

@@ -1,4 +1,4 @@
-package main
+package trader
 
 import (
 	"bytes"
@@ -166,4 +166,13 @@ func TestFormatMoney(t *testing.T) {
 func TestFormatPrice(t *testing.T) {
 	assert.Equal(t, "1.10437", formatPrice(110437))
 	assert.Equal(t, "0.00005", formatPrice(5))
+}
+
+func TestRun_ExportedEntryPointPrintsTheApprovedSummary(t *testing.T) {
+	captureLogs(t)
+
+	var out bytes.Buffer
+	require.NoError(t, Run(&out))
+
+	assert.Equal(t, approvedSummary, out.String())
 }
