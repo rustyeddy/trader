@@ -54,37 +54,19 @@ func (p Price) String() string {
 	return fixed.Format(p.raw)
 }
 
-// Float64 returns p as a float64, for crossing into Trader's analytical
-// domain — indicators and other float64-based calculations (ADR-045,
-// docs/arch/adr-045-analytical-float64-conversion-boundary.org).
-//
-// This is a direct numeric conversion (raw scaled int64 divided by the
-// common scale), never a serialize/reparse round-trip through String
-// and strconv.ParseFloat: the two are not equivalent in general, and
-// ADR-045 explicitly rejects the round-trip form as an implementation
-// smell. float64 cannot represent every value Price can exactly (IEEE
-// 754 double precision gives roughly 15-17 significant decimal digits,
-// against Price's exact 1e8 scale), so this conversion is lossy in the
-// same way any exact-to-float64 conversion is. This method itself adds
-// no unquantized path back into the exact domain — there is no
-// Price-from-float64 constructor here — but ADR-004 already permits a
-// strategy's analytical float64 result to become authoritative again
-// through the normal checked, quantized, semantically-validated
-// construction path (for example rounding to the listing's tick size
-// and constructing via ParsePrice/NewPrice), the same as any other
-// externally-derived value. ADR-045 does not add that conversion; it
-// only adds this one, exact-to-analytical direction.
+// Float64 returns p as a float64, for crossing into Trader's analytical domain
+// (indicators and other float64 calculations). It is the one sanctioned
+// exact-to-float64 conversion (ADR-045): a direct numeric conversion, never a
+// String/ParseFloat round-trip. It is lossy, because float64 cannot represent
+// every Price exactly. There is no Price-from-float64 constructor: an
+// analytical result becomes authoritative again only by being quantized to the
+// tick size and parsed through ParsePrice (ADR-004).
 func (p Price) Float64() float64 {
 	scale := fixed.Scale()
-	// Split into whole and fractional scaled parts before converting,
-	// rather than converting the full raw int64 and dividing: raw can
-	// exceed float64's 53-bit exact-integer range (Price's representable
-	// range goes well beyond 2^53), and float64(p.raw) alone would round
-	// once there, before the division rounds a second time. whole and
-	// frac are each always well within 53 bits (frac has at most 8
-	// decimal digits by construction), so this decomposition converts
-	// each part exactly and only rounds once, at the final addition —
-	// the closest float64 to the true decimal value (PR #275 review).
+	// Convert the whole and fractional parts separately: raw can exceed
+	// float64's 53-bit exact-integer range, so converting it whole and then
+	// dividing would round twice. Each part is exact, so this rounds once, at
+	// the final addition.
 	whole := p.raw / scale
 	frac := p.raw % scale
 	return float64(whole) + float64(frac)/float64(scale)
@@ -195,27 +177,12 @@ func (p Price) DivisibleBy(step Price) (bool, error) {
 	return p.raw%step.raw == 0, nil
 }
 
-// RoundDown returns the largest multiple of tick that is <= p:
-// floor(p/tick) x tick, mirroring Quantity.RoundDown's own scaled-
-// integer style exactly (issue #340) — tick.raw and p.raw already
-// share the same fixed-point scale, so their plain integer quotient is
-// already the exact, dimensionless multiple count, and Go's integer
-// division truncates toward zero, which equals floor for the
-// non-negative values Price always holds.
+// RoundDown returns the largest multiple of tick that is <= p.
 //
-// RoundDown reports ErrDivideByZero when tick is zero, matching
-// DivisibleBy's own existing convention. Callers computing a
-// derived price from arithmetic (a fraction of a high-water mark, an
-// ATR multiple, and so on) rather than copying an already tick-
-// aligned price verbatim must round it to the listing's own
-// instrument.Spec.TickSize() before constructing an order.Proposal/
-// order.ReplaceRequest — see execution's own IntentAdjustStop handling
-// for the one place this is done today. This is an explicit,
-// documented rounding step, never an implicit one: num's own package
-// doc states plainly that "nothing [is] silently rounded," and
-// RoundDown exists precisely so a caller that does want to round has
-// a named, exact operation to call instead of reaching for float64
-// arithmetic or truncated decimal text.
+// Prices derived by arithmetic (an ATR multiple, a fraction of a high-water
+// mark) must be rounded to the instrument's tick size explicitly before an
+// order is built; num never rounds silently, and RoundDown is the named exact
+// operation for it. It reports ErrDivideByZero when tick is zero.
 func (p Price) RoundDown(tick Price) (Price, error) {
 	if tick.raw == 0 {
 		return Price{}, ErrDivideByZero
@@ -224,29 +191,16 @@ func (p Price) RoundDown(tick Price) (Price, error) {
 	return Price{raw: count * tick.raw}, nil
 }
 
-// RoundUp returns the smallest multiple of tick that is >= p:
-// ceil(p/tick) x tick. See RoundDown's own doc comment for the shared
-// rationale and Price's non-negative-by-construction assumption;
-// RoundUp differs only in rounding toward positive infinity instead of
-// toward zero — the direction needed so a protective Buy stop (which
-// protects a short position from above) is never rounded into being
-// more aggressive/tighter than what the caller computed: moving it
-// further up gives the position strictly more room, never less.
+// RoundUp returns the smallest multiple of tick that is >= p; a p already on a
+// tick rounds to itself.
 //
-// RoundUp reports ErrDivideByZero when tick is zero. A p that is
-// already an exact multiple of tick rounds to itself, exactly like
-// RoundDown; only a genuinely fractional remainder rounds up to the
-// next multiple.
+// It rounds up so a protective Buy stop, which guards a short from above, is
+// never tightened by rounding. RoundUp reports ErrDivideByZero when tick is
+// zero and ErrOverflow when the next multiple does not fit.
 //
-// Unlike RoundDown, RoundUp cannot compute its result as a plain
-// count*tick.raw product: incrementing the multiple count first and
-// then multiplying could overflow int64 for a p near the top of
-// Price's representable range, silently wrapping negative and
-// violating Price's non-negative invariant (PR #341 review). Instead
-// it computes RoundDown's own (always in-range, since it never
-// exceeds p.raw) result directly, then adds one further tick via
-// fixed.Add's checked arithmetic — reporting ErrOverflow rather than
-// wrapping if even that single increment does not fit.
+// It adds one tick to RoundDown's result with checked arithmetic rather than
+// computing (count+1)*tick, which could wrap negative near the top of the
+// range and break Price's non-negative invariant.
 func (p Price) RoundUp(tick Price) (Price, error) {
 	if tick.raw == 0 {
 		return Price{}, ErrDivideByZero

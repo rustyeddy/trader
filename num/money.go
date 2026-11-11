@@ -253,20 +253,12 @@ func (m Money) Div(o Money) (Rate, error) {
 	return Rate{raw: raw}, nil
 }
 
-// DivQuantity returns m/q as a Price, rounded to nearest with ties to
-// even (ADR-027) — the inverse of Price.MulQuantity. It is meaningful
-// as a weighted-average price: given a position's total cost basis
-// (m, in the listing's quote/settlement currency) and its total
-// quantity (q), DivQuantity recovers the average price per unit.
+// DivQuantity returns m/q as a Price, rounded to nearest with ties to even
+// (ADR-027): the inverse of Price.MulQuantity, meaningful as a weighted-average
+// price from a cost basis (m) and a total quantity (q).
 //
-// DivQuantity reports ErrMissingCurrency if m is invalid,
-// ErrDivideByZero when q is zero, and ErrNegative if the true
-// quotient would be negative — Price has no signed counterpart, the
-// same rule Price.Sub already applies. The underlying division uses
-// the same widened 128-bit intermediate (num/internal/fixed
-// .DivScaled) that already backs DivRate and Div, so it never
-// silently overflows or loses precision the way naive scaled-int64
-// division would.
+// It reports ErrMissingCurrency if m is invalid, ErrDivideByZero when q is
+// zero, and ErrNegative if the true quotient would be negative.
 func (m Money) DivQuantity(q Quantity) (Price, error) {
 	if !m.IsValid() {
 		return Price{}, ErrMissingCurrency
@@ -281,25 +273,15 @@ func (m Money) DivQuantity(q Quantity) (Price, error) {
 	return Price{raw: raw}, nil
 }
 
-// DivPrice returns m/p as a Quantity, rounded to nearest with ties to
-// even (ADR-030) — the inverse of Price.MulQuantity's own dimension,
-// arranged the other way around from DivQuantity: given a budget (m,
-// for example a risk budget) and a price-per-unit distance (p), how
-// many units does that budget correspond to.
+// DivPrice returns m/p as a Quantity, rounded to nearest with ties to even
+// (ADR-030): given a budget (m, such as a risk budget) and a per-unit price
+// distance (p), how many units that budget buys.
 //
-// DivPrice is pure numeric dimensional arithmetic only: neither Money
-// nor Price carries enough information for DivPrice to confirm p is
-// actually denominated in m's own currency — Price carries no currency
-// at all. Confirming that is the caller's responsibility (see
-// risk.FixedFractionSizer, which owns exactly this check before
-// calling DivPrice).
-//
-// DivPrice reports ErrMissingCurrency if m is invalid, ErrDivideByZero
-// when p is zero, and ErrNegative if the true quotient would be
-// negative — Quantity has no signed counterpart, the same rule
-// DivQuantity already applies. The underlying division uses the same
-// widened 128-bit intermediate (num/internal/fixed.DivScaled) that
-// already backs DivQuantity, DivRate, and Div.
+// This is dimensional arithmetic only. Price carries no currency, so confirming
+// that p is denominated in m's currency is the caller's job (see
+// risk.FixedFractionSizer). It reports ErrMissingCurrency if m is invalid,
+// ErrDivideByZero when p is zero, and ErrNegative if the true quotient would be
+// negative.
 func (m Money) DivPrice(p Price) (Quantity, error) {
 	if !m.IsValid() {
 		return Quantity{}, ErrMissingCurrency
