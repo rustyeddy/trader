@@ -59,26 +59,6 @@ func moneySign(m num.Money) (int, error) {
 	return m.Cmp(zeroMoney(m.Currency()))
 }
 
-// priceMax and priceMin order Prices, which are not comparable with < or the
-// builtin min and max.
-func priceMax(first num.Price, rest ...num.Price) num.Price {
-	for _, p := range rest {
-		if p.Cmp(first) > 0 {
-			first = p
-		}
-	}
-	return first
-}
-
-func priceMin(first num.Price, rest ...num.Price) num.Price {
-	for _, p := range rest {
-		if p.Cmp(first) < 0 {
-			first = p
-		}
-	}
-	return first
-}
-
 // priceDiff is the distance between a and b, which is never negative, and
 // whether a is at or above b.
 func priceDiff(a, b num.Price) (dist num.Price, aboveOrEqual bool, err error) {
@@ -88,15 +68,6 @@ func priceDiff(a, b num.Price) (dist num.Price, aboveOrEqual bool, err error) {
 	}
 	dist, err = b.Sub(a)
 	return dist, false, err
-}
-
-func quantityMin(first num.Quantity, rest ...num.Quantity) num.Quantity {
-	for _, q := range rest {
-		if q.Cmp(first) < 0 {
-			first = q
-		}
-	}
-	return first
 }
 
 // floorCents is m in whole cents, rounded toward negative infinity, so a loss

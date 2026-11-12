@@ -224,7 +224,9 @@ decimals; the five-decimal rule is an instrument rule, not a =num= rule.
 
 * Consequences
 
-- No =num= API addition is proposed. The conservative closeout rule and a
+- No =num= API addition is proposed for the arithmetic. The one addition is
+  the generic =num.Min= and =num.Max= for Price, Quantity and Rate (#599),
+  which replace private root helpers. The conservative closeout rule and a
   compound exact-arithmetic API were considered and declined for simplicity.
   The conversion reproduces prototype rounding only where it matters, not to
   the last marginal unit.

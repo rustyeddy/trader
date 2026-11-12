@@ -453,11 +453,11 @@ func (br *broker) trailStops(b bar) {
 			// be below zero, which is below any stop).
 			if h := b.h; h.Cmp(o.trail) > 0 {
 				if level, err := h.Sub(o.trail); err == nil {
-					moved = priceMax(o.price, level)
+					moved = num.Max(o.price, level)
 				}
 			}
 		} else if level, err := b.l.Add(o.trail); err == nil {
-			moved = priceMin(o.price, level)
+			moved = num.Min(o.price, level)
 		}
 		if !moved.Equal(o.price) {
 			o.price = moved
@@ -566,9 +566,9 @@ func (o *order) execution(b bar) (num.Price, bool) {
 	below := buys == (o.orderType == limitOrder)
 	switch {
 	case below && b.l.Cmp(o.price) <= 0:
-		return priceMin(o.price, b.o), true
+		return num.Min(o.price, b.o), true
 	case !below && b.h.Cmp(o.price) >= 0:
-		return priceMax(o.price, b.o), true
+		return num.Max(o.price, b.o), true
 	}
 	return num.Price{}, false
 }

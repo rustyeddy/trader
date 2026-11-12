@@ -26,6 +26,10 @@
 // instrument metadata, contract multipliers, or lot conventions belong in
 // their domain packages, not in num.
 //
+// Min and Max order Price, Quantity and Rate (Money is ordered with its
+// error-returning Cmp), because the builtin min and max do not work on the
+// struct value types.
+//
 // Price.MulQuantity (ADR-025) and Money.DivQuantity (ADR-027) are deliberate,
 // narrow exceptions.  They derive Money from Price and Quantity and back, and
 // the arithmetic is context-free: the currency is an explicit caller-supplied

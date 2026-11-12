@@ -76,7 +76,7 @@ func (a *atr) onBar(b bar) (float64, bool) {
 	// The true range is the largest of the bar's range and how far it reached
 	// past the previous close on either side. Each term is a distance, so a bar
 	// that stays on one side of the close contributes nothing for the other.
-	tr := priceMax(mustDiff(b.h, b.l), above(b.h, prev), above(prev, b.l))
+	tr := num.Max(mustDiff(b.h, b.l), above(b.h, prev), above(prev, b.l))
 	sum, err := a.sum.Add(tr)
 	if err == nil {
 		sum, err = sum.Sub(a.ranges[a.next])
