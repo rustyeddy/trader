@@ -193,9 +193,16 @@ of the existing archive.
   in any package or in the CLI.* Other options (log level, instrument, interval,
   range, base URL) may also come from the same file where sensible; the flag still
   wins, so the command line need not repeat them. =cmd/trader= resolves the
-  data root in this order: =--data-root=, then =TRADER_DATA_ROOT=, then the
-  =data_root= key of =./etc/trader.yml= (the repository's =etc/= directory, kept
-  simple for now). The packages still take the root as an argument and hard-code
+  data root in this order: =--data-root=, then =TRADER_DATA_ROOT=, then
+  =marketdata.root= in =./etc/trader.yml= (the repository's =etc/= directory, kept
+  simple for now). The file is nested by area:
+
+  #+begin_example
+  marketdata:
+    root: /srv/data
+    provider: oanda
+  #+end_example
+ The packages still take the root as an argument and hard-code
   nothing. The config file holds no secret: the OANDA token stays in
   =TRADER_OANDA_TOKEN= only (ADR-078 S-1), and a secret key in the file is an
   error. A missing file is not an error when a flag or the environment supplies the
