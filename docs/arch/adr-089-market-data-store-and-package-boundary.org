@@ -87,7 +87,10 @@ gives back a =Partition=, and every identifier is validated as a path component:
   daily bars open at 17:00 America/New_York and can begin in the previous UTC month
   (ADR-020). The layout keeps today's file-to-month assignment unchanged, so the
   migration renames directories only; the provider package, not the resolver,
-  decides which month holds a given daily bar;
+  decides which month holds a given daily bar. The archive's existing D1
+  placement is recorded as the convention, and tests cover representative month
+  and DST boundaries (a bar opening on the last Sunday evening of a month, and
+  across the March and November New York changes) against the archive fixtures;
 - a resolved path is checked to lie under the data root;
 - a missing partition is reported with the path that was looked up. The resolver
   never searches another provider, another stage or the legacy layout.
@@ -116,10 +119,14 @@ resolver's.
   authoritative file is never silently replaced (=ErrPartitionAlreadyExists=); an
   explicit extend replaces it by rename, with the caller having merged the
   existing records. Writers that share a partition hold a per-partition lock across
-  the whole read, merge and commit sequence, as the archived writer does, because an
+  the whole read, merge and commit sequence, as the archived writer does. The
+  guarantee is process-local (one process, one lock per partition path); two
+  processes writing the same partition are not coordinated and are not supported
+  until a cross-process lock is decided. The reason for the lock: an
   atomic rename alone would let two concurrent extends lose one writer's records. A
   cancelled context or a failure observed before the commit leaves any existing file
-  untouched; a cancellation that arrives after the commit does not undo it.
+  untouched; a cancellation that arrives after the commit does not undo it. A test
+  cancels at each side of the commit point.
 - Instruments are the archive's audited set of 26 FX pairs, checked against
   =instrument.CurrencyPairID=; a symbol outside it (such as XAUUSD) is an error,
   not an FX pair by guess. OANDA symbols (=EUR_USD=) map to engine keys through the
@@ -182,7 +189,10 @@ of the existing archive.
 
 * Owner decisions (2026-11-12)
 
-- *Data root default: a config file, not a forced flag.* =cmd/trader= resolves the
+- *Data root default: a config file, not a forced flag; no hard-coded =/srv/data=
+  in any package or in the CLI.* Other options (log level, instrument, interval,
+  range, base URL) may also come from the same file where sensible; the flag still
+  wins, so the command line need not repeat them. =cmd/trader= resolves the
   data root in this order: =--data-root=, then =TRADER_DATA_ROOT=, then the
   =data_root= key of =./etc/trader.yml= (the repository's =etc/= directory, kept
   simple for now). The packages still take the root as an argument and hard-code
@@ -197,4 +207,5 @@ of the existing archive.
 - *Migration.* Later, and a simple one-time script: it renames =raw/oanda= to
   =oanda/raw= (and the same for canonical), verified by file counts and fingerprints
   before any old path is removed. It is not part of the downloader and not part of
-  stage 1.
+  stage 1. It confirms that the source tree exists and the target tree does not
+  before any rename, and preserves bytes and fingerprints.
