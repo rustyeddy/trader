@@ -66,6 +66,12 @@ it; this ADR does not precommit to it.
 - Strategies emit orders using the normalized bar's key, broker queues and
   account positions are looked up by exactly that key, and reports print it.
   The six EMAX reports keep printing =EURUSD=.
+- The broker enforces this at its own boundary: before it advances its clock or
+  touches any state, =onFrame= requires every bar to carry exactly a configured
+  engine key with prices on that market's tick, and refuses the frame
+  otherwise. A bar that was not normalized is an error, never a silently missed
+  queue or position mark. =catalog.normalize= remains the loading convenience;
+  it checks every bar before changing any.
 
 ** Ownership of lookup
 

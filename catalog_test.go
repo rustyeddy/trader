@@ -349,3 +349,65 @@ func TestEmaxEach_TakesEachInstrumentsTickFromTheCatalog(t *testing.T) {
 	unknown := &emaxEach{id: "pair", instruments: []string{"NOPE"}, short: 2, long: 3, stopPct: rt(400), markets: cat}
 	require.ErrorIs(t, unknown.init(), errUnknownInstrument)
 }
+
+// A bar the catalog has not normalized must not reach the engine: it would
+// silently miss the queue and the position held under the engine key. The
+// frame is refused before the clock or any state moves.
+func TestBroker_OnFrame_RefusesABarThatIsNotUnderAnEngineKey(t *testing.T) {
+	captureLogs(t)
+	r := goodRaw("EURUSD")
+	r.symbol = "EUR_USD"
+	cat, err := newCatalog(r.config(t))
+	require.NoError(t, err)
+	br := newBroker("t", cat)
+	act := br.addAccount("a", usd(10000))
+	ctx := context.Background()
+
+	pending := openOrderAt("EURUSD", long, px(110000))
+	pending.accountID = "a"
+	require.NoError(t, br.submit(ctx, pending))
+	require.NoError(t, br.onBar(ctx, barsOf("EURUSD", 110000, 110000).data[1]))
+	require.Contains(t, act.positions, "EURUSD")
+	held := act.positions["EURUSD"].markPrice
+	clock := br.clock
+	queued := len(br.orders["EURUSD"])
+
+	unnormalized := barsOf("EUR_USD", 111000, 111000).data[1]
+	err = br.onBar(ctx, unnormalized)
+
+	require.ErrorIs(t, err, errUnknownInstrument)
+	assert.Contains(t, err.Error(), "normalize")
+	assert.Equal(t, clock, br.clock, "the clock did not advance")
+	assert.Equal(t, held, act.positions["EURUSD"].markPrice, "the position was not marked")
+	assert.Len(t, br.orders["EURUSD"], queued, "the queues were not touched")
+
+	// An unknown instrument is refused the same way, and so is a price off the tick.
+	unknown := barsOf("AUDUSD", 100000, 100000).data[1]
+	require.ErrorIs(t, br.onBar(ctx, unknown), errUnknownInstrument)
+	off := barsOf("EURUSD", 100000, 100000).data[1]
+	off.c = num.MustParsePrice("1.000001")
+	require.Error(t, br.onBar(ctx, off))
+	assert.Equal(t, clock, br.clock)
+
+	// The same bar, normalized, is processed.
+	md := barsOf("EUR_USD", 111000, 111000, 111000)
+	require.NoError(t, cat.normalize(md))
+	require.NoError(t, br.onBar(ctx, md.data[2]))
+	assert.Equal(t, px(111000), act.positions["EURUSD"].markPrice)
+}
+
+func TestCatalog_NormalizeChangesNothingWhenAnyBarIsRefused(t *testing.T) {
+	r := goodRaw("EURUSD")
+	r.symbol = "EUR_USD"
+	c, err := newCatalog(r.config(t))
+	require.NoError(t, err)
+	md := barsOf("EUR_USD", 110000, 110000, 110000)
+	md.data[2].c = num.MustParsePrice("1.100001") // the last bar is off the tick
+
+	require.Error(t, c.normalize(md))
+
+	assert.Equal(t, "EUR_USD", md.instrument, "the set is left as it was")
+	for _, b := range md.data {
+		assert.Equal(t, "EUR_USD", b.instrument)
+	}
+}

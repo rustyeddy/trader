@@ -238,6 +238,12 @@ func (br *broker) onFrame(ctx context.Context, f frame) error {
 	if err := checkFrame(f); err != nil {
 		return err
 	}
+	// Before the clock or any state moves: a bar must already carry an engine
+	// key (ADR-088), or it would silently miss the queues and positions held
+	// under it.
+	if err := br.markets.checkFrame(f); err != nil {
+		return err
+	}
 	if f.bars[0].Before(br.clock) {
 		return fmt.Errorf("%w: frame at %s opens at %s, before %s, when the previous frame was available",
 			errFrameOverlap, f.availableAt.Format(time.RFC3339), f.bars[0].Format(time.RFC3339), br.clock.Format(time.RFC3339))

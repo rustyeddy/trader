@@ -146,30 +146,59 @@ func (c *catalog) keyFor(symbol string) (string, error) {
 	return m.key, nil
 }
 
+// checkPrices reports an error unless every price of b is a whole number of
+// m's ticks.
+func (m *market) checkPrices(b ohlc) error {
+	for _, p := range []num.Price{b.o, b.h, b.l, b.c} {
+		if ok, err := p.DivisibleBy(m.tick); err != nil || !ok {
+			return fmt.Errorf("%s price %s is not a multiple of the tick %s", m.key, p, m.tick)
+		}
+	}
+	return nil
+}
+
+// checkFrame is the engine's boundary check: every bar of the frame must carry
+// exactly a configured engine key, with prices on that market's tick. A
+// provider spelling is an error here, not a second instrument, so a bar that
+// was not normalized can never be silently missed by the queues and positions
+// held under the engine key. It changes nothing.
+func (c *catalog) checkFrame(f frame) error {
+	for _, b := range f.bars {
+		m, ok := c.byKey[b.instrument]
+		if !ok {
+			return fmt.Errorf("%w: a bar for %q is not under an engine key; normalize the bars first", errUnknownInstrument, b.instrument)
+		}
+		if err := m.checkPrices(b.ohlc); err != nil {
+			return fmt.Errorf("bar at %s: %w", b.Format(barTimeLayout), err)
+		}
+	}
+	return nil
+}
+
 // normalize rewrites loaded bars to the engine key of their instrument, before
 // the engine sees them, and checks every price is a whole number of the
 // market's ticks. A provider spelling therefore never reaches the engine as a
-// second instrument.
+// second instrument. Every bar is checked before any is changed, so a refused
+// set is left exactly as it was.
 func (c *catalog) normalize(md *marketData) error {
 	key, err := c.keyFor(md.instrument)
 	if err != nil {
 		return fmt.Errorf("bars: %w", err)
 	}
 	m := c.byKey[key]
-	md.instrument = key
-	for i := range md.data {
-		b := &md.data[i]
+	for _, b := range md.data {
 		if b.instrument != "" {
 			if bk, err := c.keyFor(b.instrument); err != nil || bk != key {
 				return fmt.Errorf("bars: a %q bar is in the %q set", b.instrument, key)
 			}
 		}
-		b.instrument = key
-		for _, p := range []num.Price{b.o, b.h, b.l, b.c} {
-			if ok, err := p.DivisibleBy(m.tick); err != nil || !ok {
-				return fmt.Errorf("bars: %s price %s is not a multiple of the tick %s", key, p, m.tick)
-			}
+		if err := m.checkPrices(b.ohlc); err != nil {
+			return fmt.Errorf("bars: %w", err)
 		}
+	}
+	md.instrument = key
+	for i := range md.data {
+		md.data[i].instrument = key
 	}
 	return nil
 }

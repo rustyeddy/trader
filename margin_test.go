@@ -428,6 +428,7 @@ func TestBroker_OnFrame_CompleteCloseoutRecordsEveryPosition(t *testing.T) {
 
 func TestBroker_OnFrame_RejectedCloseoutIsKeptAsCompleted(t *testing.T) {
 	br, _ := liquidationBroker(t, usd(2000))
+	br.markets = withMarket(t, br.markets, testInstrument("USDJPY")) // so its bar passes the frame check
 	// A policy that names a position the account does not hold: the closing
 	// order is rejected, so the closeout fails.
 	br.closeout = func(*account) (*position, error) {
