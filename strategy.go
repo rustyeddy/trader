@@ -23,6 +23,7 @@ type emax struct {
 	// stopPct is how far from the entry price the stop is placed, as a
 	// fraction of that price. Every open order carries the stop it produces.
 	stopPct num.Rate
+	tick    num.Price // the instrument's price tick, from its Spec
 
 	// signal state, not the actual position: the last entry signal consumed
 	pos     direction // side it is in (noDirection: flat)
@@ -45,6 +46,9 @@ func (e *emax) init() error {
 	}
 	if e.stopPct.Sign() <= 0 || e.stopPct.Cmp(rateOne) >= 0 {
 		return fmt.Errorf("emax: stop must be between 0%% and 100%% of price (stopPct=%s)", e.stopPct)
+	}
+	if e.tick.IsZero() {
+		return fmt.Errorf("emax: no price tick")
 	}
 	e.emaShort = newEMA(e.short)
 	e.emaLong = newEMA(e.long)
@@ -143,12 +147,12 @@ func (e *emax) stopFor(entry num.Price, d direction) (num.Price, error) {
 	if err != nil {
 		return num.Price{}, err
 	}
-	dist, err := raw.RoundDown(priceTick)
+	dist, err := raw.RoundDown(e.tick)
 	if err != nil {
 		return num.Price{}, err
 	}
 	if dist.IsZero() {
-		dist = priceTick
+		dist = e.tick
 	}
 	if d == short {
 		return entry.Add(dist)
@@ -166,6 +170,7 @@ type emaxEach struct {
 	instruments []string
 	short, long int
 	stopPct     num.Rate
+	markets     *catalog // supplies each instrument's tick
 
 	byInstrument map[string]*emax
 }
@@ -183,7 +188,11 @@ func (s *emaxEach) init() error {
 		if _, dup := s.byInstrument[inst]; dup {
 			return fmt.Errorf("emax each: instrument %q given twice", inst)
 		}
-		e := &emax{id: s.id + "/" + inst, short: s.short, long: s.long, stopPct: s.stopPct}
+		m, ok := s.markets.lookup(inst)
+		if !ok {
+			return fmt.Errorf("emax each: %w: %q", errUnknownInstrument, inst)
+		}
+		e := &emax{id: s.id + "/" + inst, short: s.short, long: s.long, stopPct: s.stopPct, tick: m.tick}
 		if err := e.init(); err != nil {
 			return fmt.Errorf("emax each %s: %w", inst, err)
 		}

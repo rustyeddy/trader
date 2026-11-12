@@ -43,7 +43,7 @@ func actionOf(o *order) action {
 
 func newTestEmax(t *testing.T, short, long int) *emax {
 	t.Helper()
-	e := &emax{short: short, long: long, stopPct: rateOnePercent}
+	e := &emax{tick: px(1), short: short, long: long, stopPct: rateOnePercent}
 	require.NoError(t, e.init())
 	return e
 }
@@ -183,7 +183,7 @@ func TestEmax_Init(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := &emax{short: tt.short, long: tt.long, stopPct: tt.stopPct}
+			e := &emax{tick: px(1), short: tt.short, long: tt.long, stopPct: tt.stopPct}
 			err := e.init()
 			if tt.wantErr {
 				require.Error(t, err)
@@ -289,7 +289,7 @@ func TestEmax_OrdersValidate(t *testing.T) {
 }
 
 func TestEmax_Name(t *testing.T) {
-	var s strategy = &emax{id: "emax-20-50"}
+	var s strategy = &emax{tick: px(1), id: "emax-20-50"}
 	assert.Equal(t, "emax-20-50", s.name())
 }
 
@@ -308,7 +308,7 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := &emax{short: 2, long: 4, stopPct: tt.stopPct}
+			e := &emax{tick: px(1), short: 2, long: 4, stopPct: tt.stopPct}
 			require.NoError(t, e.init())
 
 			var got *order
@@ -330,7 +330,7 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 }
 
 func TestEmax_StopDistanceRoundsDownAndIsAtLeastOnePoint(t *testing.T) {
-	e := &emax{short: 2, long: 4, stopPct: rateOnePercent}
+	e := &emax{tick: px(1), short: 2, long: 4, stopPct: rateOnePercent}
 	require.NoError(t, e.init())
 
 	// 1% of 12_345_678 is 123456.78, which rounds down to 123456.
@@ -382,7 +382,7 @@ func TestEmax_StopsPassAccountSizing(t *testing.T) {
 	// emax produces must be sizeable.
 	captureLogs(t)
 	e := newTestEmax(t, 2, 4)
-	acct := newAccount("a", usd(10000))
+	acct := newAccount("a", usd(10000), testMarkets())
 	for i, b := range closes(flipSeries...) {
 		o := e.onBar(context.Background(), b)
 		if o == nil || o.action != open {

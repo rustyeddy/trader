@@ -14,6 +14,7 @@ import (
 
 type broker struct {
 	id       string
+	markets  *catalog // the run's instruments, shared with every account
 	accounts map[string]*account
 	orders   map[string][]*order // submitted orders awaiting execution, by instrument, for every account
 	seq      int                 // last order id issued
@@ -39,16 +40,17 @@ type broker struct {
 	completed []*order
 }
 
-func newBroker(id string) *broker {
+func newBroker(id string, markets *catalog) *broker {
 	return &broker{
 		id:       id,
+		markets:  markets,
 		accounts: make(map[string]*account),
 		orders:   make(map[string][]*order),
 	}
 }
 
 func (br *broker) addAccount(id string, balance num.Money) *account {
-	act := newAccount(id, balance)
+	act := newAccount(id, balance, br.markets)
 	br.accounts[id] = act
 	return act
 }
@@ -172,7 +174,7 @@ func (br *broker) reservedMargin(act *account) (num.Money, error) {
 			if o.accountID != act.id || o.action != open {
 				continue
 			}
-			m, err := marginFor(o.instrument, o.units, o.price, act.currency)
+			m, err := br.markets.marginFor(o.instrument, o.units, o.price, act.currency)
 			if err != nil {
 				return num.Money{}, err
 			}
@@ -234,6 +236,12 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 // another, in instrument order: the path between them is unknown too.
 func (br *broker) onFrame(ctx context.Context, f frame) error {
 	if err := checkFrame(f); err != nil {
+		return err
+	}
+	// Before the clock or any state moves: a bar must already carry an engine
+	// key (ADR-088), or it would silently miss the queues and positions held
+	// under it.
+	if err := br.markets.checkFrame(f); err != nil {
 		return err
 	}
 	if f.bars[0].Before(br.clock) {

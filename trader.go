@@ -65,7 +65,6 @@ var (
 	errUnknownAccount    = errors.New("unknown account")
 	errAccountConflict   = errors.New("order account conflicts with the trader's account")
 	errUnknownInstrument = errors.New("unknown instrument")
-	errInstrumentConfig  = errors.New("instrument not configured")
 )
 
 type trader struct {

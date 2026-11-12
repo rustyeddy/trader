@@ -146,7 +146,7 @@ func TestATR_TrueRangeIncludesTheGapFromThePreviousClose(t *testing.T) {
 }
 
 func TestEmax_StopFor_RoundsHalfEvenAtOneEightThenFloorsToTheTick(t *testing.T) {
-	e := &emax{short: 2, long: 4, stopPct: rt(400)} // 0.04%
+	e := &emax{tick: px(1), short: 2, long: 4, stopPct: rt(400)} // 0.04%
 	require.NoError(t, e.init())
 
 	// 0.04999 x 0.0004 = 0.000019996 exactly: its floor is one tick (0.00001),
@@ -162,7 +162,7 @@ func TestEmax_StopFor_RoundsHalfEvenAtOneEightThenFloorsToTheTick(t *testing.T) 
 }
 
 func TestEmax_StopFor_AStopBelowZeroIsAnError(t *testing.T) {
-	e := &emax{short: 2, long: 4, stopPct: rateOnePercent}
+	e := &emax{tick: px(1), short: 2, long: 4, stopPct: rateOnePercent}
 	require.NoError(t, e.init())
 
 	_, err := e.stopFor(px(0), long)
@@ -176,7 +176,7 @@ func TestAccount_Aggregates_ReportOverflowInsteadOfWrapping(t *testing.T) {
 	big := func(sym string) *position {
 		return &position{instrument: sym, direction: long, units: qty(5_000_000), entryPrice: px(0), markPrice: maxPrice}
 	}
-	a := newAccount("a", num.MustParseMoney("92000000000", usdCurrency))
+	a := newAccount("a", num.MustParseMoney("92000000000", usdCurrency), testMarkets())
 	a.positions["EURUSD"] = big("EURUSD")
 
 	_, err := a.equity()
@@ -188,14 +188,14 @@ func TestAccount_Aggregates_ReportOverflowInsteadOfWrapping(t *testing.T) {
 	_, err = a.unrealizedPnL()
 	require.ErrorIs(t, err, num.ErrOverflow, "the sum of the positions")
 
-	b := newAccount("b", usd(1))
+	b := newAccount("b", usd(1), testMarkets())
 	b.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(5_000_000_000), entryPrice: maxPrice, markPrice: maxPrice}
 	_, err = b.usedMargin()
 	require.ErrorIs(t, err, num.ErrOverflow, "one position's margin")
 	_, err = defaultMarginPolicy(b)
 	require.ErrorIs(t, err, num.ErrOverflow, "the margin policy surfaces it")
 
-	r := &trader{broker: newBroker("t"), account: a}
+	r := &trader{broker: newBroker("t", testMarkets()), account: a}
 	_, err = newResult("s", 0, r)
 	require.ErrorIs(t, err, num.ErrOverflow, "a report of it is an error, not a wrong number")
 }
@@ -206,7 +206,7 @@ func TestAccount_Aggregates_ReportOverflowInsteadOfWrapping(t *testing.T) {
 // distance of 10 loses 10, more than 9.99999999.
 func TestAccount_Size_Open_VerificationDropsAStepThatOvershoots(t *testing.T) {
 	captureLogs(t)
-	a := newAccount("a", num.MustParseMoney("9.99999999", usdCurrency))
+	a := newAccount("a", num.MustParseMoney("9.99999999", usdCurrency), testMarkets())
 	a.riskPct = rateOne
 	o := openOrderAt("EURUSD", long, px(2_000_000)) // price 20, stop 19.8: replaced below
 	o.stopLoss = px(1_000_000)                      // a stop of 10 away
@@ -218,7 +218,7 @@ func TestAccount_Size_Open_VerificationDropsAStepThatOvershoots(t *testing.T) {
 }
 
 func TestTrailStops_AStopNeverMovesBelowZero(t *testing.T) {
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	stop := &order{instrument: "EURUSD", reason: reasonStopLoss, direction: long, action: close, orderType: stopOrder,
 		price: px(100000), trail: px(500000), state: stateSubmitted}
 	br.orders["EURUSD"] = []*order{stop}
@@ -231,7 +231,7 @@ func TestTrailStops_AStopNeverMovesBelowZero(t *testing.T) {
 }
 
 func TestBroker_Submit_ReportsAReservedMarginOverflow(t *testing.T) {
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	act := br.addAccount("a", usd(1000))
 	br.orders["GBPUSD"] = []*order{{accountID: "a", instrument: "GBPUSD", action: open, units: qty(5_000_000_000), price: maxPrice, state: stateSubmitted}}
 	o := openOrderAt("EURUSD", long, eurusd1_10)
