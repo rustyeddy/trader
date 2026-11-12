@@ -1,0 +1,75 @@
+#+TITLE: ADR-086: Exact Money, cents only at presentation
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issues #590 (adopt =num= in the root engine) and #591. Applies
+ADR-004's rule that an operation needing a rounding policy other than the
+default must select and document it. This is the first decision of #590's
+decision record; its remaining rounding decisions (risk sizing, margin-level
+comparison, composed expressions, the order-notional bound) are still open
+and will be recorded by amendment or a further ADR.
+
+* Context
+
+The root engine rounds to cents at three points, each in a chosen direction:
+
+- the margin requirement, rounded up to the cent so it is never understated;
+- P&L at close, rounded down to the cent so a loss is never understated;
+- printed amounts, shown as whole cents.
+
+=num.Money= is exact at 1e-8 and has no operation that rounds to a
+coarser unit. Preserving the root's cent rounding would therefore require
+adding a named settlement-rounding operation to =num=, and it would have to
+know the currency's minor unit (two decimals for USD, none for JPY, eight
+for BTC).
+
+The owner has stated the operating range: account values at most about $1M
+typically and $1B at the extreme, and sub-cent precision is not needed.
+
+* Decision
+
+=Money= stays exact throughout the engine. Balances, equity, margin and P&L
+are never rounded to cents. A value is floored to cents only when it is
+printed, as a presentation step at the report boundary.
+
+=num= gains no settlement-rounding operation and no currency minor-unit
+table.
+
+* Alternatives considered
+
+** Add a named cent-rounding operation to =num=
+
+For example =Money.RoundDownTo= and =RoundUpTo=, in the style of
+=Price.RoundDown=. It would reproduce today's multi-trade results to the
+cent. Rejected: it grows the public API of =num= against the decision to
+avoid unneeded complexity, needs a per-currency minor unit that =num=
+otherwise does not have, and leaves three rounding sites in the root to keep
+correct, all to preserve sub-cent behavior that the owner has said does not
+matter.
+
+** Keep the root's own cent arithmetic behind an adapter
+
+Rejected earlier on #590: =num= deliberately offers no raw-scaled
+constructor or accessor, so a root-side cent adapter would be a bridge it
+does not provide.
+
+* Consequences
+
+- The six EMAX scenarios each close one trade, so their printed summaries
+  are expected to be unchanged. The conversion PR must show this by diffing
+  the output of =make run= before and after.
+- On a run with many trades, balances may hold sub-cent values and can differ
+  from the old engine by up to one cent per trade (half a cent on average).
+  Over 10,000 trades that is up to $100.
+- The margin requirement is no longer rounded up to the cent. It is exact, so
+  the conservative direction is lost only below one cent.
+- Anything other than the report that reads balances, such as a future API or
+  export, sees exact sub-cent values and is responsible for its own
+  presentation rounding.
+- Results of the converted engine are not byte-comparable with the old engine
+  on multi-trade runs. The conversion PR may compare the two on a multi-trade
+  backtest and report the divergence, which should stay under one cent per
+  trade.
+- If exact cent-level reproduction is later required, adding the named
+  operation to =num= remains available and is a separate decision.
