@@ -35,10 +35,13 @@ import (
 // slog.Default() fallback only supplies a reasonable value when the guest's
 // own main() never bothered to configure one.
 //
-// examples/design is a single-package design prototype, not domain code, and
-// is not imported by anything. Its logging moves behind this rule if and when
-// it migrates to production packages.
-var globalLoggerExemptPrefixes = []string{"internal/logging", "cmd", "test", "sdk", "examples/design", ".git"}
+// _archive is reference-only code that is not built. The root package, the
+// trading engine migrated from the design prototype, still logs through slog's
+// default logger: its files sit directly in the repository root and are exempt
+// until that engine is converted to an injected logger, a separate, deferred
+// change (#602). Every other package, including the new market-data packages,
+// is held to the rule.
+var globalLoggerExemptPrefixes = []string{"internal/logging", "cmd", "test", "sdk", "_archive", ".git"}
 
 // slog identifiers that read or mutate the mutable package-level default
 // logger. slog.New, slog.NewTextHandler, slog.NewJSONHandler,
@@ -119,6 +122,9 @@ func TestNoPackageUsesSlogGlobalDefaultLogger(t *testing.T) {
 }
 
 func isGlobalLoggerExempt(rel string) bool {
+	if !strings.ContainsRune(rel, filepath.Separator) && strings.HasSuffix(rel, ".go") {
+		return true // a file of the root engine package
+	}
 	for _, p := range globalLoggerExemptPrefixes {
 		if rel == p || strings.HasPrefix(rel, p+string(filepath.Separator)) {
 			return true
@@ -145,4 +151,20 @@ func repoRoot(t *testing.T) string {
 	}
 	t.Fatal("logging: no go.mod found above " + dir)
 	return ""
+}
+
+func TestIsGlobalLoggerExempt(t *testing.T) {
+	sep := string(filepath.Separator)
+	for rel, want := range map[string]bool{
+		"broker.go":                              true, // the root engine
+		"internal" + sep + "logging":             true,
+		"cmd" + sep + "trader" + sep + "main.go": true,
+		"_archive" + sep + "sdk" + sep + "x.go":  true,
+		"internal" + sep + "marketdata" + sep + "oanda" + sep + "client.go": false,
+		"num" + sep + "money.go":     false,
+		"instrument" + sep + "id.go": false,
+		"internal":                   false, // a directory is not exempt by name alone
+	} {
+		assert.Equal(t, want, isGlobalLoggerExempt(rel), rel)
+	}
 }

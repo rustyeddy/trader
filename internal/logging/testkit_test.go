@@ -190,3 +190,16 @@ func TestCaptureRespectsDebugLevel(t *testing.T) {
 	require.Len(t, records, 1)
 	assert.Equal(t, slog.LevelDebug, records[0].Level)
 }
+
+// An attribute from WithAttrs sits in the groups that were open when it was
+// added, not in groups opened afterwards, exactly as slog's own handlers do.
+func TestCapture_WithAttrsBeforeWithGroupStaysOutsideTheGroup(t *testing.T) {
+	logger, rec := Capture()
+
+	logger.With("before", 1).WithGroup("g").With("inside", 2).Info("x", "arg", 3)
+
+	attrs := rec.Records()[0].Attrs
+	assert.Equal(t, int64(1), attrs["before"], "added before the group opened")
+	assert.NotContains(t, attrs, "inside")
+	assert.Equal(t, map[string]any{"inside": int64(2), "arg": int64(3)}, attrs["g"])
+}

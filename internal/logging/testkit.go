@@ -98,8 +98,15 @@ func Capture() (*slog.Logger, *Recorder) {
 type recordingHandler struct {
 	recorder *Recorder
 	level    slog.Level
-	attrs    []slog.Attr
+	attrs    []groupedAttr // From WithAttrs, each with the groups open when it was added.
 	groups   []string
+}
+
+// groupedAttr is an attribute from WithAttrs and the groups that were open at
+// that call: a real handler places it there, not under groups opened later.
+type groupedAttr struct {
+	groups []string
+	attr   slog.Attr
 }
 
 func (h *recordingHandler) Enabled(_ context.Context, level slog.Level) bool {
@@ -108,8 +115,8 @@ func (h *recordingHandler) Enabled(_ context.Context, level slog.Level) bool {
 
 func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
 	attrs := map[string]any{}
-	for _, a := range h.attrs {
-		addAttr(attrs, h.groups, a)
+	for _, ga := range h.attrs {
+		addAttr(attrs, ga.groups, ga.attr)
 	}
 	r.Attrs(func(a slog.Attr) bool {
 		addAttr(attrs, h.groups, a)
@@ -127,7 +134,10 @@ func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
 
 func (h *recordingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	next := *h
-	next.attrs = append(append([]slog.Attr{}, h.attrs...), attrs...)
+	next.attrs = append([]groupedAttr{}, h.attrs...)
+	for _, a := range attrs {
+		next.attrs = append(next.attrs, groupedAttr{groups: h.groups, attr: a})
+	}
 	return &next
 }
 
