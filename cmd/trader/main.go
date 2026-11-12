@@ -13,8 +13,7 @@ import (
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
-		slog.Error("backtest failed", "error", err)
+	if newApp().execute() != nil {
 		os.Exit(1)
 	}
 }
@@ -34,51 +33,81 @@ func (f *logFlags) register(cmd *cobra.Command) {
 	pf.StringVar(&f.output, "log-output", "stderr", "log destination: stderr, stdout or a file path to append to")
 }
 
-// install builds the logger these flags describe and makes it slog's default,
-// which the trading engine still logs through. This command is the composition
-// root: the one place the default is chosen (ADR-023). The returned closer
-// releases a log file and must be closed when the command ends.
-func (f *logFlags) install() (io.Closer, error) {
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(f.level)); err != nil {
-		return nil, fmt.Errorf("--log-level %q: %w", f.level, err)
-	}
-	logger, closer, err := logging.New(logging.Config{Level: level, Format: f.format, Output: f.output})
-	if err != nil {
-		return nil, err
-	}
-	slog.SetDefault(logger)
-	return closer, nil
+// app is the command and the logging resources it owns. Its execute is the one
+// place that logs a failure and releases them, on every exit path.
+type app struct {
+	cmd   *cobra.Command
+	flags logFlags
+	run   func(io.Writer) error // the backtest; replaced in tests
+
+	prev   *slog.Logger // slog's default before install
+	closer io.Closer    // the log output; nil when none is open
 }
 
-// newRootCmd builds the trader command. With no subcommand it backtests every
-// scenario and prints one summary each to stdout. Errors are returned to
-// main, which logs them, so cobra does not print them a second time.
-func newRootCmd() *cobra.Command {
-	var flags logFlags
-	var closer io.Closer
-	cmd := &cobra.Command{
+func newApp() *app {
+	a := &app{run: trader.Run}
+	a.cmd = &cobra.Command{
 		Use:           "trader",
 		Short:         "Backtest the EMAX scenarios and print a summary of each",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(*cobra.Command, []string) (err error) {
-			closer, err = flags.install()
-			return err
-		},
-		PersistentPostRunE: func(*cobra.Command, []string) error {
-			if closer == nil {
-				return nil
-			}
-			c := closer
-			closer = nil
-			return c.Close()
+		PersistentPreRunE: func(*cobra.Command, []string) error {
+			return a.install()
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return trader.Run(cmd.OutOrStdout())
+			return a.run(cmd.OutOrStdout())
 		},
 	}
-	flags.register(cmd)
-	return cmd
+	a.flags.register(a.cmd)
+	return a
+}
+
+// newRootCmd builds the trader command. With no subcommand it backtests every
+// scenario and prints one summary each to stdout. Errors are returned to
+// execute, which logs them, so cobra does not print them a second time.
+func newRootCmd() *cobra.Command { return newApp().cmd }
+
+// install builds the logger the flags describe and makes it slog's default,
+// which the trading engine still logs through. This is the composition root:
+// the one place the default is chosen (ADR-023). cleanup undoes it.
+func (a *app) install() error {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(a.flags.level)); err != nil {
+		return fmt.Errorf("--log-level %q: %w", a.flags.level, err)
+	}
+	logger, closer, err := logging.New(logging.Config{Level: level, Format: a.flags.format, Output: a.flags.output})
+	if err != nil {
+		return err
+	}
+	a.prev, a.closer = slog.Default(), closer
+	slog.SetDefault(logger)
+	return nil
+}
+
+// cleanup restores slog's previous default and then releases the log output, so
+// no later log call can target a closed file. It is safe to call more than once.
+func (a *app) cleanup() error {
+	if a.closer == nil {
+		return nil
+	}
+	slog.SetDefault(a.prev)
+	closer := a.closer
+	a.closer, a.prev = nil, nil
+	return closer.Close()
+}
+
+// execute runs the command. A failure is logged through the configured logger
+// while it is still installed (or through the previous default when logging
+// could not be configured), and the logging resources are released whether the
+// command succeeded or failed.
+func (a *app) execute() error {
+	err := a.cmd.Execute()
+	if err != nil {
+		slog.Error("command failed", "error", err)
+	}
+	if cerr := a.cleanup(); cerr != nil && err == nil {
+		err = cerr
+	}
+	return err
 }
