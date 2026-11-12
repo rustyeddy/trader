@@ -50,10 +50,8 @@ func New(cfg Config) (*slog.Logger, io.Closer, error) {
 }
 
 // newHandler builds the one handler cfg.Format selects, writing to w. It
-// holds no knowledge of where w came from or who owns closing it — New and
-// NewMulti each handle output resolution and cleanup themselves, since
-// NewMulti's partial-construction-failure cleanup needs to run across
-// several already-opened sinks, not just one.
+// holds no knowledge of where w came from or who owns closing it: New handles
+// output resolution and cleanup itself.
 func newHandler(cfg Config, w io.Writer) (slog.Handler, error) {
 	opts := &slog.HandlerOptions{Level: cfg.Level, ReplaceAttr: redactSensitiveKeys}
 
