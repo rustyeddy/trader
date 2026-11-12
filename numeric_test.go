@@ -9,18 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPriceMaxAndMin_OrderPrices(t *testing.T) {
-	assert.Equal(t, px(3), priceMax(px(1), px(3), px(2)))
-	assert.Equal(t, px(1), priceMin(px(2), px(1), px(3)))
-	assert.Equal(t, px(5), priceMax(px(5)), "one price is its own extreme")
-	assert.Equal(t, px(5), priceMin(px(5)))
-}
-
-func TestQuantityMin_OrdersQuantities(t *testing.T) {
-	assert.Equal(t, qty(1), quantityMin(qty(3), qty(1), qty(2)))
-	assert.Equal(t, qty(4), quantityMin(qty(4)))
-}
-
 func TestPriceDiff_IsAlwaysNonNegative(t *testing.T) {
 	d, above, err := priceDiff(px(110000), px(109000))
 	require.NoError(t, err)

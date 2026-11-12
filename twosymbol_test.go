@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,7 @@ func hbar(instrument string, opened time.Time, oN int64, cN int64) bar {
 	return bar{
 		instrument:  instrument,
 		Time:        opened,
-		ohlc:        ohlc{o: o, h: priceMax(o, c), l: priceMin(o, c), c: c},
+		ohlc:        ohlc{o: o, h: num.Max(o, c), l: num.Min(o, c), c: c},
 		availableAt: opened.Add(time.Hour),
 	}
 }

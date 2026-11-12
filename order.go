@@ -209,7 +209,7 @@ func (o *order) validate() error {
 	default:
 		return fmt.Errorf("%w: unsupported order type %d", errInvalidOrder, o.orderType)
 	}
-	if priceMax(o.price, o.stopLoss, o.takeProfit).Cmp(maxPrice) > 0 {
+	if num.Max(o.price, o.stopLoss, o.takeProfit).Cmp(maxPrice) > 0 {
 		return fmt.Errorf("%w: prices must not exceed %s", errInvalidOrder, maxPrice)
 	}
 	if !o.takeProfit.IsZero() && o.action != open {

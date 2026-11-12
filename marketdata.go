@@ -257,7 +257,7 @@ func parseBar(instrument string, rec []string, lasts time.Duration) (bar, error)
 		return bar{}, fmt.Errorf("volume %d is negative", v)
 	}
 	o, h, l, c := px[0], px[1], px[2], px[3]
-	if h.Cmp(priceMax(o, c)) < 0 || l.Cmp(priceMin(o, c)) > 0 {
+	if h.Cmp(num.Max(o, c)) < 0 || l.Cmp(num.Min(o, c)) > 0 {
 		return bar{}, fmt.Errorf("high %s and low %s do not contain open %s and close %s", h, l, o, c)
 	}
 	return bar{instrument: instrument, Time: t, ohlc: ohlc{o: o, h: h, l: l, c: c, v: v}, availableAt: t.Add(lasts)}, nil
