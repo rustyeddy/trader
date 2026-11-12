@@ -1,0 +1,181 @@
+#+TITLE: ADR-087: Formula and rounding decision table for adopting num in the root engine
+#+STARTUP: overview indent
+
+* Status
+
+Proposed. Issues #590 (adopt =num= in the root engine) and #594. Awaiting
+owner approval; per CLAUDE.md no implementation starts until it is approved.
+Builds on ADR-086 (exact Money, cents only at presentation) and applies
+ADR-004's rule that an operation needing a non-default rounding policy selects
+and documents it. Also refers to ADR-025, 027, 030 and 045.
+
+* Context
+
+The root engine's money arithmetic is exact and directional: each formula
+performs one chosen rounding through =muldiv=. =num= rounds half-even after
+every operation and exposes no raw values, so composing =num= operations is
+not generally equivalent. In particular =Money.MulRate=, then =Money.DivPrice=,
+then =Quantity.RoundDown= can round up across an integer before the floor
+reaches it (a ratio of 9122.999999996 becomes 9123). That change is not
+accepted, even if the six EMAX scenarios still match.
+
+The reviews on #590 asked for a finite table of formulas, rounding and tests
+before any conversion. ADR-086 already decides that =Money= stays exact and is
+floored to cents only when printed.
+
+* Decision
+
+** Principles
+
+1. *One final rounding where direction matters.* A quantity that is
+   rounded down for safety is rounded down once, at the end, never after an
+   earlier rounding that could cross the boundary.
+2. *Verify, then protect.* After a quantity is sized and quantized to the
+   instrument's step, planned risk and required margin are computed again from
+   the quantized quantity. If either exceeds its budget, the quantity is
+   reduced by one step and checked again, or the order is rejected with the
+   existing errors. This protects the decision even when an intermediate
+   rounding went the wrong way, and needs no general exact-ratio framework in
+   =num=.
+3. *Exact money.* Balance, equity, margin and P&L are exact =Money=. Cents
+   appear only at presentation (ADR-086).
+4. *Checked arithmetic.* Every =num= operation returns an error that is
+   handled. Overflow is rejected with a clear error, never wrapped,
+   saturated, or turned into a panic by an assumption about market values or
+   account size. Panics are reserved for programmer-invariant violations.
+5. *No raw scale in the root.* The root never imports =num/internal/fixed= and
+   never holds a raw scaled integer.
+
+** Formula table
+
+All amounts are in the account currency, which must equal the instrument's
+quote currency (see Currency below). "Exact" means exact at 1e-8 given the
+engine's inputs: prices with five decimals, rates with two decimals, whole
+units.
+
+| Formula | Inputs | Exact value | Final rounding | Quantum |
+|---------+--------+-------------+----------------+---------|
+| Stop distance (=stopFor=) | entry Price, stop Rate | entry x stopPct | down | one tick, at least one tick |
+| Risk units | equity Money, riskPct Rate, stop distance Price | equity x riskPct / distance | down, once, then verified | instrument unit step |
+| Margin units | margin available Money, price Price, marginRate Rate | available / (price x marginRate) | down, once, then verified | instrument unit step |
+| Order units | min(risk, margin, caps) | as above | down | unit step; reject below instrument minimum |
+| Required margin (=marginFor=) | units, Price, marginRate | units x price x marginRate | none in engine (exact; half-even only if beyond 1e-8) | none; cents at presentation only |
+| Used margin | sum over positions | sum of required margin at the mark | none; checked sum | none |
+| Reserved margin | sum over pending opens | sum | none; checked sum | none |
+| Margin available | equity, used, reserved | equity - used - reserved | none; may be zero or negative | none |
+| Realized P&L | exit and entry Price, whole units | (exit - entry) x units, sign by direction | none (exact) | none; floor at presentation (toward negative infinity) |
+| Unrealized P&L | mark and entry Price, units | (mark - entry) x units | none (exact) | none; floor at presentation |
+| Equity | balance, unrealized P&L | balance + unrealized | none; checked sum | none; printed as the sum of the floored components (ADR-086) |
+| Margin level threshold | equity, used, level Rate | equity < level x used | see boundary rule | none |
+| Margin admission at fill | units, fill Price | required margin <= margin available | exact comparison | none |
+
+The sizing formulas use the order's price at submission. The admission check
+uses the fill price. These can differ for resting orders; the table keeps both
+as they are today.
+
+*Signed values.* =num.Price= and =Quantity= are non-negative, so a signed
+price difference (stop distance, P&L delta, ATR true range) is ordered with
+=Cmp= first or computed in =Money=. P&L keeps its sign and is never rounded
+toward zero: at presentation it floors toward negative infinity, so a loss is
+not understated.
+
+*Analytics.* Indicators such as ATR stay at the ADR-045 =Float64= boundary.
+Their output is analytical, and becomes authoritative only through checked
+construction.
+
+** Margin closeout boundary rule
+
+Today the check is exact: liquidate when equity x 1 < level x used, in
+arbitrary precision, with equality not liquidating. =num= offers a rounded
+=Money.MulRate= and a rounded =Money.Div= only.
+
+Proposed rule: compute the threshold =used x level= with =num=, which is exact
+at 1e-8 for the engine's inputs, and liquidate or warn when equity is strictly
+below it. Equality does not trigger, as today. Where the threshold itself is
+beyond 1e-8 the half-even rounding can move the boundary by at most 1e-8 of
+the account currency; this is documented and tested at, one unit below and
+one unit above the boundary.
+
+OWNER DECISION: accept the 1e-8 boundary tolerance, or require a conservative
+rule (rounding the threshold up so the system never fails to liquidate), which
+needs a small exact-compare or round-up primitive in =num=.
+
+** Limits
+
+Numeric representation limits and business limits are separate.
+
+- *Numeric.* =Price.MulQuantity= and the =Money= operations return
+  =ErrOverflow= or =ErrUnderflow=. An order, mark or aggregate that would
+  overflow is rejected or surfaced as an error and tested, including the
+  intermediates and the final result. =num='s range is about 92.2 billion whole
+  units, narrower than the prototype's cent-based range.
+- *Business.* Per-instrument maximum units and a maximum order notional are
+  configuration of the instrument or account, chosen for risk reasons, not to
+  make one multiplication fit. =maxPrice= remains a data-sanity limit on bars
+  and orders and is chosen on that basis. =maxOrderUnits= is replaced by the
+  instrument limit.
+- A $1B account at 50:1 leverage is $50B of notional, and 100:1 exceeds the
+  =Money= range, so the numeric limit can be reached with realistic settings.
+  Aggregated positions and large market moves can also exceed it. None of this
+  is classified as impossible.
+
+OWNER DECISION: the default maximum order notional and whether it lives on the
+instrument, the account, or both.
+
+** Currency
+
+The account has a currency and each instrument has a quote currency, both
+explicit, USD only for now. A =Money= with a zero or invalid currency, or an
+account and instrument currency mismatch, is rejected with
+=ErrCurrencyMismatch= or the corresponding error, and is tested including a
+non-USD quote against a USD account. Conversion (=Money.Convert=) is out of
+scope.
+
+** Parsing
+
+=parsePrice= keeps its five-decimal and range checks as validation against the
+instrument's tick size, outside =num=. =num.ParsePrice= accepts up to eight
+decimals; the five-decimal rule is an instrument rule, not a =num= rule.
+
+* Test plan
+
+- *Independent reference.* Each formula in the table has a reference
+  calculation in tests only, using =math/big.Rat=, with the same single final
+  rounding. The tests compare the production result against the reference and
+  never against the production code itself.
+- *Boundaries.* Targeted cases on both sides of every integer-unit and cent
+  threshold, including the near-integer risk-sizing case (9122.999999996), a
+  value exactly on a step, one step above and below, positive and negative P&L,
+  zero and invalid currency, equality at the closeout threshold, one unit
+  either side, and the maximum and minimum representable values.
+- *Post-quantization check.* A case where the sized quantity exceeds its risk
+  or margin budget after quantizing is reduced by one step or rejected.
+- *Overflow.* Maximum price times maximum permitted units is rejected with a
+  clear error and never wraps, saturates or panics, for intermediates and
+  results.
+- *Presentation.* Negative amounts floor toward negative infinity; equity is
+  printed as the sum of the floored components; all six EMAX summaries stay
+  byte-identical (a necessary check, not a sufficient one).
+- *Fuzz.* A fuzz target for the sizing path against the reference, in the style
+  of the =num= fuzz targets.
+
+* Consequences
+
+- No =num= API addition is proposed. The two possible additions (an exact
+  compare or round-up for the closeout rule) are listed as owner decisions and
+  would be a separate small PR with tests and fuzz.
+- Some =error= returns spread through sizing, margin policy and the report.
+  Aggregation of balances and P&L returns errors rather than panicking, so the
+  signatures of =equity=, =unrealizedPnL=, =usedMargin= and =marginAvailable=
+  change.
+- A sub-cent difference between the engine and the old prototype can change a
+  later sizing, admission or liquidation decision, so divergence on long runs
+  is not bounded by one cent per trade.
+- The conversion is one coupled change and a single PR, with Market Data and
+  instrument promotion kept out.
+
+* Open owner decisions
+
+- Margin closeout boundary: accept a 1e-8 tolerance, or add a conservative
+  primitive to =num=.
+- Default maximum order notional and where it lives.
