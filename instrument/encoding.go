@@ -39,10 +39,17 @@ func (id ID) MarshalJSON() ([]byte, error) {
 // holding an ID's own canonical text form. See ErrInvalidID's own doc
 // comment for exactly what is accepted.
 func (id *ID) UnmarshalJSON(data []byte) error {
-	var s string
-	if err := json.Unmarshal(data, &s); err != nil {
+	// Decode into a *string: json.Unmarshal turns a JSON null into a nil
+	// pointer, which a plain string would swallow as "", silently clearing an
+	// existing ID.
+	var p *string
+	if err := json.Unmarshal(data, &p); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidID, err)
 	}
+	if p == nil {
+		return fmt.Errorf("%w: null is not an ID", ErrInvalidID)
+	}
+	s := *p
 	if s == "" {
 		*id = ID{}
 		return nil

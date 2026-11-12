@@ -145,3 +145,51 @@ func TestIDUnmarshalJSONReplacesAPreviousValue(t *testing.T) {
 
 	assert.True(t, id.IsZero(), "an empty string decodes to the zero ID, even over a value")
 }
+
+func TestIDUnmarshalJSONRejectsNullAndKeepsTheExistingID(t *testing.T) {
+	id := instrument.IndexID("SPX")
+
+	err := json.Unmarshal([]byte(`null`), &id)
+
+	require.ErrorIs(t, err, instrument.ErrInvalidID)
+	assert.Equal(t, "idx:SPX", id.String(), "a refused input does not clear the ID")
+
+	var zero instrument.ID
+	data, err := json.Marshal(zero)
+	require.NoError(t, err)
+	require.Equal(t, `""`, string(data))
+	require.NoError(t, json.Unmarshal(data, &zero), "the explicit empty string is still the zero ID")
+	assert.True(t, zero.IsZero())
+}
+
+// Every ID FutureID returns decodes again, including at the edges of the
+// supported contract-month range; outside it FutureID returns the zero ID.
+func TestFutureIDRoundTripsAcrossTheSupportedRange(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		at   time.Time
+		ok   bool
+	}{
+		{"first supported month", time.Date(1900, time.January, 1, 0, 0, 0, 0, time.UTC), true},
+		{"last supported month", time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC), true},
+		{"a normal contract", time.Date(2026, time.December, 18, 0, 0, 0, 0, time.UTC), true},
+		{"year 1", time.Date(1, time.January, 2, 0, 0, 0, 0, time.UTC), false},
+		{"before the range", time.Date(1899, time.December, 31, 23, 59, 59, 0, time.UTC), false},
+		{"year 10000", time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC), false},
+		{"a zone that is another year in UTC", time.Date(1899, time.December, 31, 23, 0, 0, 0, time.FixedZone("x", -3600)), true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			id := instrument.FutureID("ES", tt.at)
+			if !tt.ok {
+				assert.True(t, id.IsZero())
+				return
+			}
+			require.False(t, id.IsZero())
+			data, err := json.Marshal(id)
+			require.NoError(t, err)
+			var got instrument.ID
+			require.NoError(t, json.Unmarshal(data, &got))
+			assert.True(t, id.Equal(got), "%s", id)
+		})
+	}
+}

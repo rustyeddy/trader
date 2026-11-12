@@ -229,3 +229,26 @@ func TestInstrumentZeroValue(t *testing.T) {
 	assert.True(t, inst.ID().IsZero())
 	assert.False(t, inst.Kind().IsValid())
 }
+
+func TestNewFutureRejectsAnExpirationOutsideTheContractMonthRange(t *testing.T) {
+	for name, at := range map[string]time.Time{
+		"year 1":           time.Date(1, time.January, 2, 0, 0, 0, 0, time.UTC),
+		"before the range": time.Date(minContractYear-1, time.December, 31, 23, 59, 59, 0, time.UTC),
+		"year 10000":       time.Date(maxContractYear+1, time.January, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		_, err := NewFuture("ES", at)
+		require.ErrorIs(t, err, ErrInvalidInstrument, name)
+	}
+
+	for name, at := range map[string]time.Time{
+		"first month": time.Date(minContractYear, time.January, 1, 0, 0, 0, 0, time.UTC),
+		"last month":  time.Date(maxContractYear, time.December, 31, 23, 59, 59, 0, time.UTC),
+	} {
+		inst, err := NewFuture("ES", at)
+		require.NoError(t, err, name)
+		assert.False(t, inst.ID().IsZero(), name)
+		expiration, ok := inst.Expiration()
+		require.True(t, ok)
+		assert.Equal(t, FutureID("ES", expiration), inst.ID(), "the stored month and the ID agree")
+	}
+}

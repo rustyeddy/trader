@@ -145,7 +145,8 @@ func validateExchangeTicker(exchange, ticker string) (string, string, error) {
 // NewFuture returns the Instrument for one specific expiring futures
 // contract identified by its underlying root symbol and expiration
 // month. Once trimmed and upper-cased, root must be non-empty and contain
-// only letters, digits, '.', or '-'; expiration must be non-zero.
+// only letters, digits, '.', or '-'; expiration must be non-zero and its UTC
+// year must be in the supported contract-month range (see FutureID).
 // Contracts on the same root with different expiration months are
 // different Instruments — see the package doc comment.
 //
@@ -162,6 +163,9 @@ func NewFuture(root string, expiration time.Time) (Instrument, error) {
 	}
 	if expiration.IsZero() {
 		return Instrument{}, fmt.Errorf("%w: expiration must not be zero", ErrInvalidInstrument)
+	}
+	if !validContractYear(expiration) {
+		return Instrument{}, fmt.Errorf("%w: expiration year must be %d through %d", ErrInvalidInstrument, minContractYear, maxContractYear)
 	}
 	contractMonth := canonicalContractMonth(expiration)
 	return Instrument{
