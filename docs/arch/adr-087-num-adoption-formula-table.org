@@ -9,6 +9,13 @@ Builds on ADR-086 (exact Money, cents only at presentation) and applies
 ADR-004's rule that an operation needing a non-default rounding policy selects
 and documents it. Also refers to ADR-025, 027, 030 and 045.
 
+If accepted, this ADR *partially amends ADR-086*: ADR-086 said closeout
+thresholds use a "documented conservative boundary rule". The owner has
+decided to accept 1e-8 rate precision in the closeout comparison instead (see
+"Margin closeout boundary rule"). The guarantee that is lost is that a
+position can be liquidated one rounding step later than an exact comparison
+would liquidate it.
+
 * Context
 
 The root engine's money arithmetic is exact and directional: each formula
@@ -36,7 +43,8 @@ floored to cents only when printed.
    reduced by one step and checked again, or the order is rejected with the
    existing errors. This protects the decision even when an intermediate
    rounding went the wrong way, and needs no general exact-ratio framework in
-   =num=.
+   =num=. The check compares rounded values, so it proves safety only up to a
+   stated tolerance, not exactly (see "Rounding tolerance").
 3. *Exact money.* Balance, equity, margin and P&L are exact =Money=. Cents
    appear only at presentation (ADR-086).
 4. *Checked arithmetic.* Every =num= operation returns an error that is
@@ -49,17 +57,23 @@ floored to cents only when printed.
 ** Formula table
 
 All amounts are in the account currency, which must equal the instrument's
-quote currency (see Currency below). "Exact" means exact at 1e-8 given the
-engine's inputs: prices with five decimals, rates with two decimals, whole
-units.
+quote currency (see Currency below).
+
+*Input precision.* Prices have five decimals. Rates have six decimals
+(=rateScale= is 1e6, and the EMAX strategy accepts any stop percentage between
+0% and 100%, for example 0.0004). Units are whole numbers. A product of a
+five-decimal price and a six-decimal rate has up to eleven decimals, so it is
+*not* exact at =num='s 1e-8 scale. Only some products are exact: a price times
+a rate of up to three decimals, a whole-unit quantity times a price, and the
+EMAX defaults (a 1% stop, a 2% or 5% margin rate).
 
 | Formula | Inputs | Exact value | Final rounding | Quantum |
 |---------+--------+-------------+----------------+---------|
-| Stop distance (=stopFor=) | entry Price, stop Rate | entry x stopPct | down | one tick, at least one tick |
-| Risk units | equity Money, riskPct Rate, stop distance Price | equity x riskPct / distance | down, once, then verified | instrument unit step |
-| Margin units | margin available Money, price Price, marginRate Rate | available / (price x marginRate) | down, once, then verified | instrument unit step |
+| Stop distance (=stopFor=) | entry Price, stop Rate | entry x stopPct | down to the tick; at least one tick | one tick |
+| Risk units | equity Money, riskPct Rate, stop distance Price | (equity x riskPct) / distance | down, then verified | instrument unit step |
+| Margin units | margin available Money, price Price, marginRate Rate | (available / marginRate) / price | down, then verified | instrument unit step |
 | Order units | min(risk, margin, caps) | as above | down | unit step; reject below instrument minimum |
-| Required margin (=marginFor=) | units, Price, marginRate | units x price x marginRate | none in engine (exact; half-even only if beyond 1e-8) | none; cents at presentation only |
+| Required margin (=marginFor=) | units, Price, marginRate | (price x units) x marginRate | none in engine (one half-even rounding at 1e-8) | none; cents at presentation only |
 | Used margin | sum over positions | sum of required margin at the mark | none; checked sum | none |
 | Reserved margin | sum over pending opens | sum | none; checked sum | none |
 | Margin available | equity, used, reserved | equity - used - reserved | none; may be zero or negative | none |
@@ -68,6 +82,25 @@ units.
 | Equity | balance, unrealized P&L | balance + unrealized | none; checked sum | none; printed as the sum of the floored components (ADR-086) |
 | Margin level threshold | equity, used, level Rate | equity < level x used | see boundary rule | none |
 | Margin admission at fill | units, fill Price | required margin <= margin available | exact comparison | none |
+
+*Operation order.* Round the large-magnitude value, not a small per-unit
+factor. Multiply the whole-unit quantity by the price first (exact), then apply
+the rate once. For units, apply the rate to the money first (=Money.MulRate=
+for risk, =Money.DivRate= for margin), then divide by the price with
+=Money.DivPrice=. This keeps the one rounding on a value of order
+account-currency size, instead of on a per-unit cost such as
+0.04999 x 0.0004 = 0.000019996, which =num= would round to 0.00002000 and then
+size 50,000 units where the exact value is 50,010. It needs no new =num=
+operation.
+
+*Stop distance.* =Price.MulRate= rounds half-even at 1e-8 before the floor to
+the tick, so a product just below a tick boundary can round up to it:
+0.04999 x 0.0004 = 0.000019996 floors to one tick (0.00001) exactly but becomes
+two ticks after rounding. The stop distance is not a safety quantity, because
+sizing uses the actual distance between the order's price and its stop, so the
+ADR accepts this: the stop can be at most one tick wider than the exact floor,
+only when the exact product is within 0.5e-8 below a tick boundary. This case
+is pinned in the tests. The EMAX defaults are exact and unaffected.
 
 The sizing formulas use the order's price at submission. The admission check
 uses the fill price. These can differ for resting orders; the table keeps both
@@ -83,22 +116,43 @@ not understated.
 Their output is analytical, and becomes authoritative only through checked
 construction.
 
+** Rounding tolerance
+
+Budget checks compare values that were rounded half-even at 1e-8, so they do
+not prove exact non-overshoot. For example 9.99999 x 0.000001 =
+0.00000999999 rounds to 0.00001000, so a one-unit order at a 0.00001 stop
+distance passes the check although it exceeds the exact budget. The ADR does
+not claim mathematical strictness. It accepts and bounds the tolerance:
+
+- With the operation order above, a budget or required margin is one
+  rounding of a value of order account-currency size, so it differs from the
+  exact value by at most 0.5e-8 of the account currency. It does not grow with
+  the number of units.
+- A sized quantity can therefore exceed its exact budget by at most that
+  amount, which is far below the display quantum (one cent).
+- A rounding can also drop a quantity by one step when the exact quotient is
+  within rounding error of an integer step (9122.999999996 can become 9123 or
+  fall below it). Conservative undersizing of this kind is accepted rather than
+  building a compound exact-arithmetic API in =num=.
+
+*Amended contract.* The sizing contract is "safe within the tolerance and
+tight except at integer-step edges", not "the exact largest safe size". The
+existing test =TestAccount_Size_Open_RiskIsBoundedAndTight= is amended to say
+so, and keeps its tightness check for ordinary inputs.
+
 ** Margin closeout boundary rule
 
-Today the check is exact: liquidate when equity x 1 < level x used, in
-arbitrary precision, with equality not liquidating. =num= offers a rounded
-=Money.MulRate= and a rounded =Money.Div= only.
+Owner decision. The closeout comparison uses =num= at 1e-8 *rate* precision:
+the margin level is =equity / used= as a =Rate= rounded at 1e-8, and the
+position is liquidated, or warned, only when that level is strictly below the
+threshold. Equality is healthy, as today.
 
-Proposed rule: compute the threshold =used x level= with =num=, which is exact
-at 1e-8 for the engine's inputs, and liquidate or warn when equity is strictly
-below it. Equality does not trigger, as today. Where the threshold itself is
-beyond 1e-8 the half-even rounding can move the boundary by at most 1e-8 of
-the account currency; this is documented and tested at, one unit below and
-one unit above the boundary.
-
-OWNER DECISION: accept the 1e-8 boundary tolerance, or require a conservative
-rule (rounding the threshold up so the system never fails to liquidate), which
-needs a small exact-compare or round-up primitive in =num=.
+Because the precision is on the ratio, the equity-level difference from an
+exact comparison scales with used margin: at most 0.5e-8 x used. With $1M of
+used margin that is $0.005. It is not a fixed 1e-8 dollar tolerance. This
+amends ADR-086's conservative-closeout wording (see Status). It is tested at,
+one unit below and one unit above the boundary, and the tests record the
+tolerance rather than claiming exactness.
 
 ** Limits
 
@@ -109,18 +163,17 @@ Numeric representation limits and business limits are separate.
   overflow is rejected or surfaced as an error and tested, including the
   intermediates and the final result. =num='s range is about 92.2 billion whole
   units, narrower than the prototype's cent-based range.
-- *Business.* Per-instrument maximum units and a maximum order notional are
-  configuration of the instrument or account, chosen for risk reasons, not to
-  make one multiplication fit. =maxPrice= remains a data-sanity limit on bars
-  and orders and is chosen on that basis. =maxOrderUnits= is replaced by the
-  instrument limit.
-- A $1B account at 50:1 leverage is $50B of notional, and 100:1 exceeds the
-  =Money= range, so the numeric limit can be reached with realistic settings.
-  Aggregated positions and large market moves can also exceed it. None of this
-  is classified as impossible.
-
-OWNER DECISION: the default maximum order notional and whether it lives on the
-instrument, the account, or both.
+- *Business (owner decision).* A maximum order notional of **$50 million
+  USD-equivalent** is a configurable account risk and trading policy, chosen
+  for risk reasons and not to make one multiplication fit. It replaces the
+  global =maxOrderUnits=. Provider and venue constraints (minimum and maximum
+  units, unit step, tick) stay separate, on the instrument. =maxPrice= remains
+  a data-sanity limit on bars and orders.
+- $50 million is far inside the =Money= range, so a single order cannot
+  overflow. Aggregates can still: summed positions, reserved margin and large
+  market moves are checked and rejected or surfaced as errors, never assumed
+  impossible. A $1B account at 50:1 would be $50B notional, which the policy
+  limit rejects well before the numeric limit.
 
 ** Currency
 
@@ -149,7 +202,15 @@ decimals; the five-decimal rule is an instrument rule, not a =num= rule.
   zero and invalid currency, equality at the closeout threshold, one unit
   either side, and the maximum and minimum representable values.
 - *Post-quantization check.* A case where the sized quantity exceeds its risk
-  or margin budget after quantizing is reduced by one step or rejected.
+  or margin budget after quantizing is reduced by one step or rejected. The
+  tolerance case is pinned: equity 9.99999, riskPct 0.000001, stop distance
+  0.00001, whose budget rounds from 0.00000999999 to 0.00001000.
+- *Input precision.* Cases with six-decimal rates: 0.04999 x 0.0004 for the stop
+  distance (exact floor one tick, accepted result up to two), and $1 available
+  margin at price 0.04999 and margin rate 0.0004 (exact 50,010 units, which
+  the operation order must reproduce).
+- *Tightness.* The amended tight test shows that one more step breaches a
+  budget or cap, except at the pinned integer-step edge.
 - *Overflow.* Maximum price times maximum permitted units is rejected with a
   clear error and never wraps, saturates or panics, for intermediates and
   results.
@@ -161,9 +222,10 @@ decimals; the five-decimal rule is an instrument rule, not a =num= rule.
 
 * Consequences
 
-- No =num= API addition is proposed. The two possible additions (an exact
-  compare or round-up for the closeout rule) are listed as owner decisions and
-  would be a separate small PR with tests and fuzz.
+- No =num= API addition is proposed. The conservative closeout rule and a
+  compound exact-arithmetic API were considered and declined for simplicity.
+  The conversion reproduces prototype rounding only where it matters, not to
+  the last marginal unit.
 - Some =error= returns spread through sizing, margin policy and the report.
   Aggregation of balances and P&L returns errors rather than panicking, so the
   signatures of =equity=, =unrealizedPnL=, =usedMargin= and =marginAvailable=
@@ -174,8 +236,14 @@ decimals; the five-decimal rule is an instrument rule, not a =num= rule.
 - The conversion is one coupled change and a single PR, with Market Data and
   instrument promotion kept out.
 
-* Open owner decisions
+* Owner decisions recorded
 
-- Margin closeout boundary: accept a 1e-8 tolerance, or add a conservative
-  primitive to =num=.
-- Default maximum order notional and where it lives.
+- Closeout comparison at 1e-8 rate precision, strictly below the threshold,
+  equality healthy; amends ADR-086's conservative-closeout wording.
+- Maximum order notional of $50 million USD-equivalent, configurable as
+  account risk and trading policy; provider constraints stay separate.
+
+* To confirm
+
+- Conservative undersizing and the amended "safe within tolerance, tight
+  except at step edges" sizing contract, instead of a new exact-arithmetic API.
