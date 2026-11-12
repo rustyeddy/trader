@@ -108,7 +108,7 @@ func FutureID(root string, expiration time.Time) ID {
 	if !isValidIdentifierPart(root) || expiration.IsZero() {
 		return ID{}
 	}
-	return ID{raw: "fut:" + root + ":" + expiration.UTC().Format("2006-01")}
+	return ID{raw: "fut:" + root + ":" + expiration.UTC().Format(contractMonthLayout)}
 }
 
 // ContinuousSeriesID returns the canonical identity for the continuous,
@@ -137,6 +137,9 @@ func IndexID(name string) ID {
 	}
 	return ID{raw: "idx:" + name}
 }
+
+// contractMonthLayout is the "YYYY-MM" contract month in a futures ID.
+const contractMonthLayout = "2006-01"
 
 func normalizeIdentifierPart(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))

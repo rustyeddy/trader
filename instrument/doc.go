@@ -96,25 +96,14 @@
 // sufficient for M1's scope; a more durable identity scheme, if one proves
 // necessary, is a later, additive change.
 //
-// # Resolving provider symbols without treating them as identity
+// # Provider symbol resolution is not part of this package
 //
-// Resolver, and its in-memory reference implementation MemoryResolver
-// (see resolver.go), resolve provider-specific symbols and
-// Instrument+venue combinations to Listings — without ever letting an
-// alias, or a provider's own symbol spelling, become instrument identity.
-// This is issue #26 (M1-08) and ADR-016.
-//
-// Resolution never guesses: ResolveSymbol and ResolveInstrument both
-// resolve to exactly one Listing or report an error — ErrUnknownSymbol
-// for zero matches, ErrAmbiguousSymbol for more than one — rather than
-// picking an arbitrary match. A provider is not guaranteed to expose a
-// given symbol on only one venue, so an unconstrained (empty) venue on a
-// ResolveSymbol call is a real source of ambiguity, not merely a
-// convenience default.
-//
-// There is no package-level registry: MemoryResolver is a plain value
-// returned by NewMemoryResolver, and every instance is independent of
-// every other one.
+// A Listing carries a provider's own symbol next to the Instrument it
+// exposes, but nothing here looks a symbol up or maps one provider spelling
+// to another. A resolver, with its registration and disambiguation rules, is
+// deferred until a real provider-symbol mapping need (market data or a
+// broker adapter) requires it. A provider's symbol never becomes instrument
+// identity.
 //
 // # Synthetic and multi-leg instruments are deferred
 //
