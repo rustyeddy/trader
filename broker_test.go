@@ -11,7 +11,7 @@ import (
 )
 
 func TestBroker_AddAccount(t *testing.T) {
-	b := newBroker("b")
+	b := newBroker("b", testMarkets())
 	act := b.addAccount("a1", usd(500))
 
 	require.NotNil(t, act)
@@ -22,7 +22,7 @@ func TestBroker_AddAccount(t *testing.T) {
 }
 
 func TestBroker_AddAccountReplacesSameID(t *testing.T) {
-	b := newBroker("b")
+	b := newBroker("b", testMarkets())
 	b.addAccount("a1", usd(500))
 	second := b.addAccount("a1", usd(900))
 
@@ -31,7 +31,7 @@ func TestBroker_AddAccountReplacesSameID(t *testing.T) {
 }
 
 func TestNewAccount(t *testing.T) {
-	a := newAccount("x", usd(123))
+	a := newAccount("x", usd(123), testMarkets())
 	assert.Equal(t, "x", a.id)
 	assert.Equal(t, usd(123), a.balance)
 }
@@ -39,7 +39,7 @@ func TestNewAccount(t *testing.T) {
 func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 	logs := captureLogs(t)
 	ts := time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
-	b := newBroker("sim")
+	b := newBroker("sim", testMarkets())
 	b.addAccount("acct", usd(1000))
 	o := &order{
 		accountID:  "acct",
@@ -76,7 +76,7 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 
 func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
 	captureLogs(t)
-	b := newBroker("sim")
+	b := newBroker("sim", testMarkets())
 	b.addAccount("acct", usd(1000))
 	ctx := context.Background()
 
@@ -95,7 +95,7 @@ func TestBroker_SubmitIDsAreSequentialAndKept(t *testing.T) {
 
 func TestBroker_SubmitUnknownAccount(t *testing.T) {
 	logs := captureLogs(t)
-	b := newBroker("sim")
+	b := newBroker("sim", testMarkets())
 	o := &order{Time: testStart, accountID: "ghost", action: open}
 
 	err := b.submit(context.Background(), o)
@@ -109,7 +109,7 @@ func TestBroker_SubmitUnknownAccount(t *testing.T) {
 
 func TestBroker_SubmitCancelledContext(t *testing.T) {
 	captureLogs(t)
-	b := newBroker("sim")
+	b := newBroker("sim", testMarkets())
 	b.addAccount("acct", usd(1000))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -123,7 +123,7 @@ func TestBroker_SubmitCancelledContext(t *testing.T) {
 
 func TestBroker_SubmitOrderWithoutAnAccountIsRejectedAsUnknown(t *testing.T) {
 	logs := captureLogs(t)
-	b := newBroker("sim")
+	b := newBroker("sim", testMarkets())
 	b.addAccount("acct", usd(1000))
 	o := &order{Time: testStart, action: open} // the trader never set an account
 
@@ -138,7 +138,7 @@ func TestBroker_SubmitOrderWithoutAnAccountIsRejectedAsUnknown(t *testing.T) {
 
 func TestBroker_SubmitUsesTheOrdersAccountForTheLog(t *testing.T) {
 	logs := captureLogs(t)
-	b := newBroker("sim")
+	b := newBroker("sim", testMarkets())
 	b.addAccount("one", usd(1000))
 	b.addAccount("two", usd(1000))
 
@@ -175,7 +175,7 @@ func submittedOrder(t *testing.T, br *broker, a action, d direction) *order {
 }
 
 func newFillBroker() (*broker, *account) {
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	return br, br.addAccount("a", usd(10000))
 }
 
@@ -280,14 +280,14 @@ func TestBroker_OnBar_OpenOverAnExistingPositionIsFatal(t *testing.T) {
 }
 
 func TestAccount_ApplyFill_AddAndReduceAreUnsupported(t *testing.T) {
-	act := newAccount("a", usd(1000))
+	act := newAccount("a", usd(1000), testMarkets())
 	for _, a := range []action{add, reduce} {
 		require.ErrorIs(t, fillOn(act, &order{instrument: "EURUSD", action: a}), errUnsupportedAction, a.String())
 	}
 }
 
 func TestBroker_Fill_UnknownAccount(t *testing.T) {
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	err := br.fill(&order{id: "t-1", accountID: "ghost", instrument: "EURUSD", action: open}, px(1), time.Time{})
 	require.ErrorIs(t, err, errUnknownAccount)
 }
@@ -349,7 +349,7 @@ func TestBroker_Submit_HasTheAccountSizeTheOrder(t *testing.T) {
 
 func TestBroker_Submit_SizingRejectionIsReturnedRecordedAndNotQueued(t *testing.T) {
 	captureLogs(t)
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	br.addAccount("a", usd(0))
 	o := brokerOpen("a")
 
@@ -377,7 +377,7 @@ func TestBroker_Submit_UnknownInstrumentIsFatal(t *testing.T) {
 
 func TestBroker_ReservedMargin(t *testing.T) {
 	captureLogs(t)
-	br := &broker{id: "t", orders: map[string][]*order{"EURUSD": {
+	br := &broker{id: "t", markets: testMarkets(), orders: map[string][]*order{"EURUSD": {
 		{accountID: "a", instrument: "EURUSD", action: open, units: qty(10000), price: px(110000), state: stateSubmitted}, // $220
 		{accountID: "a", instrument: "EURUSD", action: open, units: qty(5000), price: px(110000), state: stateSubmitted},  // $110
 		{accountID: "a", instrument: "EURUSD", action: close, state: stateSubmitted},                                      // frees, never reserves
@@ -393,8 +393,9 @@ func TestBroker_ReservedMargin(t *testing.T) {
 }
 
 func TestBroker_Submit_ReservedMarginShrinksTheNextOrder(t *testing.T) {
+	cat := testMarkets()
 	captureLogs(t)
-	br := newBroker("t")
+	br := newBroker("t", cat)
 	act := br.addAccount("a", usd(10000))
 	act.riskPct = rateOne // only the margin can limit the orders
 	ctx := context.Background()
@@ -403,7 +404,6 @@ func TestBroker_Submit_ReservedMarginShrinksTheNextOrder(t *testing.T) {
 	require.NoError(t, br.submit(ctx, first))
 	assert.Equal(t, qty(454545), first.units, "all the margin")
 
-	registerInstrument(t, testInstrument("GBPUSD"))
 	second := brokerOpen("a")
 	second.instrument = "GBPUSD" // another instrument, so only the margin can refuse it
 	err := br.submit(ctx, second)
@@ -441,7 +441,7 @@ func TestBroker_OnBar_RejectedCloseLeavesTheBalance(t *testing.T) {
 
 func TestBroker_OnBar_MarksEveryAccountsPosition(t *testing.T) {
 	captureLogs(t)
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	one := br.addAccount("one", usd(1))
 	two := br.addAccount("two", usd(1))
 	one.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(1), entryPrice: px(110000), markPrice: px(110000)}
@@ -455,7 +455,7 @@ func TestBroker_OnBar_MarksEveryAccountsPosition(t *testing.T) {
 
 func TestBroker_OnBar_AppliesFillsToTheOrdersOwnAccount(t *testing.T) {
 	captureLogs(t)
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	one := br.addAccount("one", usd(10000))
 	two := br.addAccount("two", usd(10000))
 	o := brokerOpen("two")

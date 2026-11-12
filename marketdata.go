@@ -264,12 +264,13 @@ func parseBar(instrument string, rec []string, lasts time.Duration) (bar, error)
 }
 
 // parsePrice reads a positive price written with exactly five decimals, the
-// resolution of priceTick. The five-decimal rule is the bars files' (and the
-// instrument's), so it is checked here, on the text, before num parses the
-// digits exactly: nothing goes through a float.
+// resolution of the bars schema. The five-decimal rule is the file format's, so
+// it is checked here, on the text, before num parses the digits exactly:
+// nothing goes through a float. That each price is a whole number of its
+// instrument's ticks is checked when the bars are normalized.
 func parsePrice(s string) (num.Price, error) {
 	whole, frac, ok := strings.Cut(s, ".")
-	if !ok || whole == "" || len(frac) != 5 {
+	if !ok || whole == "" || len(frac) != barPriceDecimals {
 		return num.Price{}, fmt.Errorf("price %q: want five decimals", s)
 	}
 	if strings.Trim(whole+frac, "0123456789") != "" { // refuses any sign or letter

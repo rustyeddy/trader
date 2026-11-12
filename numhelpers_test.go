@@ -2,10 +2,12 @@ package trader
 
 import (
 	"fmt"
+	"hash/fnv"
 	"strconv"
 	"strings"
 	"testing"
 
+	instr "github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -181,4 +183,77 @@ func unsetIfZero(m num.Money) num.Money {
 		return num.Money{}
 	}
 	return m
+}
+
+// testMarkets is a fresh default catalog: EURUSD and GBPUSD. Every call builds
+// its own, so no test can affect another (ADR-088).
+func testMarkets() *catalog {
+	c, err := defaultCatalog()
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
+// testMarket describes one extra market for a test, EURUSD-like until changed.
+type testMarket struct {
+	symbol     string
+	quote      num.Currency
+	marginRate num.Rate
+	minUnits   num.Quantity
+	maxUnits   num.Quantity
+	unitStep   num.Quantity
+	untradable bool
+}
+
+func testInstrument(symbol string) *testMarket {
+	return &testMarket{symbol: symbol, quote: usdCurrency, marginRate: rateTwoPercent, minUnits: oneUnit, unitStep: oneUnit}
+}
+
+// config builds the catalog entry. The economic instrument is a currency pair
+// whose base code is derived from the symbol, so distinct test symbols are
+// distinct instruments.
+func (tm *testMarket) config() (marketConfig, error) {
+	f := fnv.New32a()
+	_, _ = f.Write([]byte(tm.symbol))
+	n := f.Sum32()
+	code := string([]byte{'A' + byte(n%26), 'A' + byte(n/26%26), 'A' + byte(n/676%26)})
+	base := num.MustParseCurrency(code)
+	if base.Equal(tm.quote) {
+		base = num.MustParseCurrency("ZZZ")
+	}
+	ins, err := instr.NewCurrencyPair(base, tm.quote)
+	if err != nil {
+		return marketConfig{}, err
+	}
+	spec, err := instr.NewSpec(num.MustParsePrice("0.00001"), tm.unitStep, rateOne, tm.quote)
+	if err != nil {
+		return marketConfig{}, err
+	}
+	listing, err := instr.NewListing(instr.ListingParams{
+		Instrument: ins, Provider: "TEST", Symbol: tm.symbol, Spec: spec, Tradable: !tm.untradable,
+	})
+	if err != nil {
+		return marketConfig{}, err
+	}
+	return marketConfig{key: tm.symbol, instrument: ins, listing: listing,
+		rules: tradingRules{marginRate: tm.marginRate, minUnits: tm.minUnits, maxUnits: tm.maxUnits}}, nil
+}
+
+// withMarket is a new catalog holding cat's markets and tm. cat is not changed.
+func withMarket(t *testing.T, cat *catalog, tm *testMarket) *catalog {
+	t.Helper()
+	cfg, err := tm.config()
+	require.NoError(t, err)
+	var entries []marketConfig
+	for _, key := range cat.keys() {
+		if key == tm.symbol {
+			continue // the test's market replaces one of the same key
+		}
+		m := cat.byKey[key]
+		entries = append(entries, marketConfig{key: m.key, instrument: m.instrument, listing: m.listing, rules: m.rules})
+	}
+	next, err := newCatalog(append(entries, cfg)...)
+	require.NoError(t, err)
+	return next
 }

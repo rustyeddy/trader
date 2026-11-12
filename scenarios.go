@@ -49,6 +49,9 @@ func runScenario(scenario string) (*result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := tr.broker.markets.normalize(prices); err != nil {
+		return nil, fmt.Errorf("%s: %w", scenarioPath(scenario), err)
+	}
 
 	slog.Info("backtest starting",
 		"scenario", scenario,
@@ -74,16 +77,25 @@ func scenarioPath(scenario string) string {
 
 // getTrader builds the configuration the scenarios were worked out for.
 func getTrader() (*trader, error) {
+	markets, err := defaultCatalog()
+	if err != nil {
+		return nil, err
+	}
+	m, ok := markets.lookup("EURUSD")
+	if !ok {
+		return nil, fmt.Errorf("the scenarios trade EURUSD: %w", errUnknownInstrument)
+	}
 	strat := &emax{
 		id:      "emax",
 		short:   2,
 		long:    4,
 		stopPct: rateOnePercent,
+		tick:    m.tick,
 	}
 	if err := strat.init(); err != nil {
 		return nil, err
 	}
-	br := newBroker("sim")
+	br := newBroker("sim", markets)
 	return &trader{
 		broker:   br,
 		account:  br.addAccount("sim123", num.MustParseMoney("10000", usdCurrency)),

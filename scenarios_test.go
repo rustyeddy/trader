@@ -91,7 +91,7 @@ func TestRun_ReportsAMissingScenario(t *testing.T) {
 }
 
 func TestResult_ZeroPnLIsABreakEven(t *testing.T) {
-	br := newBroker("sim")
+	br := newBroker("sim", testMarkets())
 	act := br.addAccount("a", usd(10000))
 	act.trades = []trade{{pnl: cents(3)}, {pnl: cents(-1)}, {pnl: cents(0)}, {pnl: cents(0)}} // the balance is left alone
 
@@ -122,7 +122,7 @@ func TestResult_CountsRefusalsWithoutDuplication(t *testing.T) {
 }
 
 func TestResult_CountsOnlyItsAccountOrders(t *testing.T) {
-	br := newBroker("sim")
+	br := newBroker("sim", testMarkets())
 	a := br.addAccount("a", usd(10000))
 	br.addAccount("b", usd(20000))
 	for _, id := range []string{"a", "b"} {

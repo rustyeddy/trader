@@ -120,7 +120,7 @@ func closeLargestMargin(a *account) (*position, error) {
 	var largestMargin num.Money
 	for _, sym := range a.positionSymbols() {
 		pos := a.positions[sym]
-		m, err := marginFor(pos.instrument, pos.units, pos.markPrice, a.currency)
+		m, err := a.markets.marginFor(pos.instrument, pos.units, pos.markPrice, a.currency)
 		if err != nil {
 			return nil, err
 		}

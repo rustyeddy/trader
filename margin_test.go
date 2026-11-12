@@ -15,7 +15,7 @@ import (
 // bought and marked at 1.10000: $2200 of margin, so equity of $2200 is a
 // margin level of 100% and $1100 is 50%.
 func marginAccount(balance money) *account {
-	a := newAccount("a", balance)
+	a := newAccount("a", balance, testMarkets())
 	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(100000), entryPrice: px(110000), markPrice: px(110000)}
 	return a
 }
@@ -51,7 +51,7 @@ func TestDefaultMarginPolicy(t *testing.T) {
 }
 
 func TestDefaultMarginPolicy_NoPositionsIsHealthyEvenWithNoMoney(t *testing.T) {
-	got, err := defaultMarginPolicy(newAccount("a", mneg(usd(5))))
+	got, err := defaultMarginPolicy(newAccount("a", mneg(usd(5)), testMarkets()))
 
 	require.NoError(t, err)
 	assert.Equal(t, marginHealthy, got)
@@ -107,9 +107,10 @@ func TestLevelBelow_RejectsACurrencyMismatch(t *testing.T) {
 }
 
 func TestCloseWorstLoser(t *testing.T) {
-	registerInstrument(t, testInstrument("GBPUSD"))
-	registerInstrument(t, testInstrument("AUDUSD"))
-	a := newAccount("a", usd(1000))
+	cat := testMarkets()
+	cat = withMarket(t, cat, testInstrument("GBPUSD"))
+	cat = withMarket(t, cat, testInstrument("AUDUSD"))
+	a := newAccount("a", usd(1000), cat)
 
 	none, err := closeWorstLoser(a)
 	require.NoError(t, err)
@@ -126,8 +127,9 @@ func TestCloseWorstLoser(t *testing.T) {
 }
 
 func TestCloseWorstLoser_TiesGoToTheLowestInstrument(t *testing.T) {
-	registerInstrument(t, testInstrument("GBPUSD"))
-	a := newAccount("a", usd(1000))
+	cat := testMarkets()
+	cat = withMarket(t, cat, testInstrument("GBPUSD"))
+	a := newAccount("a", usd(1000), cat)
 	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: qty(1), entryPrice: px(100000), markPrice: px(100000)}
 	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(1), entryPrice: px(100000), markPrice: px(100000)}
 
@@ -139,8 +141,9 @@ func TestCloseWorstLoser_TiesGoToTheLowestInstrument(t *testing.T) {
 }
 
 func TestCloseLargestMargin(t *testing.T) {
-	registerInstrument(t, testInstrument("GBPUSD"))
-	a := newAccount("a", usd(1000))
+	cat := testMarkets()
+	cat = withMarket(t, cat, testInstrument("GBPUSD"))
+	a := newAccount("a", usd(1000), cat)
 
 	none, err := closeLargestMargin(a)
 	require.NoError(t, err)
@@ -156,7 +159,7 @@ func TestCloseLargestMargin(t *testing.T) {
 }
 
 func TestAccount_PositionSymbolsAreSorted(t *testing.T) {
-	a := newAccount("a", usd(0))
+	a := newAccount("a", usd(0), testMarkets())
 	for _, s := range []string{"USDJPY", "EURUSD", "GBPUSD", "AUDUSD"} {
 		a.positions[s] = &position{instrument: s}
 	}
@@ -166,10 +169,11 @@ func TestAccount_PositionSymbolsAreSorted(t *testing.T) {
 // liquidationBroker has one account with long EURUSD and long GBPUSD positions
 // where the account is under water.
 func liquidationBroker(t *testing.T, balance money) (*broker, *account) {
+	cat := testMarkets()
 	t.Helper()
 	captureLogs(t)
-	registerInstrument(t, testInstrument("GBPUSD"))
-	br := newBroker("t")
+	cat = withMarket(t, cat, testInstrument("GBPUSD"))
+	br := newBroker("t", cat)
 	act := br.addAccount("a", balance)
 	// EURUSD: 100000 units, $2200 margin, -$1000 unrealized after the bar's mark.
 	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(100000), entryPrice: px(111000), markPrice: px(111000)}

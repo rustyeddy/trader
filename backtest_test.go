@@ -127,7 +127,7 @@ func TestBacktestRun_RecordsLifecycleInHistory(t *testing.T) {
 func TestBacktestRun_FatalHandlerErrorStopsRun(t *testing.T) {
 	captureLogs(t)
 	strat := &scriptStrategy{orders: opens(4)}
-	tr := &trader{broker: newBroker("t"), account: newAccount("ghost", usd(1000))} // the broker has no such account
+	tr := &trader{broker: newBroker("t", testMarkets()), account: newAccount("ghost", usd(1000), testMarkets())} // the broker has no such account
 
 	err := runTrader(context.Background(), tr, strat, seq(eurBars(1, 2, 3, 4), -1, nil))
 
@@ -138,7 +138,7 @@ func TestBacktestRun_FatalHandlerErrorStopsRun(t *testing.T) {
 func TestBacktestRun_FatalHandlerErrorHasInstrumentAndTimeContext(t *testing.T) {
 	captureLogs(t)
 	strat := &scriptStrategy{orders: []*order{nil, openOrder()}}
-	tr := &trader{broker: newBroker("t"), account: newAccount("ghost", usd(1000))}
+	tr := &trader{broker: newBroker("t", testMarkets()), account: newAccount("ghost", usd(1000), testMarkets())}
 
 	err := runTrader(context.Background(), tr, strat, seq(eurBars(1, 2, 3), -1, nil))
 
@@ -150,7 +150,7 @@ func TestBacktestRun_FatalHandlerErrorHasInstrumentAndTimeContext(t *testing.T) 
 func TestBacktestRun_FatalErrorIsNotLoggedAsRejection(t *testing.T) {
 	logs := captureLogs(t)
 	o := openOrder()
-	tr := &trader{broker: newBroker("t"), account: newAccount("ghost", usd(1000))}
+	tr := &trader{broker: newBroker("t", testMarkets()), account: newAccount("ghost", usd(1000), testMarkets())}
 
 	err := runTrader(context.Background(), tr, &scriptStrategy{orders: []*order{o}}, seq(eurBars(1, 2), -1, nil))
 

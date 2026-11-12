@@ -27,9 +27,9 @@ type emaxRun struct {
 func newEMAXRun(t *testing.T, balance money) emaxRun {
 	t.Helper()
 	captureLogs(t)
-	e := &emax{id: "emax", short: 2, long: 4, stopPct: rateOnePercent}
+	e := &emax{tick: px(1), id: "emax", short: 2, long: 4, stopPct: rateOnePercent}
 	require.NoError(t, e.init())
-	br := newBroker("sim")
+	br := newBroker("sim", testMarkets())
 	tr := &trader{broker: br, account: br.addAccount("sim123", balance), strategy: e}
 	return emaxRun{trader: tr, broker: br, account: tr.account, emax: e}
 }

@@ -10,6 +10,7 @@ import (
 
 type account struct {
 	id       string
+	markets  *catalog     // the run's instruments; immutable
 	currency num.Currency // the currency of every amount the account holds
 	balance  num.Money
 	riskPct  num.Rate // fraction of the account risked per trade
@@ -28,10 +29,11 @@ type account struct {
 }
 
 // newAccount opens an account holding balance, whose currency is the
-// account's currency.
-func newAccount(id string, balance num.Money) *account {
+// account's currency, trading the markets of the catalog.
+func newAccount(id string, balance num.Money, markets *catalog) *account {
 	act := &account{
 		id:        id,
+		markets:   markets,
 		currency:  balance.Currency(),
 		balance:   balance,
 		riskPct:   rateOnePercent, // default risk per trade
@@ -86,7 +88,7 @@ func (act *account) usedMargin() (num.Money, error) {
 	}
 	for _, sym := range act.positionSymbols() {
 		pos := act.positions[sym]
-		m, err := marginFor(pos.instrument, pos.units, pos.markPrice, act.currency)
+		m, err := act.markets.marginFor(pos.instrument, pos.units, pos.markPrice, act.currency)
 		if err != nil {
 			return num.Money{}, err
 		}
@@ -95,26 +97,6 @@ func (act *account) usedMargin() (num.Money, error) {
 		}
 	}
 	return total, nil
-}
-
-// marginFor is the margin units of symbol need at price p: (p * units) *
-// marginRate. The whole-unit product is exact, so the only rounding is the one
-// at the end, on a value of account size (ADR-087). Sizing refuses an unknown
-// instrument, so only a bug can reach here with one.
-func marginFor(symbol string, units num.Quantity, p num.Price, currency num.Currency) (num.Money, error) {
-	inst, ok := instruments[symbol]
-	if !ok {
-		panic(fmt.Sprintf("margin for %q: %v", symbol, errUnknownInstrument))
-	}
-	notional, err := p.MulQuantity(units, currency)
-	if err != nil {
-		return num.Money{}, fmt.Errorf("margin for %s: %w", symbol, err)
-	}
-	m, err := notional.MulRate(inst.marginRate)
-	if err != nil {
-		return num.Money{}, fmt.Errorf("margin for %s: %w", symbol, err)
-	}
-	return m, nil
 }
 
 // marginAvailable is what new positions may be margined against: equity less
@@ -148,18 +130,21 @@ var errUnsupportedAction = errors.New("action not supported yet")
 //   - add, reduce and anything else: errUnsupportedAction until their size
 //     rules are defined.
 func (act *account) size(o *order, reserved num.Money) error {
-	inst, ok := instruments[o.instrument]
+	m, ok := act.markets.lookup(o.instrument)
 	if !ok {
 		return fmt.Errorf("size %s: %w: %q", o.action, errUnknownInstrument, o.instrument)
 	}
-	if !inst.quote.Equal(act.currency) {
+	if !m.quote.Equal(act.currency) {
 		return fmt.Errorf("size %s: %w: %s is quoted in %s, the account holds %s",
-			o.action, num.ErrCurrencyMismatch, inst.symbol, inst.quote, act.currency)
+			o.action, num.ErrCurrencyMismatch, m.key, m.quote, act.currency)
+	}
+	if o.action == open && !m.listing.Tradable() {
+		return fmt.Errorf("size %s: %w: %s", o.action, errNotTradable, m.key)
 	}
 
 	switch o.action {
 	case open:
-		if err := act.sizeOpen(o, inst, reserved); err != nil {
+		if err := act.sizeOpen(o, m, reserved); err != nil {
 			return err
 		}
 	case close:
@@ -198,11 +183,7 @@ func (act *account) size(o *order, reserved num.Money) error {
 // Only if the result is below the instrument's minimum is the order rejected:
 // with errInsufficientMargin when margin was the limit, and with
 // errOrderTooSmall when the risk budget was.
-func (act *account) sizeOpen(o *order, inst *instrument, reserved num.Money) error {
-	if inst.marginRate.Sign() <= 0 {
-		return fmt.Errorf("size open: %w: %s has no margin rate", errInstrumentConfig, inst.symbol)
-	}
-
+func (act *account) sizeOpen(o *order, m *market, reserved num.Money) error {
 	equity, err := act.equity()
 	if err != nil {
 		return fmt.Errorf("size open: %w", err)
@@ -233,8 +214,8 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved num.Money) err
 	// is smaller. If none fits, the order is refused with the overflow, never
 	// wrapped.
 	var limits []sizeLimit
-	if !inst.maxUnits.IsZero() {
-		limits = append(limits, sizeLimit{"instrument", inst.maxUnits})
+	if !m.rules.maxUnits.IsZero() {
+		limits = append(limits, sizeLimit{"instrument", m.rules.maxUnits})
 	}
 	for _, l := range []struct {
 		name   string
@@ -242,7 +223,7 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved num.Money) err
 		per    num.Price
 	}{
 		{"risk", func() (num.Money, error) { return riskBudget, nil }, dist},
-		{"margin", func() (num.Money, error) { return margin.DivRate(inst.marginRate) }, o.price},
+		{"margin", func() (num.Money, error) { return margin.DivRate(m.rules.marginRate) }, o.price},
 		{"notional", func() (num.Money, error) { return act.maxOrderNotional, nil }, o.price},
 	} {
 		budget, err := l.budget()
@@ -268,15 +249,12 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved num.Money) err
 		}
 	}
 	marginLimited := binding == "margin"
-	step := inst.unitStep
-	if step.IsZero() {
-		step = oneUnit
-	}
+	step := m.unitStep
 	if units, err = units.RoundDown(step); err != nil {
 		return fmt.Errorf("size open: %w", err)
 	}
 	for !units.IsZero() {
-		over, err := act.overBudget(o, inst, units, riskBudget, margin)
+		over, err := act.overBudget(o, m, units, riskBudget, margin)
 		if err != nil {
 			return fmt.Errorf("size open: %w", err)
 		}
@@ -288,7 +266,7 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved num.Money) err
 		}
 	}
 
-	least := inst.minUnits
+	least := m.rules.minUnits
 	if least.IsZero() {
 		least = oneUnit
 	}
@@ -313,7 +291,7 @@ type sizeLimit struct {
 // overBudget reports whether units, sized for o, plans to lose more than the
 // risk budget at its stop, needs more margin than is available, or exceeds the
 // order notional limit.
-func (act *account) overBudget(o *order, inst *instrument, units num.Quantity, riskBudget, margin num.Money) (bool, error) {
+func (act *account) overBudget(o *order, m *market, units num.Quantity, riskBudget, margin num.Money) (bool, error) {
 	dist, _, err := priceDiff(o.price, o.stopLoss)
 	if err != nil {
 		return false, err
@@ -322,7 +300,7 @@ func (act *account) overBudget(o *order, inst *instrument, units num.Quantity, r
 	if err != nil {
 		return false, err
 	}
-	need, err := marginFor(inst.symbol, units, o.price, act.currency)
+	need, err := act.markets.marginFor(m.key, units, o.price, act.currency)
 	if err != nil {
 		return false, err
 	}
@@ -371,7 +349,7 @@ func (a *account) applyFill(o *order, p num.Price, at time.Time) error {
 		// Sizing checked the margin when the order was submitted, but a resting
 		// order fills later, after equity may have fallen. The instruction is
 		// never resized: it fills as submitted or is rejected.
-		need, err := marginFor(o.instrument, o.units, p, a.currency)
+		need, err := a.markets.marginFor(o.instrument, o.units, p, a.currency)
 		if err != nil {
 			return err
 		}

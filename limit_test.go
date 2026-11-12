@@ -116,7 +116,6 @@ func TestBroker_OnBar_MarginCloseoutCancelsAWaitingLimit(t *testing.T) {
 
 func TestBroker_OnBar_RestingLimitIsRejectedWhenEquityFellWhileItWaited(t *testing.T) {
 	captureLogs(t)
-	registerInstrument(t, testInstrument("GBPUSD"))
 	br, act := newFillBroker()
 	br.margin = func(*account) (marginStatus, error) { return marginHealthy, nil } // keep liquidation out of it
 	ctx := context.Background()
@@ -173,7 +172,6 @@ func TestBroker_Submit_SecondPendingOpenOnTheInstrumentIsRejected(t *testing.T) 
 
 func TestBroker_Submit_PendingOpenOnlyBlocksTheSameAccountAndInstrument(t *testing.T) {
 	captureLogs(t)
-	registerInstrument(t, testInstrument("GBPUSD"))
 	br, _ := newFillBroker()
 	br.addAccount("b", usd(10000))
 	submitLimit(t, br, long, 109000)

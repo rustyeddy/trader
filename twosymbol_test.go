@@ -72,7 +72,7 @@ func openOn(on string, instrument string, pN int64, stopN int64) *reactStrategy 
 }
 
 func pairTrader(balance money, strat strategy) (*trader, *account) {
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	act := br.addAccount("a", balance)
 	return &trader{broker: br, account: act, strategy: strat}, act
 }
@@ -234,7 +234,7 @@ func TestTrader_OnFrame_SizesAnOpenAgainstTheWholeFrame(t *testing.T) {
 // the fill, so the broker refuses the frame before anything executes.
 func TestBroker_OnFrame_RefusesAFrameOverlappingThePreviousOne(t *testing.T) {
 	captureLogs(t)
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	act := br.addAccount("a", usd(10000))
 	act.positions["EURUSD"] = longAt("EURUSD", 10000, 110000, 110000)
 	o := &order{accountID: "a", instrument: "GBPUSD", direction: long, action: open, orderType: marketOrder,
@@ -255,7 +255,7 @@ func TestBroker_OnFrame_RefusesAFrameOverlappingThePreviousOne(t *testing.T) {
 // after a gap: those are the aligned bars the broker supports.
 func TestBroker_OnFrame_AcceptsContiguousAndGappedFrames(t *testing.T) {
 	captureLogs(t)
-	br := newBroker("t")
+	br := newBroker("t", testMarkets())
 	for _, h := range []int{0, 1, 3} {
 		require.NoError(t, br.onFrame(context.Background(), pairFrame(hbar("EURUSD", hour(h), 110000, 110000))))
 	}
@@ -358,7 +358,7 @@ func pairBars() (*marketData, *marketData) {
 
 func runPair(t *testing.T, eur, gbp *marketData) (*trader, *account) {
 	t.Helper()
-	strat := &emaxEach{id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
+	strat := &emaxEach{markets: testMarkets(), id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
 	require.NoError(t, strat.init())
 	tr, act := pairTrader(usd(10000), strat)
 	for f, err := range frames(mergedBars(context.Background(), eur, gbp)) {
@@ -476,9 +476,9 @@ func TestEMAXEach_Init(t *testing.T) {
 		s    emaxEach
 		want string
 	}{
-		{"no instruments", emaxEach{short: 2, long: 3, stopPct: rt(400)}, "no instruments"},
-		{"an instrument twice", emaxEach{instruments: []string{"EURUSD", "EURUSD"}, short: 2, long: 3, stopPct: rt(400)}, "twice"},
-		{"bad windows", emaxEach{instruments: []string{"EURUSD"}, short: 3, long: 3, stopPct: rt(400)}, "short window"},
+		{"no instruments", emaxEach{markets: testMarkets(), short: 2, long: 3, stopPct: rt(400)}, "no instruments"},
+		{"an instrument twice", emaxEach{markets: testMarkets(), instruments: []string{"EURUSD", "EURUSD"}, short: 2, long: 3, stopPct: rt(400)}, "twice"},
+		{"bad windows", emaxEach{markets: testMarkets(), instruments: []string{"EURUSD"}, short: 3, long: 3, stopPct: rt(400)}, "short window"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -490,7 +490,7 @@ func TestEMAXEach_Init(t *testing.T) {
 // Each instrument has its own emax: a bar is seen only by its instrument's, and
 // a bar of an instrument it was not given is not traded.
 func TestEMAXEach_KeepsStatePerInstrument(t *testing.T) {
-	s := &emaxEach{id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
+	s := &emaxEach{markets: testMarkets(), id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
 	require.NoError(t, s.init())
 	eur, _ := pairBars()
 

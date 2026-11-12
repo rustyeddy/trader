@@ -1,0 +1,95 @@
+#+TITLE: ADR-088: A per-run instrument catalog replaces the root's global instrument map
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #597, after the owner's review comments on it. Builds on #593
+(the =instrument= core) and ADR-087 (the valuation contract), and replaces the
+package-level =instruments= map of the root engine.
+
+* Context
+
+The root engine looked instruments up in a mutable package-level map keyed by
+a symbol string, and used that string as identity everywhere: =positions[sym]=,
+=orders[sym]=, bars, margin lookups. "One position per instrument" (netting) was
+therefore enforced by string equality, and tests registered instruments by
+mutating the global.
+
+The promoted =instrument= package separates the economic =Instrument= (what it
+is), the =Listing= (how a venue exposes it, with provider symbol and =Spec=) and
+the canonical =ID=. The same EUR/USD can be spelled =EURUSD= or =EUR_USD= by
+different providers; the engine must never treat them as two instruments.
+
+* Decision
+
+** An explicit, immutable, per-run catalog
+
+The composition root builds a =catalog= and passes it to the broker, which
+passes the same catalog to each account it opens. No package-level state, no
+=Resolver=, no registration machinery. A catalog is built once, validated, and
+never mutated; a test that needs another instrument builds its own catalog.
+
+Each entry is a =market=: one engine key, an =instrument.Instrument=, its
+=instrument.Listing= and a small =tradingRules= value.
+
+** Constraints by owner
+
+| Constraint | Owner | Where it comes from |
+|------------+-------+---------------------|
+| Unit step | Spec | =Spec.QuantityIncrement()= (not duplicated) |
+| Price tick | Spec | =Spec.TickSize()= |
+| Margin rate | trading rules | broker/account policy, not economic identity |
+| Minimum and maximum units | trading rules | policy or provider limit, not on =Instrument= |
+| Maximum order notional | account | unchanged (ADR-087) |
+
+Validation at construction: a positive margin rate, and =min <= max= when a
+maximum exists. A minimum or maximum that is not a multiple of the unit step is
+allowed; sizing rounds down to the step.
+
+** Identity: one economic instrument, exactly one engine key (Option 2)
+
+The engine keeps string keys internally. The full =instrument.ID= migration of
+orders, positions, bars and queues is deferred until a concrete need justifies
+it; this ADR does not precommit to it.
+
+- One =instrument.ID= maps to exactly one engine key within a run. Every
+  incoming bar and order uses that key before it enters the engine.
+- The catalog rejects conflicting mappings at construction: two entries with
+  the same ID (whatever their keys), two entries with the same key, a listing
+  whose =InstrumentID()= differs from its instrument's ID, and any symbol (an
+  entry's key or a listing's provider symbol) claimed by more than one entry.
+- The translation from a provider spelling to the engine key happens at the
+  market-data boundary (=catalog.normalize= over loaded bars), before the
+  engine sees a bar. A symbol the catalog does not know is an error: there is
+  no permissive fallback, so =EURUSD= and =EUR_USD= can never become two
+  separately netted positions.
+- Strategies emit orders using the normalized bar's key, broker queues and
+  account positions are looked up by exactly that key, and reports print it.
+  The six EMAX reports keep printing =EURUSD=.
+
+** Ownership of lookup
+
+The broker holds the catalog and gives accounts the catalog (the validated
+view), not the broker, so an account never depends on broker internals and
+there is no circular ownership. Account calculations (=size=, =marginFor=) take
+the market from the catalog by key.
+
+** Supported valuation contract
+
+This integration supports currency pairs whose settlement currency is the
+quote currency and whose =Spec.Multiplier()= is 1. A catalog entry that is
+anything else fails construction with =errUnsupportedInstrument=; the
+multiplier is never applied in one formula while risk, margin, P&L and fills
+are left unadjusted. An account currency different from the instrument's
+settlement currency is =num.ErrCurrencyMismatch=. An order for a market whose
+=Listing.Tradable()= is false is refused as a configuration error.
+
+* Consequences
+
+- The global =instruments= map and the test registry hack are gone.
+- Tests build their own catalogs; they cannot affect each other.
+- Key normalization is one place, and an ambiguous mapping fails when the run
+  is configured, not when an order is submitted.
+- Equities, futures and a non-unit multiplier are not supported by the engine
+  yet; they need their own valuation decision.
+- The follow-up for a full =instrument.ID= migration is deferred.

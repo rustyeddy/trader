@@ -18,11 +18,12 @@ import (
 // Converting other quote currencies is out of scope (ADR-087).
 var usdCurrency = num.MustParseCurrency("USD")
 
-var (
-	// priceTick is the resolution of prices in the bars files: five decimals.
-	// It is a data and instrument rule, not a num rule.
-	priceTick = num.MustParsePrice("0.00001")
+// barPriceDecimals is the number of decimals a price has in the bars file
+// schema. It is the file format's rule, parsed by parsePrice; each instrument's
+// own tick is its Spec's, checked when the bars are normalized (ADR-088).
+const barPriceDecimals = 5
 
+var (
 	// maxPrice is the largest price a bar or order may carry: a data-sanity
 	// limit, not chosen to make one multiplication fit (ADR-087).
 	maxPrice = num.MustParsePrice("10000")
@@ -101,9 +102,9 @@ func formatCents(cents int64) string {
 	return fmt.Sprintf("%s$%d.%02d", sign, abs/100, abs%100)
 }
 
-// formatPrice prints p with the five decimals of priceTick, truncating any
+// formatPrice prints p with the bars schema's five decimals, truncating any
 // further digits (a price is always at that resolution).
 func formatPrice(p num.Price) string {
 	whole, frac, _ := strings.Cut(p.String(), ".")
-	return whole + "." + (frac + "00000")[:5]
+	return whole + "." + (frac + "00000")[:barPriceDecimals]
 }
