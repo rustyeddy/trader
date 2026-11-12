@@ -81,7 +81,13 @@ gives back a =Partition=, and every identifier is validated as a path component:
   begins with a dot, so no separator, no =..=, no absolute path and no empty
   segment can be smuggled in;
 - =stage= is exactly =raw= or =canonical=; the year is four digits and the month
-  1 to 12, zero-padded in the path; partitioning is by UTC opening time;
+  1 to 12, zero-padded in the path. Intraday partitions (=m1=, =h1=, =h4=) are by UTC
+  opening time. A daily partition is not assigned by a UTC rule: the resolver
+  places a =d1= bar in the month of the file it is given, because OANDA's session
+  daily bars open at 17:00 America/New_York and can begin in the previous UTC month
+  (ADR-020). The layout keeps today's file-to-month assignment unchanged, so the
+  migration renames directories only; the provider package, not the resolver,
+  decides which month holds a given daily bar;
 - a resolved path is checked to lie under the data root;
 - a missing partition is reported with the path that was looked up. The resolver
   never searches another provider, another stage or the legacy layout.
@@ -109,8 +115,11 @@ resolver's.
   synced, then committed. A create-only write links it into place so an existing
   authoritative file is never silently replaced (=ErrPartitionAlreadyExists=); an
   explicit extend replaces it by rename, with the caller having merged the
-  existing records. A cancelled context or a failure leaves any existing file
-  untouched.
+  existing records. Writers that share a partition hold a per-partition lock across
+  the whole read, merge and commit sequence, as the archived writer does, because an
+  atomic rename alone would let two concurrent extends lose one writer's records. A
+  cancelled context or a failure observed before the commit leaves any existing file
+  untouched; a cancellation that arrives after the commit does not undo it.
 - Instruments are the archive's audited set of 26 FX pairs, checked against
   =instrument.CurrencyPairID=; a symbol outside it (such as XAUUSD) is an error,
   not an FX pair by guess. OANDA symbols (=EUR_USD=) map to engine keys through the
