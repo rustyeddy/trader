@@ -202,7 +202,8 @@ of the existing archive.
     root: /srv/data
     provider: oanda
   #+end_example
- The packages still take the root as an argument and hard-code
+
+  The packages still take the root as an argument and hard-code
   nothing. The config file holds no secret: the OANDA token stays in
   =TRADER_OANDA_TOKEN= only (ADR-078 S-1), and a secret key in the file is an
   error. A missing file is not an error when a flag or the environment supplies the
