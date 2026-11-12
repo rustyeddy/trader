@@ -19,8 +19,8 @@ All persisted instrument price data, including production, research, and synthet
 Example:
 
 ```text
-/srv/trading/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-H1.csv
-<repo>/testdata/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-H1.csv
+/srv/trading/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-h1.csv
+<repo>/testdata/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-h1.csv
 ```
 
 The prefix can change; the subtree under `data/` must not. A package-local test fixture may similarly use `<package>/testdata/data/...`.

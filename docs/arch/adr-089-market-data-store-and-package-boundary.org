@@ -1,0 +1,184 @@
+#+TITLE: ADR-089: Market-data layout resolver, OANDA raw store and package boundary
+#+STARTUP: overview indent
+
+* Status
+
+Proposed. Issues #584 (Market Data milestone) and #604. Awaiting owner approval;
+per CLAUDE.md no implementation starts until it is approved. Applies the
+accepted storage convention in =docs/arch/market-data-storage.md= and builds on
+ADR-020 (historic data), ADR-023 (structured logging), ADR-078 (security, S-1)
+and ADR-088 (the per-run instrument catalog).
+
+This ADR covers the first Market Data layer only: where raw data lives, the one
+resolver that owns paths, the OANDA raw store, and the package boundary. The
+client and the command line are later stages and are named here only so their
+boundary is fixed now.
+
+* Context
+
+#584 sets the order: downloader, raw-to-canonical, gaps, disk, cache, bars and
+frames, reusing the archived code one layer at a time and without re-downloading
+the corpus. The live tree has bars, a loader and the instrument catalog, but no
+network code, no raw-file writer and no path resolver.
+
+What exists, checked on the owner's machine:
+
+- The default data root is =/srv/data= (moved from =/srv/trading/data=). It
+  holds 34 GB: =raw/{oanda,alpaca,stooq,stooq-managed,dukascopy}=,
+  =canonical/{oanda,alpaca,stooq}=, =candles/oanda=, =news_days= and =tmp=.
+- It is still in the old order, =<data>/<stage>/<source>/...=, for example
+  =raw/oanda/EURUSD/2017/05/EURUSD-2017-05-d1.csv= (18 GB of raw OANDA, 27 pairs,
+  about 1,000 files for EURUSD alone across =m1=, =h1=, =h4= and =d1=). The
+  accepted storage convention replaces that with =<data>/<source>/<stage>/...=.
+- Raw OANDA files are =raw-v1=: a =# schema=raw-v1 source=oanda instrument=...
+  tf=... year=... month=...= comment, then =time,bid_o,bid_h,bid_l,bid_c,ask_o,
+  ask_h,ask_l,ask_c,volume,complete=. The daily file spells its interval =d1= in
+  the name and =tf=d= in the comment. They are authoritative (ADR-020: raw is
+  immutable and canonical data is rebuilt from it).
+- The archived OANDA package (=_archive/internal/marketdata/internal/provider/
+  oanda=) already has the raw record, a 26-pair scope, an atomic writer, a reader
+  that cross-checks the path against the header, an inventory and a client. The
+  live storage doc's example writes the interval token as =H1=; the live bar
+  schema and the archive use the lower-case =h1=, =d1=.
+
+* Decision
+
+** Packages and the boundary
+
+- =internal/marketdata/layout= is the one path resolver (below). It imports only
+  the standard library.
+- =internal/marketdata/oanda= holds OANDA's raw record, scope, reader, writer and
+  inventory now, and its HTTP client in a later stage. It imports =num=,
+  =instrument=, =layout= and the standard library. It never imports another
+  provider package, the root package, or =cmd=.
+- =cmd/trader= is the composition root: the only place that reads the process
+  environment, chooses the data root, builds the logger (ADR-023) and passes a
+  credential into the client.
+- The root trading engine imports none of this. Bars reach the engine through a
+  later stage, through the catalog's boundary check (ADR-088), not through these
+  packages directly.
+- Packages are =internal= because nothing outside the module needs them; they can
+  be promoted later if a public contract appears. There is no =Manager=, plan,
+  sync orchestration, provider registry or service layer in this stage.
+
+** The layout and its single resolver
+
+All persisted price data follows the accepted convention, rooted at a
+caller-supplied data directory (the directory that holds the sources):
+
+#+begin_example
+<data>/<source>/<stage>/<instrument>/<YYYY>/<MM>/<file>
+#+end_example
+
+=source= is the provider (=oanda=), =stage= is =raw= or =canonical=. Nothing
+hard-codes a root such as =/srv/data=.
+
+=layout= builds and parses these paths and nothing else does: a =Partition=
+value (source, stage, instrument, year, month, interval) gives a path and a path
+gives back a =Partition=, and every identifier is validated as a path component:
+
+- a component is non-empty, made of letters, digits, =.=, =_= and =-=, and never
+  begins with a dot, so no separator, no =..=, no absolute path and no empty
+  segment can be smuggled in;
+- =stage= is exactly =raw= or =canonical=; the year is four digits and the month
+  1 to 12, zero-padded in the path; partitioning is by UTC opening time;
+- a resolved path is checked to lie under the data root;
+- a missing partition is reported with the path that was looked up. The resolver
+  never searches another provider, another stage or the legacy layout.
+
+File names: canonical files are =<instrument>-<YYYY>-<MM>-<interval>.csv=, and the
+OANDA raw files keep the name they have today, the same
+=<instrument>-<YYYY>-<MM>-<interval>.csv=. Interval tokens are lower case,
+=m1=, =h1=, =h4=, =d1=, matching the live bar schema (=barDurations=) and the
+archive. The =H1= in the storage doc's example is corrected to =h1= with this ADR.
+Whether a provider supports an interval is the provider package's rule, not the
+resolver's.
+
+** The OANDA raw store
+
+- Byte-compatible with the archive. The =raw-v1= header, the column header, the
+  row format (prices as exact =num.Price= text, never through a float; the
+  provider's =complete= flag preserved) and the =tf= spellings (=d= in the
+  comment, =d1= in the name) do not change. A file the new writer produces is
+  readable by the archived reader and the reverse, and a test reads real archive
+  fixtures to prove it.
+- The path is authoritative; a header that disagrees with it is an error. Rows
+  are in ascending time with the provider's timestamps verbatim, never rebuilt
+  from row position. A malformed row is an error, never skipped.
+- Writes are atomic: a temporary file beside the destination, flushed and
+  synced, then committed. A create-only write links it into place so an existing
+  authoritative file is never silently replaced (=ErrPartitionAlreadyExists=); an
+  explicit extend replaces it by rename, with the caller having merged the
+  existing records. A cancelled context or a failure leaves any existing file
+  untouched.
+- Instruments are the archive's audited set of 26 FX pairs, checked against
+  =instrument.CurrencyPairID=; a symbol outside it (such as XAUUSD) is an error,
+  not an FX pair by guess. OANDA symbols (=EUR_USD=) map to engine keys through the
+  catalog (ADR-088), not through a second table.
+- Fingerprints of a partition (a hash of its bytes) are kept, for the later
+  provenance and change detection stages.
+
+** The legacy layout and migration
+
+The new packages read and write only the new order. They do not fall back to the
+old one, and they do not touch =/srv/data=: tests and the smoke check use temporary
+roots.
+
+The existing archive is migrated deliberately and separately, not by this ADR and
+not by the downloader. Inside each partition nothing changes (same file names, same
+bytes); only the first two levels swap, so =raw/oanda= becomes =oanda/raw=. The
+migration is a reversible rename that is verified (file counts and fingerprints
+before and after) before any old path is removed. The other old directories
+(=candles/oanda=, the other providers' =raw= and =canonical=, =news_days=, =tmp=) are
+out of scope here.
+
+** Secrets (ADR-078, S-1)
+
+The =oanda= package never reads the process environment and never holds a bare
+token: the client takes a credential provider and a base URL by argument, and the
+provider is asked on every request. A credential never appears in an error, a log
+line or any rendered output. =cmd/trader= reads =TRADER_OANDA_TOKEN= from the
+environment; there is no flag for any secret. Tests prove the token never appears
+in logs or errors, as the archived credential test does.
+
+** Logging and time
+
+Packages accept an injected =*slog.Logger= (nil means silent) and never use slog's
+global default; the logging arch guard (ADR-023) enforces it for every package
+but the root engine. Retry delays use an injected sleeper, so tests never wait.
+
+** Tests
+
+Hermetic: no network, no environment, no =/srv/data= or =/srv/trading=. Fixtures
+are small files copied from the archive's testdata. HTTP behavior uses
+=httptest= or a fake transport. A live smoke check is opt-in (build-tagged) and is
+run by the owner.
+
+** Deferred
+
+The client, retry and pagination (stage 2, with the =trader data download= command
+in stage 3); raw-to-canonical conversion and the persisted =availableAt=; gap and
+coverage policy; the partition cache; bars and frames delivery; Stooq and Alpaca;
+a provider registry; the archived service layer and full CLI; and the migration
+of the existing archive.
+
+* Consequences
+
+- One resolver owns every path, so the CLI, services, ingestion and tests cannot
+  each invent their own, and traversal is rejected in one place.
+- The old archive is unreadable by the new code until it is migrated. That is
+  intended: there is no silent fallback to a layout the storage doc retired.
+- No new Go module is needed; HTTP uses the standard library.
+- Each stage can be reviewed and run on its own before the next starts.
+
+* Owner decisions needed
+
+- *Data root default.* The packages take the root as an argument. Should
+  =cmd/trader= require an explicit =--data-root= (or =TRADER_DATA_ROOT=) with no
+  default, or default to =/srv/data=? The recommendation is no hard-coded default
+  in the repository.
+- *Interval token case.* Lower case (=h1=, =d1=), as the live bar schema and the
+  archive use, with the storage doc's =H1= example corrected.
+- *Migration.* That it is a later, explicit, reversible rename of =raw/oanda= to
+  =oanda/raw= (and the same for canonical), done once the new reader is proven on
+  fixtures, not part of the downloader.

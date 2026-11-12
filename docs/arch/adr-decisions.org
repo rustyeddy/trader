@@ -196,6 +196,7 @@ the original decided, use full supersession instead.
 | 086 | Exact Money, cents only at presentation (in adr-086-exact-money-cents-at-presentation.org) | Accepted |
 | 087 | Formula and rounding table for adopting num in the root engine (in adr-087-num-adoption-formula-table.org) | Accepted |
 | 088 | Per-run instrument catalog replaces the root's global instrument map (in adr-088-root-instrument-catalog.org) | Accepted |
+| 089 | Market-data layout resolver, OANDA raw store and package boundary (in adr-089-market-data-store-and-package-boundary.org) | Proposed |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
