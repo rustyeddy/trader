@@ -340,14 +340,62 @@ func TestEmax_Init_NeedsThePriceTickOfItsInstrument(t *testing.T) {
 
 func TestEmaxEach_TakesEachInstrumentsTickFromTheCatalog(t *testing.T) {
 	coarse := testInstrument("COARSE")
+	coarse.tick = "0.0005"
 	cat := withMarket(t, testMarkets(), coarse)
-	s := &emaxEach{id: "pair", instruments: []string{"EURUSD", "COARSE"}, short: 2, long: 3, stopPct: rt(400), markets: cat}
+	s := &emaxEach{id: "pair", instruments: []string{"EURUSD", "COARSE"}, short: 2, long: 3, stopPct: rateOnePercent, markets: cat}
 	require.NoError(t, s.init())
+
 	assert.Equal(t, px(1), s.byInstrument["EURUSD"].tick)
-	assert.Equal(t, px(1), s.byInstrument["COARSE"].tick)
+	assert.Equal(t, px(50), s.byInstrument["COARSE"].tick)
+
+	// 1% of 1.10337 is 0.0110337: floored to the market's own tick.
+	entry := px(110337)
+	fine, err := s.byInstrument["EURUSD"].stopFor(entry, long)
+	require.NoError(t, err)
+	assert.Equal(t, px(110337-1103), fine, "1103 points on a 1-point tick")
+	wide, err := s.byInstrument["COARSE"].stopFor(entry, long)
+	require.NoError(t, err)
+	assert.Equal(t, px(110337-1100), wide, "1100 points: 22 ticks of 50")
 
 	unknown := &emaxEach{id: "pair", instruments: []string{"NOPE"}, short: 2, long: 3, stopPct: rt(400), markets: cat}
 	require.ErrorIs(t, unknown.init(), errUnknownInstrument)
+}
+
+// An open's prices must sit on its market's tick: an off-tick stop could
+// execute at a price the market cannot trade, so it is refused, never rounded.
+func TestAccount_Size_RefusesOrderPricesOffTheMarketsTick(t *testing.T) {
+	captureLogs(t)
+	coarse := testInstrument("COARSE")
+	coarse.tick = "0.0005"
+	cat := withMarket(t, testMarkets(), coarse)
+	open := func(mutate func(*order)) *order {
+		o := &order{Time: testStart, instrument: "COARSE", direction: long, action: open, orderType: marketOrder,
+			price: px(110000), stopLoss: px(108900)} // 1.10000 and 1.08900 are whole 0.0005 ticks
+		mutate(o)
+		return o
+	}
+
+	require.NoError(t, newAccount("a", usd(10000), cat).size(open(func(*order) {}), cents(0)), "on the tick")
+	require.NoError(t, newAccount("a", usd(10000), cat).size(open(func(o *order) { o.takeProfit = px(111000); o.trail = px(500) }), cents(0)))
+
+	for name, mutate := range map[string]func(*order){
+		"price":       func(o *order) { o.price = px(110001) },
+		"stop loss":   func(o *order) { o.stopLoss = px(108999) },
+		"take profit": func(o *order) { o.takeProfit = px(111001) },
+		"trail":       func(o *order) { o.trail = px(501) },
+	} {
+		o := open(mutate)
+
+		err := newAccount("a", usd(10000), cat).size(o, cents(0))
+
+		require.ErrorIs(t, err, errInvalidOrder, name)
+		assert.False(t, isRejection(err), "an off-tick price is a strategy bug, not a trading outcome")
+		assert.True(t, o.units.IsZero(), name)
+	}
+
+	// The same prices are fine on a market with a one-point tick.
+	fine := open(func(o *order) { o.instrument = "EURUSD"; o.stopLoss = px(108999) })
+	require.NoError(t, newAccount("a", usd(10000), cat).size(fine, cents(0)))
 }
 
 // A bar the catalog has not normalized must not reach the engine: it would

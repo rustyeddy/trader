@@ -73,6 +73,14 @@ it; this ADR does not precommit to it.
   queue or position mark. =catalog.normalize= remains the loading convenience;
   it checks every bar before changing any.
 
+** Order prices sit on the market's tick
+
+Sizing refuses an open whose reference or trigger price, stop, target or
+trailing distance is not a whole number of the market's ticks
+(=errInvalidOrder=, a strategy bug and not a trading outcome). Values are
+refused, never rounded, because rounding would change the strategy's risk and an
+off-tick stop could execute at a price the market cannot trade.
+
 ** Ownership of lookup
 
 The broker holds the catalog and gives accounts the catalog (the validated

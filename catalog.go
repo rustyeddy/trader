@@ -157,6 +157,23 @@ func (m *market) checkPrices(b ohlc) error {
 	return nil
 }
 
+// checkOrderPrices reports an error unless the open's reference or trigger
+// price, stop, optional target and trailing distance are each a whole number of
+// the market's ticks. Off-tick values are refused, never rounded: rounding would
+// change the strategy's risk, and an off-tick stop could execute at a price the
+// market cannot trade.
+func (m *market) checkOrderPrices(o *order) error {
+	for name, p := range map[string]num.Price{"price": o.price, "stop loss": o.stopLoss, "take profit": o.takeProfit, "trail": o.trail} {
+		if p.IsZero() {
+			continue // not set
+		}
+		if ok, err := p.DivisibleBy(m.tick); err != nil || !ok {
+			return fmt.Errorf("%w: %s %s is not a multiple of %s's tick %s", errInvalidOrder, name, p, m.key, m.tick)
+		}
+	}
+	return nil
+}
+
 // checkFrame is the engine's boundary check: every bar of the frame must carry
 // exactly a configured engine key, with prices on that market's tick. A
 // provider spelling is an error here, not a second instrument, so a bar that

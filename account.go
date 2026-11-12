@@ -141,6 +141,11 @@ func (act *account) size(o *order, reserved num.Money) error {
 	if o.action == open && !m.listing.Tradable() {
 		return fmt.Errorf("size %s: %w: %s", o.action, errNotTradable, m.key)
 	}
+	if o.action == open {
+		if err := m.checkOrderPrices(o); err != nil {
+			return fmt.Errorf("size %s: %w", o.action, err)
+		}
+	}
 
 	switch o.action {
 	case open:

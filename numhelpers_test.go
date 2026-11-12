@@ -204,6 +204,7 @@ type testMarket struct {
 	maxUnits   num.Quantity
 	unitStep   num.Quantity
 	untradable bool
+	tick       string // the price tick; empty means 0.00001
 }
 
 func testInstrument(symbol string) *testMarket {
@@ -226,7 +227,11 @@ func (tm *testMarket) config() (marketConfig, error) {
 	if err != nil {
 		return marketConfig{}, err
 	}
-	spec, err := instr.NewSpec(num.MustParsePrice("0.00001"), tm.unitStep, rateOne, tm.quote)
+	tick := tm.tick
+	if tick == "" {
+		tick = "0.00001"
+	}
+	spec, err := instr.NewSpec(num.MustParsePrice(tick), tm.unitStep, rateOne, tm.quote)
 	if err != nil {
 		return marketConfig{}, err
 	}
