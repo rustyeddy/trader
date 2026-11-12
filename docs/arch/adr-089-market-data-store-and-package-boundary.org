@@ -3,8 +3,8 @@
 
 * Status
 
-Proposed. Issues #584 (Market Data milestone) and #604. Awaiting owner approval;
-per CLAUDE.md no implementation starts until it is approved. Applies the
+Accepted (owner decisions of 2026-11-12 recorded below). Issues #584 (Market
+Data milestone) and #604. Applies the
 accepted storage convention in =docs/arch/market-data-storage.md= and builds on
 ADR-020 (historic data), ADR-023 (structured logging), ADR-078 (security, S-1)
 and ADR-088 (the per-run instrument catalog).
@@ -52,7 +52,7 @@ What exists, checked on the owner's machine:
   =instrument=, =layout= and the standard library. It never imports another
   provider package, the root package, or =cmd=.
 - =cmd/trader= is the composition root: the only place that reads the process
-  environment, chooses the data root, builds the logger (ADR-023) and passes a
+  environment, chooses the data root (flag, environment, then =etc/trader.yml=), builds the logger (ADR-023) and passes a
   credential into the client.
 - The root trading engine imports none of this. Bars reach the engine through a
   later stage, through the catalog's boundary check (ADR-088), not through these
@@ -171,14 +171,21 @@ of the existing archive.
 - No new Go module is needed; HTTP uses the standard library.
 - Each stage can be reviewed and run on its own before the next starts.
 
-* Owner decisions needed
+* Owner decisions (2026-11-12)
 
-- *Data root default.* The packages take the root as an argument. Should
-  =cmd/trader= require an explicit =--data-root= (or =TRADER_DATA_ROOT=) with no
-  default, or default to =/srv/data=? The recommendation is no hard-coded default
-  in the repository.
+- *Data root default: a config file, not a forced flag.* =cmd/trader= resolves the
+  data root in this order: =--data-root=, then =TRADER_DATA_ROOT=, then the
+  =data_root= key of =./etc/trader.yml= (the repository's =etc/= directory, kept
+  simple for now). The packages still take the root as an argument and hard-code
+  nothing. The config file holds no secret: the OANDA token stays in
+  =TRADER_OANDA_TOKEN= only (ADR-078 S-1), and a secret key in the file is an
+  error. A missing file is not an error when a flag or the environment supplies the
+  root; with no source at all the command fails and names the three. The file is
+  read in =cmd/trader= only (stage 3), which makes =gopkg.in/yaml.v3= a direct
+  dependency then; no YAML code lands before that.
 - *Interval token case.* Lower case (=h1=, =d1=), as the live bar schema and the
-  archive use, with the storage doc's =H1= example corrected.
-- *Migration.* That it is a later, explicit, reversible rename of =raw/oanda= to
-  =oanda/raw= (and the same for canonical), done once the new reader is proven on
-  fixtures, not part of the downloader.
+  archive use. The storage doc's =H1= example is corrected.
+- *Migration.* Later, and a simple one-time script: it renames =raw/oanda= to
+  =oanda/raw= (and the same for canonical), verified by file counts and fingerprints
+  before any old path is removed. It is not part of the downloader and not part of
+  stage 1.
