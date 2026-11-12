@@ -36,6 +36,15 @@ printed, as a presentation step at the report boundary.
 =num= gains no settlement-rounding operation and no currency minor-unit
 table.
 
+Flooring is toward negative infinity, including for negative amounts: -102.08316
+prints as -$102.09, not -$102.08, matching today's P&L floor. The
+presentation step is tested for negative values and for amounts on both sides
+of a cent boundary.
+
+Exactness does not relax overflow handling. Money arithmetic is checked and
+returns errors; panics are reserved for programmer-invariant violations, not
+for assumptions about market values or account size.
+
 * Alternatives considered
 
 ** Add a named cent-rounding operation to =num=
@@ -56,12 +65,21 @@ does not provide.
 
 * Consequences
 
-- The six EMAX scenarios each close one trade, so their printed summaries
-  are expected to be unchanged. The conversion PR must show this by diffing
-  the output of =make run= before and after.
-- On a run with many trades, balances may hold sub-cent values and can differ
-  from the old engine by up to one cent per trade (half a cent on average).
-  Over 10,000 trades that is up to $100.
+- Five of the six EMAX summaries are unchanged by report-only flooring
+  (checked from the fixtures in =emax_backtest_test.go=). *b2-stop-cross*
+  is not: it closes one trade and holds an open position, so equity is the
+  exact sum 9897.91684 + 35.5758 = 9933.49264 and prints $9933.49, where the
+  approved snapshot has $9933.48 (the sum of the two already-floored
+  components). Resolving this is an open owner decision, see below.
+- Pure per-value flooring means printed components need not add up to the
+  printed total by one cent.
+- On a run with many trades, balances may hold sub-cent values. For identical
+  fills and sizes, the settlement and display difference from the old engine
+  is at most one cent per trade, half a cent on average if the fractional
+  parts are uniform (an estimate that depends on the data, not a guarantee).
+  That bound does not cover changed decisions: equity and margin feed sizing,
+  order admission and liquidation, so a sub-cent difference can change a later
+  decision and the full-run divergence can exceed it.
 - The margin requirement is no longer rounded up to the cent. It is exact, so
   the conservative direction is lost only below one cent.
 - Anything other than the report that reads balances, such as a future API or
@@ -69,7 +87,26 @@ does not provide.
   presentation rounding.
 - Results of the converted engine are not byte-comparable with the old engine
   on multi-trade runs. The conversion PR may compare the two on a multi-trade
-  backtest and report the divergence, which should stay under one cent per
-  trade.
+  backtest and report the divergence. Settlement and display differences are
+  at most one cent per trade; larger divergence indicates a changed decision
+  and should be explained, not assumed to be rounding.
+- Risk and margin decisions must be protected independently of the rounding
+  policy: after a quantity is sized and quantized, the planned risk and the
+  required margin are verified against their budgets, and the quantity is
+  reduced by one increment or the order is rejected if either is exceeded.
+  Closeout thresholds use a documented conservative boundary rule. These
+  rules are decided with the remaining #590 rounding decisions.
 - If exact cent-level reproduction is later required, adding the named
   operation to =num= remains available and is a separate decision.
+
+* Open point (owner decision)
+
+The b2-stop-cross summary differs by one cent under pure report-only
+flooring. Either:
+
+- accept $9933.49 and update the approved snapshot, so five of six summaries
+  stay byte-identical and one changes by a cent, with the reason recorded; or
+- print equity as the sum of the already-floored displayed components
+  (balance + unrealized), so printed figures add up and all six summaries
+  stay byte-identical. The cost is that printed equity can be one cent below
+  the exact equity.
