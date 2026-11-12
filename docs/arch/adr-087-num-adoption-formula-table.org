@@ -83,6 +83,7 @@ EMAX defaults (a 1% stop, a 2% or 5% margin rate).
 | Equity | balance, unrealized P&L | balance + unrealized | none; checked sum | none; printed as the sum of the floored components (ADR-086) |
 | Margin level threshold | equity, used, level Rate | equity < level x used | see boundary rule | none |
 | Margin admission at fill | units, fill Price | required margin <= margin available | exact comparison | none |
+| Notional admission at fill | units, fill Price | units x price <= max order notional | exact comparison; an over-limit fill is rejected, never resized | none |
 
 *Operation order.* Round the large-magnitude value, not a small per-unit
 factor. Multiply the whole-unit quantity by the price first (exact), then apply

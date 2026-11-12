@@ -63,10 +63,14 @@ func newResult(scenario string, bars int, tr *trader) (*result, error) {
 	if err != nil {
 		return nil, err
 	}
+	realized, err := zeroMoneyOf(act.currency)
+	if err != nil {
+		return nil, err
+	}
 	r := &result{
 		scenario: scenario, bars: bars, rejected: len(tr.rejected),
 		balance: act.balance, unrealized: unrealized, equity: equity,
-		realized: zeroMoney(act.currency),
+		realized: realized,
 	}
 
 	for _, o := range tr.broker.completed {

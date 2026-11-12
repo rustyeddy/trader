@@ -42,7 +42,13 @@ var (
 // an account trading policy, separate from any provider constraint (ADR-087).
 const defaultMaxOrderNotional = "50000000"
 
+// zeroMoney is a zero amount in currency c, which must be valid: for constants
+// and fixtures. Engine code uses zeroMoneyOf.
 func zeroMoney(c num.Currency) num.Money { return num.MustParseMoney("0", c) }
+
+// zeroMoneyOf is a zero amount in currency c, or num.ErrMissingCurrency if c is
+// not valid, for currencies that come from a caller.
+func zeroMoneyOf(c num.Currency) (num.Money, error) { return num.ParseMoney("0", c) }
 
 // moneySign is -1, 0 or +1 for m. Money with no currency has no sign: that is
 // an error, not a zero.

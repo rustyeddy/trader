@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -930,4 +931,72 @@ func TestApplyFill_FailedCloseRecordsNoTrade(t *testing.T) {
 	a := newAccount("a", usd(10000))
 	require.ErrorIs(t, fillOn(a, &order{instrument: "EURUSD", action: close, fillPrice: px(110000)}), errNoPosition)
 	assert.Empty(t, a.trades)
+}
+
+// The notional limit is also checked at the price a resting order fills at: a
+// gap can make an order that fit at its reference price too large. It is
+// rejected, never resized.
+func TestAccount_ApplyFill_OpenChecksTheNotionalLimitAtTheFillPrice(t *testing.T) {
+	fill := func(p price) *order {
+		return &order{instrument: "EURUSD", direction: long, action: open, units: qty(50_000_000), fillPrice: p}
+	}
+
+	t.Run("at the limit fills", func(t *testing.T) {
+		a := newAccount("a", usd(2_000_000))
+		require.NoError(t, fillOn(a, fill(px(100000)))) // 50,000,000 x 1.00000 = $50M
+		assert.Contains(t, a.positions, "EURUSD")
+	})
+	t.Run("a gap above it is rejected and changes nothing", func(t *testing.T) {
+		a := newAccount("a", usd(2_000_000)) // the $1.1M margin at 1.10 is covered
+		o := fill(px(110000))                // 50,000,000 x 1.10000 = $55M
+
+		err := fillOn(a, o)
+
+		require.ErrorIs(t, err, errOrderTooLarge)
+		assert.True(t, isRejection(err))
+		assert.Empty(t, a.positions)
+		assert.Equal(t, qty(50_000_000), o.units, "never resized")
+	})
+}
+
+func TestNewAccount_BalanceWithNoCurrencyIsAnErrorNotAPanic(t *testing.T) {
+	var a *account
+	require.NotPanics(t, func() { a = newAccount("a", num.Money{}) })
+
+	_, err := a.equity()
+	require.ErrorIs(t, err, num.ErrMissingCurrency)
+	_, err = a.unrealizedPnL()
+	require.ErrorIs(t, err, num.ErrMissingCurrency)
+	_, err = a.usedMargin()
+	require.ErrorIs(t, err, num.ErrMissingCurrency)
+	_, err = a.marginAvailable()
+	require.ErrorIs(t, err, num.ErrMissingCurrency)
+	_, err = newResult("s", 0, &trader{broker: newBroker("t"), account: a})
+	require.ErrorIs(t, err, num.ErrMissingCurrency)
+
+	br := newBroker("t")
+	act := br.addAccount("a", num.Money{})
+	_, err = br.reservedMargin(act)
+	require.ErrorIs(t, err, num.ErrMissingCurrency)
+	o := openOrderAt("EURUSD", long, eurusd1_10)
+	o.accountID = "a"
+	err = br.submit(context.Background(), o)
+	require.ErrorIs(t, err, num.ErrMissingCurrency)
+	assert.False(t, isRejection(err))
+}
+
+// When every computed limit is more units than a Quantity holds, a representable
+// instrument maximum still sizes the order.
+func TestAccount_Size_Open_InstrumentMaximumSizesWhenEveryOtherLimitOverflows(t *testing.T) {
+	captureLogs(t)
+	inst := testInstrument("TESTMAXU")
+	inst.maxUnits = qty(100_000)
+	registerInstrument(t, inst)
+	a := newAccount("a", usd(1_000_000_000))
+	o := openOrderAt("TESTMAXU", long, px(2))
+	o.stopLoss = px(1)
+
+	require.NoError(t, a.size(o, cents(0)))
+
+	assert.Equal(t, qty(100_000), o.units)
 }

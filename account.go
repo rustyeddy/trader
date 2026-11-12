@@ -30,14 +30,19 @@ type account struct {
 // newAccount opens an account holding balance, whose currency is the
 // account's currency.
 func newAccount(id string, balance num.Money) *account {
-	return &account{
-		id:               id,
-		currency:         balance.Currency(),
-		balance:          balance,
-		riskPct:          rateOnePercent, // default risk per trade
-		maxOrderNotional: num.MustParseMoney(defaultMaxOrderNotional, balance.Currency()),
-		positions:        make(map[string]*position),
+	act := &account{
+		id:        id,
+		currency:  balance.Currency(),
+		balance:   balance,
+		riskPct:   rateOnePercent, // default risk per trade
+		positions: make(map[string]*position),
 	}
+	// A balance with no currency makes an account whose every money operation
+	// reports num.ErrMissingCurrency; it is not a panic here.
+	if limit, err := num.ParseMoney(defaultMaxOrderNotional, balance.Currency()); err == nil {
+		act.maxOrderNotional = limit
+	}
+	return act
 }
 
 // equity is what the risk budget is a fraction of: the balance plus the
@@ -55,7 +60,10 @@ func (act *account) equity() (num.Money, error) {
 // mark. A position is marked at its fill price when it opens, so a mark always
 // exists and an unmarked position is never counted as zero.
 func (act *account) unrealizedPnL() (num.Money, error) {
-	total := zeroMoney(act.currency)
+	total, err := zeroMoneyOf(act.currency)
+	if err != nil {
+		return num.Money{}, err
+	}
 	for _, sym := range act.positionSymbols() {
 		pnl, err := act.positions[sym].unrealizedPnL(act.currency)
 		if err != nil {
@@ -72,7 +80,10 @@ func (act *account) unrealizedPnL() (num.Money, error) {
 // latest mark. Margin reserved by orders that are submitted but not yet filled
 // is the broker's to know, since it holds the orders; it passes that to size.
 func (act *account) usedMargin() (num.Money, error) {
-	total := zeroMoney(act.currency)
+	total, err := zeroMoneyOf(act.currency)
+	if err != nil {
+		return num.Money{}, err
+	}
 	for _, sym := range act.positionSymbols() {
 		pos := act.positions[sym]
 		m, err := marginFor(pos.instrument, pos.units, pos.markPrice, act.currency)
@@ -222,6 +233,9 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved num.Money) err
 	// is smaller. If none fits, the order is refused with the overflow, never
 	// wrapped.
 	var limits []sizeLimit
+	if !inst.maxUnits.IsZero() {
+		limits = append(limits, sizeLimit{"instrument", inst.maxUnits})
+	}
 	for _, l := range []struct {
 		name   string
 		budget func() (num.Money, error)
@@ -254,9 +268,6 @@ func (act *account) sizeOpen(o *order, inst *instrument, reserved num.Money) err
 		}
 	}
 	marginLimited := binding == "margin"
-	if !inst.maxUnits.IsZero() {
-		units = quantityMin(units, inst.maxUnits)
-	}
 	step := inst.unitStep
 	if step.IsZero() {
 		step = oneUnit
@@ -375,6 +386,18 @@ func (a *account) applyFill(o *order, p num.Price, at time.Time) error {
 		if short > 0 {
 			return rejected("%w: %s needs %s of margin at the fill, %s available",
 				errInsufficientMargin, o.instrument, need, avail)
+		}
+		notional, err := p.MulQuantity(o.units, a.currency)
+		if err != nil {
+			return err
+		}
+		tooLarge, err := notional.Cmp(a.maxOrderNotional)
+		if err != nil {
+			return err
+		}
+		if tooLarge > 0 {
+			return rejected("%w: %s is %s at the fill, the limit is %s",
+				errOrderTooLarge, o.instrument, notional, a.maxOrderNotional)
 		}
 		a.positions[o.instrument] = &position{
 			instrument: o.instrument,

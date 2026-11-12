@@ -163,7 +163,10 @@ func (br *broker) nextID() string {
 // reservedMargin is the margin held by the account's submitted opens that have
 // not filled yet, at each order's reference price. Closes reserve nothing.
 func (br *broker) reservedMargin(act *account) (num.Money, error) {
-	total := zeroMoney(act.currency)
+	total, err := zeroMoneyOf(act.currency)
+	if err != nil {
+		return num.Money{}, err
+	}
 	for _, instrument := range slices.Sorted(maps.Keys(br.orders)) {
 		for _, o := range br.orders[instrument] {
 			if o.accountID != act.id || o.action != open {
