@@ -3,6 +3,8 @@ package trader
 import (
 	"context"
 	"fmt"
+
+	"github.com/rustyeddy/trader/num"
 )
 
 type strategy interface {
@@ -20,7 +22,7 @@ type emax struct {
 
 	// stopPct is how far from the entry price the stop is placed, as a
 	// fraction of that price. Every open order carries the stop it produces.
-	stopPct rate
+	stopPct num.Rate
 
 	// signal state, not the actual position: the last entry signal consumed
 	pos     direction // side it is in (noDirection: flat)
@@ -41,8 +43,8 @@ func (e *emax) init() error {
 	if e.short >= e.long {
 		return fmt.Errorf("emax: short window (%d) must be less than long window (%d)", e.short, e.long)
 	}
-	if e.stopPct <= 0 || int64(e.stopPct) >= rateScale {
-		return fmt.Errorf("emax: stop must be between 0%% and 100%% of price (stopPct=%d)", e.stopPct)
+	if e.stopPct.Sign() <= 0 || e.stopPct.Cmp(rateOne) >= 0 {
+		return fmt.Errorf("emax: stop must be between 0%% and 100%% of price (stopPct=%s)", e.stopPct)
 	}
 	e.emaShort = newEMA(e.short)
 	e.emaLong = newEMA(e.long)
@@ -112,8 +114,8 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 }
 
 func (e *emax) openOrder(b bar, d direction) *order {
-	stop := e.stopFor(b.c, d)
-	if stop <= 0 || stop > maxPrice {
+	stop, err := e.stopFor(b.c, d)
+	if err != nil || stop.IsZero() || stop.Cmp(maxPrice) > 0 {
 		return nil // skip the entry; clamping would change the configured risk
 	}
 	return &order{
@@ -128,17 +130,30 @@ func (e *emax) openOrder(b bar, d direction) *order {
 }
 
 // stopFor places the stop stopPct of the entry price away on the losing side:
-// below a long, above a short. The distance rounds down but is at least one
-// price point.
-func (e *emax) stopFor(entry price, d direction) price {
-	dist := price(int64(entry) * int64(e.stopPct) / rateScale)
-	if dist < 1 {
-		dist = 1
+// below a long, above a short. The distance rounds down to the price tick but
+// is at least one tick. A stop that would fall below zero is an error, and the
+// entry is skipped.
+//
+// The product is rounded half-even at 1e-8 before the floor, so a product just
+// below a tick boundary can land on it; the stop can be at most one tick wider
+// than the exact floor (ADR-087). The distance is not a safety quantity: sizing
+// uses the actual distance to the stop.
+func (e *emax) stopFor(entry num.Price, d direction) (num.Price, error) {
+	raw, err := entry.MulRate(e.stopPct)
+	if err != nil {
+		return num.Price{}, err
+	}
+	dist, err := raw.RoundDown(priceTick)
+	if err != nil {
+		return num.Price{}, err
+	}
+	if dist.IsZero() {
+		dist = priceTick
 	}
 	if d == short {
-		return entry + dist
+		return entry.Add(dist)
 	}
-	return entry - dist
+	return entry.Sub(dist)
 }
 
 // emaxEach trades EMAX on each of several instruments through one trader,
@@ -150,7 +165,7 @@ type emaxEach struct {
 	id          string
 	instruments []string
 	short, long int
-	stopPct     rate
+	stopPct     num.Rate
 
 	byInstrument map[string]*emax
 }

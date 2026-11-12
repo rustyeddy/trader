@@ -1,5 +1,7 @@
 package trader
 
+import "github.com/rustyeddy/trader/num"
+
 // ema is an exponential moving average of the close, seeded with the SMA
 // of the first window closes.
 type ema struct {
@@ -36,21 +38,28 @@ func (e *ema) onBar(b bar) (float64, bool) {
 
 // atr is the average true range: the simple average of the last window true
 // ranges, not Wilder's recursive smoothing, so a value depends only on the last
-// window+1 bars. The true ranges are kept in exact price points; only the
-// reported average is a float, from a single division.
+// window+1 bars. The true ranges are kept as exact prices; only the reported
+// average is a float (the ADR-045 boundary).
 type atr struct {
-	ranges []price // the last window true ranges, as a ring
-	next   int     // the slot the next true range goes in
-	sum    price   // of ranges
-	bars   int     // seen so far, up to window+1
-	prev   price   // the previous bar's close
+	ranges []num.Price // the last window true ranges, as a ring
+	next   int         // the slot the next true range goes in
+	sum    num.Price   // of ranges
+	bars   int         // seen so far, up to window+1
+	prev   num.Price   // the previous bar's close
 }
+
+// maxATRWindow keeps the sum of true ranges, each at most maxPrice, far inside
+// the range of a Price.
+const maxATRWindow = 1_000_000
 
 func newATR(window int) *atr {
 	if window <= 0 {
 		panic("atr: window must be > 0")
 	}
-	return &atr{ranges: make([]price, window)}
+	if window > maxATRWindow {
+		panic("atr: window is too large")
+	}
+	return &atr{ranges: make([]num.Price, window)}
 }
 
 // onBar returns the current ATR, in price units, and false until window+1 bars
@@ -64,8 +73,18 @@ func (a *atr) onBar(b bar) (float64, bool) {
 		return 0, false
 	}
 
-	tr := max(b.h-b.l, b.h-prev, prev-b.l)
-	a.sum += tr - a.ranges[a.next]
+	// The true range is the largest of the bar's range and how far it reached
+	// past the previous close on either side. Each term is a distance, so a bar
+	// that stays on one side of the close contributes nothing for the other.
+	tr := priceMax(mustDiff(b.h, b.l), above(b.h, prev), above(prev, b.l))
+	sum, err := a.sum.Add(tr)
+	if err == nil {
+		sum, err = sum.Sub(a.ranges[a.next])
+	}
+	if err != nil {
+		panic("atr: sum of true ranges left the price range: " + err.Error()) // window and prices are bounded
+	}
+	a.sum = sum
 	a.ranges[a.next] = tr
 	a.next = (a.next + 1) % len(a.ranges)
 
@@ -76,5 +95,21 @@ func (a *atr) onBar(b bar) (float64, bool) {
 	if a.bars <= window {
 		return 0, false
 	}
-	return float64(a.sum) / float64(int64(window)*priceScale), true
+	return a.sum.Float64() / float64(window), true
 }
+
+// above is how far a is above b, or zero when it is not.
+func above(a, b num.Price) num.Price {
+	if a.Cmp(b) <= 0 {
+		return num.Price{}
+	}
+	d, err := a.Sub(b)
+	if err != nil {
+		panic("above: " + err.Error()) // a > b, so the difference is not negative
+	}
+	return d
+}
+
+// mustDiff is hi - lo for a bar's high and low, which parseBar guarantees are
+// ordered.
+func mustDiff(hi, lo num.Price) num.Price { return above(hi, lo) }

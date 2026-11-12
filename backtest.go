@@ -7,6 +7,8 @@ import (
 	"iter"
 	"strings"
 	"time"
+
+	"github.com/rustyeddy/trader/num"
 )
 
 type backtest struct {
@@ -46,15 +48,29 @@ type result struct {
 	submitted, filled, rejected, cancelled, pending int
 	trades, wins, losses, breakEven                 int
 
-	realized, unrealized, balance, equity money
+	// The money is exact; it is floored to cents only in write (ADR-086).
+	realized, unrealized, balance, equity num.Money
 	open                                  []position
 }
 
-func newResult(scenario string, bars int, tr *trader) *result {
+func newResult(scenario string, bars int, tr *trader) (*result, error) {
 	act := tr.account
+	unrealized, err := act.unrealizedPnL()
+	if err != nil {
+		return nil, err
+	}
+	equity, err := act.equity()
+	if err != nil {
+		return nil, err
+	}
+	realized, err := zeroMoneyOf(act.currency)
+	if err != nil {
+		return nil, err
+	}
 	r := &result{
 		scenario: scenario, bars: bars, rejected: len(tr.rejected),
-		balance: act.balance, unrealized: act.unrealizedPnL(), equity: act.equity(),
+		balance: act.balance, unrealized: unrealized, equity: equity,
+		realized: realized,
 	}
 
 	for _, o := range tr.broker.completed {
@@ -82,24 +98,47 @@ func newResult(scenario string, bars int, tr *trader) *result {
 
 	for _, t := range act.trades {
 		r.trades++
+		sign, err := moneySign(t.pnl)
+		if err != nil {
+			return nil, err
+		}
 		switch {
-		case t.pnl > 0:
+		case sign > 0:
 			r.wins++
-		case t.pnl < 0:
+		case sign < 0:
 			r.losses++
 		default:
 			r.breakEven++
 		}
-		r.realized += t.pnl
+		if r.realized, err = r.realized.Add(t.pnl); err != nil {
+			return nil, err
+		}
 	}
 	for _, instrument := range act.positionSymbols() {
 		r.open = append(r.open, *act.positions[instrument])
 	}
-	return r
+	return r, nil
 }
 
 // write prints the summary. It holds nothing that varies between runs.
+//
+// Money is printed in cents, each amount floored toward negative infinity
+// (ADR-086). Equity is printed as the sum of the floored balance and
+// unrealized amounts, so the printed figures add up; it can be a cent below the
+// exact equity.
 func (r *result) write(w io.Writer) error {
+	realized, err := floorCents(r.realized)
+	if err != nil {
+		return err
+	}
+	unrealized, err := floorCents(r.unrealized)
+	if err != nil {
+		return err
+	}
+	balance, err := floorCents(r.balance)
+	if err != nil {
+		return err
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %d bars\n", r.scenario, r.bars)
 	fmt.Fprintf(&b, "  orders: submitted %d, filled %d, rejected %d, cancelled %d, pending %d\n",
@@ -107,26 +146,14 @@ func (r *result) write(w io.Writer) error {
 	fmt.Fprintf(&b, "  trades: closed %d, wins %d, losses %d, break-even %d\n",
 		r.trades, r.wins, r.losses, r.breakEven)
 	fmt.Fprintf(&b, "  money: realized %s, unrealized %s, balance %s, equity %s\n",
-		formatMoney(r.realized), formatMoney(r.unrealized), formatMoney(r.balance), formatMoney(r.equity))
+		formatCents(realized), formatCents(unrealized), formatCents(balance), formatCents(balance+unrealized))
 	if len(r.open) == 0 {
 		b.WriteString("  open: none\n")
 	}
 	for _, p := range r.open {
-		fmt.Fprintf(&b, "  open: %s %d %s from %s, marked %s\n",
+		fmt.Fprintf(&b, "  open: %s %s %s from %s, marked %s\n",
 			p.direction, p.units, p.instrument, formatPrice(p.entryPrice), formatPrice(p.markPrice))
 	}
-	_, err := io.WriteString(w, b.String())
+	_, err = io.WriteString(w, b.String())
 	return err
-}
-
-func formatMoney(m money) string {
-	sign, cents := "", uint64(m)
-	if m < 0 {
-		sign, cents = "-", -cents
-	}
-	return fmt.Sprintf("%s$%d.%02d", sign, cents/uint64(moneyScale), cents%uint64(moneyScale))
-}
-
-func formatPrice(p price) string {
-	return fmt.Sprintf("%d.%05d", p/priceScale, p%priceScale)
 }

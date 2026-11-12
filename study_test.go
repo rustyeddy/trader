@@ -17,7 +17,8 @@ const atrInstrument = "STUDYONLY"
 
 var atrStart = time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
 
-func atrBar(day int, h, l, c price) bar {
+func atrBar(day int, hN int64, lN int64, cN int64) bar {
+	h, l, c := px(hN), px(lN), px(cN)
 	return bar{
 		instrument: atrInstrument,
 		Time:       atrStart.AddDate(0, 0, day),
@@ -54,11 +55,18 @@ func TestRunATRStudy_ReportsEachCompletedWindow(t *testing.T) {
 	got, err := runATRStudy(studyBars(atrFixture()), 3)
 
 	require.NoError(t, err)
-	assert.Equal(t, []atrObservation{
+	// The ATR is a float, the ADR-045 boundary: compared to the float's resolution.
+	want := []atrObservation{
 		{atrInstrument, atrStart.AddDate(0, 0, 3), 0.0034}, // (150+400+470)/3 = 340 points
 		{atrInstrument, atrStart.AddDate(0, 0, 4), 0.0035}, // (400+470+180)/3 = 350 points
 		{atrInstrument, atrStart.AddDate(0, 0, 5), 0.0029}, // (470+180+220)/3 = 290 points
-	}, got)
+	}
+	require.Len(t, got, len(want))
+	for i := range want {
+		assert.Equal(t, want[i].instrument, got[i].instrument)
+		assert.Equal(t, want[i].opened, got[i].opened)
+		assert.InDelta(t, want[i].value, got[i].value, 1e-12)
+	}
 }
 
 func TestRunATRStudy_Warmup(t *testing.T) {

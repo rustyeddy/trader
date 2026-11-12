@@ -35,7 +35,7 @@ func (s *scriptStrategy) onBar(_ context.Context, b bar) *order {
 
 // openOrder is a valid open-long order for EURUSD.
 func openOrder() *order {
-	return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+	return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: px(108900)}
 }
 
 // eurBars is closes for EURUSD, the instrument the test account can size.
@@ -221,7 +221,7 @@ func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing
 	o := openOrder()
 	strat := &scriptStrategy{orders: []*order{o}}
 
-	err := runTrader(context.Background(), newTestTraderWithBalance(0), strat, seq(eurBars(1, 2, 3), -1, nil))
+	err := runTrader(context.Background(), newTestTraderWithBalance(usd(0)), strat, seq(eurBars(1, 2, 3), -1, nil))
 
 	require.NoError(t, err, "a margin rejection must not stop the run")
 	assert.Len(t, strat.seen, 3, "bars after the rejection are still processed")
@@ -256,7 +256,7 @@ func TestBacktestRun_OrderTooSmallIsARejectionToo(t *testing.T) {
 }
 
 func TestBacktestRun_InvalidOrderStopsRunBeforeSizing(t *testing.T) {
-	bad := &order{Time: testStart, instrument: "EURUSD", action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900} // open without a direction
+	bad := &order{Time: testStart, instrument: "EURUSD", action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: px(108900)} // open without a direction
 	strat := &scriptStrategy{orders: []*order{nil, bad, openOrder()}}
 	tr := newTestTrader()
 
@@ -323,7 +323,7 @@ func newRejectFirstOpen(t *testing.T) (*trader, *rejectFirstOpen) {
 	// are about missed entries, not liquidation.
 	tr.broker.margin = func(*account) (marginStatus, error) { return marginHealthy, nil }
 	s := &rejectFirstOpen{strategy: newTestEmax(t, 2, 4), act: tr.account, cash: tr.account.balance}
-	tr.account.balance = 0
+	tr.account.balance = usd(0)
 	return tr, s
 }
 

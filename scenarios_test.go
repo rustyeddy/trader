@@ -3,8 +3,10 @@ package trader
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -91,24 +93,26 @@ func TestRun_ReportsAMissingScenario(t *testing.T) {
 func TestResult_ZeroPnLIsABreakEven(t *testing.T) {
 	br := newBroker("sim")
 	act := br.addAccount("a", usd(10000))
-	act.trades = []trade{{pnl: 3}, {pnl: -1}, {pnl: 0}, {pnl: 0}} // the balance is left alone
+	act.trades = []trade{{pnl: cents(3)}, {pnl: cents(-1)}, {pnl: cents(0)}, {pnl: cents(0)}} // the balance is left alone
 
-	r := newResult("s", 0, &trader{broker: br, account: act})
+	r, err := newResult("s", 0, &trader{broker: br, account: act})
+	require.NoError(t, err)
 
 	assert.Equal(t, 4, r.trades)
 	assert.Equal(t, 1, r.wins)
 	assert.Equal(t, 1, r.losses)
 	assert.Equal(t, 2, r.breakEven)
-	assert.Equal(t, money(2), r.realized, "the trades' sum, not the balance change")
+	assert.Equal(t, cents(2), r.realized, "the trades' sum, not the balance change")
 }
 
 // The one-cent run's two opens are refused at sizing and never reach the broker;
 // its close is queued and then rejected. All three count as rejected, and only the
 // close as submitted.
 func TestResult_CountsRefusalsWithoutDuplication(t *testing.T) {
-	refused := runEMAXWithBalance(t, "a-reversal-exit", 1)
+	refused := runEMAXWithBalance(t, "a-reversal-exit", cents(1))
 
-	r := newResult("s", 10, refused.trader)
+	r, err := newResult("s", 10, refused.trader)
+	require.NoError(t, err)
 
 	assert.Equal(t, 3, r.rejected)
 	assert.Equal(t, 1, r.submitted)
@@ -133,7 +137,8 @@ func TestResult_CountsOnlyItsAccountOrders(t *testing.T) {
 	}
 	tr := &trader{broker: br, account: a, rejected: []*order{{accountID: "a", state: stateRejected}}}
 
-	r := newResult("a", 0, tr)
+	r, err := newResult("a", 0, tr)
+	require.NoError(t, err)
 
 	assert.Equal(t, 5, r.submitted, "three completed and two pending for account a")
 	assert.Equal(t, 1, r.filled)
@@ -148,24 +153,39 @@ type failingWriter struct{}
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
 
 func TestResult_WriteReturnsTheWriterError(t *testing.T) {
-	assert.EqualError(t, (&result{}).write(failingWriter{}), "disk full")
+	zero := zeroMoney(usdCurrency)
+	r := &result{realized: zero, unrealized: zero, balance: zero, equity: zero}
+	assert.EqualError(t, r.write(failingWriter{}), "disk full")
 }
 
 func TestFormatMoney(t *testing.T) {
 	for want, m := range map[string]money{
-		"$0.00":     0,
-		"$0.05":     5,
-		"-$0.05":    -5,
-		"$10033.00": 1003300,
-		"-$102.09":  -10209,
+		"$0.00":     cents(0),
+		"$0.05":     cents(5),
+		"-$0.05":    cents(-5),
+		"$10033.00": cents(1003300),
+		"-$102.09":  cents(-10209),
+		// Cents are floored toward negative infinity (ADR-086): a loss is never understated.
+		"-$102.09 floor": num.MustParseMoney("-102.08316", usdCurrency),
+		"$9897.91 floor": num.MustParseMoney("9897.91684", usdCurrency),
+		"-$0.01 floor":   num.MustParseMoney("-0.00000001", usdCurrency),
+		"$0.00 floor":    num.MustParseMoney("0.00999999", usdCurrency),
+		"-$5.00 floor":   num.MustParseMoney("-5.00000000", usdCurrency),
 	} {
-		assert.Equal(t, want, formatMoney(m))
+		c, err := floorCents(m)
+		require.NoError(t, err)
+		assert.Equal(t, strings.TrimSuffix(want, " floor"), formatCents(c))
 	}
 }
 
+func TestFloorCents_RejectsInvalidMoney(t *testing.T) {
+	_, err := floorCents(num.Money{})
+	assert.Error(t, err)
+}
+
 func TestFormatPrice(t *testing.T) {
-	assert.Equal(t, "1.10437", formatPrice(110437))
-	assert.Equal(t, "0.00005", formatPrice(5))
+	assert.Equal(t, "1.10437", formatPrice(px(110437)))
+	assert.Equal(t, "0.00005", formatPrice(px(5)))
 }
 
 func TestRun_ExportedEntryPointPrintsTheApprovedSummary(t *testing.T) {

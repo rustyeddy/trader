@@ -14,14 +14,15 @@ func day(d int) time.Time { return testStart.AddDate(0, 0, d) }
 // limitUntil submits a long limit at 1.09000 that expires at day exp.
 func limitUntil(t *testing.T, br *broker, exp int) *order {
 	t.Helper()
-	o := openOrderAt("EURUSD", long, 109000)
+	o := openOrderAt("EURUSD", long, px(109000))
 	o.orderType, o.accountID, o.expires = limitOrder, "a", day(exp)
 	require.NoError(t, br.submit(context.Background(), o))
 	return o
 }
 
 // dayBar is a EURUSD bar on day d with the given range.
-func dayBar(d int, o, h, l, c price) bar {
+func dayBar(d int, oN int64, hN int64, lN int64, cN int64) bar {
+	o, h, l, c := px(oN), px(hN), px(lN), px(cN)
 	return daily(bar{instrument: "EURUSD", Time: day(d), ohlc: ohlc{o: o, h: h, l: l, c: c}})
 }
 
@@ -60,14 +61,14 @@ func TestBroker_OnBar_ExpiredOrderReleasesItsMarginAndThePendingSlot(t *testing.
 	captureLogs(t)
 	br, _ := newFillBroker()
 	limitUntil(t, br, 2)
-	reserved := br.reservedMargin("a")
-	require.Positive(t, reserved)
+	reserved := reservedOf(t, br, "a")
+	require.False(t, reserved.IsZero())
 
 	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110000, 110500, 109500, 110200)))
 
-	reserved = br.reservedMargin("a")
-	assert.Zero(t, reserved)
-	again := openOrderAt("EURUSD", long, 109000)
+	reserved = reservedOf(t, br, "a")
+	assert.True(t, reserved.IsZero())
+	again := openOrderAt("EURUSD", long, px(109000))
 	again.orderType, again.accountID, again.Time = limitOrder, "a", day(2)
 	require.NoError(t, br.submit(context.Background(), again), "a new open may now be pending")
 }
@@ -96,7 +97,7 @@ func TestBroker_OnBar_ExpiryIsOnlyCheckedForTheBarsInstrument(t *testing.T) {
 
 func TestOrder_Validate_Expiry(t *testing.T) {
 	base := func() order {
-		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}
+		return order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: px(110000), stopLoss: px(108900)}
 	}
 	ok := base()
 	ok.expires = day(1)
@@ -124,8 +125,8 @@ func TestBroker_Cancel_WithdrawsAWaitingOrder(t *testing.T) {
 	assert.Equal(t, day(2), last.time)
 	assert.Empty(t, br.orders["EURUSD"])
 	assert.Same(t, o, br.completed[0])
-	reserved := br.reservedMargin("a")
-	assert.Zero(t, reserved, "its margin is released")
+	reserved := reservedOf(t, br, "a")
+	assert.True(t, reserved.IsZero(), "its margin is released")
 }
 
 func TestBroker_Cancel_CancelledOrderNeverFills(t *testing.T) {

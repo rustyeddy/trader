@@ -8,15 +8,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func stopBar(o, h, l, c price) bar {
+func stopBar(oN int64, hN int64, lN int64, cN int64) bar {
+	o, h, l, c := px(oN), px(hN), px(lN), px(cN)
 	return daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: o, h: h, l: l, c: c}})
 }
 
 // restingStop gives the account a long EURUSD position protected by a stop
 // order the broker holds.
-func restingStop(br *broker, act *account, dir direction, stop price) *order {
-	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: dir, units: 1000,
-		entryPrice: 110000, markPrice: 110000}
+func restingStop(br *broker, act *account, dir direction, stopN int64) *order {
+	stop := px(stopN)
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: dir, units: qty(1000),
+		entryPrice: px(110000), markPrice: px(110000)}
 	s := &order{id: br.nextID(), accountID: act.id, instrument: "EURUSD", direction: dir, action: close,
 		orderType: stopOrder, reason: reasonStopLoss, price: stop, state: stateSubmitted, Time: testStart}
 	br.orders["EURUSD"] = append(br.orders["EURUSD"], s)
@@ -35,7 +37,7 @@ func TestBroker_FilledOpenQueuesAProtectiveStopOrder(t *testing.T) {
 	assert.Equal(t, stopOrder, s.orderType)
 	assert.Equal(t, close, s.action)
 	assert.Equal(t, reasonStopLoss, s.reason)
-	assert.Equal(t, price(108900), s.price)
+	assert.Equal(t, px(108900), s.price)
 	assert.Equal(t, long, s.direction, "the direction of the position it protects")
 	assert.Equal(t, op.accountID, s.accountID)
 	assert.Equal(t, stateSubmitted, s.state)
@@ -45,7 +47,7 @@ func TestBroker_FilledOpenQueuesAProtectiveStopOrder(t *testing.T) {
 func TestBroker_OpenWithoutAStopQueuesNoStopOrder(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
-	o := &order{id: "t-1", accountID: "a", instrument: "EURUSD", action: open, direction: long, fillPrice: 110000}
+	o := &order{id: "t-1", accountID: "a", instrument: "EURUSD", action: open, direction: long, fillPrice: px(110000)}
 
 	br.placeExits(o)
 
@@ -60,7 +62,7 @@ func TestBroker_OnBar_StopOrderClosesThePositionAtTheStop(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 	require.Contains(t, act.positions, "EURUSD")
 
-	crash := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 109500, h: 109600, l: 108000, c: 108200}})
+	crash := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: px(109500), h: px(109600), l: px(108000), c: px(108200)}})
 	require.NoError(t, br.onBar(ctx, crash))
 
 	assert.Empty(t, act.positions, "stopped out")
@@ -68,11 +70,11 @@ func TestBroker_OnBar_StopOrderClosesThePositionAtTheStop(t *testing.T) {
 	stops := br.completed[len(br.completed)-1]
 	assert.Equal(t, reasonStopLoss, stops.reason)
 	assert.Equal(t, stateFilled, stops.state)
-	assert.Equal(t, price(108900), stops.fillPrice, "at the stop, not the low")
+	assert.Equal(t, px(108900), stops.fillPrice, "at the stop, not the low")
 	assert.Equal(t, crash.Time, stops.Time)
 	assert.Equal(t, op.units, stops.units)
 	// 110000 -> 108900 is 1100 points a unit: 1.1 cents a unit, rounded down.
-	assert.Equal(t, usd(10000)-money((op.units*11+9)/10), act.balance)
+	assert.Equal(t, msub(usd(10000), cents((whole(op.units)*11+9)/10)), act.balance)
 }
 
 func TestBroker_OnBar_StopOrderCanTriggerOnTheEntryBar(t *testing.T) {
@@ -137,7 +139,7 @@ func TestBroker_OnBar_StrategyCloseCancelsTheRestingStop(t *testing.T) {
 func TestBroker_OnBar_MarginCloseoutCancelsTheRestingStop(t *testing.T) {
 	br, act := liquidationBroker(t, usd(2000))
 	stop := restingStop(br, act, long, 90000) // far below: only the closeout closes it
-	act.positions["EURUSD"].units, act.positions["EURUSD"].entryPrice = 100000, 111000
+	act.positions["EURUSD"].units, act.positions["EURUSD"].entryPrice = qty(100000), px(111000)
 
 	require.NoError(t, br.onBar(context.Background(), lossBar()))
 
@@ -154,16 +156,16 @@ func TestBroker_OnBar_GapThroughTheStopFillsAtTheOpen(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110000)))
 
 	// The next bar opens below the stop and never trades at it.
-	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}})
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: px(108000), h: px(108400), l: px(107500), c: px(108200)}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	assert.Empty(t, act.positions)
 	stop := br.completed[len(br.completed)-1]
 	assert.Equal(t, reasonStopLoss, stop.reason)
 	assert.Equal(t, stateFilled, stop.state)
-	assert.Equal(t, price(108000), stop.fillPrice, "the open, not the stop price that never traded")
+	assert.Equal(t, px(108000), stop.fillPrice, "the open, not the stop price that never traded")
 	// 110000 -> 108000 is 2000 points a unit: 2 cents a unit.
-	assert.Equal(t, usd(10000)-money(op.units*2), act.balance)
+	assert.Equal(t, msub(usd(10000), cents(whole(op.units)*2)), act.balance)
 	assert.Empty(t, br.orders["EURUSD"])
 }
 
@@ -175,18 +177,18 @@ func TestBroker_OnBar_EntryAlreadyBeyondTheStopIsClosedAtOnce(t *testing.T) {
 
 	// The fill bar opens below the long's stop: the entry fills at that open,
 	// and its stop is already beyond it.
-	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: 108000, h: 108400, l: 107500, c: 108200}})
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 1), ohlc: ohlc{o: px(108000), h: px(108400), l: px(107500), c: px(108200)}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	assert.Equal(t, stateFilled, op.state)
-	assert.Equal(t, price(108000), op.fillPrice)
+	assert.Equal(t, px(108000), op.fillPrice)
 	assert.Empty(t, act.positions, "no position is left running beyond its stop")
 	require.Len(t, br.completed, 2)
 	assert.Same(t, op, br.completed[0])
 	stop := br.completed[1]
 	assert.Equal(t, reasonStopLoss, stop.reason)
 	assert.Equal(t, stateFilled, stop.state)
-	assert.Equal(t, price(108000), stop.fillPrice, "closed at the same open: no further loss")
+	assert.Equal(t, px(108000), stop.fillPrice, "closed at the same open: no further loss")
 	assert.Equal(t, usd(10000), act.balance, "entered and exited at one price")
 	assert.Empty(t, br.orders["EURUSD"])
 }
@@ -255,16 +257,16 @@ func TestBroker_OnBar_ShortGapsAboveTheStopAndClosesAtTheOpen(t *testing.T) {
 	require.Equal(t, short, stop.direction)
 
 	// The next bar opens above the stop and never trades at it.
-	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: 112000, h: 112500, l: 111800, c: 112200}})
+	gap := daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, 2), ohlc: ohlc{o: px(112000), h: px(112500), l: px(111800), c: px(112200)}})
 	require.NoError(t, br.onBar(ctx, gap))
 
 	assert.Empty(t, act.positions)
 	assert.Equal(t, stateFilled, stop.state)
-	assert.Equal(t, price(112000), stop.fillPrice, "the open, not the stop price that never traded")
+	assert.Equal(t, px(112000), stop.fillPrice, "the open, not the stop price that never traded")
 	assert.Equal(t, gap.Time, stop.Time)
 	assert.Equal(t, op.units, stop.units)
 	// A short from 1.10000 to 1.12000 loses 2000 points a unit: 2 cents a unit.
-	assert.Equal(t, usd(10000)-money(op.units*2), act.balance)
+	assert.Equal(t, msub(usd(10000), cents(whole(op.units)*2)), act.balance)
 	assert.Empty(t, br.orders["EURUSD"], "the filled stop left the queue")
 	assert.Same(t, stop, br.completed[len(br.completed)-1], "and is retained as completed")
 }

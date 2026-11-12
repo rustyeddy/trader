@@ -20,14 +20,14 @@ func TestTrader_HandleOrder(t *testing.T) {
 	ctx := context.Background()
 	captureLogs(t)
 	openO := func() *order {
-		return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+		return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: px(108900)}
 	}
 
 	t.Run("open is sized then submitted", func(t *testing.T) {
 		o := openO()
 		require.NoError(t, newTestTrader().handleOrder(ctx, o))
-		assert.Equal(t, int64(909), o.units, "balance 1000: floor(1000 / 1.1)")
-		assert.Equal(t, price(108900), o.stopLoss)
+		assert.Equal(t, qty(909), o.units, "balance 1000: floor(1000 / 1.1)")
+		assert.Equal(t, px(108900), o.stopLoss)
 		assert.Equal(t, stateSubmitted, o.state)
 		assert.NotEmpty(t, o.id)
 		assert.Equal(t, "a", o.accountID, "the trader names the account")
@@ -38,9 +38,9 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 	t.Run("limit open is sized at its limit price", func(t *testing.T) {
 		o := openO()
-		o.orderType, o.price, o.stopLoss = limitOrder, 100000, 99000
+		o.orderType, o.price, o.stopLoss = limitOrder, px(100000), px(99000)
 		require.NoError(t, newTestTrader().handleOrder(ctx, o))
-		assert.Equal(t, int64(1000), o.units, "balance 1000: floor(1000 / 1.0)")
+		assert.Equal(t, qty(1000), o.units, "balance 1000: floor(1000 / 1.0)")
 		assert.Equal(t, stateSubmitted, o.state)
 	})
 	t.Run("close is submitted without units", func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 	t.Run("open is rejected with zero margin and never submitted", func(t *testing.T) {
 		o := openO()
-		require.NoError(t, newTestTraderWithBalance(0).handleOrder(ctx, o), "a rejection is recorded, not returned")
+		require.NoError(t, newTestTraderWithBalance(usd(0)).handleOrder(ctx, o), "a rejection is recorded, not returned")
 		assert.Equal(t, stateRejected, o.state)
 		require.Len(t, o.history, 2)
 		assert.Equal(t, stateRequested, o.history[0].state)
@@ -62,7 +62,7 @@ func TestTrader_HandleOrder(t *testing.T) {
 	})
 	t.Run("open is rejected with negative margin", func(t *testing.T) {
 		o := openO()
-		require.NoError(t, newTestTraderWithBalance(-usd(1)).handleOrder(ctx, o))
+		require.NoError(t, newTestTraderWithBalance(mneg(usd(1))).handleOrder(ctx, o))
 		assert.Equal(t, stateRejected, o.state)
 		assert.Contains(t, o.history[len(o.history)-1].reason, "insufficient margin")
 	})
@@ -99,8 +99,8 @@ func TestTrader_HandleOrder_InvalidOrderType(t *testing.T) {
 			assert.Empty(t, o.id)
 			assert.Zero(t, o.units)
 			assert.Empty(t, tr.broker.orders)
-			reserved := tr.broker.reservedMargin(tr.account.id)
-			assert.Zero(t, reserved)
+			reserved := reservedOf(t, tr.broker, tr.account.id)
+			assert.True(t, reserved.IsZero())
 			assert.Empty(t, tr.account.positions)
 			assert.Equal(t, usd(1000), tr.account.balance)
 		})
@@ -110,7 +110,7 @@ func TestTrader_HandleOrder_InvalidOrderType(t *testing.T) {
 func TestTrader_HandleOrder_ConflictingAccountIsAnError(t *testing.T) {
 	captureLogs(t)
 	o := &order{Time: testStart, accountID: "someone-else", instrument: "EURUSD", direction: long, action: open,
-		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+		orderType: marketOrder, price: eurusd1_10, stopLoss: px(108900)}
 
 	err := newTestTrader().handleOrder(context.Background(), o)
 
@@ -122,7 +122,7 @@ func TestTrader_HandleOrder_ConflictingAccountIsAnError(t *testing.T) {
 func TestTrader_HandleOrder_MatchingAccountIsKept(t *testing.T) {
 	captureLogs(t)
 	o := &order{Time: testStart, accountID: "a", instrument: "EURUSD", direction: long, action: open,
-		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900}
+		orderType: marketOrder, price: eurusd1_10, stopLoss: px(108900)}
 
 	require.NoError(t, newTestTrader().handleOrder(context.Background(), o))
 
@@ -132,7 +132,7 @@ func TestTrader_HandleOrder_MatchingAccountIsKept(t *testing.T) {
 
 func TestTrader_HandleOrder_KeepsOrdersRefusedBeforeTheBroker(t *testing.T) {
 	captureLogs(t)
-	tr := newTestTraderWithBalance(0)
+	tr := newTestTraderWithBalance(usd(0))
 	o := openOrder()
 
 	require.NoError(t, tr.handleOrder(context.Background(), o), "a refusal does not stop the run")

@@ -3,10 +3,10 @@ package trader
 import (
 	"context"
 	"errors"
-	"math"
 	"strings"
 	"testing"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,7 @@ import (
 // margin level of 100% and $1100 is 50%.
 func marginAccount(balance money) *account {
 	a := newAccount("a", balance)
-	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 100000, entryPrice: 110000, markPrice: 110000}
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(100000), entryPrice: px(110000), markPrice: px(110000)}
 	return a
 }
 
@@ -35,10 +35,10 @@ func TestDefaultMarginPolicy(t *testing.T) {
 	}{
 		{"plenty of margin", usd(10000), marginHealthy},
 		{"exactly 100% is healthy", usd(2200), marginHealthy},
-		{"one cent under 100% warns", usd(2200) - 1, marginWarning},
+		{"one cent under 100% warns", msub(usd(2200), cents(1)), marginWarning},
 		{"exactly 50% only warns", usd(1100), marginWarning},
-		{"one cent under 50% liquidates", usd(1100) - 1, marginLiquidate},
-		{"negative equity liquidates", -usd(5), marginLiquidate},
+		{"one cent under 50% liquidates", msub(usd(1100), cents(1)), marginLiquidate},
+		{"negative equity liquidates", mneg(usd(5)), marginLiquidate},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -51,7 +51,7 @@ func TestDefaultMarginPolicy(t *testing.T) {
 }
 
 func TestDefaultMarginPolicy_NoPositionsIsHealthyEvenWithNoMoney(t *testing.T) {
-	got, err := defaultMarginPolicy(newAccount("a", -usd(5)))
+	got, err := defaultMarginPolicy(newAccount("a", mneg(usd(5))))
 
 	require.NoError(t, err)
 	assert.Equal(t, marginHealthy, got)
@@ -64,18 +64,46 @@ func TestDefaultMarginPolicy_UnrealizedLossCountsTowardEquity(t *testing.T) {
 	require.Equal(t, marginHealthy, got)
 
 	// 1000 points down on 100000 units is -$1000: equity $1300 against $2180.
-	a.positions["EURUSD"].markPrice = 109000
+	a.positions["EURUSD"].markPrice = px(109000)
 	got, err = defaultMarginPolicy(a)
 
 	require.NoError(t, err)
 	assert.Equal(t, marginWarning, got)
 }
 
-func TestLevelBelow_IsExactAtTheBoundary(t *testing.T) {
-	assert.False(t, levelBelow(50, 100, rate(rateScale/2)), "50/100 is not below 50%")
-	assert.True(t, levelBelow(49, 100, rate(rateScale/2)))
-	assert.True(t, levelBelow(math.MinInt64, 1, rate(rateScale/2)), "no overflow at the extremes")
-	assert.False(t, levelBelow(math.MaxInt64, math.MaxInt64, rate(rateScale)), "no overflow at the extremes")
+func TestLevelBelow_IsStrictAtTheBoundary(t *testing.T) {
+	below := func(equity, used money, level rate) bool { return must1(levelBelow(equity, used, level)) }
+
+	assert.False(t, below(cents(50), cents(100), rateHalf), "50/100 is not below 50%: equality is healthy")
+	assert.True(t, below(cents(49), cents(100), rateHalf))
+	assert.True(t, below(mneg(cents(5)), cents(1), rateHalf), "negative equity is below any level")
+	assert.False(t, below(usd(1), usd(1), rateOne), "equity equal to margin is a 100% level")
+}
+
+// The level is a Rate at 1e-8, so the equity at which a position flips is
+// within 0.5e-8 x used of the exact boundary (ADR-087). Pin that tolerance.
+func TestLevelBelow_ToleranceIsRatePrecision(t *testing.T) {
+	used := usd(1_000_000)
+	half := usd(500_000)
+	below := func(equity money) bool { return must1(levelBelow(equity, used, rateHalf)) }
+
+	assert.False(t, below(msub(half, num.MustParseMoney("0.004", usdCurrency))), "0.004 under rounds to the boundary at 1e-8")
+	assert.True(t, below(msub(half, num.MustParseMoney("0.01", usdCurrency))), "a cent under is below")
+}
+
+func TestLevelBelow_ReportsOverflowInsteadOfWrapping(t *testing.T) {
+	huge := num.MustParseMoney("90000000000", usdCurrency)
+	tiny := num.MustParseMoney("0.00000001", usdCurrency)
+
+	_, err := levelBelow(huge, tiny, rateOne)
+
+	require.Error(t, err)
+}
+
+func TestLevelBelow_RejectsACurrencyMismatch(t *testing.T) {
+	_, err := levelBelow(usd(1), num.MustParseMoney("1", num.MustParseCurrency("EUR")), rateOne)
+
+	require.ErrorIs(t, err, num.ErrCurrencyMismatch)
 }
 
 func TestCloseWorstLoser(t *testing.T) {
@@ -87,9 +115,9 @@ func TestCloseWorstLoser(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, none, "nothing to close")
 
-	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000, entryPrice: 110000, markPrice: 109000} // -$100
-	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 10000, entryPrice: 150000, markPrice: 140000} // -$1000
-	a.positions["AUDUSD"] = &position{instrument: "AUDUSD", direction: long, units: 10000, entryPrice: 70000, markPrice: 80000}   // +$1000
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(10000), entryPrice: px(110000), markPrice: px(109000)} // -$100
+	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: qty(10000), entryPrice: px(150000), markPrice: px(140000)} // -$1000
+	a.positions["AUDUSD"] = &position{instrument: "AUDUSD", direction: long, units: qty(10000), entryPrice: px(70000), markPrice: px(80000)}   // +$1000
 
 	got, err := closeWorstLoser(a)
 
@@ -100,8 +128,8 @@ func TestCloseWorstLoser(t *testing.T) {
 func TestCloseWorstLoser_TiesGoToTheLowestInstrument(t *testing.T) {
 	registerInstrument(t, testInstrument("GBPUSD"))
 	a := newAccount("a", usd(1000))
-	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 1, entryPrice: 100000, markPrice: 100000}
-	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 100000, markPrice: 100000}
+	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: qty(1), entryPrice: px(100000), markPrice: px(100000)}
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(1), entryPrice: px(100000), markPrice: px(100000)}
 
 	for i := 0; i < 20; i++ { // map order varies run to run
 		got, err := closeWorstLoser(a)
@@ -118,8 +146,8 @@ func TestCloseLargestMargin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, none)
 
-	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000, markPrice: 110000}  // $220
-	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: short, units: 50000, markPrice: 150000} // $1500
+	a.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(10000), markPrice: px(110000)}  // $220
+	a.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: short, units: qty(50000), markPrice: px(150000)} // $1500
 
 	got, err := closeLargestMargin(a)
 
@@ -128,7 +156,7 @@ func TestCloseLargestMargin(t *testing.T) {
 }
 
 func TestAccount_PositionSymbolsAreSorted(t *testing.T) {
-	a := newAccount("a", 0)
+	a := newAccount("a", usd(0))
 	for _, s := range []string{"USDJPY", "EURUSD", "GBPUSD", "AUDUSD"} {
 		a.positions[s] = &position{instrument: s}
 	}
@@ -144,9 +172,9 @@ func liquidationBroker(t *testing.T, balance money) (*broker, *account) {
 	br := newBroker("t")
 	act := br.addAccount("a", balance)
 	// EURUSD: 100000 units, $2200 margin, -$1000 unrealized after the bar's mark.
-	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 100000, entryPrice: 111000, markPrice: 111000}
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(100000), entryPrice: px(111000), markPrice: px(111000)}
 	// GBPUSD: 10000 units at 1.50, $300 margin, flat.
-	act.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 10000, entryPrice: 150000, markPrice: 150000}
+	act.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: qty(10000), entryPrice: px(150000), markPrice: px(150000)}
 	return br, act
 }
 
@@ -159,7 +187,7 @@ func lossFrame(extra ...string) frame {
 	b := lossBar()
 	f := frame{availableAt: b.availableAt, bars: []bar{b}}
 	for _, inst := range append([]string{"GBPUSD"}, extra...) {
-		f.bars = append(f.bars, daily(bar{instrument: inst, Time: b.Time, ohlc: ohlc{o: 150000, h: 150000, l: 150000, c: 150000}}))
+		f.bars = append(f.bars, daily(bar{instrument: inst, Time: b.Time, ohlc: ohlc{o: px(150000), h: px(150000), l: px(150000), c: px(150000)}}))
 	}
 	return f
 }
@@ -167,7 +195,7 @@ func lossFrame(extra ...string) frame {
 func TestBroker_OnBar_WarnsButClosesNothing(t *testing.T) {
 	br, act := liquidationBroker(t, usd(2400))
 	logs := captureLogs(t)
-	// equity = 2400 - 1000 = $1400 against $2500 of margin: 56%, warning only.
+	// equity = 2400 - 1000 = $1400 against $2500 of margin: cents(56)%, warning only.
 
 	require.NoError(t, br.onBar(context.Background(), lossBar()))
 
@@ -224,12 +252,12 @@ func TestBroker_OnFrame_DeferredCompleteCloseoutResumesUntilEverythingIsClosed(t
 	err := br.submit(ctx, o)
 	require.ErrorIs(t, err, errCloseoutGuard, "the closeout is still owed")
 
-	gbp := daily(bar{instrument: "GBPUSD", Time: testStart.AddDate(0, 0, 3), ohlc: ohlc{o: 149000, h: 149000, l: 148000, c: 148000}})
+	gbp := daily(bar{instrument: "GBPUSD", Time: testStart.AddDate(0, 0, 3), ohlc: ohlc{o: px(149000), h: px(149000), l: px(148000), c: px(148000)}})
 	require.NoError(t, br.onBar(ctx, gbp))
 	assert.Empty(t, act.positions)
 	assert.False(t, act.closeoutPending)
 	require.Len(t, act.trades, 2)
-	assert.Equal(t, price(148000), act.trades[1].exitPrice, "closed at GBPUSD's own bar")
+	assert.Equal(t, px(148000), act.trades[1].exitPrice, "closed at GBPUSD's own bar")
 	assert.Equal(t, usd(800), act.balance, "10000 units lost 0.02000")
 }
 
@@ -354,11 +382,11 @@ func TestBroker_OnBar_ACloseoutThatDoesNotFillIsAnError(t *testing.T) {
 	br, act := liquidationBroker(t, usd(2000))
 	// A policy that names a position the account does not hold: the close is
 	// rejected for want of a position, which would loop forever if ignored.
-	ghost := &position{instrument: "EURUSD", direction: long, units: 1, markPrice: 110000}
+	ghost := &position{instrument: "EURUSD", direction: long, units: qty(1), markPrice: px(110000)}
 	br.closeout = func(*account) (*position, error) { return ghost, nil }
 	delete(act.positions, "EURUSD")
 	delete(act.positions, "GBPUSD")
-	act.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 10000, entryPrice: 150000, markPrice: 150000}
+	act.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: qty(10000), entryPrice: px(150000), markPrice: px(150000)}
 	br.margin = func(*account) (marginStatus, error) { return marginLiquidate, nil }
 
 	err := br.onBar(context.Background(), lossBar())
@@ -399,7 +427,7 @@ func TestBroker_OnFrame_RejectedCloseoutIsKeptAsCompleted(t *testing.T) {
 	// A policy that names a position the account does not hold: the closing
 	// order is rejected, so the closeout fails.
 	br.closeout = func(*account) (*position, error) {
-		return &position{instrument: "USDJPY", markPrice: 150000}, nil
+		return &position{instrument: "USDJPY", markPrice: px(150000)}, nil
 	}
 
 	err := br.onFrame(context.Background(), lossFrame("USDJPY"))

@@ -194,13 +194,13 @@ the original decided, use full supersession instead.
 | 084 | Account activity CLI (in adr-084-account-cli.org) | Accepted |
 | 085 | Trading journal rendering (in adr-085-trading-journal.org) | Accepted |
 | 086 | Exact Money, cents only at presentation (in adr-086-exact-money-cents-at-presentation.org) | Accepted |
-| 087 | Formula and rounding table for adopting num in the root engine (in adr-087-num-adoption-formula-table.org) | Proposed |
+| 087 | Formula and rounding table for adopting num in the root engine (in adr-087-num-adoption-formula-table.org) | Accepted |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
 Their remaining behavior contracts are unchanged; see their Status notes.
 
-ADR-087 (Proposed) would partially amend ADR-086: the closeout comparison
+ADR-087 partially amends ADR-086: the closeout comparison
 accepts 1e-8 rate precision instead of a conservative boundary rule. ADR-086's
 remaining decisions are unchanged.
 

@@ -26,7 +26,7 @@ func closes(vals ...float64) []bar {
 		bars[i] = bar{
 			instrument: "TEST",
 			Time:       testStart.AddDate(0, 0, i),
-			ohlc:       ohlc{o: price(v * priceScale), h: price(v * priceScale), l: price(v * priceScale), c: price(v * priceScale)},
+			ohlc:       ohlc{o: px(int64(v * 100_000)), h: px(int64(v * 100_000)), l: px(int64(v * 100_000)), c: px(int64(v * 100_000))},
 		}
 		bars[i] = daily(bars[i])
 	}
@@ -67,7 +67,7 @@ func TestEmax_LongWarmsOnSameBars(t *testing.T) {
 	}
 	// Regression: the long EMA must be seeded from bars 1-4 (value 2.5). If it
 	// were only fed after the short EMA warmed, the next value would differ.
-	v, ok := e.emaLong.onBar(bar{ohlc: ohlc{c: price(4 * priceScale)}})
+	v, ok := e.emaLong.onBar(bar{ohlc: ohlc{c: px(4 * 100_000)}})
 	require.True(t, ok)
 	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
@@ -175,11 +175,11 @@ func TestEmax_Init(t *testing.T) {
 		{"negative short", -1, 5, rateOnePercent, true},
 		{"equal windows", 5, 5, rateOnePercent, true},
 		{"short above long", 6, 5, rateOnePercent, true},
-		{"stop not set", 2, 5, 0, true},
-		{"negative stop", 2, 5, -rateOnePercent, true},
-		{"stop of 100%", 2, 5, rate(rateScale), true},
-		{"stop above 100%", 2, 5, rate(2 * rateScale), true},
-		{"just under 100%", 2, 5, rate(rateScale - 1), false},
+		{"stop not set", 2, 5, rt(0), true},
+		{"negative stop", 2, 5, rt(-10_000), true},
+		{"stop of 100%", 2, 5, rt(1_000_000), true},
+		{"stop above 100%", 2, 5, rt(2 * 1_000_000), true},
+		{"just under 100%", 2, 5, rt(1_000_000 - 1), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,13 +215,13 @@ func TestEmax_OrdersCarryInstrumentDirectionAndPrice(t *testing.T) {
 	// and no stop.
 	want := []*order{
 		{instrument: "TEST", direction: short, action: open, orderType: marketOrder,
-			price: price(7 * priceScale), stopLoss: price(707000)},
-		{instrument: "TEST", action: close, orderType: marketOrder, price: price(12 * priceScale)},
+			price: px(7 * 100_000), stopLoss: px(707000)},
+		{instrument: "TEST", action: close, orderType: marketOrder, price: px(12 * 100_000)},
 		{instrument: "TEST", direction: long, action: open, orderType: marketOrder,
-			price: price(14 * priceScale), stopLoss: price(1386000)},
-		{instrument: "TEST", action: close, orderType: marketOrder, price: price(8 * priceScale)},
+			price: px(14 * 100_000), stopLoss: px(1386000)},
+		{instrument: "TEST", action: close, orderType: marketOrder, price: px(8 * 100_000)},
 		{instrument: "TEST", direction: short, action: open, orderType: marketOrder,
-			price: price(4 * priceScale), stopLoss: price(404000)},
+			price: px(4 * 100_000), stopLoss: px(404000)},
 	}
 	require.Len(t, got, len(want))
 	for i := range want {
@@ -301,10 +301,10 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 		want    direction
 		stop    price
 	}{
-		{"long 1%", []float64{1, 2, 3, 4}, rateOnePercent, long, 396000},   // 4.00 - 0.04
-		{"short 1%", []float64{4, 3, 2, 1}, rateOnePercent, short, 101000}, // 1.00 + 0.01
-		{"long 2%", []float64{1, 2, 3, 4}, rateTwoPercent, long, 392000},   // 4.00 - 0.08
-		{"short 2%", []float64{4, 3, 2, 1}, rateTwoPercent, short, 102000}, // 1.00 + 0.02
+		{"long 1%", []float64{1, 2, 3, 4}, rateOnePercent, long, px(396000)},   // 4.00 - 0.04
+		{"short 1%", []float64{4, 3, 2, 1}, rateOnePercent, short, px(101000)}, // 1.00 + 0.01
+		{"long 2%", []float64{1, 2, 3, 4}, rateTwoPercent, long, px(392000)},   // 4.00 - 0.08
+		{"short 2%", []float64{4, 3, 2, 1}, rateTwoPercent, short, px(102000)}, // 1.00 + 0.02
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -321,9 +321,9 @@ func TestEmax_OpenOrdersCarryAStopOnTheLosingSide(t *testing.T) {
 			assert.Equal(t, tt.want, got.direction)
 			assert.Equal(t, tt.stop, got.stopLoss)
 			if tt.want == long {
-				assert.Less(t, got.stopLoss, got.price, "a long's stop is below the entry")
+				priceLess(t, got.stopLoss, got.price, "a long's stop is below the entry")
 			} else {
-				assert.Greater(t, got.stopLoss, got.price, "a short's stop is above the entry")
+				priceGreater(t, got.stopLoss, got.price, "a short's stop is above the entry")
 			}
 		})
 	}
@@ -334,11 +334,11 @@ func TestEmax_StopDistanceRoundsDownAndIsAtLeastOnePoint(t *testing.T) {
 	require.NoError(t, e.init())
 
 	// 1% of 12_345_678 is 123456.78, which rounds down to 123456.
-	assert.Equal(t, price(12_345_678-123_456), e.stopFor(12_345_678, long))
-	assert.Equal(t, price(12_345_678+123_456), e.stopFor(12_345_678, short))
+	assert.Equal(t, px(12_345_678-123_456), must1(e.stopFor(px(12_345_678), long)))
+	assert.Equal(t, px(12_345_678+123_456), must1(e.stopFor(px(12_345_678), short)))
 	// 1% of 10 points is 0.1: never a zero-distance stop.
-	assert.Equal(t, price(9), e.stopFor(10, long))
-	assert.Equal(t, price(11), e.stopFor(10, short))
+	assert.Equal(t, px(9), must1(e.stopFor(px(10), long)))
+	assert.Equal(t, px(11), must1(e.stopFor(px(10), short)))
 }
 
 func TestEmax_OpenRequiresAStopWithinPriceBounds(t *testing.T) {
@@ -348,16 +348,16 @@ func TestEmax_OpenRequiresAStopWithinPriceBounds(t *testing.T) {
 		dir   direction
 		stop  price // zero means skip the entry
 	}{
-		{"long stop below minimum", 1, long, 0},
-		{"long stop at minimum", 2, long, 1},
-		{"long at maximum price", maxPrice, long, 990_000_000},
-		{"short stop at maximum", 990_099_010, short, maxPrice},
-		{"short stop above maximum", 990_099_011, short, 0},
+		{"long stop below minimum", px(1), long, px(0)},
+		{"long stop at minimum", px(2), long, px(1)},
+		{"long at maximum price", maxPrice, long, px(990_000_000)},
+		{"short stop at maximum", px(990_099_010), short, maxPrice},
+		{"short stop above maximum", px(990_099_011), short, px(0)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newTestEmax(t, 2, 4)
 			o := e.openOrder(bar{instrument: "EURUSD", Time: testStart, ohlc: ohlc{c: tt.entry}}, tt.dir)
-			if tt.stop == 0 {
+			if tt.stop.IsZero() {
 				assert.Nil(t, o, "skip rather than clamp the configured stop")
 				return
 			}
@@ -389,7 +389,7 @@ func TestEmax_StopsPassAccountSizing(t *testing.T) {
 			continue
 		}
 		o.instrument = "EURUSD" // the test bars are "TEST"; size needs a known instrument
-		require.NoError(t, acct.size(o, 0), "bar %d", i)
-		assert.Positive(t, o.units)
+		require.NoError(t, acct.size(o, cents(0)), "bar %d", i)
+		assert.False(t, o.units.IsZero())
 	}
 }

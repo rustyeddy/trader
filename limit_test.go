@@ -9,8 +9,9 @@ import (
 )
 
 // submitLimit submits a limit open for account "a" on day 0 and returns it.
-func submitLimit(t *testing.T, br *broker, d direction, limit price) *order {
+func submitLimit(t *testing.T, br *broker, d direction, limitN int64) *order {
 	t.Helper()
+	limit := px(limitN)
 	o := openOrderAt("EURUSD", d, limit)
 	o.orderType, o.accountID = limitOrder, "a"
 	require.NoError(t, br.submit(context.Background(), o))
@@ -46,9 +47,9 @@ func TestBroker_OnBar_LongLimitWaitsThenFillsAtTheLimit(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, hit))
 
 	assert.Equal(t, stateFilled, o.state)
-	assert.Equal(t, price(109000), o.fillPrice, "at the limit")
+	assert.Equal(t, px(109000), o.fillPrice, "at the limit")
 	assert.Equal(t, hit.Time, o.Time)
-	assert.Equal(t, price(109000), act.positions["EURUSD"].entryPrice)
+	assert.Equal(t, px(109000), act.positions["EURUSD"].entryPrice)
 	assert.Same(t, o, br.completed[0])
 	require.Len(t, br.orders["EURUSD"], 1, "the filled entry queued its protective stop")
 	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][0].reason)
@@ -63,8 +64,8 @@ func TestBroker_OnBar_LongLimitGappingBelowFillsAtTheBetterOpen(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), stopBar(108700, 109000, 108500, 108800)))
 
 	assert.Equal(t, stateFilled, o.state)
-	assert.Equal(t, price(108700), o.fillPrice, "the open is better than the limit")
-	assert.Equal(t, price(108700), act.positions["EURUSD"].entryPrice)
+	assert.Equal(t, px(108700), o.fillPrice, "the open is better than the limit")
+	assert.Equal(t, px(108700), act.positions["EURUSD"].entryPrice)
 }
 
 func TestBroker_OnBar_ShortLimitFillsAtTheLimitOrTheBetterOpen(t *testing.T) {
@@ -74,8 +75,8 @@ func TestBroker_OnBar_ShortLimitFillsAtTheLimitOrTheBetterOpen(t *testing.T) {
 		b    bar
 		want price
 	}{
-		{"touched", stopBar(110000, 111000, 109500, 110500), 111000},
-		{"gaps above", stopBar(111500, 111800, 111200, 111600), 111500},
+		{"touched", stopBar(110000, 111000, 109500, 110500), px(111000)},
+		{"gaps above", stopBar(111500, 111800, 111200, 111600), px(111500)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,14 +97,14 @@ func TestBroker_UnfilledLimitReservesItsMargin(t *testing.T) {
 	br, _ := newFillBroker()
 	submitLimit(t, br, long, 109000)
 
-	reserved := br.reservedMargin("a")
-	assert.Positive(t, reserved, "a waiting limit holds margin like any submitted open")
+	reserved := reservedOf(t, br, "a")
+	assert.False(t, reserved.IsZero(), "a waiting limit holds margin like any submitted open")
 }
 
 func TestBroker_OnBar_MarginCloseoutCancelsAWaitingLimit(t *testing.T) {
 	br, _ := liquidationBroker(t, usd(2000))
 	lim := brokerOpen("a")
-	lim.orderType, lim.price, lim.state, lim.id = limitOrder, 100000, stateSubmitted, "t-9"
+	lim.orderType, lim.price, lim.state, lim.id = limitOrder, px(100000), stateSubmitted, "t-9"
 	lim.Time = testStart.AddDate(0, 0, 5)
 	br.orders = map[string][]*order{"EURUSD": {lim}}
 
@@ -121,12 +122,12 @@ func TestBroker_OnBar_RestingLimitIsRejectedWhenEquityFellWhileItWaited(t *testi
 	ctx := context.Background()
 	o := submitLimit(t, br, long, 109000)
 	units := o.units
-	require.Positive(t, units)
+	require.False(t, units.IsZero())
 
 	// While the limit waits, another position loses nearly everything:
 	// -$9,900 unrealized leaves too little margin for the limit's units.
-	act.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: 100000,
-		entryPrice: 150000, markPrice: 140100}
+	act.positions["GBPUSD"] = &position{instrument: "GBPUSD", direction: long, units: qty(100000),
+		entryPrice: px(150000), markPrice: px(140100)}
 
 	hit := stopBar(109800, 110000, 108800, 109200)
 	hit.Time = hit.AddDate(0, 0, 1)
@@ -160,7 +161,7 @@ func TestBroker_Submit_SecondPendingOpenOnTheInstrumentIsRejected(t *testing.T) 
 	br, _ := newFillBroker()
 	first := submitLimit(t, br, long, 109000)
 
-	second := openOrderAt("EURUSD", long, 108500)
+	second := openOrderAt("EURUSD", long, px(108500))
 	second.orderType, second.accountID = limitOrder, "a"
 	err := br.submit(context.Background(), second)
 
@@ -202,9 +203,10 @@ func TestTrader_HandleOrder_DuplicatePendingOpenIsRecordedNotFatal(t *testing.T)
 	captureLogs(t)
 	ctx := context.Background()
 	tr := newTestTrader()
-	mk := func(limit price) *order {
+	mk := func(limitN int64) *order {
+		limit := px(limitN)
 		return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: limitOrder,
-			price: limit, stopLoss: limit - 1100}
+			price: limit, stopLoss: px(limitN - 1100)}
 	}
 	first, second := mk(109000), mk(108500)
 

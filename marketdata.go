@@ -14,18 +14,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rustyeddy/trader/num"
 )
 
-type price int64
-
-const priceScale = 100000
-
-func (p price) Float64() float64 {
-	return float64(p) / priceScale
-}
-
 type ohlc struct {
-	o, h, l, c price
+	o, h, l, c num.Price
 	v          int
 }
 
@@ -249,7 +243,7 @@ func parseBar(instrument string, rec []string, lasts time.Duration) (bar, error)
 	if err != nil {
 		return bar{}, err
 	}
-	var px [4]price
+	var px [4]num.Price
 	for i := range px {
 		if px[i], err = parsePrice(rec[i+1]); err != nil {
 			return bar{}, err
@@ -263,29 +257,33 @@ func parseBar(instrument string, rec []string, lasts time.Duration) (bar, error)
 		return bar{}, fmt.Errorf("volume %d is negative", v)
 	}
 	o, h, l, c := px[0], px[1], px[2], px[3]
-	if h < max(o, c) || l > min(o, c) {
-		return bar{}, fmt.Errorf("high %d and low %d do not contain open %d and close %d", h, l, o, c)
+	if h.Cmp(priceMax(o, c)) < 0 || l.Cmp(priceMin(o, c)) > 0 {
+		return bar{}, fmt.Errorf("high %s and low %s do not contain open %s and close %s", h, l, o, c)
 	}
 	return bar{instrument: instrument, Time: t, ohlc: ohlc{o: o, h: h, l: l, c: c, v: v}, availableAt: t.Add(lasts)}, nil
 }
 
 // parsePrice reads a positive price written with exactly five decimals, the
-// resolution of priceScale, into points. It works on the digits, never through a
-// float, so 1.10323 is exactly 110323.
-func parsePrice(s string) (price, error) {
+// resolution of priceTick. The five-decimal rule is the bars files' (and the
+// instrument's), so it is checked here, on the text, before num parses the
+// digits exactly: nothing goes through a float.
+func parsePrice(s string) (num.Price, error) {
 	whole, frac, ok := strings.Cut(s, ".")
 	if !ok || whole == "" || len(frac) != 5 {
-		return 0, fmt.Errorf("price %q: want five decimals", s)
+		return num.Price{}, fmt.Errorf("price %q: want five decimals", s)
 	}
-	n, err := strconv.ParseUint(whole+frac, 10, 63) // unsigned: refuses any sign
+	if strings.Trim(whole+frac, "0123456789") != "" { // refuses any sign or letter
+		return num.Price{}, fmt.Errorf("price %q: want digits only", s)
+	}
+	p, err := num.ParsePrice(s)
 	if err != nil {
-		return 0, fmt.Errorf("price %q: %w", s, err)
+		return num.Price{}, fmt.Errorf("price %q: %w", s, err)
 	}
-	if n == 0 {
-		return 0, fmt.Errorf("price %q: must be positive", s)
+	if p.IsZero() {
+		return num.Price{}, fmt.Errorf("price %q: must be positive", s)
 	}
-	if n > uint64(maxPrice) {
-		return 0, fmt.Errorf("price %q: above the maximum %d", s, maxPrice)
+	if p.Cmp(maxPrice) > 0 {
+		return num.Price{}, fmt.Errorf("price %q: above the maximum %s", s, maxPrice)
 	}
-	return price(n), nil
+	return p, nil
 }

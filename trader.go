@@ -11,6 +11,11 @@ import (
 // failure: the order is rejected and the run continues.
 var errInsufficientMargin = errors.New("insufficient margin available")
 
+// errOrderTooLarge is an expected outcome too: at the price a resting order
+// filled at, its notional is above the account's limit. The order is never
+// resized: it fills as submitted or is rejected.
+var errOrderTooLarge = errors.New("order notional above the account limit")
+
 // errOrderTooSmall is also an expected outcome: the risk budget, or the
 // instrument's limits, leave nothing worth trading.
 var errOrderTooSmall = errors.New("order size below the minimum")

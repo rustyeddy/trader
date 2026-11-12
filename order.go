@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/rustyeddy/trader/num"
 )
 
 // direction is the direction of a position, not an order side (buy/sell).
@@ -97,16 +99,16 @@ type order struct {
 	orderType  orderType
 	reason     orderReason // zero is reasonStrategy
 
-	price      price
-	fillPrice  price
-	units      int64
-	stopLoss   price
-	takeProfit price // optional target on an open; 0 means none
+	price      num.Price
+	fillPrice  num.Price
+	units      num.Quantity
+	stopLoss   num.Price
+	takeProfit num.Price // optional target on an open; 0 means none
 
-	// trail makes the protective stop trail the market by this distance, in
-	// price points, ratcheting toward profit and never back. 0 is a fixed stop.
+	// trail makes the protective stop trail the market by this price distance,
+	// ratcheting toward profit and never back. 0 is a fixed stop.
 	// On the broker's stop order it is the distance the stop keeps.
-	trail price
+	trail num.Price
 
 	// expires is the first bar time at which a waiting entry is no longer live:
 	// the broker cancels it instead of executing it on that bar or any later
@@ -201,19 +203,19 @@ func (o *order) validate() error {
 		if o.action != open {
 			return fmt.Errorf("%w: a %s order can only open (got %s)", errInvalidOrder, o.orderType, o.action)
 		}
-		if o.price <= 0 {
+		if o.price.IsZero() {
 			return fmt.Errorf("%w: a %s order requires a trigger price", errInvalidOrder, o.orderType)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported order type %d", errInvalidOrder, o.orderType)
 	}
-	if max(o.price, o.stopLoss, o.takeProfit) > maxPrice {
-		return fmt.Errorf("%w: prices must not exceed %d", errInvalidOrder, maxPrice)
+	if priceMax(o.price, o.stopLoss, o.takeProfit).Cmp(maxPrice) > 0 {
+		return fmt.Errorf("%w: prices must not exceed %s", errInvalidOrder, maxPrice)
 	}
-	if o.takeProfit < 0 || (o.takeProfit != 0 && o.action != open) {
+	if !o.takeProfit.IsZero() && o.action != open {
 		return fmt.Errorf("%w: take profit must be positive and only an open carries one", errInvalidOrder)
 	}
-	if o.trail < 0 || (o.trail != 0 && o.action != open) {
+	if !o.trail.IsZero() && o.action != open {
 		return fmt.Errorf("%w: trail must be positive and only an open carries one", errInvalidOrder)
 	}
 	if !o.expires.IsZero() && (o.action != open || !o.expires.After(o.Time)) {
@@ -231,18 +233,18 @@ func (o *order) validate() error {
 		}
 		// The strategy decides where the stop goes; the account only sizes
 		// from it, so an open without one never reaches the account.
-		if o.stopLoss <= 0 {
+		if o.stopLoss.IsZero() {
 			return fmt.Errorf("%w: open requires a stop loss set by the strategy", errInvalidOrder)
 		}
-		if o.price <= 0 {
+		if o.price.IsZero() {
 			return fmt.Errorf("%w: open requires a reference price", errInvalidOrder)
 		}
 		if !o.beyond(o.stopLoss, true) {
-			return fmt.Errorf("%w: %s stop %d is not beyond the entry price %d",
+			return fmt.Errorf("%w: %s stop %s is not beyond the entry price %s",
 				errInvalidOrder, o.direction, o.stopLoss, o.price)
 		}
-		if o.takeProfit != 0 && !o.beyond(o.takeProfit, false) {
-			return fmt.Errorf("%w: %s take profit %d is not beyond the entry price %d",
+		if !o.takeProfit.IsZero() && !o.beyond(o.takeProfit, false) {
+			return fmt.Errorf("%w: %s take profit %s is not beyond the entry price %s",
 				errInvalidOrder, o.direction, o.takeProfit, o.price)
 		}
 	case add, reduce, close:
@@ -261,11 +263,11 @@ func (o *order) validate() error {
 // beyond reports whether p lies past the order's entry price on its losing
 // side (where a stop belongs) or, with losing false, its winning side (where a
 // target belongs). For a long the losing side is below the entry.
-func (o *order) beyond(p price, losing bool) bool {
+func (o *order) beyond(p num.Price, losing bool) bool {
 	if (o.direction == long) == losing {
-		return p < o.price
+		return p.Cmp(o.price) < 0
 	}
-	return p > o.price
+	return p.Cmp(o.price) > 0
 }
 
 func (d direction) String() string {

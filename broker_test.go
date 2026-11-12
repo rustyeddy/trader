@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +48,7 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 		action:     open,
 		orderType:  marketOrder,
 		price:      eurusd1_10,
-		stopLoss:   108900,
+		stopLoss:   px(108900),
 		Time:       ts,
 	}
 
@@ -55,7 +56,7 @@ func TestBroker_SubmitMarksSubmittedAssignsIDAndLogs(t *testing.T) {
 
 	assert.Equal(t, "sim-1", o.id)
 	assert.Equal(t, stateSubmitted, o.state)
-	assert.Equal(t, int64(909), o.units, "the account sized it: floor($1000 / 1.1)")
+	assert.Equal(t, qty(909), o.units, "the account sized it: floor($1000 / 1.1)")
 	require.Len(t, o.history, 2)
 	assert.Equal(t, stateSized, o.history[0].state)
 	assert.Equal(t, stateSubmitted, o.history[1].state)
@@ -151,13 +152,14 @@ func TestBroker_SubmitUsesTheOrdersAccountForTheLog(t *testing.T) {
 func brokerOpen(accountID string) *order {
 	return &order{
 		Time: testStart, accountID: accountID, instrument: "EURUSD", direction: long, action: open,
-		orderType: marketOrder, price: eurusd1_10, stopLoss: 108900,
+		orderType: marketOrder, price: eurusd1_10, stopLoss: px(108900),
 	}
 }
 
 // fillBar is a EURUSD bar on day d (0 = testStart) opening at o.
-func fillBar(d int, o price) bar {
-	return daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, h: o + 100, l: o, c: o + 100}})
+func fillBar(d int, oN int64) bar {
+	o := px(oN)
+	return daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, h: px(oN + 100), l: o, c: px(oN + 100)}})
 }
 
 // submitted is an order the broker has accepted on day 0.
@@ -166,7 +168,7 @@ func submittedOrder(t *testing.T, br *broker, a action, d direction) *order {
 	o := openOrderAt("EURUSD", d, eurusd1_10)
 	o.action, o.accountID, o.Time = a, "a", testStart
 	if a != open {
-		o.direction, o.stopLoss = noDirection, 0
+		o.direction, o.stopLoss = noDirection, num.Price{}
 	}
 	require.NoError(t, br.submit(context.Background(), o))
 	return o
@@ -198,11 +200,11 @@ func TestBroker_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 
 	require.NoError(t, br.onBar(ctx, fillBar(1, 111500)))
 	assert.Equal(t, stateFilled, o.state)
-	assert.Equal(t, price(111500), o.fillPrice, "the open of the next bar")
+	assert.Equal(t, px(111500), o.fillPrice, "the open of the next bar")
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.Time, "stamped with the fill bar")
 	assert.Equal(t, stateFilled, o.history[len(o.history)-1].state)
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[len(o.history)-1].time)
-	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: 111500, entryTime: o.Time, markPrice: 111600}, act.positions["EURUSD"])
+	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: px(111500), entryTime: o.Time, markPrice: px(111600)}, act.positions["EURUSD"])
 	require.Len(t, br.orders["EURUSD"], 1, "the filled open left the queue; only its stop waits")
 	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][0].reason)
 }
@@ -236,16 +238,16 @@ func TestBroker_OnBar_CloseTakesThePositionsSizeAndRemovesIt(t *testing.T) {
 	open1 := submittedOrder(t, br, open, short)
 	require.NoError(t, br.onBar(ctx, fillBar(1, 110500)))
 	require.Equal(t, stateFilled, open1.state)
-	assert.Equal(t, price(110500), act.positions["EURUSD"].entryPrice, "the position remembers its fill price")
+	assert.Equal(t, px(110500), act.positions["EURUSD"].entryPrice, "the position remembers its fill price")
 
 	cl := &order{accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder, Time: testStart.AddDate(0, 0, 1)}
 	require.NoError(t, br.submit(ctx, cl))
 	require.NoError(t, br.onBar(ctx, fillBar(2, 112000)))
 
 	assert.Equal(t, stateFilled, cl.state)
-	assert.Equal(t, price(110500), open1.fillPrice)
+	assert.Equal(t, px(110500), open1.fillPrice)
 	assert.Equal(t, open1.units, cl.units, "the order records what was closed")
-	assert.Equal(t, price(112000), cl.fillPrice)
+	assert.Equal(t, px(112000), cl.fillPrice)
 	assert.Empty(t, act.positions)
 }
 
@@ -267,7 +269,7 @@ func TestBroker_OnBar_CloseWithoutAPositionIsRejectedNotFatal(t *testing.T) {
 func TestBroker_OnBar_OpenOverAnExistingPositionIsFatal(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
-	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10}
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(10)}
 	o := submittedOrder(t, br, open, long)
 
 	err := br.onBar(context.Background(), fillBar(1, 111000))
@@ -286,7 +288,7 @@ func TestAccount_ApplyFill_AddAndReduceAreUnsupported(t *testing.T) {
 
 func TestBroker_Fill_UnknownAccount(t *testing.T) {
 	br := newBroker("t")
-	err := br.fill(&order{id: "t-1", accountID: "ghost", instrument: "EURUSD", action: open}, 1, time.Time{})
+	err := br.fill(&order{id: "t-1", accountID: "ghost", instrument: "EURUSD", action: open}, px(1), time.Time{})
 	require.ErrorIs(t, err, errUnknownAccount)
 }
 
@@ -313,7 +315,7 @@ func TestBroker_OnBar_ErrorMidBatchKeepsTheQueueConsistent(t *testing.T) {
 	// still meet an existing position (fatal: the first one's position exists by then).
 	queued := func(id string) *order {
 		o := brokerOpen("a")
-		o.id, o.units, o.state = id, 100, stateSubmitted
+		o.id, o.units, o.state = id, qty(100), stateSubmitted
 		br.orders["EURUSD"] = append(br.orders["EURUSD"], o)
 		return o
 	}
@@ -338,17 +340,17 @@ func TestBroker_Submit_HasTheAccountSizeTheOrder(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
 	o := brokerOpen("a")
-	o.units = 7 // a strategy does not choose units; the account does
+	o.units = qty(7) // a strategy does not choose units; the account does
 
 	require.NoError(t, br.submit(context.Background(), o))
 
-	assert.Equal(t, int64(9090), o.units, "floor($10000 / 1.1)")
+	assert.Equal(t, qty(9090), o.units, "floor($10000 / 1.1)")
 }
 
 func TestBroker_Submit_SizingRejectionIsReturnedRecordedAndNotQueued(t *testing.T) {
 	captureLogs(t)
 	br := newBroker("t")
-	br.addAccount("a", 0)
+	br.addAccount("a", usd(0))
 	o := brokerOpen("a")
 
 	err := br.submit(context.Background(), o)
@@ -376,29 +378,30 @@ func TestBroker_Submit_UnknownInstrumentIsFatal(t *testing.T) {
 func TestBroker_ReservedMargin(t *testing.T) {
 	captureLogs(t)
 	br := &broker{id: "t", orders: map[string][]*order{"EURUSD": {
-		{accountID: "a", instrument: "EURUSD", action: open, units: 10000, price: 110000, state: stateSubmitted}, // $220
-		{accountID: "a", instrument: "EURUSD", action: open, units: 5000, price: 110000, state: stateSubmitted},  // $110
-		{accountID: "a", instrument: "EURUSD", action: close, state: stateSubmitted},                             // frees, never reserves
-		{accountID: "b", instrument: "EURUSD", action: open, units: 99999, price: 110000, state: stateSubmitted}, // another account's
+		{accountID: "a", instrument: "EURUSD", action: open, units: qty(10000), price: px(110000), state: stateSubmitted}, // $220
+		{accountID: "a", instrument: "EURUSD", action: open, units: qty(5000), price: px(110000), state: stateSubmitted},  // $110
+		{accountID: "a", instrument: "EURUSD", action: close, state: stateSubmitted},                                      // frees, never reserves
+		{accountID: "b", instrument: "EURUSD", action: open, units: qty(99999), price: px(110000), state: stateSubmitted}, // another account's
 	}}}
 
-	got := br.reservedMargin("a")
+	got := reservedOf(t, br, "a")
 	assert.Equal(t, usd(330), got)
 
-	none := br.reservedMargin("nobody")
-	assert.Zero(t, none)
+	none, err := br.reservedMargin(&account{id: "nobody", currency: usdCurrency})
+	require.NoError(t, err)
+	assert.True(t, none.IsZero())
 }
 
 func TestBroker_Submit_ReservedMarginShrinksTheNextOrder(t *testing.T) {
 	captureLogs(t)
 	br := newBroker("t")
 	act := br.addAccount("a", usd(10000))
-	act.riskPct = rate(rateScale) // only the margin can limit the orders
+	act.riskPct = rateOne // only the margin can limit the orders
 	ctx := context.Background()
 
 	first := brokerOpen("a")
 	require.NoError(t, br.submit(ctx, first))
-	assert.Equal(t, int64(454545), first.units, "all the margin")
+	assert.Equal(t, qty(454545), first.units, "all the margin")
 
 	registerInstrument(t, testInstrument("GBPUSD"))
 	second := brokerOpen("a")
@@ -422,7 +425,7 @@ func TestBroker_OnBar_BooksRealizedPnLToTheBalance(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, fillBar(2, 112000)))
 
 	// A short from 1.10500 to 1.12000 loses 1500 points a unit: 1.5 cents a unit.
-	assert.Equal(t, usd(10000)-money(op.units*3/2), act.balance)
+	assert.Equal(t, msub(usd(10000), cents(whole(op.units)*3/2)), act.balance)
 }
 
 func TestBroker_OnBar_RejectedCloseLeavesTheBalance(t *testing.T) {
@@ -441,13 +444,13 @@ func TestBroker_OnBar_MarksEveryAccountsPosition(t *testing.T) {
 	br := newBroker("t")
 	one := br.addAccount("one", usd(1))
 	two := br.addAccount("two", usd(1))
-	one.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 1, entryPrice: 110000, markPrice: 110000}
-	two.positions["EURUSD"] = &position{instrument: "EURUSD", direction: short, units: 1, entryPrice: 110000, markPrice: 110000}
+	one.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(1), entryPrice: px(110000), markPrice: px(110000)}
+	two.positions["EURUSD"] = &position{instrument: "EURUSD", direction: short, units: qty(1), entryPrice: px(110000), markPrice: px(110000)}
 
 	require.NoError(t, br.onBar(context.Background(), fillBar(1, 111500)))
 
-	assert.Equal(t, price(111600), one.positions["EURUSD"].markPrice)
-	assert.Equal(t, price(111600), two.positions["EURUSD"].markPrice)
+	assert.Equal(t, px(111600), one.positions["EURUSD"].markPrice)
+	assert.Equal(t, px(111600), two.positions["EURUSD"].markPrice)
 }
 
 func TestBroker_OnBar_AppliesFillsToTheOrdersOwnAccount(t *testing.T) {
@@ -467,7 +470,7 @@ func TestBroker_OnBar_AppliesFillsToTheOrdersOwnAccount(t *testing.T) {
 func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
-	closeoutBar := fillBar(0, eurusd1_10)
+	closeoutBar := fillBar(0, points(eurusd1_10))
 	act.closedOutAt = closeoutBar.availableAt
 
 	o := brokerOpen("a")
@@ -481,7 +484,7 @@ func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	// A close is still allowed, and so is an open on a later bar.
 	cl := &order{Time: testStart, accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder}
 	require.NoError(t, br.submit(context.Background(), cl))
-	next := fillBar(1, eurusd1_10)
+	next := fillBar(1, points(eurusd1_10))
 	later := brokerOpen("a")
 	later.Time, later.decidedAt = next.Time, next.availableAt // decided on the next bar
 	require.NoError(t, br.submit(context.Background(), later))
@@ -491,7 +494,7 @@ func TestBroker_OnBar_CloseoutBlocksTheStrategyOpenOnTheSameBar(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
 	act.balance = usd(1000)
-	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000,
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(10000),
 		entryPrice: eurusd1_10, markPrice: eurusd1_10}
 	b := fillBar(1, 90000) // a crash: the account is liquidated on this bar
 
@@ -542,13 +545,13 @@ func TestBroker_OnBar_MarginCloseoutRecordsATrade(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
 	act.balance = usd(1000)
-	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: 10000,
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(10000),
 		entryPrice: eurusd1_10, entryTime: testStart, markPrice: eurusd1_10}
 	b := fillBar(1, 90000)
 
 	require.NoError(t, br.onBar(context.Background(), b))
 
-	assert.Equal(t, []trade{{instrument: "EURUSD", direction: long, units: 10000,
+	assert.Equal(t, []trade{{instrument: "EURUSD", direction: long, units: qty(10000),
 		entryPrice: eurusd1_10, entryTime: testStart, exitPrice: b.c, exitTime: b.Time,
-		reason: reasonMarginCloseout, pnl: -usd(1990)}}, act.trades)
+		reason: reasonMarginCloseout, pnl: mneg(usd(1990))}}, act.trades)
 }

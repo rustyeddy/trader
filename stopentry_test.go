@@ -9,7 +9,8 @@ import (
 )
 
 // submitStopEntry submits a stop entry for account "a" on day 0 and returns it.
-func submitStopEntry(t *testing.T, br *broker, d direction, trigger price) *order {
+func submitStopEntry(t *testing.T, br *broker, d direction, triggerN int64) *order {
+	trigger := px(triggerN)
 	t.Helper()
 	o := openOrderAt("EURUSD", d, trigger)
 	o.orderType, o.accountID = stopOrder, "a"
@@ -53,7 +54,7 @@ func TestBroker_OnBar_LongStopEntryWaitsThenFillsAtTheStop(t *testing.T) {
 	require.NoError(t, br.onBar(ctx, hit))
 
 	assert.Equal(t, stateFilled, o.state)
-	assert.Equal(t, price(110500), o.fillPrice, "at the stop")
+	assert.Equal(t, px(110500), o.fillPrice, "at the stop")
 	assert.Equal(t, long, act.positions["EURUSD"].direction)
 	require.Len(t, br.orders["EURUSD"], 1, "the entry queued its protective stop")
 	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][0].reason)
@@ -66,8 +67,8 @@ func TestBroker_OnBar_StopEntryGappingAboveFillsAtTheWorseOpen(t *testing.T) {
 
 	require.NoError(t, br.onBar(context.Background(), stopBar(111000, 111500, 110800, 111200)))
 
-	assert.Equal(t, price(111000), o.fillPrice, "buying into the move costs the gap")
-	assert.Equal(t, price(111000), act.positions["EURUSD"].entryPrice)
+	assert.Equal(t, px(111000), o.fillPrice, "buying into the move costs the gap")
+	assert.Equal(t, px(111000), act.positions["EURUSD"].entryPrice)
 }
 
 func TestBroker_OnBar_ShortStopEntryFillsOnAFall(t *testing.T) {
@@ -78,7 +79,7 @@ func TestBroker_OnBar_ShortStopEntryFillsOnAFall(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), stopBar(109800, 109900, 108900, 109000)))
 
 	assert.Equal(t, stateFilled, o.state)
-	assert.Equal(t, price(109000), o.fillPrice)
+	assert.Equal(t, px(109000), o.fillPrice)
 	assert.Equal(t, short, act.positions["EURUSD"].direction)
 }
 
@@ -115,7 +116,7 @@ func TestBroker_Submit_StopEntryCompetesWithOtherPendingOpens(t *testing.T) {
 	br, _ := newFillBroker()
 	submitLimit(t, br, long, 109000)
 
-	second := openOrderAt("EURUSD", long, 110500)
+	second := openOrderAt("EURUSD", long, px(110500))
 	second.orderType, second.accountID = stopOrder, "a"
 
 	require.ErrorIs(t, br.submit(context.Background(), second), errOpenPending)
