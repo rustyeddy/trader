@@ -70,9 +70,9 @@ does not provide.
   is not: it closes one trade and holds an open position, so equity is the
   exact sum 9897.91684 + 35.5758 = 9933.49264 and prints $9933.49, where the
   approved snapshot has $9933.48 (the sum of the two already-floored
-  components). Resolving this is an open owner decision, see below.
-- Pure per-value flooring means printed components need not add up to the
-  printed total by one cent.
+  components). Resolved below: equity is printed as the sum of floored components.
+- Printed equity is the sum of the floored components, so printed figures add
+  up; it can be one cent below the exact equity.
 - On a run with many trades, balances may hold sub-cent values. For identical
   fills and sizes, the settlement and display difference from the old engine
   is at most one cent per trade, half a cent on average if the fractional
@@ -99,14 +99,13 @@ does not provide.
 - If exact cent-level reproduction is later required, adding the named
   operation to =num= remains available and is a separate decision.
 
-* Open point (owner decision)
+* Equity presentation (decided)
 
-The b2-stop-cross summary differs by one cent under pure report-only
-flooring. Either:
-
-- accept $9933.49 and update the approved snapshot, so five of six summaries
-  stay byte-identical and one changes by a cent, with the reason recorded; or
-- print equity as the sum of the already-floored displayed components
-  (balance + unrealized), so printed figures add up and all six summaries
-  stay byte-identical. The cost is that printed equity can be one cent below
-  the exact equity.
+Under pure per-value flooring the b2-stop-cross summary would print equity
+$9933.49 instead of the approved $9933.48. The owner chose to print equity as
+the sum of the already-floored displayed components (balance + unrealized),
+so the printed figures add up and all six approved summaries stay
+byte-identical. The cost is that printed equity can be one cent below the
+exact equity. Only the printed value is affected; engine equity stays exact.
+This rule is tested with b2 (9897.91 + 35.57 = 9933.48) and with a case where
+the exact and summed values differ.
