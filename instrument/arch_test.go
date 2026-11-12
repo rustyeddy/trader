@@ -99,3 +99,30 @@ func findForbiddenFields(fset *token.FileSet, file *ast.File) []string {
 
 	return violations
 }
+
+// TestImportsOnlyNumAndTheStandardLibrary keeps this package a standalone value
+// model: it may use num and the Go standard library, and nothing else. In
+// particular it never imports the archived framework or the root trader
+// package, so root's own instrument configuration and this package can change
+// independently.
+func TestImportsOnlyNumAndTheStandardLibrary(t *testing.T) {
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	const num = "github.com/rustyeddy/trader/num"
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, e.Name()), nil, parser.ImportsOnly)
+		require.NoError(t, err)
+		for _, imp := range f.Imports {
+			path := strings.Trim(imp.Path.Value, `"`)
+			firstElement, _, _ := strings.Cut(path, "/")
+			standard := !strings.Contains(firstElement, ".")
+			assert.True(t, standard || path == num, "%s imports %s", e.Name(), path)
+		}
+	}
+}

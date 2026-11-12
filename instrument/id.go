@@ -102,13 +102,15 @@ func ETFID(exchange, ticker string) ID {
 //
 // FutureID returns the zero ID if, once normalized, root is empty or
 // contains a character outside the safe identifier alphabet, or if
-// expiration is the zero time.Time.
+// expiration is the zero time.Time or its UTC year is outside the supported
+// contract-month range, 1900 through 9999: the "YYYY-MM" text needs a
+// four-digit year, and every ID FutureID returns can then be decoded again.
 func FutureID(root string, expiration time.Time) ID {
 	root = normalizeIdentifierPart(root)
-	if !isValidIdentifierPart(root) || expiration.IsZero() {
+	if !isValidIdentifierPart(root) || expiration.IsZero() || !validContractYear(expiration) {
 		return ID{}
 	}
-	return ID{raw: "fut:" + root + ":" + expiration.UTC().Format("2006-01")}
+	return ID{raw: "fut:" + root + ":" + expiration.UTC().Format(contractMonthLayout)}
 }
 
 // ContinuousSeriesID returns the canonical identity for the continuous,
@@ -137,6 +139,25 @@ func IndexID(name string) ID {
 	}
 	return ID{raw: "idx:" + name}
 }
+
+// minContractYear and maxContractYear bound the supported contract months.
+// The upper bound is the four-digit year of the "YYYY-MM" text; the lower one
+// keeps every encoded month clear of the zero time.Time, which would not
+// decode, and is well before any futures contract.
+const (
+	minContractYear = 1900
+	maxContractYear = 9999
+)
+
+// validContractYear reports whether t falls in the supported contract-month
+// range.
+func validContractYear(t time.Time) bool {
+	y := t.UTC().Year()
+	return y >= minContractYear && y <= maxContractYear
+}
+
+// contractMonthLayout is the "YYYY-MM" contract month in a futures ID.
+const contractMonthLayout = "2006-01"
 
 func normalizeIdentifierPart(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))
