@@ -1,8 +1,9 @@
 package trader
 
 import (
-	"math/big"
 	"sort"
+
+	"github.com/rustyeddy/trader/num"
 )
 
 // marginStatus is how an account stands against its broker's margin rules.
@@ -37,43 +38,75 @@ type closeoutPolicy func(*account) (*position, error)
 // marginLevelPolicy judges an account by its margin level, equity as a
 // fraction of the margin in use: below closeout it must be liquidated, below
 // warn it is in warning. An account that uses no margin is healthy.
-func marginLevelPolicy(warn, closeout rate) marginPolicy {
+func marginLevelPolicy(warn, closeout num.Rate) marginPolicy {
 	return func(a *account) (marginStatus, error) {
-		eq, used := a.equity(), a.usedMargin()
-		switch {
-		case used <= 0:
+		eq, err := a.equity()
+		if err != nil {
+			return marginHealthy, err
+		}
+		used, err := a.usedMargin()
+		if err != nil {
+			return marginHealthy, err
+		}
+		if sign, err := moneySign(used); err != nil {
+			return marginHealthy, err
+		} else if sign <= 0 {
 			return marginHealthy, nil
-		case levelBelow(eq, used, closeout):
+		}
+		below, err := levelBelow(eq, used, closeout)
+		if err != nil {
+			return marginHealthy, err
+		}
+		if below {
 			return marginLiquidate, nil
-		case levelBelow(eq, used, warn):
+		}
+		if below, err = levelBelow(eq, used, warn); err != nil {
+			return marginHealthy, err
+		}
+		if below {
 			return marginWarning, nil
 		}
 		return marginHealthy, nil
 	}
 }
 
-// levelBelow reports whether equity/used < level, exactly: equity * rateScale
-// < level * used, in arbitrary precision.
-func levelBelow(equity, used money, level rate) bool {
-	l := new(big.Int).Mul(big.NewInt(int64(equity)), big.NewInt(rateScale))
-	r := new(big.Int).Mul(big.NewInt(int64(level)), big.NewInt(int64(used)))
-	return l.Cmp(r) < 0
+// levelBelow reports whether the margin level equity/used is strictly below
+// level; equality is healthy. The level is a Rate rounded at 1e-8, so the
+// equity at which the answer flips is within 0.5e-8 x used of the exact
+// boundary (ADR-087, "Margin closeout boundary rule"). used must be positive.
+func levelBelow(equity, used num.Money, level num.Rate) (bool, error) {
+	got, err := equity.Div(used)
+	if err != nil {
+		return false, err
+	}
+	return got.Cmp(level) < 0, nil
 }
 
 // defaultMarginPolicy warns when equity falls below the margin in use (a
 // margin level of 100%) and liquidates below half of it, as a retail forex
 // broker with a 50% closeout level does.
-var defaultMarginPolicy = marginLevelPolicy(rate(rateScale), rate(rateScale/2))
+var defaultMarginPolicy = marginLevelPolicy(rateOne, rateHalf)
 
 // closeWorstLoser picks the position with the largest unrealized loss. Ties go
 // to the lowest instrument name so a run is replayable.
 func closeWorstLoser(a *account) (*position, error) {
 	var worst *position
-	var worstPnL money
+	var worstPnL num.Money
 	for _, sym := range a.positionSymbols() {
 		pos := a.positions[sym]
-		pnl := pos.unrealizedPnL()
-		if worst == nil || pnl < worstPnL {
+		pnl, err := pos.unrealizedPnL(a.currency)
+		if err != nil {
+			return nil, err
+		}
+		if worst == nil {
+			worst, worstPnL = pos, pnl
+			continue
+		}
+		less, err := pnl.Cmp(worstPnL)
+		if err != nil {
+			return nil, err
+		}
+		if less < 0 {
 			worst, worstPnL = pos, pnl
 		}
 	}
@@ -84,11 +117,22 @@ func closeWorstLoser(a *account) (*position, error) {
 // the most per closeout. Ties go to the lowest instrument name.
 func closeLargestMargin(a *account) (*position, error) {
 	var largest *position
-	var largestMargin money
+	var largestMargin num.Money
 	for _, sym := range a.positionSymbols() {
 		pos := a.positions[sym]
-		m := marginFor(pos.instrument, pos.units, pos.markPrice)
-		if largest == nil || m > largestMargin {
+		m, err := marginFor(pos.instrument, pos.units, pos.markPrice, a.currency)
+		if err != nil {
+			return nil, err
+		}
+		if largest == nil {
+			largest, largestMargin = pos, m
+			continue
+		}
+		more, err := m.Cmp(largestMargin)
+		if err != nil {
+			return nil, err
+		}
+		if more > 0 {
 			largest, largestMargin = pos, m
 		}
 	}

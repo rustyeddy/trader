@@ -15,9 +15,9 @@ func TestOrder_Execution(t *testing.T) {
 		typ  orderType
 		act  action
 		dir  direction
-		p    price
+		p    int64
 		b    bar
-		want price
+		want int64
 		hit  bool
 	}
 	rows := []row{
@@ -57,10 +57,10 @@ func TestOrder_Execution(t *testing.T) {
 	for _, tt := range rows {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &order{instrument: "EURUSD", orderType: tt.typ, action: tt.act, direction: tt.dir,
-				price: tt.p, state: stateSubmitted, Time: testStart}
+				price: px(tt.p), state: stateSubmitted, Time: testStart}
 			p, hit := o.execution(tt.b)
 			assert.Equal(t, tt.hit, hit)
-			assert.Equal(t, tt.want, p)
+			assert.Equal(t, px(tt.want), p)
 		})
 	}
 }
@@ -69,7 +69,7 @@ func TestOrder_Execution_StateInstrumentAndTime(t *testing.T) {
 	hit := stopBar(110000, 110500, 108000, 109500) // day 1, through 108900 and 110500
 	mk := func() *order {
 		return &order{instrument: "EURUSD", orderType: stopOrder, action: close, direction: long,
-			reason: reasonStopLoss, price: 108900, state: stateSubmitted, Time: testStart}
+			reason: reasonStopLoss, price: px(108900), state: stateSubmitted, Time: testStart}
 	}
 
 	o := mk()
@@ -93,7 +93,7 @@ func TestOrder_Execution_StateInstrumentAndTime(t *testing.T) {
 	assert.True(t, ok, "an exit may fill on the bar it was placed on")
 
 	entry := mk()
-	entry.reason, entry.action, entry.orderType, entry.price, entry.Time = reasonStrategy, open, limitOrder, 109000, hit.Time
+	entry.reason, entry.action, entry.orderType, entry.price, entry.Time = reasonStrategy, open, limitOrder, px(109000), hit.Time
 	_, ok = entry.execution(hit)
 	assert.False(t, ok, "a strategy's order never fills on the bar that produced it")
 

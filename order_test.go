@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -86,43 +87,42 @@ func TestOrder_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		// valid
-		{"open long", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, false},
-		{"open short", order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder, price: 110000, stopLoss: 111100}, false},
+		{"open long", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: px(110000), stopLoss: px(108900)}, false},
+		{"open short", order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder, price: px(110000), stopLoss: px(111100)}, false},
 		{"close without direction", order{instrument: "EUR/USD", action: close, orderType: marketOrder}, false},
 
 		// limit orders
-		{"limit open", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, price: 109000, stopLoss: 107900}, false},
-		{"limit without a price", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, stopLoss: 107900}, true},
-		{"stop entry", order{instrument: "EUR/USD", direction: long, action: open, orderType: stopOrder, price: 110500, stopLoss: 109400}, false},
-		{"stop entry without a price", order{instrument: "EUR/USD", direction: long, action: open, orderType: stopOrder, stopLoss: 109400}, true},
-		{"stop close is not a strategy order", order{instrument: "EUR/USD", action: close, orderType: stopOrder, price: 108900}, true},
-		{"limit close is not supported", order{instrument: "EUR/USD", action: close, orderType: limitOrder, price: 109000}, true},
+		{"limit open", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, price: px(109000), stopLoss: px(107900)}, false},
+		{"limit without a price", order{instrument: "EUR/USD", direction: long, action: open, orderType: limitOrder, stopLoss: px(107900)}, true},
+		{"stop entry", order{instrument: "EUR/USD", direction: long, action: open, orderType: stopOrder, price: px(110500), stopLoss: px(109400)}, false},
+		{"stop entry without a price", order{instrument: "EUR/USD", direction: long, action: open, orderType: stopOrder, stopLoss: px(109400)}, true},
+		{"stop close is not a strategy order", order{instrument: "EUR/USD", action: close, orderType: stopOrder, price: px(108900)}, true},
+		{"limit close is not supported", order{instrument: "EUR/USD", action: close, orderType: limitOrder, price: px(109000)}, true},
 
 		// no action
 		{"zero value", order{}, true},
 		{"missing action", order{instrument: "EUR/USD", orderType: marketOrder}, true},
 
 		// missing instrument on every action
-		{"open missing instrument", order{direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, true},
+		{"open missing instrument", order{direction: long, action: open, orderType: marketOrder, price: px(110000), stopLoss: px(108900)}, true},
 		{"add missing instrument", order{action: add, orderType: marketOrder}, true},
 		{"reduce missing instrument", order{action: reduce, orderType: marketOrder}, true},
 		{"close missing instrument", order{action: close, orderType: marketOrder}, true},
 
 		// invalid encodings
-		{"missing order type", order{instrument: "EUR/USD", direction: long, action: open, price: 110000, stopLoss: 108900}, true},
-		{"unknown order type", order{instrument: "EUR/USD", direction: long, action: open, orderType: orderType(99), price: 110000, stopLoss: 108900}, true},
+		{"missing order type", order{instrument: "EUR/USD", direction: long, action: open, price: px(110000), stopLoss: px(108900)}, true},
+		{"unknown order type", order{instrument: "EUR/USD", direction: long, action: open, orderType: orderType(99), price: px(110000), stopLoss: px(108900)}, true},
 		{"unknown action", order{instrument: "EUR/USD", action: action(99), orderType: marketOrder}, true},
 		{"unknown action without instrument", order{action: action(99), orderType: marketOrder}, true},
 		{"unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: close, orderType: marketOrder}, true},
 
 		// open needs a real direction
-		{"open no direction", order{instrument: "EUR/USD", action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, true},
-		{"open unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}, true},
+		{"open no direction", order{instrument: "EUR/USD", action: open, orderType: marketOrder, price: px(110000), stopLoss: px(108900)}, true},
+		{"open unknown direction", order{instrument: "EUR/USD", direction: direction(99), action: open, orderType: marketOrder, price: px(110000), stopLoss: px(108900)}, true},
 
 		// the strategy must set the stop on every open
 		{"open long without a stop", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder}, true},
 		{"open short without a stop", order{instrument: "EUR/USD", direction: short, action: open, orderType: marketOrder}, true},
-		{"open with a negative stop", order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, stopLoss: -1}, true},
 
 		// add/reduce/close act on the existing position and take no direction
 		{"close with long", order{instrument: "EUR/USD", direction: long, action: close, orderType: marketOrder}, true},
@@ -144,7 +144,7 @@ func TestOrder_Validate(t *testing.T) {
 }
 
 func TestOrder_Validate_NeedsTheBarTime(t *testing.T) {
-	err := (&order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900}).validate()
+	err := (&order{instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: px(110000), stopLoss: px(108900)}).validate()
 
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "time")
@@ -231,7 +231,7 @@ func TestOrder_RecordLogsTheCauseOnlyWhenItIsNotTheStrategy(t *testing.T) {
 func TestOrder_Validate_OpenNeedsAStopFromTheStrategy(t *testing.T) {
 	for _, d := range []direction{long, short} {
 		o := openOrderAt("EURUSD", d, eurusd1_10)
-		o.stopLoss = 0 // the strategy did not set one
+		o.stopLoss = num.Price{} // the strategy did not set one
 
 		err := o.validate()
 
@@ -245,7 +245,7 @@ func TestOrder_Validate_OpenNeedsAStopFromTheStrategy(t *testing.T) {
 func TestOrder_Validate_StopMustBeOnTheLosingSide(t *testing.T) {
 	for _, tt := range []struct {
 		d    direction
-		stop price
+		stop int64
 	}{
 		{long, 111000},  // above a long entry
 		{long, 110000},  // at the entry
@@ -253,7 +253,7 @@ func TestOrder_Validate_StopMustBeOnTheLosingSide(t *testing.T) {
 		{short, 110000},
 	} {
 		o := openOrderAt("EURUSD", tt.d, eurusd1_10)
-		o.stopLoss = tt.stop
+		o.stopLoss = px(tt.stop)
 
 		err := o.validate()
 
@@ -263,8 +263,8 @@ func TestOrder_Validate_StopMustBeOnTheLosingSide(t *testing.T) {
 }
 
 func TestOrder_Validate_OpenNeedsAReferencePrice(t *testing.T) {
-	o := openOrderAt("EURUSD", long, 0)
-	o.stopLoss = 1
+	o := openOrderAt("EURUSD", long, px(0))
+	o.stopLoss = px(1)
 
 	err := o.validate()
 
@@ -279,9 +279,9 @@ func TestOrder_Validate_RefusesPricesAboveTheBound(t *testing.T) {
 		return o
 	}
 	for name, o := range map[string]*order{
-		"price":       over(func(o *order) { o.price = maxPrice + 1 }),
-		"stop loss":   over(func(o *order) { o.stopLoss = maxPrice + 1 }),
-		"take profit": over(func(o *order) { o.takeProfit = maxPrice + 1 }),
+		"price":       over(func(o *order) { o.price = must1(maxPrice.Add(px(1))) }),
+		"stop loss":   over(func(o *order) { o.stopLoss = must1(maxPrice.Add(px(1))) }),
+		"take profit": over(func(o *order) { o.takeProfit = must1(maxPrice.Add(px(1))) }),
 	} {
 		assert.ErrorIs(t, o.validate(), errInvalidOrder, name)
 	}

@@ -23,11 +23,12 @@ func hour(h int) time.Time { return pairStart.Add(time.Duration(h) * time.Hour) 
 
 // hbar is an hourly bar opening at the given time: complete, and available, an
 // hour later.
-func hbar(instrument string, opened time.Time, o, c price) bar {
+func hbar(instrument string, opened time.Time, oN int64, cN int64) bar {
+	o, c := px(oN), px(cN)
 	return bar{
 		instrument:  instrument,
 		Time:        opened,
-		ohlc:        ohlc{o: o, h: max(o, c), l: min(o, c), c: c},
+		ohlc:        ohlc{o: o, h: priceMax(o, c), l: priceMin(o, c), c: c},
 		availableAt: opened.Add(time.Hour),
 	}
 }
@@ -56,7 +57,8 @@ func (s *reactStrategy) onBar(_ context.Context, b bar) *order {
 
 // openOn returns a strategy that opens instrument long, at price p with stop
 // stop, once, when it sees a bar of on.
-func openOn(on, instrument string, p, stop price) *reactStrategy {
+func openOn(on string, instrument string, pN int64, stopN int64) *reactStrategy {
+	p, stop := px(pN), px(stopN)
 	done := false
 	return &reactStrategy{react: func(b bar) *order {
 		if done || b.instrument != on {
@@ -74,8 +76,9 @@ func pairTrader(balance money, strat strategy) (*trader, *account) {
 	return &trader{broker: br, account: act, strategy: strat}, act
 }
 
-func longAt(instrument string, units int64, entry, mark price) *position {
-	return &position{instrument: instrument, direction: long, units: units,
+func longAt(instrument string, units int64, entryN int64, markN int64) *position {
+	entry, mark := px(entryN), px(markN)
+	return &position{instrument: instrument, direction: long, units: qty(units),
 		entryPrice: entry, entryTime: hour(0), markPrice: mark}
 }
 
@@ -134,7 +137,7 @@ func TestExecution_EligibleFromTheMomentTheOrderWasDecided(t *testing.T) {
 
 	assert.False(t, early, "opened before the order was decided")
 	assert.True(t, onTime, "opened the moment it was decided")
-	assert.Equal(t, price(130200), p)
+	assert.Equal(t, px(130200), p)
 }
 
 // A fill at the open is admitted against what is known at that moment: the
@@ -157,7 +160,7 @@ func TestBroker_OnFrame_AdmitsAFillAgainstTheOpensOfTheFrame(t *testing.T) {
 	br, act := newFillBroker()
 	act.positions["GBPUSD"] = longAt("GBPUSD", 100000, 100000, 100000)
 	o := &order{id: "t-1", accountID: "a", instrument: "EURUSD", direction: long, action: open,
-		orderType: marketOrder, price: 110000, stopLoss: 108900, units: 200000,
+		orderType: marketOrder, price: px(110000), stopLoss: px(108900), units: qty(200000),
 		Time: hour(0), decidedAt: hour(1)}
 	br.enqueue(o)
 
@@ -165,7 +168,7 @@ func TestBroker_OnFrame_AdmitsAFillAgainstTheOpensOfTheFrame(t *testing.T) {
 	require.NoError(t, br.onFrame(context.Background(), f))
 
 	assert.Equal(t, stateRejected, o.state)
-	assert.Contains(t, lastReason(o), "needs 440000 cents of margin at the fill, 405000 available")
+	assert.Contains(t, lastReason(o), "needs 4400 USD of margin at the fill, 4050 USD available")
 	assert.NotContains(t, act.positions, "EURUSD")
 	assert.Equal(t, usd(10000), act.balance)
 }
@@ -194,8 +197,8 @@ func TestBroker_OnFrame_ChecksMarginOnceTheWholeFrameIsMarked(t *testing.T) {
 	assert.Empty(t, br.closeouts())
 	assert.Contains(t, logs.String(), "margin warning")
 	assert.Len(t, act.positions, 2)
-	assert.Equal(t, usd(10000), act.equity())
-	assert.Equal(t, usd(14210), act.usedMargin())
+	assert.Equal(t, usd(10000), must1(act.equity()))
+	assert.Equal(t, usd(14210), must1(act.usedMargin()))
 }
 
 // The strategy sees the frame's bars only after the broker has marked all of
@@ -220,7 +223,7 @@ func TestTrader_OnFrame_SizesAnOpenAgainstTheWholeFrame(t *testing.T) {
 	require.NoError(t, tr.onFrame(context.Background(), f))
 
 	require.Len(t, strat.made, 1)
-	assert.Equal(t, int64(9000), strat.made[0].units)
+	assert.Equal(t, qty(9000), strat.made[0].units)
 	assert.Equal(t, stateSubmitted, strat.made[0].state)
 }
 
@@ -234,7 +237,7 @@ func TestBroker_OnFrame_RefusesAFrameOverlappingThePreviousOne(t *testing.T) {
 	act := br.addAccount("a", usd(10000))
 	act.positions["EURUSD"] = longAt("EURUSD", 10000, 110000, 110000)
 	o := &order{accountID: "a", instrument: "GBPUSD", direction: long, action: open, orderType: marketOrder,
-		price: 130000, stopLoss: 128700, Time: hour(-1), decidedAt: hour(0)}
+		price: px(130000), stopLoss: px(128700), Time: hour(-1), decidedAt: hour(0)}
 	require.NoError(t, br.submit(context.Background(), o))
 
 	require.NoError(t, br.onFrame(context.Background(), pairFrame(hbar("EURUSD", hour(0), 110000, 100000))))
@@ -319,7 +322,7 @@ func TestBroker_OnFrame_DefersALiquidationWithoutACurrentPrice(t *testing.T) {
 	require.Len(t, br.closeouts(), 1)
 	c := br.closeouts()[0]
 	assert.Equal(t, "GBPUSD", c.instrument)
-	assert.Equal(t, price(91000), c.fillPrice)
+	assert.Equal(t, px(91000), c.fillPrice)
 	assert.Equal(t, hour(2), c.Time)
 	assert.Equal(t, usd(-900), act.balance)
 	assert.Contains(t, act.positions, "EURUSD", "its mark is old: deferred again")
@@ -336,12 +339,12 @@ func TestBroker_OnFrame_DefersALiquidationWithoutACurrentPrice(t *testing.T) {
 //	4     1.00900-1.01200  2.01200-2.01800
 func pairBars() (*marketData, *marketData) {
 	eur := &marketData{instrument: "EURUSD"}
-	for h, c := range []price{100000, 100300, 100600, 100900, 101200} {
+	for h, c := range []price{px(100000), px(100300), px(100600), px(100900), px(101200)} {
 		o := c
 		if h > 0 {
 			o = eur.data[h-1].c
 		}
-		eur.data = append(eur.data, hbar("EURUSD", hour(h), o, c))
+		eur.data = append(eur.data, hbar("EURUSD", hour(h), points(o), points(c)))
 	}
 	gbp := &marketData{instrument: "GBPUSD", data: []bar{
 		hbar("GBPUSD", hour(0), 200000, 200000),
@@ -354,7 +357,7 @@ func pairBars() (*marketData, *marketData) {
 
 func runPair(t *testing.T, eur, gbp *marketData) (*trader, *account) {
 	t.Helper()
-	strat := &emaxEach{id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: 400}
+	strat := &emaxEach{id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
 	require.NoError(t, strat.init())
 	tr, act := pairTrader(usd(10000), strat)
 	for f, err := range frames(mergedBars(context.Background(), eur, gbp)) {
@@ -409,22 +412,22 @@ func TestEMAXEach_TwoInstrumentsShareOneAccount(t *testing.T) {
 	tr, act := runPair(t, eurBars, gbpBars)
 
 	eur, gbp := filledOpen(t, tr.broker, "EURUSD"), filledOpen(t, tr.broker, "GBPUSD")
-	assert.Equal(t, int64(250000), eur.units)
-	assert.Equal(t, int64(49403), gbp.units)
+	assert.Equal(t, qty(250000), eur.units)
+	assert.Equal(t, qty(49403), gbp.units)
 	assert.Equal(t, hour(3), eur.decidedAt, "both decided on the hour-2 bars")
 	assert.Equal(t, hour(3), gbp.decidedAt)
-	assert.Equal(t, price(100600), eur.fillPrice)
+	assert.Equal(t, px(100600), eur.fillPrice)
 	assert.Equal(t, hour(3), eur.Time)
-	assert.Equal(t, price(201200), gbp.fillPrice)
+	assert.Equal(t, px(201200), gbp.fillPrice)
 	assert.Equal(t, hour(4), gbp.Time, "no GBPUSD bar at hour 3")
 
 	require.Len(t, act.positions, 2, "one position per instrument")
-	assert.Equal(t, price(101200), act.positions["EURUSD"].markPrice)
-	assert.Equal(t, price(201800), act.positions["GBPUSD"].markPrice)
+	assert.Equal(t, px(101200), act.positions["EURUSD"].markPrice)
+	assert.Equal(t, px(201800), act.positions["GBPUSD"].markPrice)
 	assert.Equal(t, usd(10000), act.balance, "nothing realized")
-	assert.Equal(t, money(179641), act.unrealizedPnL())
-	assert.Equal(t, money(1179641), act.equity())
-	assert.Equal(t, money(1004477), act.usedMargin())
+	assert.Equal(t, cents(179641), presentFloor(must1(act.unrealizedPnL())))
+	assert.Equal(t, cents(1179641), presentFloor(must1(act.equity())))
+	assert.Equal(t, cents(1004477), presentCeil(must1(act.usedMargin())))
 
 	stops := map[string]price{}
 	for _, o := range tr.broker.orders["EURUSD"] {
@@ -433,7 +436,7 @@ func TestEMAXEach_TwoInstrumentsShareOneAccount(t *testing.T) {
 	for _, o := range tr.broker.orders["GBPUSD"] {
 		stops[o.instrument] = o.price
 	}
-	assert.Equal(t, map[string]price{"EURUSD": 100560, "GBPUSD": 201120}, stops, "each position has its own stop")
+	assert.Equal(t, map[string]price{"EURUSD": px(100560), "GBPUSD": px(201120)}, stops, "each position has its own stop")
 	assert.Empty(t, tr.rejected)
 }
 
@@ -461,7 +464,7 @@ func TestEMAXEach_StaggeredSignalsSizeAgainstTheEarlierPosition(t *testing.T) {
 	e, g := filledOpen(t, tr.broker, "EURUSD"), filledOpen(t, tr.broker, "GBPUSD")
 	assert.Equal(t, hour(3), e.decidedAt)
 	assert.Equal(t, hour(4), g.decidedAt, "an hour later")
-	assert.Equal(t, int64(56709), g.units)
+	assert.Equal(t, qty(56709), g.units)
 	assert.Equal(t, hour(4), g.Time)
 	assert.Len(t, act.positions, 2)
 }
@@ -472,9 +475,9 @@ func TestEMAXEach_Init(t *testing.T) {
 		s    emaxEach
 		want string
 	}{
-		{"no instruments", emaxEach{short: 2, long: 3, stopPct: 400}, "no instruments"},
-		{"an instrument twice", emaxEach{instruments: []string{"EURUSD", "EURUSD"}, short: 2, long: 3, stopPct: 400}, "twice"},
-		{"bad windows", emaxEach{instruments: []string{"EURUSD"}, short: 3, long: 3, stopPct: 400}, "short window"},
+		{"no instruments", emaxEach{short: 2, long: 3, stopPct: rt(400)}, "no instruments"},
+		{"an instrument twice", emaxEach{instruments: []string{"EURUSD", "EURUSD"}, short: 2, long: 3, stopPct: rt(400)}, "twice"},
+		{"bad windows", emaxEach{instruments: []string{"EURUSD"}, short: 3, long: 3, stopPct: rt(400)}, "short window"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -486,7 +489,7 @@ func TestEMAXEach_Init(t *testing.T) {
 // Each instrument has its own emax: a bar is seen only by its instrument's, and
 // a bar of an instrument it was not given is not traded.
 func TestEMAXEach_KeepsStatePerInstrument(t *testing.T) {
-	s := &emaxEach{id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: 400}
+	s := &emaxEach{id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
 	require.NoError(t, s.init())
 	eur, _ := pairBars()
 

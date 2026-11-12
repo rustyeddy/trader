@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+
+	"github.com/rustyeddy/trader/num"
 )
 
 // Run backtests every scenario and writes one summary each to w. It is the
@@ -61,7 +63,7 @@ func runScenario(scenario string) (*result, error) {
 	}
 
 	slog.Info("backtest complete", "scenario", scenario, "strategy", tr.strategy.name())
-	return newResult(scenario, len(prices.data), tr), nil
+	return newResult(scenario, len(prices.data), tr)
 }
 
 // scenarioPath is where a scenario's bars are, relative to examples/design.
@@ -84,7 +86,7 @@ func getTrader() (*trader, error) {
 	br := newBroker("sim")
 	return &trader{
 		broker:   br,
-		account:  br.addAccount("sim123", usd(10000)),
+		account:  br.addAccount("sim123", num.MustParseMoney("10000", usdCurrency)),
 		strategy: strat,
 	}, nil
 }

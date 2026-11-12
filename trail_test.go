@@ -10,7 +10,8 @@ import (
 
 // trailingEntry fills a market open at 1.10000 on day 1 with a 1% initial
 // stop and the given trail, and returns the open and its resting stop.
-func trailingEntry(t *testing.T, br *broker, d direction, trail price) (op, stop *order) {
+func trailingEntry(t *testing.T, br *broker, d direction, trailN int64) (op, stop *order) {
+	trail := px(trailN)
 	t.Helper()
 	op = openOrderAt("EURUSD", d, eurusd1_10)
 	op.accountID, op.trail = "a", trail
@@ -29,28 +30,28 @@ func TestBroker_OnBar_TrailingStopRatchetsUpAndNeverBack(t *testing.T) {
 	br, act := newFillBroker()
 	ctx := context.Background()
 	op, stop := trailingEntry(t, br, long, 1500) // stop 108900: 1.10000 - 1500 = 1.08500 is lower, so no move yet
-	require.Equal(t, price(108900), stop.price)
+	require.Equal(t, px(108900), stop.price)
 
 	// A rally: the stop follows the high up to 1.12000 - 0.01500.
 	require.NoError(t, br.onBar(ctx, dayBar(2, 110500, 112000, 110200, 111500)))
-	assert.Equal(t, price(110500), stop.price)
+	assert.Equal(t, px(110500), stop.price)
 	assert.Equal(t, stateSubmitted, stop.state)
 	last := stop.history[len(stop.history)-1]
-	assert.Equal(t, "trailed to 110500", last.reason)
+	assert.Equal(t, "trailed to 1.105", last.reason)
 	assert.Equal(t, day(2), last.time)
 
 	// A lower high: the stop stays where it is.
 	require.NoError(t, br.onBar(ctx, dayBar(3, 111000, 111500, 110600, 111000)))
-	assert.Equal(t, price(110500), stop.price)
+	assert.Equal(t, px(110500), stop.price)
 	assert.Contains(t, act.positions, "EURUSD")
 
 	// The pullback reaches the trailed stop: out at 1.10500, in profit.
 	require.NoError(t, br.onBar(ctx, dayBar(4, 110800, 110900, 109000, 109500)))
 	assert.Equal(t, stateFilled, stop.state)
-	assert.Equal(t, price(110500), stop.fillPrice)
+	assert.Equal(t, px(110500), stop.fillPrice)
 	assert.Empty(t, act.positions)
 	// 1.10000 -> 1.10500 is 500 points a unit: half a cent a unit.
-	assert.Equal(t, usd(10000)+money(op.units/2), act.balance)
+	assert.Equal(t, madd(usd(10000), cents(whole(op.units)/2)), act.balance)
 }
 
 func TestBroker_OnBar_ABarCannotBothRaiseAStopAndHitIt(t *testing.T) {
@@ -63,12 +64,12 @@ func TestBroker_OnBar_ABarCannotBothRaiseAStopAndHitIt(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110500, 113000, 110000, 112000)))
 
 	assert.Equal(t, stateSubmitted, stop.state, "not stopped out on the bar that raised it")
-	assert.Equal(t, price(111500), stop.price, "but the level has moved for the next bar")
+	assert.Equal(t, px(111500), stop.price, "but the level has moved for the next bar")
 	assert.Contains(t, act.positions, "EURUSD")
 
 	require.NoError(t, br.onBar(context.Background(), dayBar(3, 112000, 112200, 111400, 111600)))
 	assert.Equal(t, stateFilled, stop.state)
-	assert.Equal(t, price(111500), stop.fillPrice)
+	assert.Equal(t, px(111500), stop.fillPrice)
 }
 
 func TestBroker_OnBar_TrailedStopGapsLikeAnyStop(t *testing.T) {
@@ -76,12 +77,12 @@ func TestBroker_OnBar_TrailedStopGapsLikeAnyStop(t *testing.T) {
 	br, _ := newFillBroker()
 	_, stop := trailingEntry(t, br, long, 1500)
 	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110500, 112000, 110200, 111500)))
-	require.Equal(t, price(110500), stop.price)
+	require.Equal(t, px(110500), stop.price)
 
 	require.NoError(t, br.onBar(context.Background(), dayBar(3, 109000, 109500, 108500, 109200)))
 
 	assert.Equal(t, stateFilled, stop.state)
-	assert.Equal(t, price(109000), stop.fillPrice, "the open, below the trailed level")
+	assert.Equal(t, px(109000), stop.fillPrice, "the open, below the trailed level")
 }
 
 func TestBroker_OnBar_TrailingStopOnAShortRatchetsDown(t *testing.T) {
@@ -91,16 +92,16 @@ func TestBroker_OnBar_TrailingStopOnAShortRatchetsDown(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, br.onBar(ctx, dayBar(2, 109500, 109800, 108000, 108500)))
-	assert.Equal(t, price(109500), stop.price, "the low plus the trail")
+	assert.Equal(t, px(109500), stop.price, "the low plus the trail")
 
 	require.NoError(t, br.onBar(ctx, dayBar(3, 108800, 109000, 108200, 108900)))
-	assert.Equal(t, price(109500), stop.price, "a higher low does not move it back up")
+	assert.Equal(t, px(109500), stop.price, "a higher low does not move it back up")
 
 	require.NoError(t, br.onBar(ctx, dayBar(4, 109000, 109700, 108900, 109600)))
 	assert.Equal(t, stateFilled, stop.state)
-	assert.Equal(t, price(109500), stop.fillPrice)
+	assert.Equal(t, px(109500), stop.fillPrice)
 	assert.Empty(t, act.positions)
-	assert.Equal(t, usd(10000)+money(op.units/2), act.balance)
+	assert.Equal(t, madd(usd(10000), cents(whole(op.units)/2)), act.balance)
 }
 
 func TestBroker_OnBar_FixedStopNeverMoves(t *testing.T) {
@@ -111,7 +112,7 @@ func TestBroker_OnBar_FixedStopNeverMoves(t *testing.T) {
 
 	require.NoError(t, br.onBar(context.Background(), dayBar(2, 112000, 115000, 111500, 114000)))
 
-	assert.Equal(t, price(108900), stop.price)
+	assert.Equal(t, px(108900), stop.price)
 	assert.Len(t, stop.history, n, "no trail event")
 }
 
@@ -133,13 +134,11 @@ func TestBroker_OnBar_TrailedStopIsCancelledWithThePosition(t *testing.T) {
 }
 
 func TestOrder_Validate_Trail(t *testing.T) {
-	ok := order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: 110000, stopLoss: 108900, trail: 1000}
+	ok := order{Time: testStart, instrument: "EUR/USD", direction: long, action: open, orderType: marketOrder, price: px(110000), stopLoss: px(108900), trail: px(1000)}
 	require.NoError(t, ok.validate())
 
-	neg := ok
-	neg.trail = -1
-	require.ErrorIs(t, neg.validate(), errInvalidOrder)
+	// A negative trail cannot be written: a Price is never negative.
 
-	onClose := order{Time: testStart, instrument: "EUR/USD", action: close, orderType: marketOrder, trail: 1000}
+	onClose := order{Time: testStart, instrument: "EUR/USD", action: close, orderType: marketOrder, trail: px(1000)}
 	require.ErrorIs(t, onClose.validate(), errInvalidOrder, "only an open carries a trail")
 }

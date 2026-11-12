@@ -3,8 +3,9 @@
 
 * Status
 
-Proposed. Issues #590 (adopt =num= in the root engine) and #594. Awaiting
-owner approval; per CLAUDE.md no implementation starts until it is approved.
+Accepted. Issues #590 (adopt =num= in the root engine) and #594. Approved by
+the owner, including the conservative-undersizing sizing contract; the
+conversion in #590 implements it.
 Builds on ADR-086 (exact Money, cents only at presentation) and applies
 ADR-004's rule that an operation needing a non-default rounding policy selects
 and documents it. Also refers to ADR-025, 027, 030 and 045.
@@ -243,7 +244,7 @@ decimals; the five-decimal rule is an instrument rule, not a =num= rule.
 - Maximum order notional of $50 million USD-equivalent, configurable as
   account risk and trading policy; provider constraints stay separate.
 
-* To confirm
+* Also approved
 
 - Conservative undersizing and the amended "safe within tolerance, tight
   except at step edges" sizing contract, instead of a new exact-arithmetic API.

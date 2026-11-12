@@ -47,7 +47,7 @@ func available(hour int) time.Time {
 //	4     100000  100250           100300  down
 //	5     99000   99416.67         99650   down
 func scanASet() *marketData {
-	return scanSet(scanA, []int{0, 1, 2, 3, 4, 5}, []price{100000, 100300, 100600, 100900, 100000, 99000})
+	return scanSet(scanA, []int{0, 1, 2, 3, 4, 5}, []price{px(100000), px(100300), px(100600), px(100900), px(100000), px(99000)})
 }
 
 // scanB has no bar at hour 3. The missing bar must not advance its EMAs:
@@ -61,7 +61,7 @@ func scanASet() *marketData {
 // Carrying the 199400 close through hour 3 would give short 199450 and long
 // 199550 there, then 199750 and 199725 at hour 4: up, not down.
 func scanBSet() *marketData {
-	return scanSet(scanB, []int{0, 1, 2, 4}, []price{200000, 199700, 199400, 199900})
+	return scanSet(scanB, []int{0, 1, 2, 4}, []price{px(200000), px(199700), px(199400), px(199900)})
 }
 
 func TestRunEMAScan_ClassifiesEachInstrumentIndependently(t *testing.T) {
@@ -108,7 +108,7 @@ func TestRunEMAScan_NoStateLeaksBetweenInstruments(t *testing.T) {
 }
 
 func TestRunEMAScan_InstrumentsWarmUpSeparately(t *testing.T) {
-	late := scanSet(scanB, []int{4, 5}, []price{200000, 200100}) // one bar short
+	late := scanSet(scanB, []int{4, 5}, []price{px(200000), px(200100)}) // one bar short
 
 	got, err := runEMAScan(mergedBars(context.Background(), scanASet(), late), 2, 3)
 
@@ -120,7 +120,7 @@ func TestRunEMAScan_InstrumentsWarmUpSeparately(t *testing.T) {
 }
 
 func TestRunEMAScan_ExactlyTheLongWindowGivesOneReading(t *testing.T) {
-	set := scanSet(scanA, []int{0, 1, 2}, []price{100000, 100300, 100600})
+	set := scanSet(scanA, []int{0, 1, 2}, []price{px(100000), px(100300), px(100600)})
 
 	got, err := runEMAScan(mergedBars(context.Background(), set), 2, 3)
 
@@ -138,7 +138,7 @@ func TestRunEMAScan_NoBars(t *testing.T) {
 // 110000 points seeds the EMAs a rounding error apart: three 1.1s average to
 // 1.1000000000000001. An exact comparison would call this flat market a trend.
 func TestRunEMAScan_AConstantPriceIsFlat(t *testing.T) {
-	set := scanSet(scanA, []int{0, 1, 2, 3, 4}, []price{110000, 110000, 110000, 110000, 110000})
+	set := scanSet(scanA, []int{0, 1, 2, 3, 4}, []price{px(110000), px(110000), px(110000), px(110000), px(110000)})
 
 	got, err := runEMAScan(mergedBars(context.Background(), set), 2, 3)
 

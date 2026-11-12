@@ -38,7 +38,7 @@ func TestEMA_ConstantSeries(t *testing.T) {
 	e := newEMA(5)
 	var v float64
 	for i := 0; i < 50; i++ {
-		v, _ = e.onBar(bar{ohlc: ohlc{c: 110000}})
+		v, _ = e.onBar(bar{ohlc: ohlc{c: px(110000)}})
 	}
 	assert.InDelta(t, 1.1, v, 1e-12)
 }
@@ -57,7 +57,8 @@ func TestEMA_InvalidWindowPanics(t *testing.T) {
 	assert.Panics(t, func() { newEMA(-1) })
 }
 
-func hlc(h, l, c price) bar {
+func hlc(hN int64, lN int64, cN int64) bar {
+	h, l, c := px(hN), px(lN), px(cN)
 	return bar{ohlc: ohlc{o: l, h: h, l: l, c: c}}
 }
 

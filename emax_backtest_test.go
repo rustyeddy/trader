@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -92,7 +93,8 @@ func TestEMAX_SkipsUnrepresentableStopsWithoutRetrying(t *testing.T) {
 				assert.Equal(t, short, states[i].state.signal)
 				assert.Equal(t, noDirection, states[i].state.pending)
 			}
-			result := newResult("bounds", len(tt.closes), r.trader)
+			result, err := newResult("bounds", len(tt.closes), r.trader)
+			require.NoError(t, err)
 			assert.Equal(t, tt.filled, result.filled)
 			assert.Zero(t, result.rejected, "an unsupported stop never reaches the trader")
 			assert.Zero(t, result.pending)
@@ -111,7 +113,7 @@ type orderResult struct {
 	state     orderState
 	price     price
 	stopLoss  price
-	units     int64
+	units     num.Quantity
 	fillPrice price
 	at        time.Time
 	why       string // the reason on the last history event
@@ -139,10 +141,15 @@ type emaxState struct {
 
 func snapshotState(t *testing.T, r emaxRun) emaxState {
 	t.Helper()
+	// The engine holds exact money. The approved states are in cents: amounts
+	// floored as they print, equity the sum of the floored parts (ADR-086), and
+	// margin rounded up as the prototype did.
+	balance, unrealized := presentFloor(r.account.balance), presentFloor(must1(r.account.unrealizedPnL()))
 	f := emaxState{
-		balance: r.account.balance, unrealized: r.account.unrealizedPnL(), equity: r.account.equity(),
-		used: r.account.usedMargin(), reserved: r.broker.reservedMargin(r.account.id),
-		signal: r.emax.pos, pending: r.emax.pending,
+		balance: unsetIfZero(balance), unrealized: unsetIfZero(unrealized), equity: unsetIfZero(madd(balance, unrealized)),
+		used:     unsetIfZero(presentCeil(must1(r.account.usedMargin()))),
+		reserved: unsetIfZero(presentCeil(reservedOf(t, r.broker, r.account.id))),
+		signal:   r.emax.pos, pending: r.emax.pending,
 	}
 	if p := r.account.positions["EURUSD"]; p != nil {
 		held := *p // a copy: the account keeps marking its own
@@ -198,18 +205,19 @@ func jan(d int) time.Time { return time.Date(2010, time.January, d, 0, 0, 0, 0, 
 // bars cannot change what the test expects without review.
 var (
 	longEntry = orderResult{id: "sim-1", action: open, direction: long, orderType: marketOrder, state: stateFilled,
-		price: 110300, stopLoss: 109197, units: 9066, fillPrice: 110323, at: jan(8)}
+		price: px(110300), stopLoss: px(109197), units: qty(9066), fillPrice: px(110323), at: jan(8)}
 	longStop = orderResult{id: "sim-2", action: close, direction: long, orderType: stopOrder, reason: reasonStopLoss,
-		price: 109197}
+		price: px(109197)}
 	reversalClose = orderResult{id: "sim-3", action: close, orderType: marketOrder, state: stateFilled,
-		price: 110700, units: 9066, fillPrice: 110687, at: jan(15)}
-	stopCancelled = withEnd(longStop, stateCancelled, 0, 0, jan(15), "position closed")
-	profitTrade   = trade{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8),
-		exitPrice: 110687, exitTime: jan(15), reason: reasonStrategy, pnl: 3300}
+		price: px(110700), units: qty(9066), fillPrice: px(110687), at: jan(15)}
+	stopCancelled = withEnd(longStop, stateCancelled, qty(0), 0, jan(15), "position closed")
+	profitTrade   = trade{instrument: "EURUSD", direction: long, units: qty(9066), entryPrice: px(110323), entryTime: jan(8),
+		exitPrice: px(110687), exitTime: jan(15), reason: reasonStrategy, pnl: cents(3300)}
 )
 
 // withEnd is an order's result once it has ended.
-func withEnd(o orderResult, s orderState, units int64, fill price, at time.Time, why string) orderResult {
+func withEnd(o orderResult, s orderState, units num.Quantity, fillN int64, at time.Time, why string) orderResult {
+	fill := px(fillN)
 	o.state, o.units, o.fillPrice, o.at, o.why = s, units, fill, at, why
 	return o
 }
@@ -231,39 +239,39 @@ var emaxScenarios = []struct {
 		trades:    []trade{profitTrade},
 		completed: []orderResult{longEntry, reversalClose, stopCancelled},
 		waiting: []orderResult{waiting(orderResult{id: "sim-4", action: open, direction: short, orderType: marketOrder,
-			price: 110450, stopLoss: 111554, units: 9087}, jan(15))},
-		final: emaxState{balance: 1003300, equity: 1003300, reserved: 20074, signal: short},
+			price: px(110450), stopLoss: px(111554), units: qty(9087)}, jan(15))},
+		final: emaxState{balance: cents(1003300), equity: cents(1003300), reserved: cents(20074), signal: short},
 	},
 	{
 		name: "b1-stop-wick",
-		trades: []trade{{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8),
-			exitPrice: 109197, exitTime: jan(11), reason: reasonStopLoss, pnl: -10209}},
-		completed: []orderResult{longEntry, withEnd(longStop, stateFilled, 9066, 109197, jan(11), "")},
-		final:     emaxState{balance: 989791, equity: 989791, signal: long},
+		trades: []trade{{instrument: "EURUSD", direction: long, units: qty(9066), entryPrice: px(110323), entryTime: jan(8),
+			exitPrice: px(109197), exitTime: jan(11), reason: reasonStopLoss, pnl: cents(-10209)}},
+		completed: []orderResult{longEntry, withEnd(longStop, stateFilled, qty(9066), 109197, jan(11), "")},
+		final:     emaxState{balance: cents(989791), equity: cents(989791), signal: long},
 	},
 	{
 		name: "b2-stop-cross",
-		trades: []trade{{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8),
-			exitPrice: 109197, exitTime: jan(11), reason: reasonStopLoss, pnl: -10209}},
+		trades: []trade{{instrument: "EURUSD", direction: long, units: qty(9066), entryPrice: px(110323), entryTime: jan(8),
+			exitPrice: px(109197), exitTime: jan(11), reason: reasonStopLoss, pnl: cents(-10209)}},
 		completed: []orderResult{
 			longEntry,
-			withEnd(longStop, stateFilled, 9066, 109197, jan(11), ""),
-			{id: "sim-3", action: close, orderType: marketOrder, state: stateRejected, price: 108700, at: jan(12),
+			withEnd(longStop, stateFilled, qty(9066), 109197, jan(11), ""),
+			{id: "sim-3", action: close, orderType: marketOrder, state: stateRejected, price: px(108700), at: jan(12),
 				why: "no position to close: EURUSD"},
 			{id: "sim-4", action: open, direction: short, orderType: marketOrder, state: stateFilled,
-				price: 108500, stopLoss: 109585, units: 9122, fillPrice: 108490, at: jan(13)},
+				price: px(108500), stopLoss: px(109585), units: qty(9122), fillPrice: px(108490), at: jan(13)},
 		},
 		waiting: []orderResult{waiting(orderResult{id: "sim-5", action: close, direction: short, orderType: stopOrder,
-			reason: reasonStopLoss, price: 109585}, jan(13))},
-		final: emaxState{balance: 989791, unrealized: 3557, equity: 993348, used: 19722, signal: short,
-			position: &position{instrument: "EURUSD", direction: short, units: 9122, entryPrice: 108490, entryTime: jan(13), markPrice: 108100}},
+			reason: reasonStopLoss, price: px(109585)}, jan(13))},
+		final: emaxState{balance: cents(989791), unrealized: cents(3557), equity: cents(993348), used: cents(19722), signal: short,
+			position: &position{instrument: "EURUSD", direction: short, units: qty(9122), entryPrice: px(108490), entryTime: jan(13), markPrice: px(108100)}},
 	},
 	{
 		name: "b3-stop-gap",
-		trades: []trade{{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8),
-			exitPrice: 108900, exitTime: jan(11), reason: reasonStopLoss, pnl: -12901}},
-		completed: []orderResult{longEntry, withEnd(longStop, stateFilled, 9066, 108900, jan(11), "")},
-		final:     emaxState{balance: 987099, equity: 987099, signal: long},
+		trades: []trade{{instrument: "EURUSD", direction: long, units: qty(9066), entryPrice: px(110323), entryTime: jan(8),
+			exitPrice: px(108900), exitTime: jan(11), reason: reasonStopLoss, pnl: cents(-12901)}},
+		completed: []orderResult{longEntry, withEnd(longStop, stateFilled, qty(9066), 108900, jan(11), "")},
+		final:     emaxState{balance: cents(987099), equity: cents(987099), signal: long},
 	},
 	{
 		name:   "c-reversal",
@@ -271,24 +279,24 @@ var emaxScenarios = []struct {
 		completed: []orderResult{
 			longEntry, reversalClose, stopCancelled,
 			{id: "sim-4", action: open, direction: short, orderType: marketOrder, state: stateFilled,
-				price: 110450, stopLoss: 111554, units: 9087, fillPrice: 110437, at: jan(18)},
+				price: px(110450), stopLoss: px(111554), units: qty(9087), fillPrice: px(110437), at: jan(18)},
 		},
 		waiting: []orderResult{waiting(orderResult{id: "sim-5", action: close, direction: short, orderType: stopOrder,
-			reason: reasonStopLoss, price: 111554}, jan(18))},
-		final: emaxState{balance: 1003300, unrealized: 4243, equity: 1007543, used: 19986, signal: short,
-			position: &position{instrument: "EURUSD", direction: short, units: 9087, entryPrice: 110437, entryTime: jan(18), markPrice: 109970}},
+			reason: reasonStopLoss, price: px(111554)}, jan(18))},
+		final: emaxState{balance: cents(1003300), unrealized: cents(4243), equity: cents(1007543), used: cents(19986), signal: short,
+			position: &position{instrument: "EURUSD", direction: short, units: qty(9087), entryPrice: px(110437), entryTime: jan(18), markPrice: px(109970)}},
 	},
 	{
 		name: "d-short-stop",
-		trades: []trade{{instrument: "EURUSD", direction: short, units: 9115, entryPrice: 109680, entryTime: jan(8),
-			exitPrice: 110797, exitTime: jan(11), reason: reasonStopLoss, pnl: -10182}},
+		trades: []trade{{instrument: "EURUSD", direction: short, units: qty(9115), entryPrice: px(109680), entryTime: jan(8),
+			exitPrice: px(110797), exitTime: jan(11), reason: reasonStopLoss, pnl: cents(-10182)}},
 		completed: []orderResult{
 			{id: "sim-1", action: open, direction: short, orderType: marketOrder, state: stateFilled,
-				price: 109700, stopLoss: 110797, units: 9115, fillPrice: 109680, at: jan(8)},
+				price: px(109700), stopLoss: px(110797), units: qty(9115), fillPrice: px(109680), at: jan(8)},
 			{id: "sim-2", action: close, direction: short, orderType: stopOrder, reason: reasonStopLoss, state: stateFilled,
-				price: 110797, units: 9115, fillPrice: 110797, at: jan(11)},
+				price: px(110797), units: qty(9115), fillPrice: px(110797), at: jan(11)},
 		},
-		final: emaxState{balance: 989818, equity: 989818, signal: short},
+		final: emaxState{balance: cents(989818), equity: cents(989818), signal: short},
 	},
 }
 
@@ -297,17 +305,13 @@ func TestEMAXBacktest_MatchesApprovedResults(t *testing.T) {
 		t.Run(want.name, func(t *testing.T) {
 			r := runEMAX(t, want.name)
 
-			assert.Equal(t, want.trades, r.account.trades)
+			assert.Equal(t, want.trades, presentTrades(r.account.trades))
 			assert.Equal(t, want.completed, orderResults(r.broker.completed))
 			assert.Equal(t, orderResults(nil), orderResults(r.trader.rejected), "no scenario is refused before the broker's queue")
 			assert.Equal(t, want.waiting, nilIfEmpty(orderResults(r.broker.orders["EURUSD"])))
 			assert.Equal(t, want.final, snapshotState(t, r))
 
-			var realized money
-			for _, tr := range want.trades {
-				realized += tr.pnl
-			}
-			assert.Equal(t, usd(10000)+realized, r.account.balance, "the balance moves only by the trades' P/L")
+			assert.Equal(t, madd(usd(10000), sumPnL(r.account.trades)), r.account.balance, "the balance moves only by the trades' P/L")
 		})
 	}
 }
@@ -340,9 +344,10 @@ func TestEMAXBacktest_RepeatsExactlyFromFreshInstances(t *testing.T) {
 // so each refusal is kept in exactly one place. Worked by hand: the budget is
 // $0.0001 against a stop 1103 or 1104 points away.
 func TestEMAXBacktest_OpensRefusedAtSizingStayWithTheTrader(t *testing.T) {
-	r := runEMAXWithBalance(t, "a-reversal-exit", 1)
+	r := runEMAXWithBalance(t, "a-reversal-exit", cents(1))
 
-	refused := func(d direction, p, stop price, at time.Time) orderResult {
+	refused := func(d direction, pN int64, stopN int64, at time.Time) orderResult {
+		p, stop := px(pN), px(stopN)
 		return orderResult{action: open, direction: d, orderType: marketOrder, state: stateRejected,
 			price: p, stopLoss: stop, at: at, why: "order size below the minimum: 0 units, minimum 1"}
 	}
@@ -351,12 +356,12 @@ func TestEMAXBacktest_OpensRefusedAtSizingStayWithTheTrader(t *testing.T) {
 		refused(short, 110450, 111554, jan(15)),
 	}, orderResults(r.trader.rejected))
 	assert.Equal(t, []orderResult{
-		{id: "sim-1", action: close, orderType: marketOrder, state: stateRejected, price: 110700, at: jan(15),
+		{id: "sim-1", action: close, orderType: marketOrder, state: stateRejected, price: px(110700), at: jan(15),
 			why: "no position to close: EURUSD"},
 	}, orderResults(r.broker.completed))
 	assert.Empty(t, r.broker.orders["EURUSD"])
 	assert.Empty(t, r.account.trades)
-	assert.Equal(t, emaxState{balance: 1, equity: 1, signal: short}, snapshotState(t, r), "the signal state moves on regardless")
+	assert.Equal(t, emaxState{balance: cents(1), equity: cents(1), signal: short}, snapshotState(t, r), "the signal state moves on regardless")
 }
 
 // Scenario C's reversal, seen between bars: never long and short at once, and flat
@@ -381,21 +386,22 @@ func TestEMAXBacktest_BarsCanBeWrappedToWatchStateBetweenBars(t *testing.T) {
 // 1.10323) * 9066 floored to the cent, used margin is 9066 * close * 2% rounded up,
 // and reserved margin is units * signal close * 2% rounded up.
 func reversalBarStates() []barState {
-	holding := func(mark price, unrealized, used money) emaxState {
-		return emaxState{balance: 1000000, unrealized: unrealized, equity: 1000000 + unrealized, used: used, signal: long,
-			position: &position{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8), markPrice: mark}}
+	holding := func(markN int64, unrealizedN int64, usedN int64) emaxState {
+		mark, unrealized, used := px(markN), cents(unrealizedN), cents(usedN)
+		return emaxState{balance: cents(1000000), unrealized: unrealized, equity: madd(cents(1000000), unrealized), used: used, signal: long,
+			position: &position{instrument: "EURUSD", direction: long, units: qty(9066), entryPrice: px(110323), entryTime: jan(8), markPrice: mark}}
 	}
 	afterCrossover := holding(110700, 3417, 20073)
 	afterCrossover.signal, afterCrossover.pending = noDirection, short
 
-	flat := emaxState{balance: 1000000, equity: 1000000}
+	flat := emaxState{balance: cents(1000000), equity: cents(1000000)}
 	return []barState{
 		{at: jan(4), state: flat},
 		{at: jan(5), state: flat},
 		{at: jan(6), state: flat},
 		// First warm bar, EMA(2) above EMA(4): the long is sized from this close.
 		{at: jan(7), waiting: []string{"sim-1"},
-			state: emaxState{balance: 1000000, equity: 1000000, reserved: 20000, signal: long}},
+			state: emaxState{balance: cents(1000000), equity: cents(1000000), reserved: cents(20000), signal: long}},
 		// Fills at this bar's open and places its stop.
 		{at: jan(8), waiting: []string{"sim-2"}, completed: []string{"sim-1"}, state: holding(110600, 2511, 20054)},
 		// The low is one point above the stop: still open.
@@ -407,7 +413,7 @@ func reversalBarStates() []barState {
 		// The close fills at the open and cancels the stop, so sim-3 ends before
 		// sim-2. The short is sized from the new balance and left waiting.
 		{at: jan(15), waiting: []string{"sim-4"}, completed: []string{"sim-1", "sim-3", "sim-2"},
-			state: emaxState{balance: 1003300, equity: 1003300, reserved: 20074, signal: short}},
+			state: emaxState{balance: cents(1003300), equity: cents(1003300), reserved: cents(20074), signal: short}},
 	}
 }
 
@@ -480,8 +486,8 @@ func assertEMAs(t *testing.T, scenario string, exact []struct{ short, long float
 				continue
 			}
 			want := exact[i-4]
-			assert.InDelta(t, want.short/priceScale, r.emax.emaShort.value, 1e-9, "EMA(2) on bar %d", i-1)
-			assert.InDelta(t, want.long/priceScale, r.emax.emaLong.value, 1e-9, "EMA(4) on bar %d", i-1)
+			assert.InDelta(t, want.short/100_000, r.emax.emaShort.value, 1e-9, "EMA(2) on bar %d", i-1)
+			assert.InDelta(t, want.long/100_000, r.emax.emaLong.value, 1e-9, "EMA(4) on bar %d", i-1)
 		}
 	})
 	assert.Equal(t, len(exact)+3, i)
@@ -507,8 +513,9 @@ func TestEMAXBacktest_ScenarioATradeAgreesWithOrdersAndAccount(t *testing.T) {
 
 	require.Len(t, r.account.trades, 1)
 	tr := r.account.trades[0]
-	assert.Equal(t, money(3300), tr.pnl)
-	assert.Equal(t, usd(10000)+tr.pnl, r.account.balance)
+	assert.Equal(t, num.MustParseMoney("33.00024", usdCurrency), tr.pnl, "exact; floored to $33.00 only when printed")
+	assert.Equal(t, cents(3300), presentFloor(tr.pnl))
+	assert.Equal(t, madd(usd(10000), tr.pnl), r.account.balance)
 
 	require.Len(t, r.broker.completed, 3)
 	entry, exit := r.broker.completed[0], r.broker.completed[1]
@@ -529,11 +536,11 @@ func TestEMAXBacktest_ScenarioAFixtureHoldsItsBoundaries(t *testing.T) {
 	prices := scenarioPrices(t, "a-reversal-exit")
 	require.Len(t, prices.data, 10)
 
-	assert.Equal(t, price(110300), prices.data[3].c, "signal close")
-	assert.Equal(t, price(110323), prices.data[4].o, "entry open")
-	assert.Equal(t, price(109197+1), prices.data[5].l, "one point above the stop")
+	assert.Equal(t, px(110300), prices.data[3].c, "signal close")
+	assert.Equal(t, px(110323), prices.data[4].o, "entry open")
+	assert.Equal(t, px(109197+1), prices.data[5].l, "one point above the stop")
 	for i, b := range prices.data[4:] {
-		assert.Greater(t, b.l, price(109197), "bar %d stays above the stop", i+4)
+		priceGreater(t, b.l, px(109197), "bar %d stays above the stop", i+4)
 	}
 }
 
@@ -542,16 +549,16 @@ func TestEMAXBacktest_ScenarioAFixtureHoldsItsBoundaries(t *testing.T) {
 // margin is 9066 * 1.106 * 2% = $200.53992, rounded up; the reserve on the 7th is
 // 9066 * 1.103 * 2% = $199.99596, rounded up.
 func entryBarStates() []barState {
-	flat := emaxState{balance: 1000000, equity: 1000000}
+	flat := emaxState{balance: cents(1000000), equity: cents(1000000)}
 	return []barState{
 		{at: jan(4), state: flat},
 		{at: jan(5), state: flat},
 		{at: jan(6), state: flat},
 		{at: jan(7), waiting: []string{"sim-1"},
-			state: emaxState{balance: 1000000, equity: 1000000, reserved: 20000, signal: long}},
+			state: emaxState{balance: cents(1000000), equity: cents(1000000), reserved: cents(20000), signal: long}},
 		{at: jan(8), waiting: []string{"sim-2"}, completed: []string{"sim-1"},
-			state: emaxState{balance: 1000000, unrealized: 2511, equity: 1002511, used: 20054, signal: long,
-				position: &position{instrument: "EURUSD", direction: long, units: 9066, entryPrice: 110323, entryTime: jan(8), markPrice: 110600}}},
+			state: emaxState{balance: cents(1000000), unrealized: cents(2511), equity: cents(1002511), used: cents(20054), signal: long,
+				position: &position{instrument: "EURUSD", direction: long, units: qty(9066), entryPrice: px(110323), entryTime: jan(8), markPrice: px(110600)}}},
 	}
 }
 
@@ -569,13 +576,13 @@ func TestEMAXBacktest_StopOutWithoutACrossoverStaysFlatBarByBar(t *testing.T) {
 		after []barState
 	}{
 		{"b1-stop-wick", []barState{
-			{at: jan(11), completed: completed, state: stopped(989791)},
-			{at: jan(12), completed: completed, state: stopped(989791)},
-			{at: jan(13), completed: completed, state: stopped(989791)},
+			{at: jan(11), completed: completed, state: stopped(cents(989791))},
+			{at: jan(12), completed: completed, state: stopped(cents(989791))},
+			{at: jan(13), completed: completed, state: stopped(cents(989791))},
 		}},
 		{"b3-stop-gap", []barState{
-			{at: jan(11), completed: completed, state: stopped(987099)},
-			{at: jan(12), completed: completed, state: stopped(987099)},
+			{at: jan(11), completed: completed, state: stopped(cents(987099))},
+			{at: jan(12), completed: completed, state: stopped(cents(987099))},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -598,15 +605,16 @@ func TestEMAXBacktest_ScenarioB2StopThenRejectedCloseThenShortBarByBar(t *testin
 	r := newEMAXRun(t, usd(10000))
 	states := watchEMAX(t, r, scenarioBars(t, "b2-stop-cross"))
 
-	holdingShort := func(mark price, unrealized, used money) emaxState {
-		return emaxState{balance: 989791, unrealized: unrealized, equity: 989791 + unrealized, used: used, signal: short,
-			position: &position{instrument: "EURUSD", direction: short, units: 9122, entryPrice: 108490, entryTime: jan(13), markPrice: mark}}
+	holdingShort := func(markN int64, unrealizedN int64, usedN int64) emaxState {
+		mark, unrealized, used := px(markN), cents(unrealizedN), cents(usedN)
+		return emaxState{balance: cents(989791), unrealized: unrealized, equity: madd(cents(989791), unrealized), used: used, signal: short,
+			position: &position{instrument: "EURUSD", direction: short, units: qty(9122), entryPrice: px(108490), entryTime: jan(13), markPrice: mark}}
 	}
 	assert.Equal(t, slices.Concat(entryBarStates(), []barState{
 		{at: jan(11), waiting: []string{"sim-3"}, completed: []string{"sim-1", "sim-2"},
-			state: emaxState{balance: 989791, equity: 989791, pending: short}},
+			state: emaxState{balance: cents(989791), equity: cents(989791), pending: short}},
 		{at: jan(12), waiting: []string{"sim-4"}, completed: []string{"sim-1", "sim-2", "sim-3"},
-			state: emaxState{balance: 989791, equity: 989791, reserved: 19795, signal: short}},
+			state: emaxState{balance: cents(989791), equity: cents(989791), reserved: cents(19795), signal: short}},
 		{at: jan(13), waiting: []string{"sim-5"}, completed: []string{"sim-1", "sim-2", "sim-3", "sim-4"}, state: holdingShort(108300, 1733, 19759)},
 		{at: jan(14), waiting: []string{"sim-5"}, completed: []string{"sim-1", "sim-2", "sim-3", "sim-4"}, state: holdingShort(108100, 3557, 19722)},
 	}), states)
@@ -701,7 +709,7 @@ func TestEMAXBacktest_StopOutOrderHistories(t *testing.T) {
 }
 
 // Each loss is calculated from its fill, then compared with the trade, its orders and
-// the balance: -1126 points * 9066 units = -$102.08316, floored to -$102.09, -1423
+// the balance: cents(-1126) points * 9066 units = -$102.08316, floored to -$102.09, -1423
 // points * 9066 units = -$129.00918, floored to -$129.01, and D's short, 1.09680 -
 // 1.10797 = -1117 points * 9115 units = -$101.81455, floored to -$101.82. 1% is planned
 // risk, not a cap: the budget is $100.00 and every loss is larger, because the entry
@@ -712,19 +720,19 @@ func TestEMAXBacktest_StopLossIsExactAndExceedsThePlannedRisk(t *testing.T) {
 		exit price
 		pnl  money
 	}{
-		{"b1-stop-wick", 109197, -10209},
-		{"b2-stop-cross", 109197, -10209},
-		{"b3-stop-gap", 108900, -12901},
-		{"d-short-stop", 110797, -10182},
+		{"b1-stop-wick", px(109197), cents(-10209)},
+		{"b2-stop-cross", px(109197), cents(-10209)},
+		{"b3-stop-gap", px(108900), cents(-12901)},
+		{"d-short-stop", px(110797), cents(-10182)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := runEMAX(t, tc.name)
 
 			require.Len(t, r.account.trades, 1, "no retry or second closed position")
 			tr := r.account.trades[0]
-			assert.Equal(t, tc.pnl, tr.pnl)
-			assert.Equal(t, usd(10000)+tc.pnl, r.account.balance)
-			assert.Less(t, tr.pnl, -usd(100), "worse than the 1% budget")
+			assert.Equal(t, tc.pnl, presentFloor(tr.pnl))
+			assert.Equal(t, madd(usd(10000), tr.pnl), r.account.balance)
+			assert.Negative(t, must1(tr.pnl.Cmp(mneg(usd(100)))), "worse than the 1% budget")
 
 			entry, stop := r.broker.completed[0], r.broker.completed[1]
 			assert.Equal(t, reasonStopLoss, tr.reason)
@@ -769,21 +777,21 @@ func TestEMAXBacktest_StopOutEMAs(t *testing.T) {
 // closes above the stop, a bar that passes the stop and closes through the crossover,
 // and an open already past the stop on a bar that recovers.
 func TestEMAXBacktest_StopOutFixturesHoldTheirBoundaries(t *testing.T) {
-	const stop = price(109197)
+	stop := px(109197)
 
 	b1 := scenarioPrices(t, "b1-stop-wick").data[5]
 	assert.Equal(t, stop, b1.l, "B1's low touches the stop exactly")
-	assert.Greater(t, b1.o, stop)
-	assert.Greater(t, b1.c, stop)
+	priceGreater(t, b1.o, stop)
+	priceGreater(t, b1.c, stop)
 
 	b2 := scenarioPrices(t, "b2-stop-cross").data[5]
-	assert.Greater(t, b2.o, stop)
-	assert.Less(t, b2.l, stop, "B2's low goes past the stop")
-	assert.Less(t, b2.c, stop)
+	priceGreater(t, b2.o, stop)
+	priceLess(t, b2.l, stop, "B2's low goes past the stop")
+	priceLess(t, b2.c, stop)
 
 	b3 := scenarioPrices(t, "b3-stop-gap").data[5]
-	assert.Less(t, b3.o, stop, "B3's open is already past the stop")
-	assert.Greater(t, b3.c, stop, "and the bar recovers")
+	priceLess(t, b3.o, stop, "B3's open is already past the stop")
+	priceGreater(t, b3.c, stop, "and the bar recovers")
 }
 
 // Scenario C is scenario A with two more bars, so the reversal plays out in full: flat
@@ -797,9 +805,10 @@ func TestEMAXBacktest_ScenarioCFullReversalBarByBar(t *testing.T) {
 	r := newEMAXRun(t, usd(10000))
 	states := watchEMAX(t, r, scenarioBars(t, "c-reversal"))
 
-	holdingShort := func(mark price, unrealized, used money) emaxState {
-		return emaxState{balance: 1003300, unrealized: unrealized, equity: 1003300 + unrealized, used: used, signal: short,
-			position: &position{instrument: "EURUSD", direction: short, units: 9087, entryPrice: 110437, entryTime: jan(18), markPrice: mark}}
+	holdingShort := func(markN int64, unrealizedN int64, usedN int64) emaxState {
+		mark, unrealized, used := px(markN), cents(unrealizedN), cents(usedN)
+		return emaxState{balance: cents(1003300), unrealized: unrealized, equity: madd(cents(1003300), unrealized), used: used, signal: short,
+			position: &position{instrument: "EURUSD", direction: short, units: qty(9087), entryPrice: px(110437), entryTime: jan(18), markPrice: mark}}
 	}
 	completed := []string{"sim-1", "sim-3", "sim-2", "sim-4"}
 	assert.Equal(t, slices.Concat(reversalBarStates(), []barState{
@@ -835,7 +844,8 @@ func TestEMAXBacktest_ScenarioCOrderHistories(t *testing.T) {
 func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 	r := newEMAXRun(t, usd(10000))
 	prices := scenarioPrices(t, "c-reversal")
-	next := func(day int, o, h, l, c price) bar {
+	next := func(day int, oN int64, hN int64, lN int64, cN int64) bar {
+		o, h, l, c := px(oN), px(hN), px(lN), px(cN)
 		return daily(bar{instrument: "EURUSD", Time: jan(day), ohlc: ohlc{o: o, h: h, l: l, c: c, v: 1000}})
 	}
 	prices.data = append(slices.Clone(prices.data[:9]),
@@ -859,22 +869,22 @@ func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 
 	assert.Equal(t, []barState{
 		{at: jan(15), waiting: []string{"sim-4"}, completed: []string{"sim-1", "sim-3", "sim-2"},
-			state: emaxState{balance: 1003300, equity: 1003300, reserved: 20066, signal: short}},
+			state: emaxState{balance: cents(1003300), equity: cents(1003300), reserved: cents(20066), signal: short}},
 		{at: jan(18), waiting: []string{"sim-5", "sim-6"}, completed: []string{"sim-1", "sim-3", "sim-2", "sim-4"},
-			state: emaxState{balance: 1003300, unrealized: -359, equity: 1002941, used: 20075, pending: long,
-				position: &position{instrument: "EURUSD", direction: short, units: 8958, entryPrice: 112010, entryTime: jan(18), markPrice: 112050}}},
+			state: emaxState{balance: cents(1003300), unrealized: cents(-359), equity: cents(1002941), used: cents(20075), pending: long,
+				position: &position{instrument: "EURUSD", direction: short, units: qty(8958), entryPrice: px(112010), entryTime: jan(18), markPrice: px(112050)}}},
 		{at: jan(19), waiting: []string{"sim-7"}, completed: []string{"sim-1", "sim-3", "sim-2", "sim-4", "sim-6", "sim-5"},
-			state: emaxState{balance: 1002852, equity: 1002852, reserved: 20057, signal: long}},
+			state: emaxState{balance: cents(1002852), equity: cents(1002852), reserved: cents(20057), signal: long}},
 		{at: jan(20), waiting: []string{"sim-8"}, completed: []string{"sim-1", "sim-3", "sim-2", "sim-4", "sim-6", "sim-5", "sim-7"},
-			state: emaxState{balance: 1002852, unrealized: 536, equity: 1003388, used: 20072, signal: long,
-				position: &position{instrument: "EURUSD", direction: long, units: 8946, entryPrice: 112120, entryTime: jan(20), markPrice: 112180}}},
+			state: emaxState{balance: cents(1002852), unrealized: cents(536), equity: cents(1003388), used: cents(20072), signal: long,
+				position: &position{instrument: "EURUSD", direction: long, units: qty(8946), entryPrice: px(112120), entryTime: jan(20), markPrice: px(112180)}}},
 	}, states[9:])
 
 	assert.Equal(t, []trade{
 		profitTrade,
-		{instrument: "EURUSD", direction: short, units: 8958, entryPrice: 112010, entryTime: jan(18),
-			exitPrice: 112060, exitTime: jan(19), reason: reasonStrategy, pnl: -448},
-	}, r.account.trades)
+		{instrument: "EURUSD", direction: short, units: qty(8958), entryPrice: px(112010), entryTime: jan(18),
+			exitPrice: px(112060), exitTime: jan(19), reason: reasonStrategy, pnl: cents(-448)},
+	}, presentTrades(r.account.trades))
 }
 
 // The short's stop is above it, so the high is what fires it, and the fill is the stop
@@ -886,18 +896,18 @@ func TestEMAXBacktest_ScenarioDShortStoppedByTheHighBarByBar(t *testing.T) {
 	r := newEMAXRun(t, usd(10000))
 	states := watchEMAX(t, r, scenarioBars(t, "d-short-stop"))
 
-	flat := emaxState{balance: 1000000, equity: 1000000}
-	stopped := emaxState{balance: 989818, equity: 989818, signal: short}
+	flat := emaxState{balance: cents(1000000), equity: cents(1000000)}
+	stopped := emaxState{balance: cents(989818), equity: cents(989818), signal: short}
 	completed := []string{"sim-1", "sim-2"}
 	assert.Equal(t, []barState{
 		{at: jan(4), state: flat},
 		{at: jan(5), state: flat},
 		{at: jan(6), state: flat},
 		{at: jan(7), waiting: []string{"sim-1"},
-			state: emaxState{balance: 1000000, equity: 1000000, reserved: 19999, signal: short}},
+			state: emaxState{balance: cents(1000000), equity: cents(1000000), reserved: cents(19999), signal: short}},
 		{at: jan(8), waiting: []string{"sim-2"}, completed: []string{"sim-1"},
-			state: emaxState{balance: 1000000, unrealized: 2552, equity: 1002552, used: 19944, signal: short,
-				position: &position{instrument: "EURUSD", direction: short, units: 9115, entryPrice: 109680, entryTime: jan(8), markPrice: 109400}}},
+			state: emaxState{balance: cents(1000000), unrealized: cents(2552), equity: cents(1002552), used: cents(19944), signal: short,
+				position: &position{instrument: "EURUSD", direction: short, units: qty(9115), entryPrice: px(109680), entryTime: jan(8), markPrice: px(109400)}}},
 		{at: jan(11), completed: completed, state: stopped},
 		{at: jan(12), completed: completed, state: stopped},
 	}, states)
@@ -931,15 +941,15 @@ func TestEMAXBacktest_ReversalAndShortStopFixturesHoldTheirBoundaries(t *testing
 	assert.Equal(t, scenarioPrices(t, "a-reversal-exit").data, c[:10], "C is A with more bars")
 	assert.NotEqual(t, c[9].c, c[10].o, "the short fills away from its signal close")
 	for i, b := range c[10:] {
-		assert.Less(t, b.h, price(111554), "bar %d stays below the short's stop", i+10)
+		priceLess(t, b.h, px(111554), "bar %d stays below the short's stop", i+10)
 	}
 
-	const stop = price(110797)
+	stop := px(110797)
 	d := scenarioPrices(t, "d-short-stop").data
-	assert.Less(t, d[4].h, stop, "the entry bar stays below the stop")
-	assert.Less(t, d[5].o, stop)
-	assert.Equal(t, stop+3, d[5].h, "the high goes past the stop")
-	assert.Less(t, d[5].c, stop, "and the bar closes back below it")
+	priceLess(t, d[4].h, stop, "the entry bar stays below the stop")
+	priceLess(t, d[5].o, stop)
+	assert.Equal(t, must1(stop.Add(px(3))), d[5].h, "the high goes past the stop")
+	priceLess(t, d[5].c, stop, "and the bar closes back below it")
 }
 
 // floorDiv divides, rounding toward negative infinity.
@@ -953,17 +963,17 @@ func floorDiv(a, b int64) int64 {
 
 // pnlFromFills is rule 2 worked from the prices alone: the points the position
 // moved in its favour, times its units, floored to the cent.
-func pnlFromFills(d direction, units int64, entry, exit price) money {
-	points := int64(exit - entry)
+func pnlFromFills(d direction, units num.Quantity, entry, exit price) money {
+	points := pts(exit) - pts(entry)
 	if d == short {
 		points = -points
 	}
-	return money(floorDiv(points*units*moneyScale, priceScale))
+	return cents(floorDiv(points*whole(units)*100, 100_000))
 }
 
 // marginAt is rule 5: units * price * 2%, rounded up to the cent.
-func marginAt(units int64, p price) money {
-	return money(-floorDiv(-units*int64(p)*2*moneyScale, 100*priceScale))
+func marginAt(units num.Quantity, p price) money {
+	return cents(-floorDiv(-whole(units)*pts(p)*2*100, 100*100_000))
 }
 
 // Each realized P/L is worked from the fills alone: a filled open, then the filled
@@ -998,14 +1008,10 @@ func TestEMAXBacktest_RealizedPnLReconcilesFromTheFills(t *testing.T) {
 			require.Equal(t, approved, realized, "each trade's P/L from its fills")
 			var recorded []money
 			for _, tr := range r.account.trades {
-				recorded = append(recorded, tr.pnl)
+				recorded = append(recorded, presentFloor(tr.pnl))
 			}
 			assert.Equal(t, realized, recorded, "the account's trades")
-			var sum money
-			for _, pnl := range realized {
-				sum += pnl
-			}
-			assert.Equal(t, usd(10000)+sum, r.account.balance)
+			assert.Equal(t, presentFloor(madd(usd(10000), sumPnL(r.account.trades))), presentFloor(r.account.balance))
 			assert.Equal(t, entry != nil, r.account.positions["EURUSD"] != nil, "an open fill with no close is the live position")
 		})
 	}
@@ -1024,24 +1030,24 @@ func TestEMAXBacktest_OpenPositionReconcilesAtTheLastMark(t *testing.T) {
 			last := data[len(data)-1]
 			st := snapshotState(t, r)
 
-			var unrealized, used, reserved money
+			unrealized, used, reserved := cents(0), cents(0), cents(0)
 			if p := st.position; p != nil {
 				assert.Equal(t, last.c, p.markPrice, "marked at the last close")
 				assert.Equal(t, short, p.direction)
-				points := int64(p.entryPrice - last.c)
-				assert.NotZero(t, points*p.units*moneyScale%priceScale, "a fraction of a cent to floor")
+				moved := pts(p.entryPrice) - pts(last.c)
+				assert.NotZero(t, moved*whole(p.units)*100%100_000, "a fraction of a cent to floor")
 				unrealized = pnlFromFills(p.direction, p.units, p.entryPrice, last.c)
 				used = marginAt(p.units, last.c)
 			}
 			for _, o := range r.broker.orders["EURUSD"] {
 				if o.action == open {
-					reserved += marginAt(o.units, o.price)
+					reserved = madd(reserved, marginAt(o.units, o.price))
 				}
 			}
-			assert.Equal(t, unrealized, st.unrealized)
-			assert.Equal(t, st.balance+unrealized, st.equity)
-			assert.Equal(t, used, st.used)
-			assert.Equal(t, reserved, st.reserved)
+			assert.Equal(t, unsetIfZero(unrealized), st.unrealized)
+			assert.Equal(t, unsetIfZero(madd(st.balance, unrealized)), st.equity)
+			assert.Equal(t, unsetIfZero(used), st.used)
+			assert.Equal(t, unsetIfZero(reserved), st.reserved)
 		})
 	}
 }
@@ -1124,7 +1130,7 @@ func TestEMAXBacktest_EveryOrderEndsAtMostOnce(t *testing.T) {
 		})
 	}
 	t.Run("refused at sizing", func(t *testing.T) {
-		r := runEMAXWithBalance(t, "a-reversal-exit", 1)
+		r := runEMAXWithBalance(t, "a-reversal-exit", cents(1))
 		require.NotEmpty(t, r.trader.rejected)
 		assertLifecycles(t, r)
 	})

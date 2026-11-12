@@ -1,14 +1,18 @@
 package trader
 
-import "time"
+import (
+	"time"
+
+	"github.com/rustyeddy/trader/num"
+)
 
 type position struct {
 	instrument string
 	direction  direction
-	units      int64
-	entryPrice price
+	units      num.Quantity
+	entryPrice num.Price
 	entryTime  time.Time // the bar the open filled on
-	markPrice  price     // latest price the position was valued at: the fill, then each bar's close
+	markPrice  num.Price // latest price the position was valued at: the fill, then each bar's close
 }
 
 // trade is a position that actually closed. An open position is not a trade
@@ -16,11 +20,11 @@ type position struct {
 type trade struct {
 	instrument string
 	direction  direction
-	units      int64
-	entryPrice price
+	units      num.Quantity
+	entryPrice num.Price
 	entryTime  time.Time
-	exitPrice  price
+	exitPrice  num.Price
 	exitTime   time.Time
 	reason     orderReason // what closed it
-	pnl        money       // realized, rounded down once to the cent
+	pnl        num.Money   // realized, exact; floored to cents only when printed
 }

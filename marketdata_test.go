@@ -15,17 +15,17 @@ import (
 )
 
 func TestBars_YieldsAllInOrder(t *testing.T) {
-	md := &marketData{data: testBars(1, 2, 3)}
+	md := &marketData{data: testBars(px(1), px(2), px(3))}
 	var got []price
 	for b, err := range md.bars(context.Background()) {
 		require.NoError(t, err)
 		got = append(got, b.c)
 	}
-	require.Equal(t, []price{1, 2, 3}, got)
+	require.Equal(t, []price{px(1), px(2), px(3)}, got)
 }
 
 func TestBars_EarlyBreak(t *testing.T) {
-	md := &marketData{data: testBars(1, 2, 3)}
+	md := &marketData{data: testBars(px(1), px(2), px(3))}
 	n := 0
 	for range md.bars(context.Background()) {
 		n++
@@ -35,7 +35,7 @@ func TestBars_EarlyBreak(t *testing.T) {
 }
 
 func TestBars_ContextCancelled(t *testing.T) {
-	md := &marketData{data: testBars(1, 2, 3)}
+	md := &marketData{data: testBars(px(1), px(2), px(3))}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var bars int
@@ -55,7 +55,7 @@ func TestBars_ContextCancelled(t *testing.T) {
 func TestBars_CancelledAfterTheLastBar(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	md := &marketData{data: testBars(1)}
+	md := &marketData{data: testBars(px(1))}
 
 	var bars, errs int
 	var gotErr error
@@ -77,7 +77,7 @@ func TestBars_CancelledAfterTheLastBar(t *testing.T) {
 func TestBars_EarlyBreakOnTheLastBarAfterCancelYieldsNothingMore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	md := &marketData{data: testBars(1)}
+	md := &marketData{data: testBars(px(1))}
 
 	var items int
 	for range md.bars(ctx) {
@@ -101,10 +101,9 @@ func TestPrice_Float64(t *testing.T) {
 		p    price
 		want float64
 	}{
-		{0, 0},
-		{110000, 1.1},
-		{1, 0.00001},
-		{-250000, -2.5},
+		{px(0), 0},
+		{px(110000), 1.1},
+		{px(1), 0.00001},
 	}
 	for _, tt := range tests {
 		assert.InDelta(t, tt.want, tt.p.Float64(), 1e-12)
@@ -121,7 +120,7 @@ func testBars(closes ...price) []bar {
 }
 
 func TestBars_YieldsInstrumentAndTime(t *testing.T) {
-	md := &marketData{data: testBars(110000, 110100, 110200)}
+	md := &marketData{data: testBars(px(110000), px(110100), px(110200))}
 
 	var n int
 	for b, err := range md.bars(context.Background()) {
@@ -148,8 +147,8 @@ func TestReadBars_ParsesExactPointsInOrder(t *testing.T) {
 	first := time.Date(2010, time.January, 4, 0, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
 	assert.Equal(t, []bar{
-		{instrument: "EURUSD", Time: first, ohlc: ohlc{o: 110323, h: 110650, l: 109197, c: 110001, v: 1000}, availableAt: second},
-		{instrument: "EURUSD", Time: second, ohlc: ohlc{o: 110015, h: 110130, l: 110005, c: 110100}, availableAt: second.AddDate(0, 0, 1)},
+		{instrument: "EURUSD", Time: first, ohlc: ohlc{o: px(110323), h: px(110650), l: px(109197), c: px(110001), v: 1000}, availableAt: second},
+		{instrument: "EURUSD", Time: second, ohlc: ohlc{o: px(110015), h: px(110130), l: px(110005), c: px(110100)}, availableAt: second.AddDate(0, 0, 1)},
 	}, md.data)
 }
 
@@ -198,7 +197,7 @@ func barSet(instrument string, lasts time.Duration, opens ...time.Duration) *mar
 		md.data = append(md.data, bar{
 			instrument:  instrument,
 			Time:        open,
-			ohlc:        ohlc{c: price(100000 + i)},
+			ohlc:        ohlc{c: px(int64(100000 + i))},
 			availableAt: open.Add(lasts),
 		})
 	}
@@ -474,7 +473,7 @@ func TestDelivery_BarsCanMixMomentsAndFramesCannot(t *testing.T) {
 		return []*marketData{barSet("EURUSD", time.Hour, 0, time.Hour), barSet("GBPUSD", time.Hour, 0, time.Hour)}
 	}
 	closeSum := func(latest map[string]price) price {
-		return latest["EURUSD"] + latest["GBPUSD"]
+		return must1(latest["EURUSD"].Add(latest["GBPUSD"]))
 	}
 
 	var byBar []price
@@ -498,8 +497,8 @@ func TestDelivery_BarsCanMixMomentsAndFramesCannot(t *testing.T) {
 	}
 
 	// Closes are 100000 then 100001 for each instrument.
-	assert.Equal(t, []price{200000, 200001, 200002}, byBar, "200001 is EUR's 01:00 close beside GBP's 00:00 close")
-	assert.Equal(t, []price{200000, 200002}, byFrame)
+	assert.Equal(t, []price{px(200000), px(200001), px(200002)}, byBar, "200001 is EUR's 01:00 close beside GBP's 00:00 close")
+	assert.Equal(t, []price{px(200000), px(200002)}, byFrame)
 }
 
 func TestReadBars_RefusesMalformedInput(t *testing.T) {

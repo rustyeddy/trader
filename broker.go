@@ -8,6 +8,8 @@ import (
 	"maps"
 	"slices"
 	"time"
+
+	"github.com/rustyeddy/trader/num"
 )
 
 type broker struct {
@@ -45,7 +47,7 @@ func newBroker(id string) *broker {
 	}
 }
 
-func (br *broker) addAccount(id string, balance money) *account {
+func (br *broker) addAccount(id string, balance num.Money) *account {
 	act := newAccount(id, balance)
 	br.accounts[id] = act
 	return act
@@ -80,7 +82,11 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 		}
 	}
 
-	if err := act.size(o, br.reservedMargin(o.accountID)); err != nil {
+	reserved, err := br.reservedMargin(act)
+	if err != nil {
+		return fmt.Errorf("submit to broker %s: %w", br.id, err)
+	}
+	if err := act.size(o, reserved); err != nil {
 		return err
 	}
 
@@ -156,16 +162,23 @@ func (br *broker) nextID() string {
 
 // reservedMargin is the margin held by the account's submitted opens that have
 // not filled yet, at each order's reference price. Closes reserve nothing.
-func (br *broker) reservedMargin(accountID string) money {
-	var total money
-	for _, orders := range br.orders {
-		for _, o := range orders {
-			if o.accountID == accountID && o.action == open {
-				total += marginFor(o.instrument, o.units, o.price)
+func (br *broker) reservedMargin(act *account) (num.Money, error) {
+	total := zeroMoney(act.currency)
+	for _, instrument := range slices.Sorted(maps.Keys(br.orders)) {
+		for _, o := range br.orders[instrument] {
+			if o.accountID != act.id || o.action != open {
+				continue
+			}
+			m, err := marginFor(o.instrument, o.units, o.price, act.currency)
+			if err != nil {
+				return num.Money{}, err
+			}
+			if total, err = total.Add(m); err != nil {
+				return num.Money{}, err
 			}
 		}
 	}
-	return total
+	return total, nil
 }
 
 // phases is how many passes onBar makes over an instrument's queue; see phase.
@@ -395,15 +408,15 @@ func (br *broker) enforceMargin(ctx context.Context, f frame, act *account) erro
 // placeExits queues the protective stop and the take profit, when the filled
 // open o carries them, as resting closes the broker owns.
 func (br *broker) placeExits(o *order) {
-	if o.stopLoss > 0 {
+	if !o.stopLoss.IsZero() {
 		br.placeExit(o, stopOrder, reasonStopLoss, o.stopLoss).trail = o.trail
 	}
-	if o.takeProfit > 0 {
+	if !o.takeProfit.IsZero() {
 		br.placeExit(o, limitOrder, reasonTakeProfit, o.takeProfit)
 	}
 }
 
-func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) *order {
+func (br *broker) placeExit(o *order, typ orderType, why orderReason, p num.Price) *order {
 	x := &order{
 		id:         br.nextID(),
 		accountID:  o.accountID,
@@ -428,18 +441,24 @@ func (br *broker) placeExit(o *order, typ orderType, why orderReason, p price) *
 // takes no view on it. Each move is an event in the order's history.
 func (br *broker) trailStops(b bar) {
 	for _, o := range br.orders[b.instrument] {
-		if o.reason != reasonStopLoss || o.trail <= 0 {
+		if o.reason != reasonStopLoss || o.trail.IsZero() {
 			continue
 		}
-		var moved price
+		moved := o.price
 		if o.direction == long {
-			moved = max(o.price, b.h-o.trail)
-		} else {
-			moved = min(o.price, b.l+o.trail)
+			// The high less the trail, when that is above the stop (it can also
+			// be below zero, which is below any stop).
+			if h := b.h; h.Cmp(o.trail) > 0 {
+				if level, err := h.Sub(o.trail); err == nil {
+					moved = priceMax(o.price, level)
+				}
+			}
+		} else if level, err := b.l.Add(o.trail); err == nil {
+			moved = priceMin(o.price, level)
 		}
-		if moved != o.price {
+		if !moved.Equal(o.price) {
 			o.price = moved
-			o.record(stateSubmitted, b.Time, fmt.Sprintf("trailed to %d", moved))
+			o.record(stateSubmitted, b.Time, "trailed to "+moved.String())
 		}
 	}
 }
@@ -447,7 +466,7 @@ func (br *broker) trailStops(b bar) {
 // closePosition closes pos with a market order the broker makes itself, for the
 // given reason, filled at once on this bar at p. A closeout that does not fill
 // is an error: the margin rules depend on it.
-func (br *broker) closePosition(b bar, act *account, pos *position, why orderReason, p price) error {
+func (br *broker) closePosition(b bar, act *account, pos *position, why orderReason, p num.Price) error {
 	o := &order{
 		id:         br.nextID(),
 		accountID:  act.id,
@@ -525,12 +544,12 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 // Which side of the bar triggers a resting order follows from what it does: a
 // buy limit and a sell stop wait for the price to fall, a sell limit and a buy
 // stop for it to rise. Opening a long buys, closing one sells.
-func (o *order) execution(b bar) (price, bool) {
+func (o *order) execution(b bar) (num.Price, bool) {
 	if o.state != stateSubmitted || o.instrument != b.instrument {
-		return 0, false
+		return num.Price{}, false
 	}
 	if o.reason == reasonStrategy && (!b.After(o.Time) || b.Before(o.decidedAt)) || b.Before(o.Time) {
-		return 0, false
+		return num.Price{}, false
 	}
 	switch o.orderType {
 	case marketOrder:
@@ -538,17 +557,17 @@ func (o *order) execution(b bar) (price, bool) {
 	case limitOrder, stopOrder:
 		// Resting orders use the trigger calculation below.
 	default:
-		return 0, false
+		return num.Price{}, false
 	}
 	buys := (o.action == open) == (o.direction == long)
 	below := buys == (o.orderType == limitOrder)
 	switch {
-	case below && b.l <= o.price:
-		return min(o.price, b.o), true
-	case !below && b.h >= o.price:
-		return max(o.price, b.o), true
+	case below && b.l.Cmp(o.price) <= 0:
+		return priceMin(o.price, b.o), true
+	case !below && b.h.Cmp(o.price) >= 0:
+		return priceMax(o.price, b.o), true
 	}
-	return 0, false
+	return num.Price{}, false
 }
 
 // fill reports the execution at p, at time at, to the order's account, which validates it
@@ -556,7 +575,7 @@ func (o *order) execution(b bar) (price, bool) {
 // close with no position, too little margin now) is an expected rejection,
 // recorded on the order and returned; anything else is a failure. A filled
 // open places its exits.
-func (br *broker) fill(o *order, p price, at time.Time) error {
+func (br *broker) fill(o *order, p num.Price, at time.Time) error {
 	act, ok := br.accounts[o.accountID]
 	if !ok {
 		return fmt.Errorf("fill order %s: %w: %s", o.id, errUnknownAccount, o.accountID)
