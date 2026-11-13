@@ -129,7 +129,12 @@ func Parse(root, path string) (Partition, error) {
 	if root == "" {
 		return Partition{}, ErrInvalidRoot
 	}
-	rel, err := filepath.Rel(root, path)
+	absRoot, rerr := filepath.Abs(root)
+	absPath, perr := filepath.Abs(path)
+	if rerr != nil || perr != nil {
+		return Partition{}, fmt.Errorf("%w: %s is not under the data root", ErrNotPartitionPath, path)
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return Partition{}, fmt.Errorf("%w: %s is not under the data root", ErrNotPartitionPath, path)
 	}
@@ -139,7 +144,9 @@ func Parse(root, path string) (Partition, error) {
 	}
 	year, yerr := strconv.Atoi(parts[3])
 	month, merr := strconv.Atoi(parts[4])
-	if yerr != nil || merr != nil || len(parts[3]) != 4 || len(parts[4]) != 2 {
+	// Atoi accepts a sign and other spellings; only the exact canonical
+	// renderings Path produces are partitions, so Parse inverts Path.
+	if yerr != nil || merr != nil || parts[3] != fmt.Sprintf("%04d", year) || parts[4] != fmt.Sprintf("%02d", month) {
 		return Partition{}, fmt.Errorf("%w: %s: year %q or month %q is malformed", ErrNotPartitionPath, path, parts[3], parts[4])
 	}
 	name := parts[5]
@@ -165,15 +172,24 @@ func Parse(root, path string) (Partition, error) {
 	return p, nil
 }
 
-// underRoot cleans path and confirms it is inside root: defense in depth, since
-// validated components cannot escape.
+// underRoot returns path as an absolute, cleaned path and confirms it is inside
+// root: defense in depth, since validated components cannot escape. The result
+// is absolute so that a relative root and its absolute spelling name the same
+// file, which the writers rely on to key their per-partition locks.
 func underRoot(root, path string) (string, error) {
-	path = filepath.Clean(path)
-	rel, err := filepath.Rel(filepath.Clean(root), path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("%w: %s escapes the data root", ErrInvalidComponent, path)
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidRoot, err)
 	}
-	return path, nil
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidComponent, err)
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: %s escapes the data root", ErrInvalidComponent, absPath)
+	}
+	return absPath, nil
 }
 
 func validComponent(what, s string) error {

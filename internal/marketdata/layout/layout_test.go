@@ -124,6 +124,9 @@ func TestParseRejectsNonPartitionPaths(t *testing.T) {
 		"too deep":           filepath.Join(good, "x"),
 		"not csv":            filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "05", "EURUSD-2020-05-h1.txt"),
 		"short month":        filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "5", "EURUSD-2020-5-h1.csv"),
+		"signed month":       filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "+1", "EURUSD-2020-01-h1.csv"),
+		"signed year":        filepath.Join(root, "oanda", "raw", "EURUSD", "+2020", "01", "EURUSD-2020-01-h1.csv"),
+		"minus month":        filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "-1", "EURUSD-2020--1-h1.csv"),
 		"directory mismatch": filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "06", "EURUSD-2020-05-h1.csv"),
 		"symbol mismatch":    filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "05", "GBPUSD-2020-05-h1.csv"),
 		"unknown stage":      filepath.Join(root, "oanda", "candles", "EURUSD", "2020", "05", "EURUSD-2020-05-h1.csv"),
@@ -145,4 +148,32 @@ func TestStageValid(t *testing.T) {
 	assert.True(t, layout.Raw.Valid())
 	assert.True(t, layout.Canonical.Valid())
 	assert.False(t, layout.Stage("raw ").Valid())
+}
+
+func TestPathIsAbsoluteSoRelativeAndAbsoluteRootsAgree(t *testing.T) {
+	t.Chdir(t.TempDir())
+	abs, err := filepath.Abs("data")
+	require.NoError(t, err)
+
+	rel, err := eurusd().Path("data")
+	require.NoError(t, err)
+	viaAbs, err := eurusd().Path(abs)
+	require.NoError(t, err)
+
+	assert.True(t, filepath.IsAbs(rel))
+	assert.Equal(t, viaAbs, rel)
+	dir, err := layout.StageDir("./data/", "oanda", layout.Raw)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(abs, "oanda", "raw"), dir)
+}
+
+func TestParseAcceptsARelativeRoot(t *testing.T) {
+	t.Chdir(t.TempDir())
+	path, err := eurusd().Path("data")
+	require.NoError(t, err)
+
+	got, err := layout.Parse("data", path)
+
+	require.NoError(t, err)
+	assert.Equal(t, eurusd(), got)
 }

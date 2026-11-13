@@ -383,3 +383,31 @@ func TestWritePartition_PriceTooPreciseWritesNothing(t *testing.T) {
 	_, serr := os.Stat(mustPath(t, root))
 	assert.ErrorIs(t, serr, fs.ErrNotExist)
 }
+
+// One root spelled relative and absolute is one partition: both writers share a
+// lock and neither loses the other's records.
+func TestUpdatePartition_RelativeAndAbsoluteRootsShareALock(t *testing.T) {
+	t.Chdir(t.TempDir())
+	abs, err := filepath.Abs("data")
+	require.NoError(t, err)
+	roots := []string{"data", abs, "./data", abs + "/"}
+	const perRoot = 8
+	var wg sync.WaitGroup
+	for r, root := range roots {
+		for i := range perRoot {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := UpdatePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, func(existing []Record) ([]Record, error) {
+					return append(existing, testRecord(at(2024, 1, 1, r*perRoot+i), true)), nil
+				})
+				assert.NoError(t, err)
+			}()
+		}
+	}
+	wg.Wait()
+
+	got, err := ReadPartitionRecords(context.Background(), abs, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, err)
+	assert.Len(t, got, len(roots)*perRoot)
+}

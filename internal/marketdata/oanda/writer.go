@@ -364,6 +364,8 @@ func ReadPartitionSnapshot(ctx context.Context, root, symbol string, interval Ra
 // result, so two overlapping updates cannot both start from the same revision
 // and silently lose one writer's records. merge decides the policy (what is new,
 // what wins on a duplicate time); a merge error leaves the file untouched.
+// merge runs while the lock is held, so it must not write the same partition
+// (WritePartition or UpdatePartition on it from inside merge would deadlock).
 //
 // The lock is process-local: two processes updating one partition are not
 // coordinated (ADR-089). A failure or a context cancellation observed before the
