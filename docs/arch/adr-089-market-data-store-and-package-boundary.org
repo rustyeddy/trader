@@ -106,7 +106,8 @@ resolver's.
 ** The OANDA raw store
 
 - Byte-compatible with the archive. The =raw-v1= header, the column header, the
-  row format (prices as exact =num.Price= text, never through a float; the
+  row format (prices as exact =num.Price= text padded to the archive's five
+  decimals, never through a float and never rounded; the
   provider's =complete= flag preserved) and the =tf= spellings (=d= in the
   comment, =d1= in the name) do not change. A file the new writer produces is
   readable by the archived reader and the reverse, and a test reads real archive

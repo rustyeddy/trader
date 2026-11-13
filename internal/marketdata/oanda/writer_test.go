@@ -133,7 +133,7 @@ func TestWritePartition_PathMatchesArchiveLayout(t *testing.T) {
 		testRecord(time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), true),
 	}, true))
 
-	want := root + "/EURUSD/2024/03/EURUSD-2024-03-d1.csv"
+	want := root + "/oanda/raw/EURUSD/2024/03/EURUSD-2024-03-d1.csv"
 	_, err := os.Stat(want)
 	require.NoError(t, err, "expected file at %s", want)
 

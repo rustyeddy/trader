@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/marketdata/layout"
 )
 
 // PartitionStatus classifies the outcome of inspecting one monthly raw
@@ -154,14 +155,14 @@ type Inventory struct {
 	Gaps []MonthGap
 }
 
-// Inspect walks root — a raw OANDA archive laid out as
-// root/PAIR/YYYY/MM/PAIR-YYYY-MM-<tf>.csv — and returns a deterministic
+// Inspect walks the raw OANDA stage under the data root, laid out as
+// root/oanda/raw/PAIR/YYYY/MM/PAIR-YYYY-MM-<tf>.csv, and returns a deterministic
 // Inventory describing every partition file found beneath it. Inspect
 // never writes, renames, deletes, or otherwise modifies anything under
 // root.
 //
-// Inspect never searches for root; the caller supplies the exact raw
-// archive directory to scan, typically Manager's configured raw root. A
+// Inspect never searches for root; the caller supplies the data root, and
+// only <root>/oanda/raw is scanned (layout.StageDir). A
 // sibling tree that happens to share the same PAIR/YYYY/MM shape — a
 // candles backup or save tree, for example — is therefore never seen
 // unless the caller mistakenly points root at it directly: Inspect only
@@ -170,7 +171,7 @@ type Inventory struct {
 // archive by being nested *inside* root (a backup subtree parallel to
 // the pair directories, or a stray file filed under the wrong
 // pair/year/month directory): every candidate file's path relative to
-// root must itself be exactly SYMBOL/YYYY/MM/<filename>, agreeing with
+// the raw stage directory must itself be exactly SYMBOL/YYYY/MM/<filename>, agreeing with
 // what the file name resolves to, or it is recorded as skipped rather
 // than inventoried as a partition — see verifyPathLayout.
 //
@@ -201,8 +202,14 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 // Gaps reflects only the accepted partitions.
 func InspectMatching(ctx context.Context, root string, match func(symbol string, interval RawInterval) bool) (Inventory, error) {
 	inv := Inventory{Root: root}
+	// The raw stage of this source lives at <root>/oanda/raw (ADR-089); Inspect
+	// scans nothing else and never falls back to the retired <stage>/<source> order.
+	stage, err := layout.StageDir(root, source, layout.Raw)
+	if err != nil {
+		return Inventory{}, fmt.Errorf("oanda: inspect: %w", err)
+	}
 
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(stage, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("oanda: inspect: walk %s: %w", path, err)
 		}
@@ -213,7 +220,7 @@ func InspectMatching(ctx context.Context, root string, match func(symbol string,
 			return nil
 		}
 
-		partition, skipped, fatalErr := inspectFile(ctx, root, path, match)
+		partition, skipped, fatalErr := inspectFile(ctx, stage, path, match)
 		if errors.Is(fatalErr, errNotMatched) {
 			return nil
 		}
@@ -231,7 +238,7 @@ func InspectMatching(ctx context.Context, root string, match func(symbol string,
 		return nil
 	})
 	if walkErr != nil {
-		return Inventory{}, fmt.Errorf("oanda: inspect %s: %w", root, walkErr)
+		return Inventory{}, fmt.Errorf("oanda: inspect %s: %w", stage, walkErr)
 	}
 
 	sortPartitions(inv.Partitions)
