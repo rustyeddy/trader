@@ -12,7 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/rustyeddy/trader/internal/marketdata/layout"
+	"github.com/rustyeddy/trader/num"
 )
 
 // ErrPartitionAlreadyExists marks an attempt to write a brand-new raw
@@ -25,14 +29,37 @@ import (
 // replacement of an existing authoritative raw artifact" constraint).
 var ErrPartitionAlreadyExists = errors.New("oanda: raw partition already exists")
 
+// source is OANDA's name in the layout.
+const source = "oanda"
+
 // partitionPath returns the path a raw partition for
-// (symbol, interval, year, month) lives at under root, matching the
-// layout Inspect and Open already expect:
-// root/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-tf.csv.
-func partitionPath(root, symbol string, interval RawInterval, year int, month time.Month) string {
-	dir := filepath.Join(root, symbol, fmt.Sprintf("%04d", year), fmt.Sprintf("%02d", int(month)))
-	base := fmt.Sprintf("%s-%04d-%02d-%s.csv", symbol, year, int(month), interval)
-	return filepath.Join(dir, base)
+// (symbol, interval, year, month) lives at under the data root, through the one
+// layout resolver (ADR-089): root/oanda/raw/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-tf.csv.
+// The symbol must be one of the audited in-scope pairs and the interval one of
+// the raw tokens, so a caller cannot reach a path outside the corpus.
+func partitionPath(root, symbol string, interval RawInterval, year int, month time.Month) (string, error) {
+	if _, err := resolveSymbol(symbol); err != nil {
+		return "", err
+	}
+	if got, err := resolveInterval(string(interval)); err != nil || got != interval {
+		return "", fmt.Errorf("%w: %q", ErrUnsupportedInterval, string(interval))
+	}
+	p := layout.Partition{Source: source, Stage: layout.Raw, Instrument: symbol, Year: year, Month: month, Interval: string(interval)}
+	path, err := p.Path(root)
+	if err != nil {
+		return "", fmt.Errorf("oanda: %w", err)
+	}
+	return path, nil
+}
+
+// rawTF is the interval spelling in the schema comment. The daily partition
+// names its interval d1 but writes tf=d, exactly as the archive's files do, so
+// a file this writes is byte-identical to one already on disk.
+func rawTF(interval RawInterval) string {
+	if interval == RawD1 {
+		return "d"
+	}
+	return string(interval)
 }
 
 // WritePartition atomically writes records as a raw-v1 partition file
@@ -72,13 +99,30 @@ func partitionPath(root, symbol string, interval RawInterval, year int, month ti
 // commit leaves any existing file at path completely untouched; ctx is
 // checked before writing begins, once per record while encoding (a
 // large M1 partition can run to tens of thousands of rows), and once
-// more immediately before the commit step — the actual commit point.
+// more immediately before the commit step — the actual commit point. A
+// cancellation that arrives after the commit does not undo it.
+//
+// WritePartition holds the partition's process-local lock (see UpdatePartition)
+// for the duration of the write, so a replace never interleaves with a
+// read-merge-commit by UpdatePartition on the same partition.
 func WritePartition(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month, records []Record, mustNotExist bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path := partitionPath(root, symbol, interval, year, month)
+	path, err := partitionPath(root, symbol, interval, year, month)
+	if err != nil {
+		return err
+	}
+	unlock, err := lockPartition(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return writeLocked(ctx, path, symbol, interval, year, month, records, mustNotExist)
+}
 
+// writeLocked is the atomic write itself. The caller holds the partition's lock.
+func writeLocked(ctx context.Context, path, symbol string, interval RawInterval, year int, month time.Month, records []Record, mustNotExist bool) error {
 	sorted := append([]Record(nil), records...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
 
@@ -146,11 +190,26 @@ func WritePartition(ctx context.Context, root, symbol string, interval RawInterv
 	return nil
 }
 
+// rawPriceDecimals is the fixed number of decimals every price has in the
+// archive's raw-v1 files, for every pair (107.27200 and 1.08050 alike).
+const rawPriceDecimals = 5
+
+// formatRawPrice renders p as the archive spells a price: exact decimal text
+// padded with zeros to five decimals. It never rounds: a price with more
+// precision than the file format holds is an error, not a silently altered value.
+func formatRawPrice(p num.Price) (string, error) {
+	whole, frac, _ := strings.Cut(p.String(), ".")
+	if len(frac) > rawPriceDecimals {
+		return "", fmt.Errorf("%w: price %s has more than %d decimals", ErrMalformedData, p, rawPriceDecimals)
+	}
+	return whole + "." + frac + strings.Repeat("0", rawPriceDecimals-len(frac)), nil
+}
+
 // encodeRawPartition writes the schema comment, column header, and one
 // row per record, in the exact raw-v1 shape Open/Inspect parse.
 func encodeRawPartition(ctx context.Context, w *bufio.Writer, symbol string, interval RawInterval, year int, month time.Month, records []Record) error {
 	if _, err := fmt.Fprintf(w, "# schema=raw-v1 source=oanda instrument=%s tf=%s year=%04d month=%02d\n",
-		symbol, interval, year, int(month)); err != nil {
+		symbol, rawTF(interval), year, int(month)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(w, rawV1Header); err != nil {
@@ -160,9 +219,17 @@ func encodeRawPartition(ctx context.Context, w *bufio.Writer, symbol string, int
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		var prices [8]string
+		for i, p := range [8]num.Price{r.BidOpen, r.BidHigh, r.BidLow, r.BidClose, r.AskOpen, r.AskHigh, r.AskLow, r.AskClose} {
+			text, err := formatRawPrice(p)
+			if err != nil {
+				return fmt.Errorf("record at %s: %w", r.Time.UTC().Format(time.RFC3339), err)
+			}
+			prices[i] = text
+		}
 		if _, err := fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%t\n",
-			r.Time.UTC().Format(time.RFC3339), r.BidOpen, r.BidHigh, r.BidLow, r.BidClose,
-			r.AskOpen, r.AskHigh, r.AskLow, r.AskClose, r.Volume, r.Complete); err != nil {
+			r.Time.UTC().Format(time.RFC3339), prices[0], prices[1], prices[2], prices[3],
+			prices[4], prices[5], prices[6], prices[7], r.Volume, r.Complete); err != nil {
 			return err
 		}
 	}
@@ -176,7 +243,10 @@ func encodeRawPartition(ctx context.Context, w *bufio.Writer, symbol string, int
 // without duplicating Open's own parsing; it is a thin wrapper over
 // Open/Reader that discards Meta, since the caller already knows it.
 func ReadPartitionRecords(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month) ([]Record, error) {
-	path := partitionPath(root, symbol, interval, year, month)
+	path, err := partitionPath(root, symbol, interval, year, month)
+	if err != nil {
+		return nil, err
+	}
 	r, err := Open(path)
 	if err != nil {
 		return nil, err
@@ -218,7 +288,10 @@ func ReadPartitionRecords(ctx context.Context, root, symbol string, interval Raw
 // bytes must use ReadPartitionSnapshot instead, not this function
 // followed by ReadPartitionRecords (or the reverse order).
 func FingerprintPartition(root, symbol string, interval RawInterval, year int, month time.Month) (string, error) {
-	path := partitionPath(root, symbol, interval, year, month)
+	path, err := partitionPath(root, symbol, interval, year, month)
+	if err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -252,7 +325,10 @@ type PartitionSnapshot struct {
 // record alongside the canonical bars built from that exact data must
 // use this function, not the two-open pattern.
 func ReadPartitionSnapshot(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month) (PartitionSnapshot, error) {
-	path := partitionPath(root, symbol, interval, year, month)
+	path, err := partitionPath(root, symbol, interval, year, month)
+	if err != nil {
+		return PartitionSnapshot{}, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return PartitionSnapshot{}, err
@@ -280,4 +356,40 @@ func ReadPartitionSnapshot(ctx context.Context, root, symbol string, interval Ra
 		records = append(records, rec)
 	}
 	return PartitionSnapshot{Records: records, Fingerprint: fingerprint}, nil
+}
+
+// UpdatePartition is the safe read-merge-commit for extending a partition: it
+// holds the partition's lock across reading the existing records (none when the
+// file does not exist), calling merge with them, and replacing the file with the
+// result, so two overlapping updates cannot both start from the same revision
+// and silently lose one writer's records. merge decides the policy (what is new,
+// what wins on a duplicate time); a merge error leaves the file untouched.
+//
+// The lock is process-local: two processes updating one partition are not
+// coordinated (ADR-089). A failure or a context cancellation observed before the
+// commit leaves any existing file untouched; one that arrives after does not
+// undo it.
+func UpdatePartition(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month, merge func(existing []Record) ([]Record, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := partitionPath(root, symbol, interval, year, month)
+	if err != nil {
+		return err
+	}
+	unlock, err := lockPartition(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	existing, err := ReadPartitionRecords(ctx, root, symbol, interval, year, month)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	merged, err := merge(existing)
+	if err != nil {
+		return err
+	}
+	return writeLocked(ctx, path, symbol, interval, year, month, merged, false)
 }

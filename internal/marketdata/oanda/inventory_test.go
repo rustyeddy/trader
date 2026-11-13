@@ -42,7 +42,7 @@ func h1Row(t time.Time, complete bool) string {
 func buildArchive(t *testing.T, root string) {
 	t.Helper()
 
-	eurusdMay := root + "/EURUSD/2020/05"
+	eurusdMay := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, eurusdMay, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+
 			h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true)+
@@ -52,25 +52,25 @@ func buildArchive(t *testing.T, root string) {
 	writeFile(t, eurusdMay, "EURUSD-2020-05-w1.csv",
 		fmtHeaderTF("EURUSD", "w1", 2020, 5)+h1Row(time.Date(2020, 5, 3, 0, 0, 0, 0, time.UTC), true))
 
-	eurusdJune := root + "/EURUSD/2020/06"
+	eurusdJune := root + "/oanda/raw/EURUSD/2020/06"
 	writeFile(t, eurusdJune, "EURUSD-2020-06-h1.csv",
 		fmtHeader("EURUSD", 2020, 6)+h1Row(time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC), true))
 
 	// 2020/07 intentionally absent: EURUSD/H1's gap.
-	eurusdAug := root + "/EURUSD/2020/08"
+	eurusdAug := root + "/oanda/raw/EURUSD/2020/08"
 	writeFile(t, eurusdAug, "EURUSD-2020-08-h1.csv",
 		fmtHeader("EURUSD", 2020, 8)+h1Row(time.Date(2020, 8, 1, 0, 0, 0, 0, time.UTC), true))
 
-	usdjpyMay := root + "/USDJPY/2020/05"
+	usdjpyMay := root + "/oanda/raw/USDJPY/2020/05"
 	writeFile(t, usdjpyMay, "USDJPY-2020-05-h1.csv",
 		"# schema=raw-v1 source=oanda instrument=USDJPY tf=h1 year=2020 month=05\nnot,the,right,header\n"+
 			h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
 
-	xauusdMay := root + "/XAUUSD/2020/05"
+	xauusdMay := root + "/oanda/raw/XAUUSD/2020/05"
 	writeFile(t, xauusdMay, "XAUUSD-2020-05-h1.csv",
 		fmtHeader("XAUUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
 
-	writeFile(t, root, "not-a-partition-file.csv", "garbage\n")
+	writeFile(t, root+"/oanda/raw", "not-a-partition-file.csv", "garbage\n")
 }
 
 func fmtHeader(symbol string, year, month int) string {
@@ -125,7 +125,7 @@ func TestInspect_OKPartitionSummary(t *testing.T) {
 
 func TestInspect_LastCompleteReflectsTheLatestRecordSpecifically(t *testing.T) {
 	root := t.TempDir()
-	dir := root + "/EURUSD/2020/06"
+	dir := root + "/oanda/raw/EURUSD/2020/06"
 	writeFile(t, dir, "EURUSD-2020-06-h1.csv",
 		fmtHeader("EURUSD", 2020, 6)+
 			h1Row(time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC), false)+ // earlier, incomplete
@@ -282,7 +282,7 @@ func TestInspect_PartitionsSortedDeterministically(t *testing.T) {
 func TestInspect_NeverModifiesSourceFiles(t *testing.T) {
 	root := t.TempDir()
 	buildArchive(t, root)
-	path := filepath.Join(root, "EURUSD", "2020", "05", "EURUSD-2020-05-h1.csv")
+	path := filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "05", "EURUSD-2020-05-h1.csv")
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 
@@ -328,7 +328,7 @@ func TestInspect_UnreadableFile(t *testing.T) {
 		t.Skip("running as root: file permissions cannot make a file unreadable")
 	}
 	root := t.TempDir()
-	dir := root + "/EURUSD/2020/05"
+	dir := root + "/oanda/raw/EURUSD/2020/05"
 	path := writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
 	require.NoError(t, os.Chmod(path, 0o000))
@@ -389,7 +389,7 @@ func buildTieBreakArchive(t *testing.T, root string) {
 	// 2021/03 (gap at 02) -- two H1 gaps, same symbol+interval,
 	// different year.
 	for _, ym := range [][2]int{{2020, 5}, {2020, 7}, {2021, 1}, {2021, 3}} {
-		dir := fmt.Sprintf("%s/EURUSD/%04d/%02d", root, ym[0], ym[1])
+		dir := fmt.Sprintf("%s/oanda/raw/EURUSD/%04d/%02d", root, ym[0], ym[1])
 		writeFile(t, dir, fmt.Sprintf("EURUSD-%04d-%02d-h1.csv", ym[0], ym[1]),
 			fmtHeader("EURUSD", ym[0], ym[1])+h1Row(time.Date(ym[0], time.Month(ym[1]), 1, 0, 0, 0, 0, time.UTC), true))
 	}
@@ -397,7 +397,7 @@ func buildTieBreakArchive(t *testing.T, root string) {
 	// EURUSD H4: present 2020/05, 2020/07 (gap at 06) -- same symbol as
 	// above, different interval.
 	for _, month := range []int{5, 7} {
-		dir := fmt.Sprintf("%s/EURUSD/2020/%02d", root, month)
+		dir := fmt.Sprintf("%s/oanda/raw/EURUSD/2020/%02d", root, month)
 		writeFile(t, dir, fmt.Sprintf("EURUSD-2020-%02d-h4.csv", month),
 			fmtHeaderTF("EURUSD", "h4", 2020, month)+h1Row(time.Date(2020, time.Month(month), 1, 0, 0, 0, 0, time.UTC), true))
 	}
@@ -472,7 +472,7 @@ func TestFindGaps_OutOfOrderInputAndSymbolTiebreak(t *testing.T) {
 // actually compare two elements.
 func TestInspect_MultipleDuplicateTimesSorted(t *testing.T) {
 	root := t.TempDir()
-	dir := root + "/EURUSD/2020/05"
+	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+
 			h1Row(time.Date(2020, 5, 1, 3, 0, 0, 0, time.UTC), true)+
@@ -500,7 +500,7 @@ func TestInspect_NestedBackupTreeSkipped(t *testing.T) {
 	root := t.TempDir()
 	buildArchive(t, root)
 
-	nested := root + "/backup/EURUSD/2020/05"
+	nested := root + "/oanda/raw/backup/EURUSD/2020/05"
 	writeFile(t, nested, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
@@ -532,7 +532,7 @@ func TestInspect_MisplacedFileSkipped(t *testing.T) {
 	buildArchive(t, root)
 
 	// Filed under USDJPY/2021/06, but named as an EURUSD 2020-05 file.
-	misplacedDir := root + "/USDJPY/2021/06"
+	misplacedDir := root + "/oanda/raw/USDJPY/2021/06"
 	writeFile(t, misplacedDir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
@@ -558,7 +558,7 @@ func TestInspect_MisplacedFileSkipped(t *testing.T) {
 func TestInspect_WrongDepthBeneathRootSkipped(t *testing.T) {
 	root := t.TempDir()
 	// Only two path components beneath root, not the required three.
-	writeFile(t, root+"/EURUSD", "EURUSD-2020-05-h1.csv",
+	writeFile(t, root+"/oanda/raw/EURUSD", "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
 	inv, err := Inspect(context.Background(), root)
@@ -571,7 +571,7 @@ func TestInspect_WrongDepthBeneathRootSkipped(t *testing.T) {
 
 func TestInspect_DirectoryYearMismatchSkipped(t *testing.T) {
 	root := t.TempDir()
-	dir := root + "/EURUSD/2021/05" // directory year 2021, file name year 2020
+	dir := root + "/oanda/raw/EURUSD/2021/05" // directory year 2021, file name year 2020
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
@@ -585,7 +585,7 @@ func TestInspect_DirectoryYearMismatchSkipped(t *testing.T) {
 
 func TestInspect_DirectoryMonthMismatchSkipped(t *testing.T) {
 	root := t.TempDir()
-	dir := root + "/EURUSD/2020/06" // directory month 06, file name month 05
+	dir := root + "/oanda/raw/EURUSD/2020/06" // directory month 06, file name month 05
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
@@ -602,7 +602,7 @@ func TestInspect_DirectoryMonthMismatchSkipped(t *testing.T) {
 // (newReaderFromBytes-backed) parse path rather than a bad header.
 func TestInspect_MalformedDataRowAfterValidHeader(t *testing.T) {
 	root := t.TempDir()
-	dir := root + "/EURUSD/2020/05"
+	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+"not-a-valid-row-at-all\n")
 
@@ -624,14 +624,14 @@ func TestInspect_MalformedDataRowAfterValidHeader(t *testing.T) {
 // between files.
 func TestInspectFile_ContextCancelledDuringParseIsFatal(t *testing.T) {
 	root := t.TempDir()
-	dir := root + "/EURUSD/2020/05"
+	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	p, skipped, fatalErr := inspectFile(ctx, root, filepath.Join(dir, "EURUSD-2020-05-h1.csv"), nil)
+	p, skipped, fatalErr := inspectFile(ctx, filepath.Join(root, "oanda", "raw"), filepath.Join(dir, "EURUSD-2020-05-h1.csv"), nil)
 	require.ErrorIs(t, fatalErr, context.Canceled)
 	assert.Zero(t, p, "no partition result when inspectFile fails fatally")
 	assert.Nil(t, skipped, "cancellation is not a skip reason")
@@ -645,7 +645,7 @@ func TestInspectFile_ContextCancelledDuringParseIsFatal(t *testing.T) {
 // happens.
 func TestInspect_ContextCancelledDuringParsePropagates(t *testing.T) {
 	root := t.TempDir()
-	dir := root + "/EURUSD/2020/05"
+	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
 
@@ -690,9 +690,9 @@ func TestInspectMatching_OnlyAcceptedPartitionsAreInventoried(t *testing.T) {
 func TestInspectMatching_RejectedFilesAreNeverRead(t *testing.T) {
 	root := t.TempDir()
 	row := h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true)
-	good := writeFile(t, root+"/EURUSD/2020/05", "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+row)
-	other := writeFile(t, root+"/GBPUSD/2020/05", "GBPUSD-2020-05-h1.csv", fmtHeader("GBPUSD", 2020, 5)+row)
-	otherInterval := writeFile(t, root+"/EURUSD/2020/05", "EURUSD-2020-05-h4.csv", fmtHeaderTF("EURUSD", "h4", 2020, 5)+row)
+	good := writeFile(t, root+"/oanda/raw/EURUSD/2020/05", "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+row)
+	other := writeFile(t, root+"/oanda/raw/GBPUSD/2020/05", "GBPUSD-2020-05-h1.csv", fmtHeader("GBPUSD", 2020, 5)+row)
+	otherInterval := writeFile(t, root+"/oanda/raw/EURUSD/2020/05", "EURUSD-2020-05-h4.csv", fmtHeaderTF("EURUSD", "h4", 2020, 5)+row)
 	reads := recordReads(t)
 
 	inv, err := InspectMatching(context.Background(), root, func(symbol string, interval RawInterval) bool {
