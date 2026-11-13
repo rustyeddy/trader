@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/internal/marketdata/layout"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -28,29 +27,6 @@ import (
 // rather than silently overwrite (issue #80's "prevent accidental
 // replacement of an existing authoritative raw artifact" constraint).
 var ErrPartitionAlreadyExists = errors.New("oanda: raw partition already exists")
-
-// source is OANDA's name in the layout.
-const source = "oanda"
-
-// partitionPath returns the path a raw partition for
-// (symbol, interval, year, month) lives at under the data root, through the one
-// layout resolver (ADR-089): root/oanda/raw/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-tf.csv.
-// The symbol must be one of the audited in-scope pairs and the interval one of
-// the raw tokens, so a caller cannot reach a path outside the corpus.
-func partitionPath(root, symbol string, interval RawInterval, year int, month time.Month) (string, error) {
-	if _, err := resolveSymbol(symbol); err != nil {
-		return "", err
-	}
-	if got, err := resolveInterval(string(interval)); err != nil || got != interval {
-		return "", fmt.Errorf("%w: %q", ErrUnsupportedInterval, string(interval))
-	}
-	p := layout.Partition{Source: source, Stage: layout.Raw, Instrument: symbol, Year: year, Month: month, Interval: string(interval)}
-	path, err := p.Path(root)
-	if err != nil {
-		return "", fmt.Errorf("oanda: %w", err)
-	}
-	return path, nil
-}
 
 // rawTF is the interval spelling in the schema comment. The daily partition
 // names its interval d1 but writes tf=d, exactly as the archive's files do, so
@@ -105,11 +81,11 @@ func rawTF(interval RawInterval) string {
 // WritePartition holds the partition's process-local lock (see UpdatePartition)
 // for the duration of the write, so a replace never interleaves with a
 // read-merge-commit by UpdatePartition on the same partition.
-func WritePartition(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month, records []Record, mustNotExist bool) error {
+func WritePartition(ctx context.Context, root string, key PartitionKey, records []Record, mustNotExist bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path, err := partitionPath(root, symbol, interval, year, month)
+	path, err := key.Path(root)
 	if err != nil {
 		return err
 	}
@@ -118,11 +94,11 @@ func WritePartition(ctx context.Context, root, symbol string, interval RawInterv
 		return err
 	}
 	defer unlock()
-	return writeLocked(ctx, path, symbol, interval, year, month, records, mustNotExist)
+	return writeLocked(ctx, path, key, records, mustNotExist)
 }
 
 // writeLocked is the atomic write itself. The caller holds the partition's lock.
-func writeLocked(ctx context.Context, path, symbol string, interval RawInterval, year int, month time.Month, records []Record, mustNotExist bool) error {
+func writeLocked(ctx context.Context, path string, key PartitionKey, records []Record, mustNotExist bool) error {
 	sorted := append([]Record(nil), records...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
 
@@ -145,7 +121,7 @@ func writeLocked(ctx context.Context, path, symbol string, interval RawInterval,
 	}()
 
 	bw := bufio.NewWriter(tmp)
-	if err := encodeRawPartition(ctx, bw, symbol, interval, year, month, sorted); err != nil {
+	if err := encodeRawPartition(ctx, bw, key, sorted); err != nil {
 		return fmt.Errorf("oanda: write partition: %w", err)
 	}
 	if err := bw.Flush(); err != nil {
@@ -207,9 +183,9 @@ func formatRawPrice(p num.Price) (string, error) {
 
 // encodeRawPartition writes the schema comment, column header, and one
 // row per record, in the exact raw-v1 shape Open/Inspect parse.
-func encodeRawPartition(ctx context.Context, w *bufio.Writer, symbol string, interval RawInterval, year int, month time.Month, records []Record) error {
+func encodeRawPartition(ctx context.Context, w *bufio.Writer, key PartitionKey, records []Record) error {
 	if _, err := fmt.Fprintf(w, "# schema=raw-v1 source=oanda instrument=%s tf=%s year=%04d month=%02d\n",
-		symbol, rawTF(interval), year, int(month)); err != nil {
+		key.Symbol, rawTF(key.Interval), key.Year, int(key.Month)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(w, rawV1Header); err != nil {
@@ -242,8 +218,8 @@ func encodeRawPartition(ctx context.Context, w *bufio.Writer, symbol string, int
 // "extend" sync can merge new records with what is already on disk
 // without duplicating Open's own parsing; it is a thin wrapper over
 // Open/Reader that discards Meta, since the caller already knows it.
-func ReadPartitionRecords(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month) ([]Record, error) {
-	path, err := partitionPath(root, symbol, interval, year, month)
+func ReadPartitionRecords(ctx context.Context, root string, key PartitionKey) ([]Record, error) {
+	path, err := key.Path(root)
 	if err != nil {
 		return nil, err
 	}
@@ -287,8 +263,8 @@ func ReadPartitionRecords(ctx context.Context, root, symbol string, interval Raw
 // partition's records and its fingerprint describing the exact same
 // bytes must use ReadPartitionSnapshot instead, not this function
 // followed by ReadPartitionRecords (or the reverse order).
-func FingerprintPartition(root, symbol string, interval RawInterval, year int, month time.Month) (string, error) {
-	path, err := partitionPath(root, symbol, interval, year, month)
+func FingerprintPartition(root string, key PartitionKey) (string, error) {
+	path, err := key.Path(root)
 	if err != nil {
 		return "", err
 	}
@@ -324,8 +300,8 @@ type PartitionSnapshot struct {
 // normalization build, issue #81 — that needs a raw fingerprint to
 // record alongside the canonical bars built from that exact data must
 // use this function, not the two-open pattern.
-func ReadPartitionSnapshot(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month) (PartitionSnapshot, error) {
-	path, err := partitionPath(root, symbol, interval, year, month)
+func ReadPartitionSnapshot(ctx context.Context, root string, key PartitionKey) (PartitionSnapshot, error) {
+	path, err := key.Path(root)
 	if err != nil {
 		return PartitionSnapshot{}, err
 	}
@@ -371,11 +347,11 @@ func ReadPartitionSnapshot(ctx context.Context, root, symbol string, interval Ra
 // coordinated (ADR-089). A failure or a context cancellation observed before the
 // commit leaves any existing file untouched; one that arrives after does not
 // undo it.
-func UpdatePartition(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month, merge func(existing []Record) ([]Record, error)) error {
+func UpdatePartition(ctx context.Context, root string, key PartitionKey, merge func(existing []Record) ([]Record, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path, err := partitionPath(root, symbol, interval, year, month)
+	path, err := key.Path(root)
 	if err != nil {
 		return err
 	}
@@ -385,7 +361,7 @@ func UpdatePartition(ctx context.Context, root, symbol string, interval RawInter
 	}
 	defer unlock()
 
-	existing, err := ReadPartitionRecords(ctx, root, symbol, interval, year, month)
+	existing, err := ReadPartitionRecords(ctx, root, key)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -393,5 +369,5 @@ func UpdatePartition(ctx context.Context, root, symbol string, interval RawInter
 	if err != nil {
 		return err
 	}
-	return writeLocked(ctx, path, symbol, interval, year, month, merged, false)
+	return writeLocked(ctx, path, key, merged, false)
 }
