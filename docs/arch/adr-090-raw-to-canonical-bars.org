@@ -56,11 +56,12 @@ type Bar struct {
 
     Bid OHLC
     Ask OHLC
+    Mid OHLC // derived once when the bar is built, not computed on every use
 
     Volume int64 // the provider's activity count, not a tradable quantity
 }
 
-func (b Bar) Mid() OHLC // exact midpoint of Bid and Ask, field by field
+func MidOf(bid, ask OHLC) (OHLC, error) // exact midpoint, field by field
 #+end_src
 
 File: a comment line =# schema=canonical-v2 provider=oanda symbol=EURUSD
@@ -68,20 +69,36 @@ interval=h1 year=2024 month=01=, one JSON metadata line, any bad-record lines (3
 below), the columns
 
 #+begin_example
-time,available_at,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume
+time,available_at,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,mid_o,mid_h,mid_l,mid_c,volume
 #+end_example
 
-and one row per good bar, in ascending time. Prices are exact text with the raw
-store's five decimals, never through a float. Times are UTC, RFC 3339.
+and one row per good bar, in ascending time. Bid and ask are exact text with the
+raw store's five decimals and mid with six (the midpoint of two five-decimal prices
+can end in a half pip), never through a float. Times are UTC, RFC 3339.
 
-*Mid is a method, not a column.* =Mid()= returns, for each of open, high, low and
-close, the exact midpoint of the bid and ask values (half a pip is representable,
-so nothing is rounded). Open and close are preserved on both sides, so mid is
-always recomputable from what is stored. Note that a candle's mid high is the
-midpoint of the bid high and the ask high, which need not equal the high of a
-tick-by-tick mid series; it is the midpoint of the candle values the provider
-gives, and the method's comment says so. The spreads of the old format are
-derivable (=Ask.x - Bid.x=) and are not stored.
+*Mid is a stored field, derived once (owner decision of 2026-11-14, review of
+#631).* Mid costs four more prices per bar and is computed once when the bar is
+built, not on every use; and some sources give a single price, which can then be
+written to the series it is. The rules, enforced by =Bar.Validate= and the file
+reader:
+
+- Each of =Bid=, =Ask= and =Mid= is optional: an absent series is the zero =OHLC=
+  (four empty fields in the file; a series with only some fields empty is an
+  error). At least one series must be present, and every present one must be
+  valid (positive prices, high and low containing open and close).
+- When both =Bid= and =Ask= are present, no ask is below its bid (a crossed bar is
+  rejected), and =Mid= must be present and exactly equal to =MidOf(Bid, Ask)=: the
+  exact midpoint at open, high, low and close. =MidOf= is what the builder calls;
+  a stored mid that is not that midpoint is malformed. Half a pip is representable,
+  so nothing is rounded.
+- When a source gives one series, or only one side, there is nothing to derive or
+  cross-check: the builder writes the price to the series it knows it is and leaves
+  the others absent. Which series a given source writes is decided in that
+  source's mapping, not here.
+- A candle's mid high is the midpoint of the bid high and the ask high, which need
+  not equal the high of a tick-by-tick mid series; it is the midpoint of the candle
+  values the provider gives. Open and close are preserved on both sides. The
+  spreads of the old format are derivable (=Ask.x - Bid.x=) and are not stored.
 
 ** 2. Availability is stored, modeled, and versioned
 
@@ -142,8 +159,10 @@ the next run. The gaps stage treats an absent bar at the end of a downloaded ran
 as possibly still forming, not as proof of a gap. Records with the same time keep the first as the good row and
 record the later ones as =duplicate=.
 
-Alignment: =h1= on the hour; =d1= at 17:00 America/New_York, using the embedded
-time zone database. One small function, tested at the DST and month boundaries; no
+Alignment: =h1= on the hour; =d1= at 17:00 America/New_York, using America/New_York
+zone bytes pinned in the repository (loaded from the bytes, never by name, so the
+host's zone data cannot change a stored time; changing them is a new policy name).
+One small function, tested at the DST and month boundaries; no
 =Calendar= interface. A weekend or holiday gap is not an error and nothing is
 filled.
 
@@ -159,7 +178,7 @@ per-partition lock, and the report says it was replaced. A build never touches r
 
 ** 5. Packages and the command
 
-- =internal/marketdata/canonical=: =OHLC=, =Bar=, =Mid=, the =canonical-v2= reader
+- =internal/marketdata/canonical=: =OHLC=, =Bar=, =MidOf=, the =canonical-v2= reader
   and writer, the bad-record type, validation and the alignment and availability
   rule. It imports =num=, =layout= and the standard library; never a provider.
 - =internal/marketdata/oanda=: the mapping from a raw record to a canonical bar or
@@ -176,7 +195,8 @@ per-partition lock, and the report says it was replaced. A build never touches r
 Hermetic: raw fixtures are small files copied from the archive; tests never read
 =/srv/data=. Cases: each rejection rule written as a bad line and read back; a file
 with good and bad rows; a damaged raw row failing the build; a DST =d1= week and the
-New York changes; a month boundary; =Mid()= exact on half-pip values; an unchanged
+New York changes; a month boundary; =MidOf= exact on half-pip values, mid required and consistent when bid and ask
+are present, single-series bars; an unchanged
 rebuild; a rebuild after a changed fingerprint, builder version, validator version
 or availability policy; =raw_row= numbering; the reader returning the bad records;
 cancellation. A cross-check against the archive:
@@ -195,8 +215,8 @@ model); =m1=, =h4=, =W1=; other providers; the one-time migration of =raw/oanda=
 
 * Consequences
 
-- Nothing about prices is lost between raw and canonical, and mid is a method, so
-  the basis can be chosen by the consumer.
+- Nothing about prices is lost between raw and canonical, and mid is stored (derived once),
+  so the basis can be chosen by the consumer and single-price sources fit.
 - The existing =canonical-v1= archive is not reused; it is rebuilt from raw once raw
   is migrated. Raw is complete, so nothing is lost, but the rebuild is a step the
   migration must schedule.
@@ -216,4 +236,6 @@ model); =m1=, =h4=, =W1=; other providers; the one-time migration of =raw/oanda=
 - A forming candle is not stored and leaves no trace in raw (option 1); a later
   download adds it once it is complete.
 - Mid basis, with open and close preserved: the canonical bar keeps bid and ask
-  open, high, low and close and the volume, and mid is a method.
+  open, high, low and close and the volume. Mid was first a method; on the review
+  of #631 the owner chose a stored field, derived once, so that single-price
+  sources can write to the series they are (rules in section 1).
