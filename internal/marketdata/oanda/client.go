@@ -142,6 +142,14 @@ func normalizeBaseURL(base string) string {
 	return strings.TrimRight(u.String(), "/")
 }
 
+// noRedirectClient is the default transport: a redirect is returned as the
+// response (a non-200 status, so an error) instead of being followed.
+func noRedirectClient() *http.Client {
+	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+}
+
 // checkBaseURL requires an absolute https URL with no credentials, so the
 // bearer token is never sent in clear text or leaked through userinfo. Plain
 // http is allowed only to a loopback host, which is how tests use httptest.
@@ -195,7 +203,10 @@ type ClientConfig struct {
 	// positive. Zero disables pacing at this layer.
 	MinRequestInterval time.Duration
 
-	// HTTPClient overrides the transport (default http.DefaultClient).
+	// HTTPClient overrides the transport. The default does not follow
+	// redirects, so the bearer token can never be forwarded to another URL; a
+	// replacement must do the same, since a client that follows a redirect to
+	// plain http would send the token in clear text.
 	HTTPClient HTTPDoer
 	// Sleep waits between retries and paced requests (default: a real timer
 	// that honors ctx). Tests inject one that does not wait.
@@ -249,7 +260,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = noRedirectClient()
 	}
 	maxAttempts := cfg.MaxAttempts
 	if maxAttempts <= 0 {
@@ -301,9 +312,12 @@ type CandleRequest struct {
 // candle may be incomplete (Complete false); it is returned as the provider
 // declares it, and what to do with it is the caller's decision.
 //
-// A page whose candles are out of order, earlier than the requested cursor, or
-// repeated is ErrMalformedData, never silently accepted, which also guarantees
-// pagination makes progress. FetchCandles honors ctx cancellation between pages
+// A page whose candles are out of order or repeat the previous page's last
+// candle is ErrMalformedData, never silently accepted, which also guarantees
+// pagination makes progress. Later pages continue from the last candle with
+// includeFirst=false; the candle covering an unaligned From, which opened
+// before it, is dropped. A 200 response without a candles array is
+// ErrMalformedData, so a truncated body never looks like an empty range. FetchCandles honors ctx cancellation between pages
 // and during retry backoff; it starts no goroutines. On error the records
 // fetched so far are returned with it.
 func (c *Client) FetchCandles(ctx context.Context, req CandleRequest) ([]Record, error) {
@@ -326,22 +340,36 @@ func (c *Client) FetchCandles(ctx context.Context, req CandleRequest) ([]Record,
 	log.Info("fetch started", "from", req.From.UTC(), "to", req.To.UTC())
 
 	var out []Record
-	cursor := req.From.UTC()
+	start := req.From.UTC()
+	cursor := start
+	includeFirst := true // the first page includes a candle that opens exactly at from
 	end := req.To.UTC()
 
 	for pageNo := 1; cursor.Before(end); pageNo++ {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		page, err := c.fetchPage(ctx, log, apiSymbol, granularity, cursor)
+		page, err := c.fetchPage(ctx, log, apiSymbol, granularity, cursor, includeFirst)
 		if err != nil {
 			log.Error("fetch failed", "page", pageNo, "records", len(out), "error", err)
 			return out, err
 		}
+		full := len(page) >= c.pageSize
+		if pageNo == 1 {
+			// OANDA also returns the candle that covers an unaligned from,
+			// which opened before it; it is not part of the requested range.
+			for len(page) > 0 && page[0].Time.Before(start) {
+				page = page[1:]
+			}
+		}
 		if len(page) == 0 {
 			break
 		}
-		if err := checkPage(page, cursor); err != nil {
+		var last time.Time
+		if len(out) > 0 {
+			last = out[len(out)-1].Time
+		}
+		if err := checkPage(page, last); err != nil {
 			log.Error("fetch failed", "page", pageNo, "records", len(out), "error", err)
 			return out, err
 		}
@@ -355,20 +383,25 @@ func (c *Client) FetchCandles(ctx context.Context, req CandleRequest) ([]Record,
 			out = append(out, r)
 		}
 		log.Debug("page fetched", "page", pageNo, "page_records", len(page), "records", len(out))
-		if reachedEnd || len(page) < c.pageSize {
+		if reachedEnd || !full {
 			break
 		}
-		cursor = page[len(page)-1].Time.Add(time.Nanosecond)
+		// Continue from the last candle itself and ask the provider to leave it
+		// out, rather than guess the next opening time.
+		cursor = page[len(page)-1].Time
+		includeFirst = false
 	}
 	log.Info("fetch finished", "records", len(out))
 	return out, nil
 }
 
-// checkPage requires strictly ascending times, none before the cursor.
-func checkPage(page []Record, cursor time.Time) error {
-	prev := cursor.Add(-time.Nanosecond)
+// checkPage requires strictly ascending times, the first after last (the last
+// record already collected; the zero time for the first page), so pagination
+// always makes progress and no candle is repeated.
+func checkPage(page []Record, last time.Time) error {
+	prev := last
 	for i, r := range page {
-		if !r.Time.After(prev) {
+		if !prev.IsZero() && !r.Time.After(prev) {
 			return fmt.Errorf("oanda: %w: candle %d at %s is not after %s",
 				ErrMalformedData, i, r.Time.Format(time.RFC3339Nano), prev.Format(time.RFC3339Nano))
 		}
@@ -382,7 +415,7 @@ const candlePageSize = 5000
 
 // fetchPage issues one paginated candles request starting at from, retrying
 // transient failures per the Client's policy.
-func (c *Client) fetchPage(ctx context.Context, log *slog.Logger, apiSymbol, granularity string, from time.Time) ([]Record, error) {
+func (c *Client) fetchPage(ctx context.Context, log *slog.Logger, apiSymbol, granularity string, from time.Time, includeFirst bool) ([]Record, error) {
 	var lastErr error
 	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
 		if attempt > 1 {
@@ -396,7 +429,7 @@ func (c *Client) fetchPage(ctx context.Context, log *slog.Logger, apiSymbol, gra
 			return nil, err
 		}
 
-		records, err := c.doFetchPage(ctx, log, apiSymbol, granularity, from, attempt)
+		records, err := c.doFetchPage(ctx, log, apiSymbol, granularity, from, includeFirst, attempt)
 		if err == nil {
 			return records, nil
 		}
@@ -420,7 +453,7 @@ var errNetwork = errors.New("oanda: network error")
 // doFetchPage issues exactly one HTTP request and parses its response. It never
 // retries; fetchPage owns retry policy. Every error it returns has had the
 // token scrubbed from its text.
-func (c *Client) doFetchPage(ctx context.Context, log *slog.Logger, apiSymbol, granularity string, from time.Time, attempt int) ([]Record, error) {
+func (c *Client) doFetchPage(ctx context.Context, log *slog.Logger, apiSymbol, granularity string, from time.Time, includeFirst bool, attempt int) ([]Record, error) {
 	token, err := c.credential.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("oanda: resolve credential: %w", err)
@@ -428,14 +461,14 @@ func (c *Client) doFetchPage(ctx context.Context, log *slog.Logger, apiSymbol, g
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("oanda: %w: the credential provider returned an empty token", ErrUnauthorized)
 	}
-	records, err := c.doRequest(ctx, log, token, apiSymbol, granularity, from, attempt)
+	records, err := c.doRequest(ctx, log, token, apiSymbol, granularity, from, includeFirst, attempt)
 	if err != nil {
 		return nil, scrubError(err, token)
 	}
 	return records, nil
 }
 
-func (c *Client) doRequest(ctx context.Context, log *slog.Logger, token, apiSymbol, granularity string, from time.Time, attempt int) ([]Record, error) {
+func (c *Client) doRequest(ctx context.Context, log *slog.Logger, token, apiSymbol, granularity string, from time.Time, includeFirst bool, attempt int) ([]Record, error) {
 	u, err := url.Parse(c.baseURL + "/v3/instruments/" + apiSymbol + "/candles")
 	if err != nil {
 		return nil, fmt.Errorf("oanda: %w: %v", ErrBadRequest, err)
@@ -445,6 +478,7 @@ func (c *Client) doRequest(ctx context.Context, log *slog.Logger, token, apiSymb
 	q.Set("price", "BA")
 	q.Set("count", strconv.Itoa(c.pageSize))
 	q.Set("from", from.Format(time.RFC3339Nano))
+	q.Set("includeFirst", strconv.FormatBool(includeFirst))
 	q.Set("dailyAlignment", dailyAlignment)
 	q.Set("alignmentTimezone", alignmentTimezone)
 	u.RawQuery = q.Encode()
@@ -476,6 +510,9 @@ func (c *Client) doRequest(ctx context.Context, log *slog.Logger, token, apiSymb
 	var parsed candleResponse
 	dec := json.NewDecoder(body)
 	if err := dec.Decode(&parsed); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, fmt.Errorf("oanda: %w: decode response: %v", ErrMalformedData, err)
 	}
 	if dec.InputOffset() > maxResponseBytes {
@@ -531,7 +568,7 @@ func classifyStatus(status int, body io.Reader) error {
 // candleResponse is the JSON shape OANDA's /v3/instruments/{i}/candles
 // endpoint returns for price=BA (bid and ask OHLC sets together).
 type candleResponse struct {
-	Candles []struct {
+	Candles *[]struct {
 		Complete bool   `json:"complete"`
 		Time     string `json:"time"`
 		Volume   int64  `json:"volume"`
@@ -552,8 +589,11 @@ type ohlc struct {
 // never float64 or position-derived, matching ADR-004/#75's existing
 // discipline for this package.
 func (r candleResponse) records() ([]Record, error) {
-	out := make([]Record, 0, len(r.Candles))
-	for i, c := range r.Candles {
+	if r.Candles == nil {
+		return nil, fmt.Errorf("oanda: %w: response has no candles array", ErrMalformedData)
+	}
+	out := make([]Record, 0, len(*r.Candles))
+	for i, c := range *r.Candles {
 		if c.Bid == nil || c.Ask == nil {
 			return nil, fmt.Errorf("oanda: %w: candle %d missing bid/ask", ErrMalformedData, i)
 		}

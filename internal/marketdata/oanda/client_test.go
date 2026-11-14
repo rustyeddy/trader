@@ -186,10 +186,121 @@ func TestFetchCandles_Paginates(t *testing.T) {
 	require.Len(t, records, 3)
 	assert.Equal(t, 2, doer.requestCount())
 
-	// Second page's "from" must advance past the last candle of page 1.
-	secondFrom := doer.requests[1].URL.Query().Get("from")
-	wantFrom := page1[len(page1)-1].Add(time.Nanosecond).Format(time.RFC3339Nano)
-	assert.Equal(t, wantFrom, secondFrom)
+	// The first page includes a candle opening at from; the second continues from
+	// the last candle and asks the provider to leave it out.
+	assert.Equal(t, "true", doer.requests[0].URL.Query().Get("includeFirst"))
+	assert.Equal(t, page1[len(page1)-1].Format(time.RFC3339Nano), doer.requests[1].URL.Query().Get("from"))
+	assert.Equal(t, "false", doer.requests[1].URL.Query().Get("includeFirst"))
+}
+
+// A provider that repeats the last candle of the previous page is a malformed
+// stream, not progress.
+func TestFetchCandles_RejectsAPageThatRepeatsThePreviousCandle(t *testing.T) {
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	doer := &fakeDoer{responses: []fakeResponse{
+		{status: 200, body: candlesJSON([]time.Time{t0, t0.Add(time.Hour)}, true)},
+		{status: 200, body: candlesJSON([]time.Time{t0.Add(time.Hour), t0.Add(2 * time.Hour)}, true)},
+	}}
+	c := newTestClient(t, doer, withPageSize(2))
+
+	got, err := c.FetchCandles(context.Background(), hourRange())
+
+	require.ErrorIs(t, err, ErrMalformedData)
+	assert.Len(t, got, 2, "the records fetched before the failure are returned")
+}
+
+// OANDA also returns the candle covering an unaligned from; it opened before the
+// requested range and is dropped, and a full page is still recognised as full.
+func TestFetchCandles_DropsTheCandleCoveringAnUnalignedFrom(t *testing.T) {
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	doer := &fakeDoer{responses: []fakeResponse{
+		{status: 200, body: candlesJSON([]time.Time{t0, t0.Add(time.Hour)}, true)},
+		{status: 200, body: candlesJSON([]time.Time{t0.Add(2 * time.Hour)}, true)},
+	}}
+	c := newTestClient(t, doer, withPageSize(2))
+	req := hourRange()
+	req.From = t0.Add(30 * time.Minute)
+
+	got, err := c.FetchCandles(context.Background(), req)
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.True(t, got[0].Time.Equal(t0.Add(time.Hour)))
+	assert.Equal(t, 2, doer.requestCount(), "the trimmed first page was full, so the next page is requested")
+}
+
+func TestFetchCandles_RequiresACandlesArray(t *testing.T) {
+	for name, body := range map[string]string{
+		"empty object": `{}`,
+		"null":         `null`,
+		"null array":   `{"candles":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newTestClient(t, &fakeDoer{responses: []fakeResponse{{status: 200, body: body}}})
+
+			_, err := c.FetchCandles(context.Background(), hourRange())
+
+			assert.ErrorIs(t, err, ErrMalformedData)
+		})
+	}
+}
+
+func TestFetchCandles_AnExplicitEmptyArrayIsAnEmptyRange(t *testing.T) {
+	c := newTestClient(t, &fakeDoer{responses: []fakeResponse{{status: 200, body: `{"candles":[]}`}}})
+
+	got, err := c.FetchCandles(context.Background(), hourRange())
+
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+// stallBody blocks reading until the context is cancelled, like a response body
+// that stops arriving.
+type stallBody struct{ ctx context.Context }
+
+func (b stallBody) Read([]byte) (int, error) { <-b.ctx.Done(); return 0, b.ctx.Err() }
+func (stallBody) Close() error               { return nil }
+
+type stallDoer struct{ cancel context.CancelFunc }
+
+func (d stallDoer) Do(req *http.Request) (*http.Response, error) {
+	go d.cancel()
+	return &http.Response{StatusCode: 200, Body: stallBody{req.Context()}, Header: http.Header{}}, nil
+}
+
+func TestFetchCandles_CancellationWhileReadingTheBodyIsNotMalformedData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := newTestClient(t, stallDoer{cancel})
+
+	_, err := c.FetchCandles(ctx, hourRange())
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NotErrorIs(t, err, ErrMalformedData)
+}
+
+// The default transport returns a redirect instead of following it, so the
+// bearer token is never forwarded to another URL.
+func TestDefaultTransportDoesNotFollowRedirectsWithTheToken(t *testing.T) {
+	var targetAuth string
+	var targetHit bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHit, targetAuth = true, r.Header.Get("Authorization")
+	}))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/stolen", http.StatusFound)
+	}))
+	defer redirector.Close()
+	c, err := NewClient(ClientConfig{BaseURL: redirector.URL, Credential: StaticCredential(testToken), Sleep: func(context.Context, time.Duration) error { return nil }})
+	require.NoError(t, err)
+
+	_, err = c.FetchCandles(context.Background(), hourRange())
+
+	require.Error(t, err)
+	assert.False(t, targetHit, "the redirect target was never contacted")
+	assert.Empty(t, targetAuth)
+	assert.NotContains(t, err.Error(), testToken)
 }
 
 func TestFetchCandles_StopsAtToBoundary(t *testing.T) {
@@ -670,13 +781,12 @@ func TestFetchCandles_CredentialErrorIsReportedAndNotRetried(t *testing.T) {
 func TestFetchCandles_RejectsMalformedPages(t *testing.T) {
 	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for name, body := range map[string]string{
-		"not json":          "<html>",
-		"descending":        candlesJSON([]time.Time{t0.Add(time.Hour), t0}, true),
-		"duplicate":         candlesJSON([]time.Time{t0, t0}, true),
-		"before the cursor": candlesJSON([]time.Time{t0.Add(-time.Hour)}, true),
-		"bad time":          `{"candles":[{"complete":true,"time":"nope","volume":1,"bid":{"o":"1","h":"1","l":"1","c":"1"},"ask":{"o":"1","h":"1","l":"1","c":"1"}}]}`,
-		"bad price":         `{"candles":[{"complete":true,"time":"2024-01-01T00:00:00Z","volume":1,"bid":{"o":"x","h":"1","l":"1","c":"1"},"ask":{"o":"1","h":"1","l":"1","c":"1"}}]}`,
-		"missing ask":       `{"candles":[{"complete":true,"time":"2024-01-01T00:00:00Z","volume":1,"bid":{"o":"1","h":"1","l":"1","c":"1"}}]}`,
+		"not json":    "<html>",
+		"descending":  candlesJSON([]time.Time{t0.Add(time.Hour), t0}, true),
+		"duplicate":   candlesJSON([]time.Time{t0, t0}, true),
+		"bad time":    `{"candles":[{"complete":true,"time":"nope","volume":1,"bid":{"o":"1","h":"1","l":"1","c":"1"},"ask":{"o":"1","h":"1","l":"1","c":"1"}}]}`,
+		"bad price":   `{"candles":[{"complete":true,"time":"2024-01-01T00:00:00Z","volume":1,"bid":{"o":"x","h":"1","l":"1","c":"1"},"ask":{"o":"1","h":"1","l":"1","c":"1"}}]}`,
+		"missing ask": `{"candles":[{"complete":true,"time":"2024-01-01T00:00:00Z","volume":1,"bid":{"o":"1","h":"1","l":"1","c":"1"}}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			doer := &fakeDoer{responses: []fakeResponse{{status: 200, body: body}}}
