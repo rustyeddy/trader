@@ -79,3 +79,96 @@ func Example_singlePriceSource() {
 	fmt.Println(bar.Validate(), bar.OHLC().Close, bar.Bid.IsZero(), bar.Ask.IsZero())
 	// Output: <nil> 187.9 true true
 }
+
+const modulePath = "github.com/rustyeddy/trader"
+
+// importsOf returns the import paths of one Go file.
+func importsOf(t *testing.T, file string) []string {
+	t.Helper()
+	src, err := os.ReadFile(file)
+	require.NoError(t, err)
+	f, err := parser.ParseFile(token.NewFileSet(), file, src, parser.ImportsOnly)
+	require.NoError(t, err)
+	var out []string
+	for _, imp := range f.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		require.NoError(t, err)
+		out = append(out, path)
+	}
+	return out
+}
+
+// goFiles lists the Go files under dir (relative to this package), skipping the
+// archive, build output, VCS data and test data.
+func goFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "_archive", "bin", "testdata", "docs":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, ".go") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	return files
+}
+
+// TestMarketdataTree_DependsOnlyOnNumLayoutAndItself enforces ADR-091's flow for
+// the whole market-data tree, public package and internal implementation alike:
+// within the module it may import num, the shared path resolver (storage, until
+// it has its own home) and itself, and nothing else: not a provider, the
+// transport, an application service, or the root engine. Go does not forbid
+// those imports; this does.
+func TestMarketdataTree_DependsOnlyOnNumLayoutAndItself(t *testing.T) {
+	allowed := func(path string) bool {
+		return path == modulePath+"/num" ||
+			path == modulePath+"/internal/marketdata/layout" ||
+			path == modulePath+"/marketdata" || strings.HasPrefix(path, modulePath+"/marketdata/")
+	}
+	checked := 0
+	for _, file := range goFiles(t, ".") {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		checked++
+		for _, path := range importsOf(t, file) {
+			if path == modulePath || strings.HasPrefix(path, modulePath+"/") {
+				assert.True(t, allowed(path), "%s imports %s: the marketdata tree may import only num, the layout resolver and itself", file, path)
+			}
+		}
+	}
+	assert.Positive(t, checked)
+}
+
+// TestMarketdataInternal_IsImportedOnlyFromMarketdata checks that nothing outside
+// the marketdata tree reaches into marketdata/internal. Go's internal rule
+// already makes that a compile error; this test keeps the guarantee visible, and
+// keeps it if the implementation is ever moved out of an internal directory by
+// mistake.
+func TestMarketdataInternal_IsImportedOnlyFromMarketdata(t *testing.T) {
+	internal := modulePath + "/marketdata/internal"
+	checked := 0
+	for _, file := range goFiles(t, "..") {
+		rel, err := filepath.Rel("..", file)
+		require.NoError(t, err)
+		if strings.HasPrefix(rel, "marketdata"+string(filepath.Separator)) {
+			continue
+		}
+		checked++
+		for _, path := range importsOf(t, file) {
+			assert.False(t, path == internal || strings.HasPrefix(path, internal+"/"),
+				"%s imports %s: only the marketdata tree may import marketdata/internal", rel, path)
+		}
+	}
+	assert.Positive(t, checked, "the walk found the rest of the module")
+}
