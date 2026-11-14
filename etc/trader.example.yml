@@ -1,0 +1,12 @@
+# Copy to etc/trader.yml (this directory, relative to where trader runs).
+# Holds no secret: the OANDA token is read only from TRADER_OANDA_TOKEN.
+# A flag beats the environment, and the environment beats this file.
+marketdata:
+  # Data root: --data-root, then TRADER_DATA_ROOT, then this value.
+  root: /srv/data
+  provider: oanda
+  # OANDA REST host. Defaults to the practice host when left out.
+  base_url: https://api-fxpractice.oanda.com
+  # Defaults for `trader data download`; --instrument and --interval win.
+  instruments: [EURUSD]
+  interval: h1

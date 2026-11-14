@@ -40,12 +40,16 @@ type app struct {
 	flags logFlags
 	run   func(io.Writer) error // the backtest; replaced in tests
 
+	// getenv reads the process environment. cmd/trader is the only place that
+	// does (ADR-078 S-1, ADR-089); tests replace it.
+	getenv func(string) string
+
 	prev   *slog.Logger // slog's default before install
 	closer io.Closer    // the log output; nil when none is open
 }
 
 func newApp() *app {
-	a := &app{run: trader.Run}
+	a := &app{run: trader.Run, getenv: os.Getenv}
 	a.cmd = &cobra.Command{
 		Use:           "trader",
 		Short:         "Backtest the EMAX scenarios and print a summary of each",
@@ -60,6 +64,7 @@ func newApp() *app {
 		},
 	}
 	a.flags.register(a.cmd)
+	a.cmd.AddCommand(newDataCmd(a))
 	return a
 }
 
