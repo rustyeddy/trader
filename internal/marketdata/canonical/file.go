@@ -3,6 +3,7 @@ package canonical
 import (
 	"errors"
 	"fmt"
+	"github.com/rustyeddy/trader/marketdata"
 	"time"
 
 	"github.com/rustyeddy/trader/internal/marketdata/layout"
@@ -128,7 +129,7 @@ type BadRecord struct {
 type File struct {
 	Key  Key
 	Meta Meta
-	Bars []Bar
+	Bars []marketdata.Bar
 	Bad  []BadRecord
 }
 
@@ -177,10 +178,13 @@ func (f File) inMonth(t time.Time) bool {
 	return u.Year() == f.Key.Year && u.Month() == f.Key.Month
 }
 
-func (f File) checkBar(i int, b Bar) error {
+func (f File) checkBar(i int, b marketdata.Bar) error {
 	at := b.Time.UTC().Format(time.RFC3339)
 	if err := b.Validate(); err != nil {
 		return fmt.Errorf("%w: bar %s: %v", ErrMalformedData, at, err)
+	}
+	if !b.Trade.IsZero() {
+		return fmt.Errorf("%w: bar %s has a trade series, which canonical-v2 does not store", ErrMalformedData, at)
 	}
 	if !f.inMonth(b.Time) {
 		return fmt.Errorf("%w: bar %s is not in %04d-%02d", ErrMalformedData, at, f.Key.Year, int(f.Key.Month))

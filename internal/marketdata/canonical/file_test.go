@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/internal/marketdata/layout"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,12 +76,15 @@ func TestFile_Validate(t *testing.T) {
 			f.Meta.AvailabilityPolicy = "other-v9"
 			f.Bars[0].AvailableAt = f.Bars[0].Time.Add(time.Minute)
 		}, nil},
-		"bad key":              {func(f *File) { f.Key.Interval = "h4" }, ErrUnsupportedInterval},
-		"no fingerprint":       {func(f *File) { f.Meta.RawFingerprint = "" }, ErrMalformedData},
-		"no builder":           {func(f *File) { f.Meta.BuilderVersion = "" }, ErrMalformedData},
-		"no validator":         {func(f *File) { f.Meta.ValidatorVersion = "" }, ErrMalformedData},
-		"no policy":            {func(f *File) { f.Meta.AvailabilityPolicy = "" }, ErrMalformedData},
-		"no build time":        {func(f *File) { f.Meta.BuiltAt = time.Time{} }, ErrMalformedData},
+		"bad key":        {func(f *File) { f.Key.Interval = "h4" }, ErrUnsupportedInterval},
+		"no fingerprint": {func(f *File) { f.Meta.RawFingerprint = "" }, ErrMalformedData},
+		"no builder":     {func(f *File) { f.Meta.BuilderVersion = "" }, ErrMalformedData},
+		"no validator":   {func(f *File) { f.Meta.ValidatorVersion = "" }, ErrMalformedData},
+		"no policy":      {func(f *File) { f.Meta.AvailabilityPolicy = "" }, ErrMalformedData},
+		"no build time":  {func(f *File) { f.Meta.BuiltAt = time.Time{} }, ErrMalformedData},
+		"trade series": {func(f *File) {
+			f.Bars[1].Trade = marketdata.OHLC{Open: px("1.1"), High: px("1.2"), Low: px("1.0"), Close: px("1.15")}
+		}, ErrMalformedData},
 		"invalid bar":          {func(f *File) { f.Bars[1].Volume = -5 }, ErrMalformedData},
 		"bar in another month": {func(f *File) { f.Bars[2] = goodBar(t, utc(2024, 2, 1, 0)) }, ErrMalformedData},
 		"bars not ascending":   {func(f *File) { f.Bars[1], f.Bars[2] = f.Bars[2], f.Bars[1] }, ErrMalformedData},
@@ -114,7 +118,7 @@ func TestFile_Validate(t *testing.T) {
 
 // goodBarAt is a bar opening at open with no alignment adjustment, for building
 // deliberately misaligned input.
-func goodBarAt(t *testing.T, open time.Time) Bar {
+func goodBarAt(t *testing.T, open time.Time) marketdata.Bar {
 	t.Helper()
 	b := goodBar(t, utc(2024, 1, 2, 0))
 	b.Time = open
@@ -128,7 +132,7 @@ func TestFile_ValidateD1UsesTheNewYorkSessionRule(t *testing.T) {
 	require.NoError(t, err)
 	b := goodBar(t, utc(2024, 3, 9, 0))
 	b.Time, b.AvailableAt = open, avail
-	f := File{Key: Key{Source: "oanda", Symbol: "EURUSD", Interval: D1, Year: 2024, Month: time.March}, Meta: testMeta(), Bars: []Bar{b}}
+	f := File{Key: Key{Source: "oanda", Symbol: "EURUSD", Interval: D1, Year: 2024, Month: time.March}, Meta: testMeta(), Bars: []marketdata.Bar{b}}
 	require.NoError(t, f.Validate())
 
 	f.Bars[0].AvailableAt = open.Add(24 * time.Hour) // the fixed-duration mistake

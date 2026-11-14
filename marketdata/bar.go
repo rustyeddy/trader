@@ -1,4 +1,4 @@
-package canonical
+package marketdata
 
 import (
 	"errors"
@@ -10,50 +10,75 @@ import (
 
 // Errors, classifiable with errors.Is.
 var (
-	// ErrInvalidBar reports a bar whose shape is impossible: a zero price, a
-	// high or low that does not contain the open and close, a negative volume,
-	// or an availability time that is zero or before the bar opened.
-	ErrInvalidBar = errors.New("canonical: invalid bar")
+	// ErrInvalidBar reports a bar whose shape is impossible: a partly filled or
+	// zero-priced series, a high or low that does not contain the open and
+	// close, no series at all, a negative volume, a mid that is not the midpoint
+	// of its bid and ask, or an availability time that is zero or before the
+	// bar opened.
+	ErrInvalidBar = errors.New("marketdata: invalid bar")
 	// ErrCrossed reports a bar whose ask is below its bid at some corner (open,
 	// high, low or close): a market anomaly, not a shape error.
-	ErrCrossed = errors.New("canonical: crossed bid/ask")
+	ErrCrossed = errors.New("marketdata: crossed bid/ask")
 )
 
-// OHLC is open, high, low and close on one side of the market, or the midpoint
-// of both (Bar.Mid).
+// OHLC is open, high, low and close of one price series: the bid, the ask, their
+// midpoint, or trades. The all-zero OHLC means the series is not available; a
+// series that is present has all four prices positive, and a partly filled one is
+// invalid.
 type OHLC struct {
 	Open, High, Low, Close num.Price
 }
 
-// Present reports whether the side carries prices: an OHLC with every price zero
-// is a side the source did not give.
-func (o OHLC) Present() bool { return o != OHLC{} }
+// IsZero reports whether the series is absent: every price is zero.
+func (o OHLC) IsZero() bool { return o == OHLC{} }
 
-// Bar is one canonical observation: up to three price series for one interval
-// (bid, ask and mid), the provider's activity count, when the bar opened and the
-// earliest moment a consumer may use it (ADR-090).
+// Bar is one observation of an instrument over one interval: up to four price
+// series, the provider's activity count, when the interval opened and the
+// earliest moment a consumer may use the bar. It is the one bar model shared by
+// storage, backtests, studies, strategies and external consumers (ADR-091).
 //
-// Each series is optional: an absent series is the zero OHLC, and at least one
-// must be present. A source that quotes both sides gives Bid and Ask and Mid is
-// derived from them once, with MidOf; a source that gives a single price writes
-// it to the series it is (often Mid) and leaves the others absent.
+// Every field is read directly. Each price series is optional: an absent series
+// is the all-zero OHLC, and at least one must be present. A source that quotes
+// both sides gives Bid and Ask and Mid is derived from them once, with MidOf; a
+// source that gives a single price writes it to the series it actually is and
+// leaves the others absent. Nothing infers a missing side: code that needs the
+// bid or the ask reads that field and checks IsZero if absence matters.
 type Bar struct {
 	// Time is the bar's opening instant.
 	Time time.Time
 	// AvailableAt is the earliest time the completed bar may be consumed. The
 	// zero value means availability has not been established, which a stored
-	// bar never has. It is modeled under a named policy (PolicyScheduledCloseV1),
-	// not an observed provider timestamp.
+	// bar never has. It is modeled under a named policy (canonical's
+	// PolicyScheduledCloseV1), not an observed provider timestamp.
 	AvailableAt time.Time
+
+	// Volume is the provider's activity (tick) count, not a tradable quantity.
+	Volume int64
 
 	Bid OHLC
 	Ask OHLC
 	// Mid is the midpoint series. When Bid and Ask are both present it is
 	// exactly MidOf(Bid, Ask); Validate enforces that.
 	Mid OHLC
+	// Trade is the series of traded prices, for sources that give trades. It is
+	// part of the API model; whether and how it is persisted is a separate
+	// decision (canonical-v2 stores bid, ask and mid only).
+	Trade OHLC
+}
 
-	// Volume is the provider's activity (tick) count, not a tradable quantity.
-	Volume int64
+// OHLC returns the preferred available price series: Mid, then Trade, then Bid,
+// then Ask, and the zero OHLC when the bar has none. It is for code that wants
+// "the price" and does not care which basis; a caller that needs a specific
+// basis reads that field, and execution that needs the bid or the ask must check
+// those fields itself, since this never substitutes one side for the other
+// silently when a different series is present.
+func (b Bar) OHLC() OHLC {
+	for _, s := range []OHLC{b.Mid, b.Trade, b.Bid, b.Ask} {
+		if !s.IsZero() {
+			return s
+		}
+	}
+	return OHLC{}
 }
 
 // MidOf derives the midpoint series from bid and ask: the exact midpoint at each
@@ -77,10 +102,10 @@ func MidOf(bid, ask OHLC) (OHLC, error) {
 	} {
 		sum, err := c.bid.Add(c.ask)
 		if err != nil {
-			return OHLC{}, fmt.Errorf("canonical: mid: %w", err)
+			return OHLC{}, fmt.Errorf("marketdata: mid: %w", err)
 		}
 		if *c.dst, err = sum.MulRate(half); err != nil {
-			return OHLC{}, fmt.Errorf("canonical: mid: %w", err)
+			return OHLC{}, fmt.Errorf("marketdata: mid: %w", err)
 		}
 	}
 	return m, nil
@@ -99,8 +124,9 @@ func (b Bar) IsAvailable(at time.Time) bool {
 
 // Validate reports ErrInvalidBar or ErrCrossed (wrapped, with what is wrong)
 // unless the bar is a possible observation. It does not check alignment to an
-// interval or that AvailableAt follows a policy; those depend on the interval
-// (see Aligned and AvailableAt).
+// interval or that AvailableAt follows a policy; those depend on the interval and
+// the policy, and belong to the storage that applies them. The trade series has
+// no relation to bid and ask, so only its own shape is checked.
 func (b Bar) Validate() error {
 	if b.Time.IsZero() {
 		return fmt.Errorf("%w: no opening time", ErrInvalidBar)
@@ -115,21 +141,21 @@ func (b Bar) Validate() error {
 	if b.Volume < 0 {
 		return fmt.Errorf("%w: volume %d is negative", ErrInvalidBar, b.Volume)
 	}
-	if !b.Bid.Present() && !b.Ask.Present() && !b.Mid.Present() {
+	if b.Bid.IsZero() && b.Ask.IsZero() && b.Mid.IsZero() && b.Trade.IsZero() {
 		return fmt.Errorf("%w: %s has no prices", ErrInvalidBar, b.Time.UTC().Format(time.RFC3339))
 	}
 	for _, s := range []struct {
 		name string
 		ohlc OHLC
-	}{{"bid", b.Bid}, {"ask", b.Ask}, {"mid", b.Mid}} {
-		if !s.ohlc.Present() {
+	}{{"bid", b.Bid}, {"ask", b.Ask}, {"mid", b.Mid}, {"trade", b.Trade}} {
+		if s.ohlc.IsZero() {
 			continue
 		}
 		if err := s.ohlc.validate(); err != nil {
 			return fmt.Errorf("%w: %s: %v", ErrInvalidBar, s.name, err)
 		}
 	}
-	if !b.Bid.Present() || !b.Ask.Present() {
+	if b.Bid.IsZero() || b.Ask.IsZero() {
 		return nil // a single-sided source: nothing to cross or derive
 	}
 	for _, c := range []struct {

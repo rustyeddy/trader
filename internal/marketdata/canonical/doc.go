@@ -1,8 +1,11 @@
-// Package canonical is Trader's provider-neutral bar store: the Bar with its bid,
-// ask and mid OHLC (each optional, mid derived once with MidOf), its availability
-// time, the canonical-v2 file that holds one month of them, and the alignment and
-// availability rule for the H1 and D1 intervals (ADR-090). It imports num and the layout resolver and
-// never a provider; a provider package maps its raw records into this one.
+// Package canonical is Trader's canonical bar store: the canonical-v2 file that
+// holds one month of marketdata.Bar values, and the alignment and availability
+// rule for the H1 and D1 intervals (ADR-090). The Bar itself, with its optional
+// bid, ask, mid and trade series and the validation of what a possible bar is,
+// is the public marketdata.Bar (ADR-091); canonical stores a Bar's bid, ask and
+// mid and refuses a bar that carries a trade series, which this schema does not
+// persist. It imports marketdata, num and the layout resolver and never a
+// provider; a provider package maps its raw records into marketdata.Bar.
 //
 // # File format
 //

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -76,8 +77,8 @@ func parsePrice(s string, decimals int) (num.Price, error) {
 
 // formatOHLC writes the four prices of one series, or four empty fields when the
 // series is absent.
-func formatOHLC(o OHLC, decimals int) ([]string, error) {
-	if !o.Present() {
+func formatOHLC(o marketdata.OHLC, decimals int) ([]string, error) {
+	if o.IsZero() {
 		return []string{"", "", "", ""}, nil
 	}
 	out := make([]string, 0, 4)
@@ -93,7 +94,7 @@ func formatOHLC(o OHLC, decimals int) ([]string, error) {
 
 // parseOHLC reads four fields as one series: all empty is an absent series, and
 // a series with some fields empty is an error.
-func parseOHLC(fields []string, decimals int) (OHLC, error) {
+func parseOHLC(fields []string, decimals int) (marketdata.OHLC, error) {
 	empty := 0
 	for _, f := range fields {
 		if f == "" {
@@ -101,19 +102,19 @@ func parseOHLC(fields []string, decimals int) (OHLC, error) {
 		}
 	}
 	if empty == len(fields) {
-		return OHLC{}, nil
+		return marketdata.OHLC{}, nil
 	}
 	if empty != 0 {
-		return OHLC{}, fmt.Errorf("a price series is either all present or all empty, got %q", fields)
+		return marketdata.OHLC{}, fmt.Errorf("a price series is either all present or all empty, got %q", fields)
 	}
 	var p [4]num.Price
 	for i, f := range fields {
 		var err error
 		if p[i], err = parsePrice(f, decimals); err != nil {
-			return OHLC{}, err
+			return marketdata.OHLC{}, err
 		}
 	}
-	return OHLC{p[0], p[1], p[2], p[3]}, nil
+	return marketdata.OHLC{Open: p[0], High: p[1], Low: p[2], Close: p[3]}, nil
 }
 
 // Encode writes f in canonical-v2 form after validating it: the schema comment,
@@ -157,7 +158,7 @@ func Encode(ctx context.Context, w io.Writer, f File) error {
 		}
 		row := []string{formatTime(b.Time), formatTime(b.AvailableAt)}
 		for _, s := range []struct {
-			o        OHLC
+			o        marketdata.OHLC
 			decimals int
 		}{{b.Bid, priceDecimals}, {b.Ask, priceDecimals}, {b.Mid, midDecimals}} {
 			fields, err := formatOHLC(s.o, s.decimals)
@@ -363,30 +364,30 @@ func parseBadLine(s string) (BadRecord, error) {
 	return BadRecord{Time: t, Reason: Reason(got["reason"]), RawRow: row}, nil
 }
 
-func parseBar(rec []string) (Bar, error) {
+func parseBar(rec []string) (marketdata.Bar, error) {
 	t, err := parseTime(rec[0])
 	if err != nil {
-		return Bar{}, err
+		return marketdata.Bar{}, err
 	}
 	avail, err := parseTime(rec[1])
 	if err != nil {
-		return Bar{}, err
+		return marketdata.Bar{}, err
 	}
 	bid, err := parseOHLC(rec[2:6], priceDecimals)
 	if err != nil {
-		return Bar{}, fmt.Errorf("bid: %w", err)
+		return marketdata.Bar{}, fmt.Errorf("bid: %w", err)
 	}
 	ask, err := parseOHLC(rec[6:10], priceDecimals)
 	if err != nil {
-		return Bar{}, fmt.Errorf("ask: %w", err)
+		return marketdata.Bar{}, fmt.Errorf("ask: %w", err)
 	}
 	mid, err := parseOHLC(rec[10:14], midDecimals)
 	if err != nil {
-		return Bar{}, fmt.Errorf("mid: %w", err)
+		return marketdata.Bar{}, fmt.Errorf("mid: %w", err)
 	}
 	vol, err := strconv.ParseInt(rec[14], 10, 64)
 	if err != nil {
-		return Bar{}, fmt.Errorf("volume %q: %v", rec[14], err)
+		return marketdata.Bar{}, fmt.Errorf("volume %q: %v", rec[14], err)
 	}
-	return Bar{Time: t, AvailableAt: avail, Bid: bid, Ask: ask, Mid: mid, Volume: vol}, nil
+	return marketdata.Bar{Time: t, AvailableAt: avail, Bid: bid, Ask: ask, Mid: mid, Volume: vol}, nil
 }

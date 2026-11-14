@@ -11,16 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/rustyeddy/trader/internal/marketdata/oanda"
 	"github.com/rustyeddy/trader/num"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-
-func utc(y int, m time.Month, d, h int) time.Time { return time.Date(y, m, d, h, 0, 0, 0, time.UTC) }
 
 func rec(t time.Time, bidOpen string, complete bool) oanda.Record {
 	p := num.MustParsePrice

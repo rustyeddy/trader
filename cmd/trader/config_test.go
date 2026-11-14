@@ -1,20 +1,12 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func writeConfig(t *testing.T, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "trader.yml")
-	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
-	return path
-}
 
 func TestLoadConfig_ReadsTheNestedMarketdataBlock(t *testing.T) {
 	path := writeConfig(t, "marketdata:\n  root: /somewhere\n  provider: oanda\n  base_url: https://example.test\n  instruments: [EURUSD, GBPUSD]\n  interval: h1\n")

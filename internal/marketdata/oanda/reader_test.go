@@ -13,6 +13,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCrossCheckSchemaAccepts(t *testing.T) {
+	meta := eurusdMeta()
+	comment := "# schema=raw-v1 source=oanda instrument=EURUSD tf=h1 year=2020 month=05"
+	require.NoError(t, crossCheckSchema(comment, "p.csv", meta, "h1"))
+}
+
+// A daily partition's path token (d1) and comment tf (d) differ but resolve to
+// the same interval; the cross-check must accept that.
+func TestCrossCheckSchemaAcceptsDailyTokenVariance(t *testing.T) {
+	meta := eurusdMeta()
+	meta.Interval = RawD1
+	comment := "# schema=raw-v1 source=oanda instrument=EURUSD tf=d year=2020 month=05"
+	require.NoError(t, crossCheckSchema(comment, "p.csv", meta, "d1"))
+}
+
+// A "# ..." comment that is not a schema line is ignored, not rejected.
+func TestCrossCheckSchemaIgnoresNonSchemaComment(t *testing.T) {
+	require.NoError(t, crossCheckSchema("# just a note", "p.csv", eurusdMeta(), "h1"))
+}
+
+func TestCrossCheckSchemaRejects(t *testing.T) {
+	cases := map[string]string{
+		"bad schema version":  "# schema=raw-v2 source=oanda instrument=EURUSD tf=h1 year=2020 month=05",
+		"bad source":          "# schema=raw-v1 source=dukascopy instrument=EURUSD tf=h1 year=2020 month=05",
+		"instrument mismatch": "# schema=raw-v1 source=oanda instrument=GBPUSD tf=h1 year=2020 month=05",
+		"tf mismatch":         "# schema=raw-v1 source=oanda instrument=EURUSD tf=h4 year=2020 month=05",
+		"unsupported tf":      "# schema=raw-v1 source=oanda instrument=EURUSD tf=w1 year=2020 month=05",
+		"year mismatch":       "# schema=raw-v1 source=oanda instrument=EURUSD tf=h1 year=2019 month=05",
+		"month mismatch":      "# schema=raw-v1 source=oanda instrument=EURUSD tf=h1 year=2020 month=06",
+	}
+	for kind, comment := range cases {
+		err := crossCheckSchema(comment, "p.csv", eurusdMeta(), "h1")
+		assert.ErrorIs(t, err, ErrMalformedData, kind)
+	}
+}
+
 func fixture(name string) string { return filepath.Join("testdata", name) }
 
 func TestReadFileEURUSDH1(t *testing.T) {
@@ -205,4 +241,15 @@ func TestOpenMissingFile(t *testing.T) {
 	// A well-formed, in-scope name that does not exist on disk.
 	_, err := Open(fixture("EURUSD-1999-01-h1.csv"))
 	assert.Error(t, err)
+}
+
+func TestReader_RejectsARowOutsideItsPartitionMonth(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "05")
+	writeFile(t, dir, "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+h1Row(at(2020, 5, 1, 0), true)+h1Row(at(2020, 6, 1, 0), true))
+
+	_, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2020, time.May})
+
+	require.ErrorIs(t, err, ErrMalformedData)
+	assert.Contains(t, err.Error(), "2020-06-01T00:00:00Z")
 }
