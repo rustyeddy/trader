@@ -30,8 +30,8 @@ func TestEncode_WritesTheDocumentedShape(t *testing.T) {
 	assert.Equal(t, "# schema=canonical-v2 provider=oanda symbol=EURUSD interval=h1 year=2024 month=01", lines[0])
 	assert.Equal(t, `# meta {"raw_fingerprint":"sha256:abc","builder_version":"builder-v1","validator_version":"validator-v1","availability_policy":"scheduled-close-v1","built_at":"2026-11-14T12:00:00Z","bar_count":3,"bad_count":1,"first_bar":"2024-01-02T00:00:00Z","last_bar":"2024-01-02T02:00:00Z"}`, lines[1])
 	assert.Equal(t, "# bad time=2024-01-02T09:00:00Z reason=crossed raw_row=4", lines[2])
-	assert.Equal(t, "time,available_at,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume", lines[3])
-	assert.Equal(t, "2024-01-02T00:00:00Z,2024-01-02T01:00:00Z,1.10000,1.10100,1.09900,1.10050,1.10010,1.10111,1.09911,1.10061,100", lines[4])
+	assert.Equal(t, "time,available_at,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,mid_o,mid_h,mid_l,mid_c,volume", lines[3])
+	assert.Equal(t, "2024-01-02T00:00:00Z,2024-01-02T01:00:00Z,1.10000,1.10100,1.09900,1.10050,1.10010,1.10111,1.09911,1.10061,1.100050,1.101055,1.099055,1.100555,100", lines[4])
 }
 
 func TestEncode_RoundTripsGoodAndBadRecords(t *testing.T) {
@@ -54,6 +54,7 @@ func TestEncode_RoundTripsGoodAndBadRecords(t *testing.T) {
 		assert.True(t, f.Bars[i].AvailableAt.Equal(got.Bars[i].AvailableAt))
 		assert.Equal(t, f.Bars[i].Bid, got.Bars[i].Bid)
 		assert.Equal(t, f.Bars[i].Ask, got.Bars[i].Ask)
+		assert.Equal(t, f.Bars[i].Mid, got.Bars[i].Mid)
 		assert.Equal(t, f.Bars[i].Volume, got.Bars[i].Volume)
 	}
 	require.Len(t, got.Bad, 3)
@@ -86,8 +87,8 @@ func TestEncode_RefusesWhatIsNotValidOrNotRepresentable(t *testing.T) {
 
 	// A price with a sixth decimal is an error, never rounded.
 	f := goodFile(t)
+	f.Bars[0].Ask, f.Bars[0].Mid = OHLC{}, OHLC{} // a bid-only bar, so mid does not depend on it
 	f.Bars[0].Bid.Open = px("1.100005")
-	f.Bars[0].Bid.Low = px("1.09900")
 	err := Encode(context.Background(), &bytes.Buffer{}, f)
 	assert.ErrorIs(t, err, ErrMalformedData)
 	assert.Contains(t, err.Error(), "decimals")
@@ -191,15 +192,43 @@ func TestDecode_ReportsAReadFailure(t *testing.T) {
 }
 
 func TestParsePriceAndFormatPrice(t *testing.T) {
-	s, err := formatPrice(px("1.1"))
+	s, err := formatPrice(px("1.1"), 5)
 	require.NoError(t, err)
 	assert.Equal(t, "1.10000", s)
-	s, err = formatPrice(px("107"))
+	s, err = formatPrice(px("107"), 5)
 	require.NoError(t, err)
 	assert.Equal(t, "107.00000", s)
-	p, err := parsePrice("107.27200")
+	s, err = formatPrice(px("1.100555"), 6)
+	require.NoError(t, err)
+	assert.Equal(t, "1.100555", s)
+	_, err = formatPrice(px("1.100555"), 5)
+	assert.ErrorIs(t, err, ErrMalformedData)
+	p, err := parsePrice("107.27200", 5)
 	require.NoError(t, err)
 	assert.Equal(t, px("107.272"), p)
+	_, err = parsePrice("107.27200", 6)
+	assert.Error(t, err)
+}
+
+func TestEncode_AbsentSeriesAreEmptyFieldsAndRoundTrip(t *testing.T) {
+	f := File{Key: jan24H1(), Meta: testMeta()}
+	midOnly := goodBar(t, utc(2024, 1, 2, 0))
+	midOnly.Bid, midOnly.Ask = OHLC{}, OHLC{}
+	bidOnly := goodBar(t, utc(2024, 1, 2, 1))
+	bidOnly.Ask, bidOnly.Mid = OHLC{}, OHLC{}
+	f.Bars = []Bar{midOnly, bidOnly}
+
+	out := encode(t, f)
+	got, err := Decode(strings.NewReader(out))
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "2024-01-02T00:00:00Z,2024-01-02T01:00:00Z,,,,,,,,,1.100050,1.101055,1.099055,1.100555,100\n")
+	assert.Contains(t, out, "2024-01-02T01:00:00Z,2024-01-02T02:00:00Z,1.10000,1.10100,1.09900,1.10050,,,,,,,,,100\n")
+	assert.Equal(t, f.Bars[0].Mid, got.Bars[0].Mid)
+	assert.False(t, got.Bars[0].Bid.Present())
+	assert.False(t, got.Bars[1].Ask.Present())
+	assert.False(t, got.Bars[1].Mid.Present())
+	assert.Equal(t, f.Bars[1].Bid, got.Bars[1].Bid)
 }
 
 func TestEncode_StopsWhenCancelledEvenWithNoGoodBars(t *testing.T) {

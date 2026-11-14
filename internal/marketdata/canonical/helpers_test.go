@@ -18,10 +18,13 @@ func goodBar(t *testing.T, open time.Time) Bar {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Bar{Time: open, AvailableAt: avail,
-		Bid:    OHLC{px("1.10000"), px("1.10100"), px("1.09900"), px("1.10050")},
-		Ask:    OHLC{px("1.10010"), px("1.10111"), px("1.09911"), px("1.10061")},
-		Volume: 100}
+	bid := OHLC{px("1.10000"), px("1.10100"), px("1.09900"), px("1.10050")}
+	ask := OHLC{px("1.10010"), px("1.10111"), px("1.09911"), px("1.10061")}
+	mid, err := MidOf(bid, ask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Bar{Time: open, AvailableAt: avail, Bid: bid, Ask: ask, Mid: mid, Volume: 100}
 }
 
 func testMeta() Meta {

@@ -25,9 +25,18 @@ type OHLC struct {
 	Open, High, Low, Close num.Price
 }
 
-// Bar is one canonical observation: the bid and ask OHLC of one interval, the
-// provider's activity count, when the bar opened and the earliest moment a
-// consumer may use it (ADR-090).
+// Present reports whether the side carries prices: an OHLC with every price zero
+// is a side the source did not give.
+func (o OHLC) Present() bool { return o != OHLC{} }
+
+// Bar is one canonical observation: up to three price series for one interval
+// (bid, ask and mid), the provider's activity count, when the bar opened and the
+// earliest moment a consumer may use it (ADR-090).
+//
+// Each series is optional: an absent series is the zero OHLC, and at least one
+// must be present. A source that quotes both sides gives Bid and Ask and Mid is
+// derived from them once, with MidOf; a source that gives a single price writes
+// it to the series it is (often Mid) and leaves the others absent.
 type Bar struct {
 	// Time is the bar's opening instant.
 	Time time.Time
@@ -39,29 +48,32 @@ type Bar struct {
 
 	Bid OHLC
 	Ask OHLC
+	// Mid is the midpoint series. When Bid and Ask are both present it is
+	// exactly MidOf(Bid, Ask); Validate enforces that.
+	Mid OHLC
 
 	// Volume is the provider's activity (tick) count, not a tradable quantity.
 	Volume int64
 }
 
-// Mid returns the exact midpoint of the bid and ask at each of open, high, low
-// and close. Half a pip is representable, so nothing is rounded for any price
-// with up to seven decimals.
+// MidOf derives the midpoint series from bid and ask: the exact midpoint at each
+// of open, high, low and close. Half a pip is representable, so nothing is
+// rounded for prices with up to seven decimals. Open and close are preserved on
+// both sides of a bar, so the midpoint is always recomputable from what is stored.
 //
 // The high of the result is the midpoint of the bid high and the ask high, which
 // are the values of the provider's two candles; it need not equal the high of a
-// tick-by-tick mid series. Open and close are preserved on both sides, so the
-// midpoint is always recomputable from what is stored.
-func (b Bar) Mid() (OHLC, error) {
+// tick-by-tick mid series.
+func MidOf(bid, ask OHLC) (OHLC, error) {
 	var m OHLC
 	for _, c := range []struct {
 		dst      *num.Price
 		bid, ask num.Price
 	}{
-		{&m.Open, b.Bid.Open, b.Ask.Open},
-		{&m.High, b.Bid.High, b.Ask.High},
-		{&m.Low, b.Bid.Low, b.Ask.Low},
-		{&m.Close, b.Bid.Close, b.Ask.Close},
+		{&m.Open, bid.Open, ask.Open},
+		{&m.High, bid.High, ask.High},
+		{&m.Low, bid.Low, ask.Low},
+		{&m.Close, bid.Close, ask.Close},
 	} {
 		sum, err := c.bid.Add(c.ask)
 		if err != nil {
@@ -103,11 +115,22 @@ func (b Bar) Validate() error {
 	if b.Volume < 0 {
 		return fmt.Errorf("%w: volume %d is negative", ErrInvalidBar, b.Volume)
 	}
-	if err := b.Bid.validate(); err != nil {
-		return fmt.Errorf("%w: bid: %v", ErrInvalidBar, err)
+	if !b.Bid.Present() && !b.Ask.Present() && !b.Mid.Present() {
+		return fmt.Errorf("%w: %s has no prices", ErrInvalidBar, b.Time.UTC().Format(time.RFC3339))
 	}
-	if err := b.Ask.validate(); err != nil {
-		return fmt.Errorf("%w: ask: %v", ErrInvalidBar, err)
+	for _, s := range []struct {
+		name string
+		ohlc OHLC
+	}{{"bid", b.Bid}, {"ask", b.Ask}, {"mid", b.Mid}} {
+		if !s.ohlc.Present() {
+			continue
+		}
+		if err := s.ohlc.validate(); err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrInvalidBar, s.name, err)
+		}
+	}
+	if !b.Bid.Present() || !b.Ask.Present() {
+		return nil // a single-sided source: nothing to cross or derive
 	}
 	for _, c := range []struct {
 		name     string
@@ -120,6 +143,13 @@ func (b Bar) Validate() error {
 			return fmt.Errorf("%w: at %s the %s ask %s is below the bid %s", ErrCrossed,
 				b.Time.UTC().Format(time.RFC3339), c.name, c.ask, c.bid)
 		}
+	}
+	want, err := MidOf(b.Bid, b.Ask)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidBar, err)
+	}
+	if b.Mid != want {
+		return fmt.Errorf("%w: at %s the mid is not the midpoint of the bid and ask", ErrInvalidBar, b.Time.UTC().Format(time.RFC3339))
 	}
 	return nil
 }
