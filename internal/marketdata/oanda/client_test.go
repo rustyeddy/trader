@@ -18,8 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- Fake HTTP transport: no test in this file makes a real network call ---
-
 type fakeResponse struct {
 	status int
 	body   string
@@ -118,8 +116,6 @@ func newTestClient(t *testing.T, doer HTTPDoer, opts ...func(*ClientConfig)) *Cl
 func withPageSize(n int) func(*ClientConfig) {
 	return func(c *ClientConfig) { c.pageSize = n }
 }
-
-// --- Tests ---
 
 func TestFetchCandles_SinglePage(t *testing.T) {
 	doer := &fakeDoer{responses: []fakeResponse{
@@ -260,7 +256,8 @@ func TestFetchCandles_AnExplicitEmptyArrayIsAnEmptyRange(t *testing.T) {
 type stallBody struct{ ctx context.Context }
 
 func (b stallBody) Read([]byte) (int, error) { <-b.ctx.Done(); return 0, b.ctx.Err() }
-func (stallBody) Close() error               { return nil }
+
+func (stallBody) Close() error { return nil }
 
 type stallDoer struct{ cancel context.CancelFunc }
 
@@ -508,12 +505,6 @@ func TestToGranularity(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnsupportedInterval)
 }
 
-func TestStaticCredential(t *testing.T) {
-	tok, err := StaticCredential("abc").Token(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, "abc", tok)
-}
-
 func TestNewClient_BaseURLMayCarryTheV3Suffix(t *testing.T) {
 	for _, base := range []string{
 		"https://api-fxtrade.oanda.com",
@@ -543,8 +534,6 @@ func TestNormalizeBaseURL(t *testing.T) {
 		assert.Equal(t, want, normalizeBaseURL(in), in)
 	}
 }
-
-// --- pacing, backoff and the injected sleeper ---
 
 // recordingSleeper records every requested delay and returns at once.
 type recordingSleeper struct {
@@ -689,8 +678,6 @@ func TestNewClient_PacesWhenAnIntervalIsConfigured(t *testing.T) {
 	assert.Equal(t, []time.Duration{time.Second}, rs.delays, "the second page waits out the interval")
 }
 
-// --- base URL ---
-
 func TestNewClient_BaseURLRules(t *testing.T) {
 	cred := StaticCredential("x")
 	for base, ok := range map[string]bool{
@@ -714,8 +701,6 @@ func TestNewClient_BaseURLRules(t *testing.T) {
 		}
 	}
 }
-
-// --- the token never leaks ---
 
 const echoToken = "tok-" + "ECHO-9f8e7d"
 
@@ -814,8 +799,6 @@ func TestFetchCandles_CredentialErrorIsReportedAndNotRetried(t *testing.T) {
 	assert.Equal(t, 0, doer.requestCount())
 }
 
-// --- response validation ---
-
 func TestFetchCandles_RejectsMalformedPages(t *testing.T) {
 	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for name, body := range map[string]string{
@@ -883,8 +866,6 @@ func TestFetchCandles_NetworkErrorAfterCancellationReportsCancellation(t *testin
 
 	assert.ErrorIs(t, err, context.Canceled)
 }
-
-// --- the real HTTP path, against a loopback server ---
 
 func TestFetchCandles_OverRealHTTP(t *testing.T) {
 	var gotAuth, gotPath string

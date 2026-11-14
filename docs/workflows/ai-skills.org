@@ -81,9 +81,26 @@ regressions, not merely increase a coverage number.
 
 - Use =github.com/stretchr/testify/require= for prerequisites and fatal
   assertions; use =github.com/stretchr/testify/assert= for independent checks.
-- Put tests in the corresponding =*_test.go= file beside the source (=intent.go=
-  → =intent_test.go=); create a separate integration test file only when behavior
-  spans multiple files/packages.
+- *One test file per source file, named after it.*  Tests for =intent.go= go in
+  =intent_test.go= and nowhere else.  Do not name test files by topic or role
+  (=helpers_test.go=, =external_test.go=, =store_test.go= for a package with no
+  =store.go=, =boundary_test.go=).  A source file with no tests of its own has no
+  test file.
+- *Tests that cross source-file boundaries* in a package, and the fixtures and
+  helpers shared by several test files, go in =<package>_test.go= (for package
+  =marketdata=: =marketdata_test.go=).  This includes godoc examples, consumer
+  tests and architecture or import-boundary checks.
+- A Go test file holds one package.  Tests that must be external (=package
+  <name>_test=: examples, exported-API consumer tests, import-boundary checks that
+  need no internals) therefore cannot share a file with internal tests of the
+  same source file.  Put them in =<package>_test.go=, and when a package has
+  cross-file tests of both kinds, write the cross-file ones as external tests
+  where they need no internals.
+- Exception: a build-tagged test (a live or smoke test) needs its own file, since
+  the tag applies to the whole file.  Name it =<package>_<tag>_test.go=, for
+  example =main_oandasmoke_test.go=.
+- When regrouping existing tests to this rule, move declarations only: no test
+  is added, removed or changed, and the test count and coverage stay the same.
 - Prefer same-package tests for private implementation behavior; use external
   =_test= packages when testing the exported API as a consumer.
 - Use descriptive =TestXxx_Scenario= names and table-driven subtests when they

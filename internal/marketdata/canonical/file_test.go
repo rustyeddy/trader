@@ -1,12 +1,12 @@
 package canonical
 
 import (
-	"github.com/rustyeddy/trader/marketdata"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/internal/marketdata/layout"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

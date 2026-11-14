@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/marketdata/layout"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -490,8 +492,6 @@ func TestInspect_MultipleDuplicateTimesSorted(t *testing.T) {
 	assert.Equal(t, time.Date(2020, 5, 1, 3, 0, 0, 0, time.UTC), p.DuplicateTimes[1])
 }
 
-// --- Path-layout verification (review finding) ---
-
 // A file nested inside an unrelated subtree beneath root -- for example
 // a "backup" directory sitting alongside the real pair directories --
 // must not be accepted as an authoritative partition merely because its
@@ -614,8 +614,6 @@ func TestInspect_MalformedDataRowAfterValidHeader(t *testing.T) {
 	assert.ErrorIs(t, p.Err, ErrMalformedData)
 }
 
-// --- Context cancellation during file parsing (review finding) ---
-
 // A context cancelled before inspectFile parses a file's rows must
 // propagate as cancellation, not be misclassified as
 // PartitionStatusMalformed. This exercises the same failure mode
@@ -733,4 +731,22 @@ func recordReads(t *testing.T) *[]string {
 	}
 	t.Cleanup(func() { readFile = orig })
 	return &reads
+}
+
+func TestInspect_DoesNotReadTheLegacyLayout(t *testing.T) {
+	root := t.TempDir()
+	legacy := filepath.Join(root, "raw", "oanda", "EURUSD", "2020", "05")
+	writeFile(t, legacy, "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+h1Row(at(2020, 5, 1, 0), true))
+
+	_, err := Inspect(context.Background(), root)
+
+	require.Error(t, err, "no oanda/raw directory exists: the legacy tree is not a fallback")
+	assert.ErrorIs(t, err, fs.ErrNotExist)
+	assert.Contains(t, err.Error(), filepath.Join(root, "oanda", "raw"), "the path that was looked up is reported")
+}
+
+func TestInspect_RejectsAnEmptyRoot(t *testing.T) {
+	_, err := Inspect(context.Background(), "")
+
+	assert.ErrorIs(t, err, layout.ErrInvalidRoot)
 }
