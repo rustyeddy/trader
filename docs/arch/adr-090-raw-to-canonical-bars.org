@@ -45,6 +45,13 @@ ask prices or an availability time, and raw is complete and local, so the existi
 files are rebuilt from raw (local, no network) rather than migrated. =canonical-v1=
 files are not read by the new code.
 
+The =Bar= and =OHLC= types below are the public =marketdata.Bar= and
+=marketdata.OHLC= (#633, ADR-091), not types of the canonical package; they also
+carry an optional =Trade= series and an =OHLC()= method that picks the preferred
+series (mid, trade, bid, ask). canonical-v2 stores bid, ask and mid only and
+refuses a bar with a trade series; persisting trade needs its own schema decision.
+The snippet shows the fields canonical-v2 stores.
+
 #+begin_src go
 type OHLC struct {
     Open, High, Low, Close num.Price
@@ -178,9 +185,11 @@ per-partition lock, and the report says it was replaced. A build never touches r
 
 ** 5. Packages and the command
 
-- =internal/marketdata/canonical=: =OHLC=, =Bar=, =MidOf=, the =canonical-v2= reader
-  and writer, the bad-record type, validation and the alignment and availability
-  rule. It imports =num=, =layout= and the standard library; never a provider.
+- =marketdata= (public): =OHLC=, =Bar=, =MidOf= and bar validation (#633). It
+  imports =num= and the standard library only.
+- =internal/marketdata/canonical=: the =canonical-v2= reader and writer, the
+  bad-record type, file validation and the alignment and availability rule. It
+  imports =marketdata=, =num=, =layout= and the standard library; never a provider.
 - =internal/marketdata/oanda=: the mapping from a raw record to a canonical bar or
   a bad record. It imports =canonical=.
 - =cmd/trader=: =trader data build=, flags as =download= (=--data-root=,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/rustyeddy/trader/marketdata"
 	"strings"
 	"testing"
 	"time"
@@ -87,7 +88,7 @@ func TestEncode_RefusesWhatIsNotValidOrNotRepresentable(t *testing.T) {
 
 	// A price with a sixth decimal is an error, never rounded.
 	f := goodFile(t)
-	f.Bars[0].Ask, f.Bars[0].Mid = OHLC{}, OHLC{} // a bid-only bar, so mid does not depend on it
+	f.Bars[0].Ask, f.Bars[0].Mid = marketdata.OHLC{}, marketdata.OHLC{} // a bid-only bar, so mid does not depend on it
 	f.Bars[0].Bid.Open = px("1.100005")
 	err := Encode(context.Background(), &bytes.Buffer{}, f)
 	assert.ErrorIs(t, err, ErrMalformedData)
@@ -213,10 +214,10 @@ func TestParsePriceAndFormatPrice(t *testing.T) {
 func TestEncode_AbsentSeriesAreEmptyFieldsAndRoundTrip(t *testing.T) {
 	f := File{Key: jan24H1(), Meta: testMeta()}
 	midOnly := goodBar(t, utc(2024, 1, 2, 0))
-	midOnly.Bid, midOnly.Ask = OHLC{}, OHLC{}
+	midOnly.Bid, midOnly.Ask = marketdata.OHLC{}, marketdata.OHLC{}
 	bidOnly := goodBar(t, utc(2024, 1, 2, 1))
-	bidOnly.Ask, bidOnly.Mid = OHLC{}, OHLC{}
-	f.Bars = []Bar{midOnly, bidOnly}
+	bidOnly.Ask, bidOnly.Mid = marketdata.OHLC{}, marketdata.OHLC{}
+	f.Bars = []marketdata.Bar{midOnly, bidOnly}
 
 	out := encode(t, f)
 	got, err := Decode(strings.NewReader(out))
@@ -225,9 +226,9 @@ func TestEncode_AbsentSeriesAreEmptyFieldsAndRoundTrip(t *testing.T) {
 	assert.Contains(t, out, "2024-01-02T00:00:00Z,2024-01-02T01:00:00Z,,,,,,,,,1.100050,1.101055,1.099055,1.100555,100\n")
 	assert.Contains(t, out, "2024-01-02T01:00:00Z,2024-01-02T02:00:00Z,1.10000,1.10100,1.09900,1.10050,,,,,,,,,100\n")
 	assert.Equal(t, f.Bars[0].Mid, got.Bars[0].Mid)
-	assert.False(t, got.Bars[0].Bid.Present())
-	assert.False(t, got.Bars[1].Ask.Present())
-	assert.False(t, got.Bars[1].Mid.Present())
+	assert.True(t, got.Bars[0].Bid.IsZero())
+	assert.True(t, got.Bars[1].Ask.IsZero())
+	assert.True(t, got.Bars[1].Mid.IsZero())
 	assert.Equal(t, f.Bars[1].Bid, got.Bars[1].Bid)
 }
 
