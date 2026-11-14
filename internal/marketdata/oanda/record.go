@@ -1,6 +1,7 @@
 package oanda
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
@@ -82,4 +83,16 @@ type Record struct {
 	// provider-declared metadata; distinguishing it from a calendar-derived
 	// gap is a later normalization concern, not this reader's.
 	Complete bool
+}
+
+// checkRecordMonth reports ErrMalformedData when the record's UTC open time is
+// not in the partition's year and month. Every interval, daily included, is
+// partitioned by the UTC month of the bar's opening time, as the archive is
+// (ADR-089), so a row in the wrong file is a mis-assembled month, never data.
+func checkRecordMonth(key PartitionKey, t time.Time) error {
+	u := t.UTC()
+	if u.Year() != key.Year || u.Month() != key.Month {
+		return fmt.Errorf("%w: record at %s is not in partition %04d-%02d", ErrMalformedData, u.Format(time.RFC3339), key.Year, int(key.Month))
+	}
+	return nil
 }

@@ -99,6 +99,11 @@ func WritePartition(ctx context.Context, root string, key PartitionKey, records 
 
 // writeLocked is the atomic write itself. The caller holds the partition's lock.
 func writeLocked(ctx context.Context, path string, key PartitionKey, records []Record, mustNotExist bool) error {
+	for _, r := range records {
+		if err := checkRecordMonth(key, r.Time); err != nil {
+			return fmt.Errorf("oanda: write partition: %w", err)
+		}
+	}
 	sorted := append([]Record(nil), records...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
 

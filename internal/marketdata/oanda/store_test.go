@@ -115,20 +115,20 @@ func TestWritePartition_RefusesAnOutOfScopeSymbolAndWritesNothing(t *testing.T) 
 	assert.Empty(t, entries)
 }
 
-// Daily bars open at 17:00 America/New_York, so one can open in the previous
-// UTC month. The partition is the file the caller names, never re-derived from
-// the row time, and a month and DST boundary survives write, read and inspect
-// unchanged (ADR-089).
-func TestWritePartition_DailyBarsKeepTheMonthOfTheirFileAcrossBoundaries(t *testing.T) {
+// Every interval, daily included, is partitioned by the UTC month of the bar's
+// opening time, as the archive is (ADR-089). Daily bars open at 17:00
+// America/New_York, so the last bar of a month opens on its last evening in UTC
+// and belongs to that month's file, across month and DST boundaries.
+func TestWritePartition_DailyBarsAreFiledByTheirUTCOpeningMonth(t *testing.T) {
 	cases := []struct {
 		name  string
 		year  int
 		month time.Month
 		open  time.Time
 	}{
-		{"summer time, opens the evening before the month", 2020, time.May, at(2020, time.April, 30, 21)},
-		{"winter time, opens the evening before the month", 2020, time.December, at(2020, time.November, 30, 22)},
-		{"leap day, winter time", 2020, time.March, at(2020, time.February, 29, 22)},
+		{"summer time, last bar of April", 2020, time.April, at(2020, time.April, 30, 21)},
+		{"winter time, last bar of November", 2020, time.November, at(2020, time.November, 30, 22)},
+		{"leap day, winter time", 2020, time.February, at(2020, time.February, 29, 22)},
 		{"the Sunday the clocks go forward", 2020, time.March, at(2020, time.March, 8, 22)},
 		{"the Sunday the clocks go back", 2020, time.November, at(2020, time.November, 1, 22)},
 		{"first bar of a month by UTC", 2020, time.June, at(2020, time.June, 1, 21)},
@@ -136,11 +136,11 @@ func TestWritePartition_DailyBarsKeepTheMonthOfTheirFileAcrossBoundaries(t *test
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			rec := testRecord(tc.open, true)
+			key := PartitionKey{"EURUSD", RawD1, tc.year, tc.month}
 
-			require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawD1, tc.year, tc.month}, []Record{rec}, true))
+			require.NoError(t, WritePartition(context.Background(), root, key, []Record{testRecord(tc.open, true)}, true))
 
-			got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawD1, tc.year, tc.month})
+			got, err := ReadPartitionRecords(context.Background(), root, key)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 			assert.True(t, got[0].Time.Equal(tc.open), "the provider's timestamp is kept verbatim")
@@ -150,6 +150,62 @@ func TestWritePartition_DailyBarsKeepTheMonthOfTheirFileAcrossBoundaries(t *test
 			assert.Empty(t, inv.Skipped)
 		})
 	}
+}
+
+// A row in the wrong month's file is a mis-assembled partition: the writer
+// refuses it before touching the disk, for every interval, and an existing file
+// is left as it was.
+func TestWritePartition_RefusesARowOutsideItsPartitionMonth(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  PartitionKey
+		open time.Time
+	}{
+		{"daily bar of April in the May file", PartitionKey{"EURUSD", RawD1, 2020, time.May}, at(2020, time.April, 30, 21)},
+		{"hourly bar of the next month", PartitionKey{"EURUSD", RawH1, 2020, time.May}, at(2020, time.June, 1, 0)},
+		{"same month, another year", PartitionKey{"EURUSD", RawH4, 2020, time.May}, at(2021, time.May, 3, 0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+
+			err := WritePartition(context.Background(), root, tc.key, []Record{testRecord(tc.open, true)}, true)
+
+			require.ErrorIs(t, err, ErrMalformedData)
+			entries, rerr := os.ReadDir(root)
+			require.NoError(t, rerr)
+			assert.Empty(t, entries, "nothing is created, not even the directories")
+		})
+	}
+}
+
+func TestUpdatePartition_ARowOutsideItsMonthLeavesTheExistingFileUntouched(t *testing.T) {
+	root := t.TempDir()
+	key := PartitionKey{"EURUSD", RawD1, 2020, time.May}
+	require.NoError(t, WritePartition(context.Background(), root, key, []Record{testRecord(at(2020, time.May, 1, 21), true)}, true))
+	path, err := key.Path(root)
+	require.NoError(t, err)
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	err = UpdatePartition(context.Background(), root, key, func(existing []Record) ([]Record, error) {
+		return append(existing, testRecord(at(2020, time.April, 30, 21), true)), nil
+	})
+
+	require.ErrorIs(t, err, ErrMalformedData)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}
+
+func TestReader_RejectsARowOutsideItsPartitionMonth(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "05")
+	writeFile(t, dir, "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+h1Row(at(2020, 5, 1, 0), true)+h1Row(at(2020, 6, 1, 0), true))
+
+	_, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2020, time.May})
+
+	require.ErrorIs(t, err, ErrMalformedData)
+	assert.Contains(t, err.Error(), "2020-06-01T00:00:00Z")
 }
 
 func TestInspect_DoesNotReadTheLegacyLayout(t *testing.T) {

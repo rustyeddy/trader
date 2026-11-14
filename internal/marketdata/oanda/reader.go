@@ -147,7 +147,14 @@ func (r *Reader) Next(ctx context.Context) (Record, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		return r.parseRow(line)
+		rec, err := r.parseRow(line)
+		if err != nil {
+			return Record{}, err
+		}
+		if err := checkRecordMonth(PartitionKey{Year: r.meta.Year, Month: r.meta.Month}, rec.Time); err != nil {
+			return Record{}, fmt.Errorf("%s:%d: %w", r.path, r.line, err)
+		}
+		return rec, nil
 	}
 	if err := r.scanner.Err(); err != nil {
 		return Record{}, fmt.Errorf("%w: %s:%d: %v", ErrMalformedData, r.path, r.line, err)

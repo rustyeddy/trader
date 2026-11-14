@@ -81,16 +81,18 @@ gives back a =Partition=, and every identifier is validated as a path component:
   begins with a dot, so no separator, no =..=, no absolute path and no empty
   segment can be smuggled in;
 - =stage= is exactly =raw= or =canonical=; the year is four digits and the month
-  1 to 12, zero-padded in the path. Intraday partitions (=m1=, =h1=, =h4=) are by UTC
-  opening time. A daily partition is not assigned by a UTC rule: the resolver
-  places a =d1= bar in the month of the file it is given, because OANDA's session
-  daily bars open at 17:00 America/New_York and can begin in the previous UTC month
-  (ADR-020). The layout keeps today's file-to-month assignment unchanged, so the
-  migration renames directories only; the provider package, not the resolver,
-  decides which month holds a given daily bar. The archive's existing D1
-  placement is recorded as the convention, and tests cover representative month
-  and DST boundaries (a bar opening on the last Sunday evening of a month, and
-  across the March and November New York changes) against the archive fixtures;
+  1 to 12, zero-padded in the path. Every interval, daily included, is partitioned
+  by the UTC month of the bar's opening time. OANDA's session daily bars open at 17:00
+  America/New_York, so the last daily bar of a month opens on that month's last evening
+  in UTC and stays in that month's file (=2020-04-30T21:00:00Z= is the last row of the
+  April file). This is how the archive is laid out: a read-only check of every =d1=,
+  =h4= and =h1= file of the existing OANDA raw archive found no row whose UTC month
+  differs from its file's month. The resolver builds paths and does not look at rows;
+  the OANDA writer and reader enforce the rule and reject a row whose UTC year and
+  month differ from the partition's (=ErrMalformedData=), the writer before anything
+  is created, so a mis-assembled month can never be stored. Tests cover representative
+  month and DST boundaries (the last evening of a month, the leap day and the March
+  and November New York changes);
 - a resolved path is checked to lie under the data root;
 - a missing partition is reported with the path that was looked up. The resolver
   never searches another provider, another stage or the legacy layout.
