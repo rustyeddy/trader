@@ -13,6 +13,6 @@
 // returned here reports that path.
 //
 // Which month a bar belongs to is the provider package's rule, not this one's:
-// intraday partitions are by UTC opening time, and a daily partition keeps the
-// month of the file it is stored in (ADR-089).
+// every interval, daily included, is partitioned by the UTC month of the bar's
+// opening time, and the provider's writer and reader enforce it (ADR-089).
 package layout
