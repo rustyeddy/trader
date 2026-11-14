@@ -10,7 +10,15 @@ LINT_VERSION := v2.13.0
 all: check build
 
 # The verification gate: the same steps, in the same order, as CI.
-check: tidy-check fmt-check vet lint test race
+# The gates run one after another even under `make -j`, so a later gate never
+# runs when an earlier one fails.
+check:
+	$(MAKE) tidy-check
+	$(MAKE) fmt-check
+	$(MAKE) vet
+	$(MAKE) lint
+	$(MAKE) test
+	$(MAKE) race
 
 # tidy-check fails when go.mod/go.sum are not what `go mod tidy` would
 # produce, without modifying them. CI runs this same target.
@@ -18,7 +26,8 @@ tidy-check:
 	go mod tidy -diff
 
 fmt-check:
-	test -z "$$(gofmt -l .)"
+	@out=$$(gofmt -l .) || exit 1; \
+	if [ -n "$$out" ]; then echo "gofmt needs to run on:"; echo "$$out"; exit 1; fi
 
 test:
 	go test ./...
@@ -27,6 +36,7 @@ race:
 	go test -race ./...
 
 cover:
+	mkdir -p bin
 	go test -coverprofile=bin/cover.out ./... && go tool cover -func=bin/cover.out
 
 vet:
