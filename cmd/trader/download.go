@@ -82,6 +82,15 @@ func downloadMonth(ctx context.Context, log *slog.Logger, f candleFetcher, root,
 		return res, err
 	}
 	res.Fetched = len(fetched)
+	// The durable-storage boundary checks what the fetcher returned rather than
+	// trusting it: every candle opens inside the requested window, hence inside
+	// this partition's UTC month.
+	for _, r := range fetched {
+		if t := r.Time.UTC(); t.Before(from) || !t.Before(to) {
+			return res, fmt.Errorf("provider returned a candle opening %s, outside the requested window [%s, %s)",
+				t.Format(time.RFC3339), from.Format(time.RFC3339), to.Format(time.RFC3339))
+		}
+	}
 	var fresh []oanda.Record
 	for _, r := range fetched {
 		if !r.Complete {

@@ -220,3 +220,11 @@ of the existing archive.
   before any old path is removed. It is not part of the downloader and not part of
   stage 1. It confirms that the source tree exists and the target tree does not
   before any rename, and preserves bytes and fingerprints.
+- *Incomplete candles are never stored (2026-11-14).* A candle the provider still
+  reports as forming (=complete=false=) is not written to the raw archive: its
+  values will change and raw files are immutable. If a still-moving price is ever
+  needed, it is a tick feed, not a candle. The raw =complete= flag stays as the
+  provider's native fact; it does not say when a candle became available, so the
+  download invents no availability time. How the normalized bar carries
+  availability (=Time= plus =AvailableAt=, no stored close time) is decided with
+  the bar model in a later stage (see the design comment on #619).

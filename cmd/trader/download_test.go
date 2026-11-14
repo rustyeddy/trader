@@ -235,3 +235,32 @@ func TestSameCandle_IgnoresTheLocationOfTheTime(t *testing.T) {
 	b.Volume++
 	assert.False(t, sameCandle(a, b))
 }
+
+// strayFetcher ignores the window, like a future fetcher that breaks the contract.
+type strayFetcher struct{ out []oanda.Record }
+
+func (s strayFetcher) FetchCandles(context.Context, oanda.CandleRequest) ([]oanda.Record, error) {
+	return s.out, nil
+}
+
+func TestDownloadMonths_RejectsACandleOutsideTheRequestedWindowBeforeWriting(t *testing.T) {
+	req := downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 10, 0), To: utc(2024, 1, 11, 0)}
+	for name, stray := range map[string]time.Time{
+		"before the window":    utc(2024, 1, 9, 23),
+		"at the exclusive end": utc(2024, 1, 11, 0),
+		"another month":        utc(2024, 2, 1, 0),
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			f := strayFetcher{out: []oanda.Record{rec(utc(2024, 1, 10, 1), "1.10000", true), rec(stray, "1.10000", true)}}
+
+			err := downloadMonths(context.Background(), quiet(), f, root, req, nil)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "outside the requested window")
+			entries, rerr := os.ReadDir(root)
+			require.NoError(t, rerr)
+			assert.Empty(t, entries, "nothing is written")
+		})
+	}
+}

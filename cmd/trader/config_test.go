@@ -102,3 +102,45 @@ func TestResolveRoot_NoSourceNamesAllThree(t *testing.T) {
 		assert.Contains(t, err.Error(), want)
 	}
 }
+
+func TestLoadConfig_ErrorsNeverQuoteAValue(t *testing.T) {
+	for name, body := range map[string]string{
+		"tagged secret":     "marketdata: {token: !!int hunter2-VALUE}\n",
+		"wrong typed value": "marketdata:\n  instruments: hunter2-VALUE\n",
+		"wrong typed root":  "marketdata:\n  root: [hunter2-VALUE]\n",
+		"bad tag":           "marketdata:\n  root: !!int hunter2-VALUE\n",
+		"syntax":            "marketdata: [hunter2-VALUE\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadConfig(writeConfig(t, body), true)
+
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "hunter2-VALUE")
+		})
+	}
+}
+
+func TestLoadConfig_NamesTheLineAndTheUnknownKeyButNotTheValue(t *testing.T) {
+	_, err := loadConfig(writeConfig(t, "marketdata:\n  rooot: hunter2-VALUE\n"), true)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown key "rooot"`)
+	assert.Contains(t, err.Error(), "line 2")
+	assert.NotContains(t, err.Error(), "hunter2-VALUE")
+}
+
+func TestLoadConfig_RejectsASecondDocument(t *testing.T) {
+	for name, body := range map[string]string{
+		"trailing secret":  "marketdata:\n  root: /x\n---\nmarketdata:\n  token: hunter2-VALUE\n",
+		"trailing unknown": "marketdata:\n  root: /x\n---\nsurprise: 1\n",
+		"trailing empty":   "marketdata:\n  root: /x\n---\n",
+		"broken second":    "marketdata:\n  root: /x\n---\n[unterminated hunter2-VALUE\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadConfig(writeConfig(t, body), true)
+
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "hunter2-VALUE")
+		})
+	}
+}

@@ -61,7 +61,8 @@ partition file at a time:
   <data root>/oanda/raw/<instrument>/<YYYY>/<MM>/<instrument>-<YYYY>-<MM>-<interval>.csv
 
 Rows already on file are never changed; only missing rows are added, and a
-candle the provider still reports as forming is not stored. The token is read
+candle the provider still reports as forming is never stored (a price that is
+still moving belongs to a tick feed, not to the immutable candle archive). The token is read
 only from ` + envOANDAToken + `. The data root is --data-root, then ` + envDataRoot + `, then
 marketdata.root in ` + defaultConfigPath + `; --instrument, --interval and --base-url also
 fall back to that file.`,
@@ -140,18 +141,24 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 
 	out := cmd.OutOrStdout()
 	var total partitionResult
+	var writeErr error // the first failure to write the summary
+	say := func(format string, args ...any) {
+		if _, werr := fmt.Fprintf(out, format, args...); werr != nil && writeErr == nil {
+			writeErr = fmt.Errorf("write summary: %w", werr)
+		}
+	}
 	err = downloadMonths(ctx, logging.WithComponent(log, logging.ComponentMarketData), client, root, req, func(r partitionResult) {
 		total.Fetched += r.Fetched
 		total.Added += r.Added
 		total.Kept += r.Kept
 		total.Incomplete += r.Incomplete
 		total.Differing += r.Differing
-		_, _ = fmt.Fprintf(out, "%s: fetched %d, added %d, kept %d, not stored (incomplete) %d\n",
+		say("%s: fetched %d, added %d, kept %d, not stored (incomplete) %d\n",
 			r.Path, r.Fetched, r.Added, r.Kept, r.Incomplete)
 	})
-	_, _ = fmt.Fprintf(out, "total: fetched %d, added %d, kept %d, not stored (incomplete) %d, stored rows that differ from the provider %d\n",
+	say("total: fetched %d, added %d, kept %d, not stored (incomplete) %d, stored rows that differ from the provider %d\n",
 		total.Fetched, total.Added, total.Kept, total.Incomplete, total.Differing)
-	return err
+	return errors.Join(err, writeErr)
 }
 
 // tokenFromEnv asks the environment for the token on every request, so the

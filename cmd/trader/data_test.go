@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -219,6 +220,39 @@ func TestDataDownload_AHostileProviderBodyNeverLeaksTheToken(t *testing.T) {
 	entries, rerr := os.ReadDir(root)
 	require.NoError(t, rerr)
 	assert.Empty(t, entries)
+}
+
+// failingWriter accepts n writes and then fails, like stdout on a full disk.
+type failingWriter struct{ n int }
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	if w.n <= 0 {
+		return 0, errors.New("disk full")
+	}
+	w.n--
+	return len(p), nil
+}
+
+func TestDataDownload_ASummaryWriteFailureIsReported(t *testing.T) {
+	for name, okWrites := range map[string]int{"partition line": 0, "total line": 1} {
+		t.Run(name, func(t *testing.T) {
+			srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 3)
+			a := newApp()
+			a.getenv = func(k string) string { return map[string]string{envOANDAToken: testToken}[k] }
+			a.cmd.SetOut(&failingWriter{n: okWrites})
+			a.cmd.SetErr(io.Discard)
+			a.cmd.SetArgs([]string{"--log-level", "DEBUG", "--log-output", filepath.Join(t.TempDir(), "run.log"),
+				"data", "download", "--config", writeConfig(t, ""), "--data-root", t.TempDir(), "--instrument", "EURUSD", "--interval", "h1",
+				"--from", "2024-01-01", "--to", "2024-01-02", "--base-url", srv.URL})
+			prev := slogDefault()
+			defer restoreSlog(prev)
+
+			err := a.execute()
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "disk full")
+		})
+	}
 }
 
 func TestDataCommand_PrintsHelpWithoutASubcommand(t *testing.T) {
