@@ -228,3 +228,10 @@ of the existing archive.
   download invents no availability time. How the normalized bar carries
   availability (=Time= plus =AvailableAt=, no stored close time) is decided with
   the bar model in a later stage (see the design comment on #619).
+- *A 401 is retried within the attempt budget (2026-11-14, #624).* Two smoke runs
+  with a valid token got a one-off =401 Insufficient authorization= on a single
+  request while the same token worked on the others, with and without request
+  pacing. The client retries a 401 (not a 403, not an empty token) up to its
+  attempt limit; if every attempt is refused the error is both
+  =ErrRetriesExhausted= and =ErrUnauthorized=, so a wrong token still fails
+  clearly, only after a few attempts. The cause of the one-off 401 is not known.

@@ -360,7 +360,6 @@ func TestFetchCandles_PermanentErrorNotRetried(t *testing.T) {
 		status int
 		want   error
 	}{
-		{"unauthorized", http.StatusUnauthorized, ErrUnauthorized},
 		{"forbidden", http.StatusForbidden, ErrUnauthorized},
 		{"bad request", http.StatusBadRequest, ErrBadRequest},
 		{"not found", http.StatusNotFound, ErrBadRequest},
@@ -381,8 +380,46 @@ func TestFetchCandles_PermanentErrorNotRetried(t *testing.T) {
 	}
 }
 
+func TestFetchCandles_A401IsRetriedAndASecondTryCanSucceed(t *testing.T) {
+	doer := &fakeDoer{responses: []fakeResponse{
+		{status: 401, body: "Insufficient authorization to perform request."},
+		{status: 200, body: candlesJSON([]time.Time{time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, true)},
+	}}
+	c := newTestClient(t, doer)
+
+	got, err := c.FetchCandles(context.Background(), hourRange())
+
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+	assert.Equal(t, 2, doer.requestCount())
+}
+
+func TestFetchCandles_AnAlways401IsExhaustedAndStillUnauthorized(t *testing.T) {
+	r := fakeResponse{status: 401, body: "no"}
+	doer := &fakeDoer{responses: []fakeResponse{r, r, r, r}}
+	c := newTestClient(t, doer)
+
+	_, err := c.FetchCandles(context.Background(), hourRange())
+
+	require.ErrorIs(t, err, ErrUnauthorized)
+	require.ErrorIs(t, err, ErrRetriesExhausted)
+	assert.Equal(t, 3, doer.requestCount(), "bounded by the attempt limit")
+}
+
+func TestFetchCandles_A403IsNeverRetried(t *testing.T) {
+	doer := &fakeDoer{responses: []fakeResponse{{status: 403, body: "no"}, {status: 200, body: candlesJSON(nil, true)}}}
+	c := newTestClient(t, doer)
+
+	_, err := c.FetchCandles(context.Background(), hourRange())
+
+	require.ErrorIs(t, err, ErrUnauthorized)
+	assert.NotErrorIs(t, err, ErrRetriesExhausted)
+	assert.Equal(t, 1, doer.requestCount())
+}
+
 func TestFetchCandles_TokenNeverAppearsInError(t *testing.T) {
-	doer := &fakeDoer{responses: []fakeResponse{{status: 401, body: "invalid credentials, please check your token"}}}
+	body := "invalid credentials, please check your token"
+	doer := &fakeDoer{responses: []fakeResponse{{status: 401, body: body}, {status: 401, body: body}, {status: 401, body: body}}}
 	c := newTestClient(t, doer)
 	_, err := c.FetchCandles(context.Background(), CandleRequest{
 		Symbol: "EURUSD", Interval: RawH1,
@@ -827,7 +864,7 @@ func TestFetchCandles_ReturnsTheIncompleteLastCandleAsDeclared(t *testing.T) {
 func TestFetchCandles_ReturnsRecordsFetchedBeforeAFailure(t *testing.T) {
 	doer := &fakeDoer{responses: []fakeResponse{
 		{status: 200, body: candlesJSON([]time.Time{time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC)}, true)},
-		{status: 401, body: "no"},
+		{status: 403, body: "no"},
 	}}
 	c := newTestClient(t, doer, withPageSize(2))
 
@@ -897,7 +934,8 @@ func TestClassifyStatus_RateLimitedIsTransient(t *testing.T) {
 	err := classifyStatus(429, strings.NewReader("slow"))
 
 	assert.True(t, isTransient(err))
-	assert.False(t, isTransient(classifyStatus(401, strings.NewReader("no"))))
+	assert.True(t, isTransient(classifyStatus(401, strings.NewReader("no"))), "a 401 is retried (#624)")
+	assert.False(t, isTransient(classifyStatus(403, strings.NewReader("no"))))
 }
 
 func TestFetchCandles_RejectsDataAfterTheResponse(t *testing.T) {
