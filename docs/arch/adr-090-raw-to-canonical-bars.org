@@ -23,10 +23,12 @@ Checked read-only on the owner's machine:
   =time,open,high,low,close,avg_spread,max_spread,ticks=, then one row per bar
   present. The archived converter took open, high, low and close from the raw
   record's *bid* prices, kept only the mean and the largest of the four corner
-  spreads (ask minus bid), and so dropped the ask prices. It reported rejected
-  records per record (incomplete, crossed, bad shape, duplicate, out of order,
-  misaligned) and dropped nothing silently in memory, but nothing in the file said
-  a record had been rejected.
+  spreads (ask minus bid), and so dropped the ask prices. It classified each
+  record (accepted, incomplete, suspicious, rejected) and *failed closed*: if any
+  record in a partition was suspicious or rejected, the build returned an error
+  before publishing anything (=firstBadOutcomeError=, =build_normalize.go=), so a
+  partition was either fully clean or absent, and the reason lived only in the
+  error.
 - The live engine reads =design-bars-v1= and derives =availableAt= as open plus a
   fixed duration. That is wrong for OANDA's session day, which opens 17:00 New York
   and lasts 23 or 25 hours across a DST change.
@@ -89,11 +91,28 @@ the next 17:00 America/New_York, so a DST day is 23 or 25 hours. This is a
 *modeled* availability under a named policy (=scheduled-close-v1=), never presented
 as an observed provider timestamp; the metadata records the policy name. A stored
 bar always has a nonzero =available_at= not before =Time=. The raw =complete= flag
-stays in raw as the provider's own fact. A change to the policy means a new
-policy name and a rebuild, which is cheap because canonical is derived (ADR-020),
-and the files built under the old policy say so.
+stays in raw as the provider's own fact.
+
+The policy name carries its version and is stored in the file's metadata
+(=availability_policy=); that is the only place the rule's version lives, and a
+file's =available_at= values always belong to the policy it names. A reader honors
+what the file says and never recomputes. Changing the interval or session rule
+(including the New York calendar) means a *new policy name* and a rebuild: a file
+naming a policy other than the one in force is stale, the build replaces it (4
+below), and a loader reports it rather than using it. Rebuilding is cheap because
+canonical is derived (ADR-020).
 
 ** 3. Bad records are written into the file, never silently lost
+
+This is a *deliberate change from the archived builder*, which failed closed and
+published nothing for a partition with any bad record. The owner chose (2026-11-14)
+to publish the good rows and keep the bad ones visible, so a partition may be
+partial. The safety invariant that makes this acceptable: *no consumer may treat a
+partition with =bad_count > 0= as complete data.* The reader returns the bad
+records with the bars; the loader that feeds the engine (a later stage) refuses a
+partition with bad records unless the caller explicitly allows known-bad
+partitions, and says which; the gaps and coverage stage reports them. Nothing
+downstream sees only the good rows by default.
 
 The build writes every good row and *also records every record it rejected*, in the
 same file, as comment lines before the column header:
@@ -107,7 +126,8 @@ same file, as comment lines before the column header:
 =crossed= (an ask below its bid at some corner), =invalid= (a high or low not
 containing open and close, or a non-positive price), =duplicate=, =out-of-order= and
 =misaligned= (not on the interval's boundary). =raw_row= is the row's position in
-the raw file, so the record can be examined there. The metadata line carries
+the raw file: 1-based, counting data rows only (the raw file's schema comment and
+column header are not counted), so the first data row is =raw_row=1=. The metadata line carries
 =bar_count= and =bad_count=. The canonical reader returns the good bars *and* the
 bad records, so a later stage (gaps, coverage) can tell "known bad" from "missing"
 from "closed market" and a bad month is never mistaken for a quiet one.
@@ -129,9 +149,11 @@ filled.
 
 ** 4. Rebuilds and fingerprints
 
-The metadata records =raw_fingerprint= (the raw partition's bytes), the builder
-version and the availability policy. Canonical is derived, so unlike raw it may be
-replaced: a build whose three values match the file on disk does nothing;
+The metadata records =raw_fingerprint= (the raw partition's bytes), the
+=builder_version=, the =validator_version= (the accept and reject rules of 3) and
+the =availability_policy=. Any change to what is accepted, rejected or computed
+bumps the validator or builder version. Canonical is derived, so unlike raw it may
+be replaced: a build whose four values match the file on disk does nothing;
 otherwise the file is rewritten atomically (temporary file, sync, rename) under the
 per-partition lock, and the report says it was replaced. A build never touches raw.
 
@@ -155,7 +177,9 @@ Hermetic: raw fixtures are small files copied from the archive; tests never read
 =/srv/data=. Cases: each rejection rule written as a bad line and read back; a file
 with good and bad rows; a damaged raw row failing the build; a DST =d1= week and the
 New York changes; a month boundary; =Mid()= exact on half-pip values; an unchanged
-rebuild; a changed fingerprint; cancellation. A cross-check against the archive:
+rebuild; a rebuild after a changed fingerprint, builder version, validator version
+or availability policy; =raw_row= numbering; the reader returning the bad records;
+cancellation. A cross-check against the archive:
 building a month from its raw fixture must give bid prices and volume equal to the
 v1 file's open to close and ticks, and spreads (=Ask - Bid=) whose mean and maximum
 equal the v1 file's =avg_spread= and =max_spread=. The owner's check: download a
@@ -176,6 +200,8 @@ model); =m1=, =h4=, =W1=; other providers; the one-time migration of =raw/oanda=
 - The existing =canonical-v1= archive is not reused; it is rebuilt from raw once raw
   is migrated. Raw is complete, so nothing is lost, but the rebuild is a step the
   migration must schedule.
+- A canonical partition can be partial; the invariant in 3 (no consumer treats
+  =bad_count > 0= as complete) is part of this decision, not a later option.
 - A bad or incomplete record is visible in the file it affects and in the reader's
   result, not only in a build log.
 - Files are larger than v1 (eight prices instead of four plus two spreads).
