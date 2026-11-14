@@ -22,14 +22,18 @@ import (
 
 // Sentinel errors Client returns (wrapped), classifying a failed request
 // without requiring a caller to inspect an HTTP status code directly
-// (issue #80). A permanent error (ErrUnauthorized, ErrBadRequest) is
+// (issue #80). A permanent error (ErrBadRequest, a 403, an empty token) is
 // never retried; a transient one (ErrRateLimited, ErrProviderUnavailable,
-// or a network-level failure) is retried up to the Client's configured
-// attempt limit, reported as ErrRetriesExhausted if every attempt fails.
+// a network-level failure, or an HTTP 401) is retried up to the Client's
+// configured attempt limit, reported as ErrRetriesExhausted if every attempt
+// fails. A 401 is retried because OANDA has answered a valid token with a
+// one-off 401 while the same token succeeded on the next request (#624); when
+// every attempt is refused the error is both ErrRetriesExhausted and
+// ErrUnauthorized, so a bad token still fails clearly.
 var (
 	// ErrUnauthorized marks an HTTP 401/403 response: the credential is
 	// missing, invalid, or lacks access. Retrying with the same
-	// credential cannot succeed.
+	// credential cannot succeed, except that a lone 401 is retried (see above).
 	ErrUnauthorized = errors.New("oanda: unauthorized")
 	// ErrBadRequest marks an HTTP 400/404 response: the request itself
 	// (instrument, granularity, range) is malformed or refers to
@@ -439,13 +443,17 @@ func (c *Client) fetchPage(ctx context.Context, log *slog.Logger, apiSymbol, gra
 		}
 		lastErr = err
 	}
-	return nil, fmt.Errorf("oanda: %w after %d attempts: %v", ErrRetriesExhausted, c.maxAttempts, lastErr)
+	return nil, fmt.Errorf("oanda: %w after %d attempts: %w", ErrRetriesExhausted, c.maxAttempts, lastErr)
 }
 
 // isTransient reports whether err should be retried.
 func isTransient(err error) bool {
-	return errors.Is(err, ErrRateLimited) || errors.Is(err, ErrProviderUnavailable) || errors.Is(err, errNetwork)
+	return errors.Is(err, ErrRateLimited) || errors.Is(err, ErrProviderUnavailable) || errors.Is(err, errNetwork) || errors.Is(err, err401)
 }
+
+// err401 marks an HTTP 401 specifically (a 403 is not retried), so the retry
+// policy can tell them apart; it always accompanies ErrUnauthorized.
+var err401 = errors.New("oanda: http 401")
 
 // errNetwork marks a failure from HTTPDoer.Do itself (no HTTP response at all:
 // DNS, connection refused, timeout), always treated as transient.
@@ -561,7 +569,9 @@ func classifyStatus(status int, body io.Reader) error {
 	b, _ := io.ReadAll(io.LimitReader(body, 4*1024))
 	excerpt := strings.TrimSpace(string(b))
 	switch {
-	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+	case status == http.StatusUnauthorized:
+		return fmt.Errorf("%w: %w: http %d: %s", ErrUnauthorized, err401, status, excerpt)
+	case status == http.StatusForbidden:
 		return fmt.Errorf("%w: http %d: %s", ErrUnauthorized, status, excerpt)
 	case status == http.StatusBadRequest || status == http.StatusNotFound:
 		return fmt.Errorf("%w: http %d: %s", ErrBadRequest, status, excerpt)
