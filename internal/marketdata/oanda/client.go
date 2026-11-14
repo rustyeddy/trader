@@ -1,6 +1,7 @@
 package oanda
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -506,17 +507,25 @@ func (c *Client) doRequest(ctx context.Context, log *slog.Logger, token, apiSymb
 		return nil, classifyStatus(resp.StatusCode, resp.Body)
 	}
 
-	body := io.LimitReader(resp.Body, maxResponseBytes+1)
-	var parsed candleResponse
-	dec := json.NewDecoder(body)
-	if err := dec.Decode(&parsed); err != nil {
+	// Read the whole body under the limit first, so the size rule covers any
+	// trailing data too, then require exactly one JSON value.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
+		return nil, fmt.Errorf("%w: read response: %v", errNetwork, err)
+	}
+	if len(raw) > maxResponseBytes {
+		return nil, fmt.Errorf("oanda: %w: response exceeds %d bytes", ErrMalformedData, maxResponseBytes)
+	}
+	var parsed candleResponse
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("oanda: %w: decode response: %v", ErrMalformedData, err)
 	}
-	if dec.InputOffset() > maxResponseBytes {
-		return nil, fmt.Errorf("oanda: %w: response exceeds %d bytes", ErrMalformedData, maxResponseBytes)
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("oanda: %w: unexpected data after the response", ErrMalformedData)
 	}
 	return parsed.records()
 }

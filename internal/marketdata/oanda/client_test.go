@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -897,4 +898,100 @@ func TestClassifyStatus_RateLimitedIsTransient(t *testing.T) {
 
 	assert.True(t, isTransient(err))
 	assert.False(t, isTransient(classifyStatus(401, strings.NewReader("no"))))
+}
+
+func TestFetchCandles_RejectsDataAfterTheResponse(t *testing.T) {
+	good := candlesJSON([]time.Time{time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, true)
+	for name, body := range map[string]string{
+		"a second value":  good + good,
+		"stray text":      good + " junk",
+		"oversize padded": good + strings.Repeat(" ", maxResponseBytes),
+	} {
+		t.Run(name, func(t *testing.T) {
+			doer := &fakeDoer{responses: []fakeResponse{{status: 200, body: body}}}
+			c := newTestClient(t, doer)
+
+			_, err := c.FetchCandles(context.Background(), hourRange())
+
+			require.ErrorIs(t, err, ErrMalformedData)
+			assert.Equal(t, 1, doer.requestCount(), "permanent, not retried")
+		})
+	}
+}
+
+func TestFetchCandles_TrailingWhitespaceIsAccepted(t *testing.T) {
+	body := candlesJSON([]time.Time{time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, true) + "\n"
+	c := newTestClient(t, &fakeDoer{responses: []fakeResponse{{status: 200, body: body}}})
+
+	got, err := c.FetchCandles(context.Background(), hourRange())
+
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+}
+
+// oandaFake models the provider's candles endpoint over an hourly series: it
+// returns candles that open at or after from, plus the candle covering an
+// unaligned from, includes a candle opening exactly at from only when
+// includeFirst is true, and returns at most count candles.
+type oandaFake struct {
+	mu     sync.Mutex
+	series []time.Time
+	calls  int
+}
+
+func (f *oandaFake) Do(req *http.Request) (*http.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	q := req.URL.Query()
+	from, err := time.Parse(time.RFC3339Nano, q.Get("from"))
+	if err != nil {
+		return nil, err
+	}
+	count, _ := strconv.Atoi(q.Get("count"))
+	includeFirst := q.Get("includeFirst") != "false" // the provider's default is true
+	var out []time.Time
+	for _, t := range f.series {
+		covers := t.Before(from) && t.Add(time.Hour).After(from)
+		switch {
+		case t.Equal(from) && includeFirst, t.After(from), covers && includeFirst:
+			out = append(out, t)
+		}
+		if len(out) == count {
+			break
+		}
+	}
+	return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(candlesJSON(out, true)))}, nil
+}
+
+func TestFetchCandles_AgainstProviderSemantics(t *testing.T) {
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	series := make([]time.Time, 10)
+	for i := range series {
+		series[i] = t0.Add(time.Duration(i) * time.Hour)
+	}
+	for name, tc := range map[string]struct {
+		from, to time.Time
+		want     []time.Time
+	}{
+		"aligned, several pages":   {t0, t0.Add(10 * time.Hour), series},
+		"unaligned from":           {t0.Add(90 * time.Minute), t0.Add(10 * time.Hour), series[2:]},
+		"to cuts the range":        {t0, t0.Add(5 * time.Hour), series[:5]},
+		"to unaligned":             {t0.Add(time.Hour), t0.Add(4*time.Hour + time.Minute), series[1:5]},
+		"exactly a full last page": {t0, t0.Add(4 * time.Hour), series[:4]},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := &oandaFake{series: series}
+			c := newTestClient(t, fake, withPageSize(2))
+
+			got, err := c.FetchCandles(context.Background(), CandleRequest{Symbol: "EURUSD", Interval: RawH1, From: tc.from, To: tc.to})
+
+			require.NoError(t, err)
+			var times []time.Time
+			for _, r := range got {
+				times = append(times, r.Time)
+			}
+			assert.Equal(t, tc.want, times)
+		})
+	}
 }
