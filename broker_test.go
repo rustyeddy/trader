@@ -303,6 +303,22 @@ func TestBroker_OnOrderBar_CancelledContext(t *testing.T) {
 	assert.Equal(t, stateSubmitted, o.state)
 }
 
+// With no order waiting nothing else consults the context, so onFrame must: a
+// cancelled run neither marks nor closes anything and reports the cancellation.
+func TestBroker_OnFrame_CancelledContextWithNothingQueued(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	b := fillBar(1, 111000)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	clock := br.clock
+
+	err := br.onFrame(ctx, frame{availableAt: b.availableAt, bars: []bar{b}})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, clock, br.clock, "no state moved")
+}
+
 // Documents current behavior, not a goal: when one order in a batch fails, the
 // run stops before cleanup, so an order that already filled stays in
 // the broker's orders. Live recovery will need to reconcile such partial batches;

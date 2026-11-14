@@ -235,6 +235,11 @@ func (br *broker) onBar(ctx context.Context, b bar) error {
 // todo.org for the options. Across instruments the ranges are taken one after
 // another, in instrument order: the path between them is unknown too.
 func (br *broker) onFrame(ctx context.Context, f frame) error {
+	// A cancelled context stops the frame before any state moves, even when no
+	// order is waiting and nothing would otherwise consult it.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := checkFrame(f); err != nil {
 		return err
 	}
