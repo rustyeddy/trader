@@ -45,9 +45,9 @@ func TestWritePartition_ReproducesArchiveFixturesByteForByte(t *testing.T) {
 			require.NoError(t, err)
 			root := t.TempDir()
 
-			require.NoError(t, WritePartition(context.Background(), root, f.symbol, f.interval, f.year, f.month, records, true))
+			require.NoError(t, WritePartition(context.Background(), root, PartitionKey{f.symbol, f.interval, f.year, f.month}, records, true))
 
-			path, err := partitionPath(root, f.symbol, f.interval, f.year, f.month)
+			path, err := PartitionKey{f.symbol, f.interval, f.year, f.month}.Path(root)
 			require.NoError(t, err)
 			got, err := os.ReadFile(path)
 			require.NoError(t, err)
@@ -63,10 +63,10 @@ func TestRawTFSpellsTheDailyTokenAsInTheArchive(t *testing.T) {
 	assert.Equal(t, "h4", rawTF(RawH4))
 }
 
-func TestPartitionPath_UsesTheLayoutResolver(t *testing.T) {
+func TestPartitionKeyPath_UsesTheLayoutResolver(t *testing.T) {
 	root := t.TempDir()
 
-	got, err := partitionPath(root, "EURUSD", RawH4, 2024, time.July)
+	got, err := PartitionKey{"EURUSD", RawH4, 2024, time.July}.Path(root)
 
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(root, "oanda", "raw", "EURUSD", "2024", "07", "EURUSD-2024-07-h4.csv"), got)
@@ -75,7 +75,7 @@ func TestPartitionPath_UsesTheLayoutResolver(t *testing.T) {
 	assert.Equal(t, layout.Partition{Source: "oanda", Stage: layout.Raw, Instrument: "EURUSD", Year: 2024, Month: time.July, Interval: "h4"}, p)
 }
 
-func TestPartitionPath_RejectsWhatIsNotInTheCorpus(t *testing.T) {
+func TestPartitionKeyPath_RejectsWhatIsNotInTheCorpus(t *testing.T) {
 	root := t.TempDir()
 	for name, tc := range map[string]struct {
 		symbol   string
@@ -95,19 +95,19 @@ func TestPartitionPath_RejectsWhatIsNotInTheCorpus(t *testing.T) {
 		"year 99":         {"EURUSD", RawH1, 99, 1, layout.ErrInvalidComponent},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := partitionPath(root, tc.symbol, tc.interval, tc.year, tc.month)
+			_, err := PartitionKey{tc.symbol, tc.interval, tc.year, tc.month}.Path(root)
 
 			assert.ErrorIs(t, err, tc.want)
 		})
 	}
-	_, err := partitionPath("", "EURUSD", RawH1, 2024, 1)
+	_, err := PartitionKey{"EURUSD", RawH1, 2024, 1}.Path("")
 	assert.ErrorIs(t, err, layout.ErrInvalidRoot)
 }
 
 func TestWritePartition_RefusesAnOutOfScopeSymbolAndWritesNothing(t *testing.T) {
 	root := t.TempDir()
 
-	err := WritePartition(context.Background(), root, "XAUUSD", RawH1, 2024, time.January, nil, true)
+	err := WritePartition(context.Background(), root, PartitionKey{"XAUUSD", RawH1, 2024, time.January}, nil, true)
 
 	require.ErrorIs(t, err, ErrInstrumentOutOfScope)
 	entries, rerr := os.ReadDir(root)
@@ -138,9 +138,9 @@ func TestWritePartition_DailyBarsKeepTheMonthOfTheirFileAcrossBoundaries(t *test
 			root := t.TempDir()
 			rec := testRecord(tc.open, true)
 
-			require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawD1, tc.year, tc.month, []Record{rec}, true))
+			require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawD1, tc.year, tc.month}, []Record{rec}, true))
 
-			got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawD1, tc.year, tc.month)
+			got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawD1, tc.year, tc.month})
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 			assert.True(t, got[0].Time.Equal(tc.open), "the provider's timestamp is kept verbatim")
@@ -173,7 +173,7 @@ func TestInspect_RejectsAnEmptyRoot(t *testing.T) {
 func TestReadPartitionRecords_MissingPartitionReportsItsPath(t *testing.T) {
 	root := t.TempDir()
 
-	_, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	_, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 
 	require.ErrorIs(t, err, fs.ErrNotExist)
 	assert.Contains(t, err.Error(), filepath.Join(root, "oanda", "raw", "EURUSD", "2024", "01"))
@@ -184,55 +184,55 @@ func TestReadPartitionRecords_MissingPartitionReportsItsPath(t *testing.T) {
 func TestUpdatePartition_CreatesAMissingPartitionFromTheMerge(t *testing.T) {
 	root := t.TempDir()
 
-	err := UpdatePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, func(existing []Record) ([]Record, error) {
+	err := UpdatePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, func(existing []Record) ([]Record, error) {
 		assert.Empty(t, existing)
 		return []Record{testRecord(at(2024, 1, 1, 0), true)}, nil
 	})
 
 	require.NoError(t, err)
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Len(t, got, 1)
 }
 
 func TestUpdatePartition_ExtendsFromTheExistingRecords(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, []Record{testRecord(at(2024, 1, 1, 0), true)}, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, []Record{testRecord(at(2024, 1, 1, 0), true)}, true))
 
-	err := UpdatePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, func(existing []Record) ([]Record, error) {
+	err := UpdatePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, func(existing []Record) ([]Record, error) {
 		require.Len(t, existing, 1)
 		return append(existing, testRecord(at(2024, 1, 1, 1), true)), nil
 	})
 
 	require.NoError(t, err)
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 }
 
 func TestUpdatePartition_MergeErrorLeavesTheFileUntouched(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, []Record{testRecord(at(2024, 1, 1, 0), true)}, true))
-	before, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, []Record{testRecord(at(2024, 1, 1, 0), true)}, true))
+	before, err := FingerprintPartition(root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	boom := errors.New("boom")
 
-	err = UpdatePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, func([]Record) ([]Record, error) { return nil, boom })
+	err = UpdatePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, func([]Record) ([]Record, error) { return nil, boom })
 
 	require.ErrorIs(t, err, boom)
-	after, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	after, err := FingerprintPartition(root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
 }
 
 func TestUpdatePartition_ReportsAMalformedExistingFileAndDoesNotReplaceIt(t *testing.T) {
 	root := t.TempDir()
-	path, err := partitionPath(root, "EURUSD", RawH1, 2024, time.January)
+	path, err := PartitionKey{"EURUSD", RawH1, 2024, time.January}.Path(root)
 	require.NoError(t, err)
 	writeFile(t, filepath.Dir(path), filepath.Base(path), "garbage\n")
 	called := false
 
-	err = UpdatePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, func(e []Record) ([]Record, error) {
+	err = UpdatePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, func(e []Record) ([]Record, error) {
 		called = true
 		return e, nil
 	})
@@ -248,12 +248,12 @@ func TestUpdatePartition_RejectsOutOfScopeAndCancelledInput(t *testing.T) {
 	root := t.TempDir()
 	merge := func(e []Record) ([]Record, error) { return e, nil }
 
-	err := UpdatePartition(context.Background(), root, "XAUUSD", RawH1, 2024, time.January, merge)
+	err := UpdatePartition(context.Background(), root, PartitionKey{"XAUUSD", RawH1, 2024, time.January}, merge)
 	assert.ErrorIs(t, err, ErrInstrumentOutOfScope)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = UpdatePartition(ctx, root, "EURUSD", RawH1, 2024, time.January, merge)
+	err = UpdatePartition(ctx, root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, merge)
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
@@ -267,7 +267,7 @@ func TestUpdatePartition_ConcurrentExtendsLoseNothing(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := UpdatePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, func(existing []Record) ([]Record, error) {
+			err := UpdatePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, func(existing []Record) ([]Record, error) {
 				return append(existing, testRecord(at(2024, 1, 1, i), true)), nil
 			})
 			assert.NoError(t, err)
@@ -275,7 +275,7 @@ func TestUpdatePartition_ConcurrentExtendsLoseNothing(t *testing.T) {
 	}
 	wg.Wait()
 
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Len(t, got, writers, "every writer's record survives")
 	entries, err := os.ReadDir(filepath.Dir(mustPath(t, root)))
@@ -286,7 +286,7 @@ func TestUpdatePartition_ConcurrentExtendsLoseNothing(t *testing.T) {
 
 func mustPath(t *testing.T, root string) string {
 	t.Helper()
-	p, err := partitionPath(root, "EURUSD", RawH1, 2024, time.January)
+	p, err := PartitionKey{"EURUSD", RawH1, 2024, time.January}.Path(root)
 	require.NoError(t, err)
 	return p
 }
@@ -333,19 +333,19 @@ func TestWritePartition_CancellationAtAndAfterTheCommitPoint(t *testing.T) {
 	root := t.TempDir()
 	first := []Record{testRecord(at(2024, 1, 1, 0), true)}
 	both := append(append([]Record(nil), first...), testRecord(at(2024, 1, 1, 1), true))
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, first, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, first, true))
 
 	atCommit := &nthCancelContext{Context: context.Background(), remaining: 3}
-	err := WritePartition(atCommit, root, "EURUSD", RawH1, 2024, time.January, both, false)
+	err := WritePartition(atCommit, root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, both, false)
 	require.ErrorIs(t, err, context.Canceled)
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Len(t, got, 1, "cancelled at the commit point: the old file stands")
 
 	afterCommit := &nthCancelContext{Context: context.Background(), remaining: 4}
-	require.NoError(t, WritePartition(afterCommit, root, "EURUSD", RawH1, 2024, time.January, both, false))
+	require.NoError(t, WritePartition(afterCommit, root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, both, false))
 	require.ErrorIs(t, afterCommit.Err(), context.Canceled, "the context is cancelled once the commit is done")
-	got, err = ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err = ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Len(t, got, 2, "cancelled after the commit: the replacement is not undone")
 }
@@ -377,7 +377,7 @@ func TestWritePartition_PriceTooPreciseWritesNothing(t *testing.T) {
 	rec := testRecord(at(2024, 1, 1, 0), true)
 	rec.BidOpen = num.MustParsePrice("1.123456")
 
-	err := WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, []Record{rec}, true)
+	err := WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, []Record{rec}, true)
 
 	require.ErrorIs(t, err, ErrMalformedData)
 	_, serr := os.Stat(mustPath(t, root))
@@ -398,7 +398,7 @@ func TestUpdatePartition_RelativeAndAbsoluteRootsShareALock(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := UpdatePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, func(existing []Record) ([]Record, error) {
+				err := UpdatePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, func(existing []Record) ([]Record, error) {
 					return append(existing, testRecord(at(2024, 1, 1, r*perRoot+i), true)), nil
 				})
 				assert.NoError(t, err)
@@ -407,7 +407,30 @@ func TestUpdatePartition_RelativeAndAbsoluteRootsShareALock(t *testing.T) {
 	}
 	wg.Wait()
 
-	got, err := ReadPartitionRecords(context.Background(), abs, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), abs, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Len(t, got, len(roots)*perRoot)
+}
+
+func TestPartitionKeyValidate(t *testing.T) {
+	assert.NoError(t, PartitionKey{"EURUSD", RawD1, 2024, time.December}.Validate())
+	assert.ErrorIs(t, PartitionKey{"XAUUSD", RawH1, 2024, 1}.Validate(), ErrInstrumentOutOfScope)
+	assert.ErrorIs(t, PartitionKey{"EURUSD", RawInterval("w1"), 2024, 1}.Validate(), ErrUnsupportedInterval)
+	assert.ErrorIs(t, PartitionKey{"EURUSD", RawH1, 2024, 13}.Validate(), layout.ErrInvalidComponent)
+	assert.ErrorIs(t, PartitionKey{}.Validate(), ErrMalformedData, "the zero key names nothing")
+}
+
+func TestMetaKeyRoundTripsThroughThePath(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range fixtures {
+		meta, _, err := parsePathMeta(filepath.Join("testdata", f.file))
+		require.NoError(t, err)
+
+		key := meta.Key()
+
+		assert.Equal(t, PartitionKey{f.symbol, f.interval, f.year, f.month}, key, f.file)
+		path, err := key.Path(root)
+		require.NoError(t, err)
+		assert.Equal(t, f.file, filepath.Base(path), "the file name is the fixture's name")
+	}
 }

@@ -37,9 +37,9 @@ func TestWritePartition_NewFileRoundTrips(t *testing.T) {
 		testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true), // unsorted on purpose
 	}
 
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, records, true))
 
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	// Sorted ascending regardless of input order.
@@ -51,9 +51,9 @@ func TestWritePartition_NewFileRoundTrips(t *testing.T) {
 func TestWritePartition_MustNotExistRejectsExisting(t *testing.T) {
 	root := t.TempDir()
 	records := []Record{testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true)}
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, records, true))
 
-	err := WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true)
+	err := WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, records, true)
 	assert.ErrorIs(t, err, ErrPartitionAlreadyExists)
 }
 
@@ -76,7 +76,7 @@ func TestWritePartition_ConcurrentMustNotExistIsRaceFree(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			records := []Record{testRecord(time.Date(2024, 1, 1, i, 0, 0, 0, time.UTC), true)}
-			errs[i] = WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true)
+			errs[i] = WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, records, true)
 		}(i)
 	}
 	wg.Wait()
@@ -95,7 +95,7 @@ func TestWritePartition_ConcurrentMustNotExistIsRaceFree(t *testing.T) {
 	assert.Equal(t, 1, successes, "exactly one concurrent writer must win")
 	assert.Equal(t, n-1, conflicts, "every other writer must see ErrPartitionAlreadyExists")
 
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	require.Len(t, got, 1, "the file must hold exactly one writer's content, not a mix")
 }
@@ -103,33 +103,33 @@ func TestWritePartition_ConcurrentMustNotExistIsRaceFree(t *testing.T) {
 func TestWritePartition_ExtendReplacesExisting(t *testing.T) {
 	root := t.TempDir()
 	first := []Record{testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true)}
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, first, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, first, true))
 
 	merged := append(first, testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true))
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, merged, false))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, merged, false))
 
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 }
 
 func TestReadPartitionRecords_MissingFile(t *testing.T) {
 	root := t.TempDir()
-	_, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	_, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	assert.True(t, errors.Is(err, fs.ErrNotExist), "want fs.ErrNotExist, got %v", err)
 }
 
 func TestWritePartition_EmptyRecordsProducesValidHeaderOnlyFile(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, nil, true))
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, nil, true))
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
 
 func TestWritePartition_PathMatchesArchiveLayout(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawD1, 2024, time.March, []Record{
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawD1, 2024, time.March}, []Record{
 		testRecord(time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), true),
 	}, true))
 
@@ -167,13 +167,13 @@ func (c *nthCancelContext) Err() error {
 func TestWritePartition_CancelledBeforeWriteLeavesExistingFileIntact(t *testing.T) {
 	root := t.TempDir()
 	original := []Record{testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true)}
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, original, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, original, true))
 
 	ctx := &nthCancelContext{Context: context.Background(), remaining: 0}
-	err := WritePartition(ctx, root, "EURUSD", RawH1, 2024, time.January, append(original, testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true)), false)
+	err := WritePartition(ctx, root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, append(original, testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true)), false)
 	assert.ErrorIs(t, err, context.Canceled)
 
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	require.Len(t, got, 1, "original file must be untouched")
 }
@@ -181,16 +181,16 @@ func TestWritePartition_CancelledBeforeWriteLeavesExistingFileIntact(t *testing.
 func TestWritePartition_CancelledJustBeforeRenameLeavesExistingFileIntact(t *testing.T) {
 	root := t.TempDir()
 	original := []Record{testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true)}
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, original, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, original, true))
 
 	// remaining=2: the initial ctx.Err() check, then one per-record
 	// check during encode (one record) both succeed; cancellation lands
 	// on the commit-point check immediately before the rename.
 	ctx := &nthCancelContext{Context: context.Background(), remaining: 2}
-	err := WritePartition(ctx, root, "EURUSD", RawH1, 2024, time.January, append(original, testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true)), false)
+	err := WritePartition(ctx, root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, append(original, testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true)), false)
 	assert.ErrorIs(t, err, context.Canceled)
 
-	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	got, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	require.Len(t, got, 1, "original file must still be intact; cancelled write must not have replaced it")
 }
@@ -198,9 +198,9 @@ func TestWritePartition_CancelledJustBeforeRenameLeavesExistingFileIntact(t *tes
 func TestFingerprintPartition(t *testing.T) {
 	root := t.TempDir()
 	records := []Record{testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true)}
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, records, true))
 
-	got, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	got, err := FingerprintPartition(root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Regexp(t, "^sha256:[0-9a-f]{64}$", got)
 
@@ -213,7 +213,7 @@ func TestFingerprintPartition(t *testing.T) {
 
 func TestFingerprintPartition_MissingFile(t *testing.T) {
 	root := t.TempDir()
-	_, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	_, err := FingerprintPartition(root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	assert.True(t, errors.Is(err, fs.ErrNotExist))
 }
 
@@ -223,17 +223,17 @@ func TestReadPartitionSnapshot_RecordsAndFingerprintAgree(t *testing.T) {
 		testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true),
 		testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true),
 	}
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, records, true))
 
-	snap, err := ReadPartitionSnapshot(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	snap, err := ReadPartitionSnapshot(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	require.Len(t, snap.Records, 2)
 
-	wantFingerprint, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	wantFingerprint, err := FingerprintPartition(root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	assert.Equal(t, wantFingerprint, snap.Fingerprint)
 
-	wantRecords, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	wantRecords, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	require.NoError(t, err)
 	require.Len(t, wantRecords, len(snap.Records))
 	for i := range wantRecords {
@@ -243,7 +243,7 @@ func TestReadPartitionSnapshot_RecordsAndFingerprintAgree(t *testing.T) {
 
 func TestReadPartitionSnapshot_MissingFile(t *testing.T) {
 	root := t.TempDir()
-	_, err := ReadPartitionSnapshot(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	_, err := ReadPartitionSnapshot(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 	assert.True(t, errors.Is(err, fs.ErrNotExist))
 }
 
@@ -270,12 +270,12 @@ func TestReadPartitionSnapshot_ConsistentUnderConcurrentReplace(t *testing.T) {
 		testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true),
 		testRecord(time.Date(2024, 1, 1, 2, 0, 0, 0, time.UTC), true),
 	}
-	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, contentA, true))
+	require.NoError(t, WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, contentA, true))
 
 	fpFor := func(records []Record) string {
 		tmp := t.TempDir()
-		require.NoError(t, WritePartition(context.Background(), tmp, "EURUSD", RawH1, 2024, time.January, records, true))
-		fp, err := FingerprintPartition(tmp, "EURUSD", RawH1, 2024, time.January)
+		require.NoError(t, WritePartition(context.Background(), tmp, PartitionKey{"EURUSD", RawH1, 2024, time.January}, records, true))
+		fp, err := FingerprintPartition(tmp, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 		require.NoError(t, err)
 		return fp
 	}
@@ -292,7 +292,7 @@ func TestReadPartitionSnapshot_ConsistentUnderConcurrentReplace(t *testing.T) {
 			if i%2 == 0 {
 				content = contentB
 			}
-			_ = WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, content, false)
+			_ = WritePartition(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January}, content, false)
 		}
 	}()
 
@@ -300,7 +300,7 @@ func TestReadPartitionSnapshot_ConsistentUnderConcurrentReplace(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range iterations {
-			snap, err := ReadPartitionSnapshot(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+			snap, err := ReadPartitionSnapshot(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2024, time.January})
 			if err != nil {
 				continue // a rename mid-open is a legitimate transient read error, not the hazard under test
 			}
