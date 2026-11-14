@@ -1,0 +1,150 @@
+#+TITLE: ADR-090: Raw to canonical bars (stage 4)
+#+STARTUP: overview indent
+
+* Status
+
+Proposed, for owner approval. Issue #628; stage 4 of #584. Builds on ADR-020
+(historic data: raw is immutable, canonical is rebuilt from it), ADR-088 (the
+instrument catalog) and ADR-089 (layout, OANDA raw store, package boundary).
+No code is written before this is approved.
+
+The bar-availability design the owner recorded on #619 (a bar has an opening
+=Time= and an =AvailableAt=; no stored close time; zero means not established) is
+taken as given. This ADR only decides how canonical files relate to it.
+
+* Context
+
+Checked read-only on the owner's machine:
+
+- =/srv/data/canonical/oanda= holds 3,722 files, 113 MB: 2,400 =h1= and 1,322
+  =d1= files. There are no =m1= or =h4= canonical files, although raw has all
+  four. Canonical files are the old =canonical-v1= format: a comment line
+  =# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=2024
+  month=01=, one JSON metadata line (provider, instrument =fx:EUR/USD=, interval,
+  span, =raw_fingerprint=, builder, validator and calendar versions, =built_at=,
+  =bar_count=, first and last bar, =revision=), the columns
+  =time,open,high,low,close,avg_spread,max_spread,ticks=, then one row per bar
+  actually present (a January =h1= file has 530 rows, since the market is closed at
+  weekends). Times are UTC; the first =d1= row of January 2024
+  opens =2024-01-01T22:00:00Z= (17:00 New York).
+- The archived converter took =Open/High/Low/Close= from the raw record's *bid*
+  prices, =AvgSpread= as the mean of the four corner spreads (ask minus bid at
+  open, high, low and close) and =MaxSpread= as the largest, and =Ticks= from the
+  raw volume. It never touched a float. It reported, per record, accepted,
+  incomplete (never persisted), suspicious (a crossed corner, ask below bid) or
+  rejected (bad shape, duplicate, out of order, or not aligned to the interval),
+  and dropped nothing silently.
+- The live engine reads =design-bars-v1= (=time,open,high,low,close,volume=). Its
+  =availableAt= is not in the file: the reader derives it as open plus a fixed
+  duration (=barDurations=: =h1=, =d1=), and says production's raw-to-canonical
+  step owns the real rule. A fixed 24 hours is wrong for OANDA's session day (it
+  opens 17:00 New York, so a day is 23 or 25 hours across a DST change).
+- The raw store (ADR-089) is complete for =m1=, =h1=, =h4=, =d1=, with a
+  fingerprint per partition.
+
+* Decision (proposed)
+
+** 1. The canonical file keeps the existing format
+
+Keep =canonical-v1= byte-compatible: the same comment line, metadata line, columns
+and row formatting. The 3,722 existing files stay valid and are not rebuilt, and a
+file the new builder writes is readable by the archived reader and the reverse.
+Prices are bid open, high, low, close; =avg_spread= and =max_spread= come from the
+four corner spreads exactly as above; =ticks= is the raw volume. Prices stay exact
+decimals (=num.Price=), never floats.
+
+** 2. Availability is derived, not stored
+
+The file has no availability column. =AvailableAt= is computed when canonical bars
+are loaded for the engine (stage 6), as the bar's scheduled end: the next interval
+boundary after its opening time under the instrument's calendar rule. For =d1= that
+is the next 17:00 America/New_York, so DST days are 23 or 25 hours. This is a
+*modeled* availability under an explicit backtest policy, never presented as an
+observed provider timestamp. The raw =complete= flag is provider fact kept in raw;
+canonical contains only complete bars, so =AvailableAt= is never zero for a stored
+bar, and a bar without one cannot exist in canonical.
+
+The rule is versioned by the metadata's =calendar_version=, so a change to it is
+visible in the files that were built under the old one. Storing =AvailableAt= was
+considered and rejected: it would freeze the policy into the data and force a
+rebuild of every file when the policy changes.
+
+** 3. Rules of the conversion
+
+A canonical partition is built from one raw partition and nothing else:
+
+- a record with =complete=false= is never converted (the downloader does not store
+  them; an old archive file might hold one, and it is skipped and reported);
+- a crossed corner (ask below bid), an impossible bar (=high= or =low= not
+  containing open and close, a non-positive price), a duplicate or out-of-order
+  time, or a time not on the interval's boundary rejects the record;
+- *the build fails closed*: a partition with any rejected record is not written,
+  and the report names each rejected record and why. Nothing is dropped, repaired
+  or skipped silently. (The archive reported per record; this makes a bad month
+  impossible to miss and impossible to half-store.)
+- Alignment: =h1= on the hour; =d1= at 17:00 America/New_York. Anything else is
+  misaligned. No =Calendar= interface: one small function, tested at the DST and
+  month boundaries, using the time zone database (embedded, so the build does not
+  depend on the host's).
+- A weekend or holiday gap is not an error and nothing is filled: the file lists
+  only the bars that exist. Whether a missing bar is a real gap is stage 5.
+
+** 4. Rebuilds and fingerprints
+
+The metadata records =raw_fingerprint=, the fingerprint of the raw partition's
+bytes it was built from. Canonical is derived data (ADR-020), so unlike raw it may
+be replaced: a build whose raw fingerprint, builder version and calendar version
+match the file on disk does nothing; otherwise the file is rewritten atomically
+(temporary file, sync, rename) under the per-partition lock, and the report says it
+was replaced. A build never touches raw.
+
+** 5. Packages and the command
+
+- =internal/marketdata/canonical=: the provider-neutral bar, the =canonical-v1=
+  reader and writer, the validation and the alignment rule. It imports =num=,
+  =instrument=, =layout= and the standard library.
+- =internal/marketdata/oanda=: the OANDA mapping (raw record to canonical bar,
+  spreads, outcomes). It imports =canonical=; =canonical= never imports a provider.
+- =cmd/trader=: =trader data build=, flags as =download= (=--data-root=,
+  =--instrument=, =--interval=, =--from=, =--to=, the same root precedence and
+  config file). It needs no token and makes no network call. It prints per
+  partition: built, unchanged, replaced or failed, with counts.
+- Scope: =h1= and =d1=, the intervals the archive has and the engine reads. =m1=
+  and =h4= wait until a strategy needs them (=h4= may be a resample of =h1=).
+- No Manager, plan, registry or service layer.
+
+** 6. Tests and the owner's check
+
+Hermetic: raw and canonical fixtures are small files copied from the archive;
+tests never read =/srv/data=. A test builds canonical from a raw fixture and
+compares the bytes with the archive's canonical file for the same month (except
+=built_at=, which is injected), another reads an archive file with the new reader.
+Cases: each rejection rule, a DST =d1= week, a month boundary, an unchanged
+rebuild, a changed raw fingerprint, a crossed corner, cancellation. The owner's
+check: download a short range with =trader data download= into a temporary root,
+run =trader data build= over it, and read the output.
+
+* Deferred
+
+Gap and coverage policy (stage 5); disk layout checks (6); the partition cache;
+loading canonical into =bar=/frames with the availability rule (stage 7, with the
+bar model); =m1=, =h4=, =W1=; other providers; the one-time migration of
+=raw/oanda= to =oanda/raw= and =canonical/oanda= to =oanda/canonical=.
+
+* Consequences
+
+- The existing canonical archive is reusable as it is once migrated; nothing is
+  rebuilt to adopt this stage.
+- Availability policy changes need no data rebuild, only a new =calendar_version=.
+- A bad raw month stops the build for that month rather than producing a canonical
+  file with a hole.
+
+* Questions for the owner
+
+1. Keep =canonical-v1= byte-compatible (proposed), or start a new schema with an
+   explicit =available_at= column?
+2. Fail closed per partition (proposed), or write the good rows and report the
+   rest, as the archive did?
+3. =h1= and =d1= only for now (proposed)?
+4. Canonical prices are the *bid* series with spreads, as in the archive. Is bid
+   the right basis for the engine, or should the canonical bar be mid?
