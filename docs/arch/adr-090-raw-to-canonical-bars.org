@@ -3,148 +3,186 @@
 
 * Status
 
-Proposed, for owner approval. Issue #628; stage 4 of #584. Builds on ADR-020
-(historic data: raw is immutable, canonical is rebuilt from it), ADR-088 (the
-instrument catalog) and ADR-089 (layout, OANDA raw store, package boundary).
-No code is written before this is approved.
+Proposed, with the owner's answers of 2026-11-14 applied (below), for final
+approval. Issue #628; stage 4 of #584. Builds on ADR-020 (historic data: raw is
+immutable, canonical is rebuilt from it), ADR-088 (the instrument catalog) and
+ADR-089 (layout, OANDA raw store, package boundary). No code is written before this
+is approved.
 
-The bar-availability design the owner recorded on #619 (a bar has an opening
-=Time= and an =AvailableAt=; no stored close time; zero means not established) is
-taken as given. This ADR only decides how canonical files relate to it.
+The bar-availability design the owner recorded on #619 (a bar has an opening =Time=
+and an =AvailableAt=; no stored close time; zero means not established) is taken as
+given.
 
 * Context
 
 Checked read-only on the owner's machine:
 
-- =/srv/data/canonical/oanda= holds 3,722 files, 113 MB: 2,400 =h1= and 1,322
-  =d1= files. There are no =m1= or =h4= canonical files, although raw has all
-  four. Canonical files are the old =canonical-v1= format: a comment line
-  =# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=2024
-  month=01=, one JSON metadata line (provider, instrument =fx:EUR/USD=, interval,
-  span, =raw_fingerprint=, builder, validator and calendar versions, =built_at=,
-  =bar_count=, first and last bar, =revision=), the columns
+- =/srv/data/canonical/oanda= holds 3,722 =canonical-v1= files (2,400 =h1=, 1,322
+  =d1=; no =m1= or =h4=): a comment line, one JSON metadata line (=raw_fingerprint=,
+  versions, =bar_count=, first and last bar, =revision=), the columns
   =time,open,high,low,close,avg_spread,max_spread,ticks=, then one row per bar
-  actually present (a January =h1= file has 530 rows, since the market is closed at
-  weekends). Times are UTC; the first =d1= row of January 2024
-  opens =2024-01-01T22:00:00Z= (17:00 New York).
-- The archived converter took =Open/High/Low/Close= from the raw record's *bid*
-  prices, =AvgSpread= as the mean of the four corner spreads (ask minus bid at
-  open, high, low and close) and =MaxSpread= as the largest, and =Ticks= from the
-  raw volume. It never touched a float. It reported, per record, accepted,
-  incomplete (never persisted), suspicious (a crossed corner, ask below bid) or
-  rejected (bad shape, duplicate, out of order, or not aligned to the interval),
-  and dropped nothing silently.
-- The live engine reads =design-bars-v1= (=time,open,high,low,close,volume=). Its
-  =availableAt= is not in the file: the reader derives it as open plus a fixed
-  duration (=barDurations=: =h1=, =d1=), and says production's raw-to-canonical
-  step owns the real rule. A fixed 24 hours is wrong for OANDA's session day (it
-  opens 17:00 New York, so a day is 23 or 25 hours across a DST change).
-- The raw store (ADR-089) is complete for =m1=, =h1=, =h4=, =d1=, with a
-  fingerprint per partition.
+  present. The archived converter took open, high, low and close from the raw
+  record's *bid* prices, kept only the mean and the largest of the four corner
+  spreads (ask minus bid), and so dropped the ask prices. It reported rejected
+  records per record (incomplete, crossed, bad shape, duplicate, out of order,
+  misaligned) and dropped nothing silently in memory, but nothing in the file said
+  a record had been rejected.
+- The live engine reads =design-bars-v1= and derives =availableAt= as open plus a
+  fixed duration. That is wrong for OANDA's session day, which opens 17:00 New York
+  and lasts 23 or 25 hours across a DST change.
+- The raw store (ADR-089) holds, per partition, every bid and ask open, high, low
+  and close, the volume and the provider's =complete= flag.
 
-* Decision (proposed)
+* Decision
 
-** 1. The canonical file keeps the existing format
+** 1. A new schema, canonical-v2
 
-Keep =canonical-v1= byte-compatible: the same comment line, metadata line, columns
-and row formatting. The 3,722 existing files stay valid and are not rebuilt, and a
-file the new builder writes is readable by the archived reader and the reverse.
-Prices are bid open, high, low, close; =avg_spread= and =max_spread= come from the
-four corner spreads exactly as above; =ticks= is the raw volume. Prices stay exact
-decimals (=num.Price=), never floats.
+Canonical keeps *everything raw knows about prices* and adds the availability time
+the engine needs. A new schema, not the old one: =canonical-v1= could not carry the
+ask prices or an availability time, and raw is complete and local, so the existing
+files are rebuilt from raw (local, no network) rather than migrated. =canonical-v1=
+files are not read by the new code.
 
-** 2. Availability is derived, not stored
+#+begin_src go
+type OHLC struct {
+    Open, High, Low, Close num.Price
+}
 
-The file has no availability column. =AvailableAt= is computed when canonical bars
-are loaded for the engine (stage 6), as the bar's scheduled end: the next interval
-boundary after its opening time under the instrument's calendar rule. For =d1= that
-is the next 17:00 America/New_York, so DST days are 23 or 25 hours. This is a
-*modeled* availability under an explicit backtest policy, never presented as an
-observed provider timestamp. The raw =complete= flag is provider fact kept in raw;
-canonical contains only complete bars, so =AvailableAt= is never zero for a stored
-bar, and a bar without one cannot exist in canonical.
+type Bar struct {
+    Time        time.Time // the bar's opening instant, UTC
+    AvailableAt time.Time // earliest time the completed bar may be consumed
 
-The rule is versioned by the metadata's =calendar_version=, so a change to it is
-visible in the files that were built under the old one. Storing =AvailableAt= was
-considered and rejected: it would freeze the policy into the data and force a
-rebuild of every file when the policy changes.
+    Bid OHLC
+    Ask OHLC
 
-** 3. Rules of the conversion
+    Volume int64 // the provider's activity count, not a tradable quantity
+}
 
-A canonical partition is built from one raw partition and nothing else:
+func (b Bar) Mid() OHLC // exact midpoint of Bid and Ask, field by field
+#+end_src
 
-- a record with =complete=false= is never converted (the downloader does not store
-  them; an old archive file might hold one, and it is skipped and reported);
-- a crossed corner (ask below bid), an impossible bar (=high= or =low= not
-  containing open and close, a non-positive price), a duplicate or out-of-order
-  time, or a time not on the interval's boundary rejects the record;
-- *the build fails closed*: a partition with any rejected record is not written,
-  and the report names each rejected record and why. Nothing is dropped, repaired
-  or skipped silently. (The archive reported per record; this makes a bad month
-  impossible to miss and impossible to half-store.)
-- Alignment: =h1= on the hour; =d1= at 17:00 America/New_York. Anything else is
-  misaligned. No =Calendar= interface: one small function, tested at the DST and
-  month boundaries, using the time zone database (embedded, so the build does not
-  depend on the host's).
-- A weekend or holiday gap is not an error and nothing is filled: the file lists
-  only the bars that exist. Whether a missing bar is a real gap is stage 5.
+File: a comment line =# schema=canonical-v2 provider=oanda symbol=EURUSD
+interval=h1 year=2024 month=01=, one JSON metadata line, any bad-record lines (3
+below), the columns
+
+#+begin_example
+time,available_at,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume
+#+end_example
+
+and one row per good bar, in ascending time. Prices are exact text with the raw
+store's five decimals, never through a float. Times are UTC, RFC 3339.
+
+*Mid is a method, not a column.* =Mid()= returns, for each of open, high, low and
+close, the exact midpoint of the bid and ask values (half a pip is representable,
+so nothing is rounded). Open and close are preserved on both sides, so mid is
+always recomputable from what is stored. Note that a candle's mid high is the
+midpoint of the bid high and the ask high, which need not equal the high of a
+tick-by-tick mid series; it is the midpoint of the candle values the provider
+gives, and the method's comment says so. The spreads of the old format are
+derivable (=Ask.x - Bid.x=) and are not stored.
+
+** 2. Availability is stored, modeled, and versioned
+
+=available_at= is written at build time as the bar's scheduled end: the next
+interval boundary after the opening time. For =h1= that is the next hour; for =d1=
+the next 17:00 America/New_York, so a DST day is 23 or 25 hours. This is a
+*modeled* availability under a named policy (=scheduled-close-v1=), never presented
+as an observed provider timestamp; the metadata records the policy name. A stored
+bar always has a nonzero =available_at= not before =Time=. The raw =complete= flag
+stays in raw as the provider's own fact. A change to the policy means a new
+policy name and a rebuild, which is cheap because canonical is derived (ADR-020),
+and the files built under the old policy say so.
+
+** 3. Bad records are written into the file, never silently lost
+
+The build writes every good row and *also records every record it rejected*, in the
+same file, as comment lines before the column header:
+
+#+begin_example
+# bad time=2024-01-05T14:00:00Z reason=crossed raw_row=1203
+# bad time=2024-01-05T15:00:00Z reason=incomplete raw_row=1204
+#+end_example
+
+=reason= is one of =incomplete= (the provider had not closed the candle),
+=crossed= (an ask below its bid at some corner), =invalid= (a high or low not
+containing open and close, or a non-positive price), =duplicate=, =out-of-order= and
+=misaligned= (not on the interval's boundary). =raw_row= is the row's position in
+the raw file, so the record can be examined there. The metadata line carries
+=bar_count= and =bad_count=. The canonical reader returns the good bars *and* the
+bad records, so a later stage (gaps, coverage) can tell "known bad" from "missing"
+from "closed market" and a bad month is never mistaken for a quiet one.
+
+A raw row that cannot even be parsed (the raw reader's =ErrMalformedData=) is not a
+bad record: the raw file itself is damaged, so that partition's build fails and
+writes nothing. A candle the downloader declined to store because it was still
+forming never reaches raw, so canonical sees it only as an absent bar; the gaps
+stage reports that. Records with the same time keep the first as the good row and
+record the later ones as =duplicate=.
+
+Alignment: =h1= on the hour; =d1= at 17:00 America/New_York, using the embedded
+time zone database. One small function, tested at the DST and month boundaries; no
+=Calendar= interface. A weekend or holiday gap is not an error and nothing is
+filled.
 
 ** 4. Rebuilds and fingerprints
 
-The metadata records =raw_fingerprint=, the fingerprint of the raw partition's
-bytes it was built from. Canonical is derived data (ADR-020), so unlike raw it may
-be replaced: a build whose raw fingerprint, builder version and calendar version
-match the file on disk does nothing; otherwise the file is rewritten atomically
-(temporary file, sync, rename) under the per-partition lock, and the report says it
-was replaced. A build never touches raw.
+The metadata records =raw_fingerprint= (the raw partition's bytes), the builder
+version and the availability policy. Canonical is derived, so unlike raw it may be
+replaced: a build whose three values match the file on disk does nothing;
+otherwise the file is rewritten atomically (temporary file, sync, rename) under the
+per-partition lock, and the report says it was replaced. A build never touches raw.
 
 ** 5. Packages and the command
 
-- =internal/marketdata/canonical=: the provider-neutral bar, the =canonical-v1=
-  reader and writer, the validation and the alignment rule. It imports =num=,
-  =instrument=, =layout= and the standard library.
-- =internal/marketdata/oanda=: the OANDA mapping (raw record to canonical bar,
-  spreads, outcomes). It imports =canonical=; =canonical= never imports a provider.
+- =internal/marketdata/canonical=: =OHLC=, =Bar=, =Mid=, the =canonical-v2= reader
+  and writer, the bad-record type, validation and the alignment and availability
+  rule. It imports =num=, =layout= and the standard library; never a provider.
+- =internal/marketdata/oanda=: the mapping from a raw record to a canonical bar or
+  a bad record. It imports =canonical=.
 - =cmd/trader=: =trader data build=, flags as =download= (=--data-root=,
-  =--instrument=, =--interval=, =--from=, =--to=, the same root precedence and
-  config file). It needs no token and makes no network call. It prints per
-  partition: built, unchanged, replaced or failed, with counts.
-- Scope: =h1= and =d1=, the intervals the archive has and the engine reads. =m1=
-  and =h4= wait until a strategy needs them (=h4= may be a resample of =h1=).
+  =--instrument=, =--interval=, =--from=, =--to=; the same root precedence and
+  config file). It needs no token and makes no network call. It prints, per
+  partition, built, unchanged, replaced or failed, with the good and bad counts.
+- Scope: =h1= and =d1=. =m1= and =h4= wait until a strategy needs them.
 - No Manager, plan, registry or service layer.
 
 ** 6. Tests and the owner's check
 
-Hermetic: raw and canonical fixtures are small files copied from the archive;
-tests never read =/srv/data=. A test builds canonical from a raw fixture and
-compares the bytes with the archive's canonical file for the same month (except
-=built_at=, which is injected), another reads an archive file with the new reader.
-Cases: each rejection rule, a DST =d1= week, a month boundary, an unchanged
-rebuild, a changed raw fingerprint, a crossed corner, cancellation. The owner's
-check: download a short range with =trader data download= into a temporary root,
-run =trader data build= over it, and read the output.
+Hermetic: raw fixtures are small files copied from the archive; tests never read
+=/srv/data=. Cases: each rejection rule written as a bad line and read back; a file
+with good and bad rows; a damaged raw row failing the build; a DST =d1= week and the
+New York changes; a month boundary; =Mid()= exact on half-pip values; an unchanged
+rebuild; a changed fingerprint; cancellation. A cross-check against the archive:
+building a month from its raw fixture must give bid prices and volume equal to the
+v1 file's open to close and ticks, and spreads (=Ask - Bid=) whose mean and maximum
+equal the v1 file's =avg_spread= and =max_spread=. The owner's check: download a
+short range with =trader data download= into a temporary root, run =trader data
+build= over it, and read the output.
 
 * Deferred
 
-Gap and coverage policy (stage 5); disk layout checks (6); the partition cache;
-loading canonical into =bar=/frames with the availability rule (stage 7, with the
-bar model); =m1=, =h4=, =W1=; other providers; the one-time migration of
-=raw/oanda= to =oanda/raw= and =canonical/oanda= to =oanda/canonical=.
+Gap and coverage policy (stage 5); disk layout checks; the partition cache; loading
+canonical bars into the engine's =bar= and frames (a later stage, with the bar
+model); =m1=, =h4=, =W1=; other providers; the one-time migration of =raw/oanda= to
+=oanda/raw=, after which the existing raw archive is converted by this builder.
 
 * Consequences
 
-- The existing canonical archive is reusable as it is once migrated; nothing is
-  rebuilt to adopt this stage.
-- Availability policy changes need no data rebuild, only a new =calendar_version=.
-- A bad raw month stops the build for that month rather than producing a canonical
-  file with a hole.
+- Nothing about prices is lost between raw and canonical, and mid is a method, so
+  the basis can be chosen by the consumer.
+- The existing =canonical-v1= archive is not reused; it is rebuilt from raw once raw
+  is migrated. Raw is complete, so nothing is lost, but the rebuild is a step the
+  migration must schedule.
+- A bad or incomplete record is visible in the file it affects and in the reader's
+  result, not only in a build log.
+- Files are larger than v1 (eight prices instead of four plus two spreads).
+- Availability policy changes need a rebuild, not a code-only change.
 
-* Questions for the owner
+* Owner decisions (2026-11-14)
 
-1. Keep =canonical-v1= byte-compatible (proposed), or start a new schema with an
-   explicit =available_at= column?
-2. Fail closed per partition (proposed), or write the good rows and report the
-   rest, as the archive did?
-3. =h1= and =d1= only for now (proposed)?
-4. Canonical prices are the *bid* series with spreads, as in the archive. Is bid
-   the right basis for the engine, or should the canonical bar be mid?
+- New schema with an =available_at= column.
+- Write the good rows and record the bad rows in the same file, so bad or incomplete
+  records never silently lose that distinction.
+- =h1= and =d1= only for now.
+- Mid basis, with open and close preserved: the canonical bar keeps bid and ask
+  open, high, low and close and the volume, and mid is a method.
