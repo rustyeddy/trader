@@ -118,7 +118,7 @@ the original decided, use full supersession instead.
 | 007 | Broker account handle versus account snapshot (in adr-007-broker-account-handle.org) | Accepted |
 | 008 | Simulated broker implements the public broker port (in adr-008-simulated-broker-port.org) | Accepted |
 | 009 | Journal and reconciliation model                                  | Proposed   |
-| 010 | gRPC primary external strategy protocol; MQTT integration         | Proposed   |
+| 010 | gRPC primary external strategy protocol; MQTT integration transport | Proposed   |
 | 011 | Public API and semantic-versioning policy                         | Proposed   |
 | 012 | Trading calendar and bar-alignment semantics                      | Accepted   |
 | 013 | Greenfield repository with controlled legacy transplant           | Accepted   |
@@ -255,7 +255,7 @@ Note: ADR-022 is likewise maintained in its own file,
 this registry.  Its own Status section is authoritative; the status
 column above is kept in sync with it.  It was held at =Proposed=
 pending five open questions raised while it was written; issues
-#107/#109/#110/#111 resolved all of them as the M2.5 implementation
+#104/#107/#109/#110/#111 resolved all of them as the M2.5 implementation
 actually encountered each one, and the M2.5 completion review (issue
 #113) folded those resolutions back into the ADR and promoted it to
 =Accepted=.
