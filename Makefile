@@ -5,7 +5,7 @@ BIN := bin/trader
 # new golangci-lint release adds or reconfigures linters.
 LINT_VERSION := v2.13.0
 
-.PHONY: all check tidy-check fmt-check test race cover vet lint build run clean
+.PHONY: all check tidy-check fmt-check test race cover vet lint smoke build run clean
 
 all: check build
 
@@ -44,6 +44,13 @@ vet:
 
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION) run ./...
+
+# smoke runs the opt-in live OANDA check (not part of `make check`). It needs
+# TRADER_OANDA_TOKEN in your shell (never on a command line) and writes only to a
+# temp directory. For a live-account token also set
+# TRADER_OANDA_BASE_URL=https://api-fxtrade.oanda.com.
+smoke:
+	go test -tags oandasmoke ./cmd/trader -run TestSmokeOANDA -v -count=1
 
 build:
 	go build -o $(BIN) ./cmd/trader
