@@ -115,8 +115,11 @@ from "closed market" and a bad month is never mistaken for a quiet one.
 A raw row that cannot even be parsed (the raw reader's =ErrMalformedData=) is not a
 bad record: the raw file itself is damaged, so that partition's build fails and
 writes nothing. A candle the downloader declined to store because it was still
-forming never reaches raw, so canonical sees it only as an absent bar; the gaps
-stage reports that. Records with the same time keep the first as the good row and
+forming never reaches raw (the owner chose this on 2026-11-14: raw files do not
+record it, only the download run's output does), so canonical sees it only as an
+absent bar. A download made after the candle has closed adds it, so this heals on
+the next run. The gaps stage treats an absent bar at the end of a downloaded range
+as possibly still forming, not as proof of a gap. Records with the same time keep the first as the good row and
 record the later ones as =duplicate=.
 
 Alignment: =h1= on the hour; =d1= at 17:00 America/New_York, using the embedded
@@ -184,5 +187,7 @@ model); =m1=, =h4=, =W1=; other providers; the one-time migration of =raw/oanda=
 - Write the good rows and record the bad rows in the same file, so bad or incomplete
   records never silently lose that distinction.
 - =h1= and =d1= only for now.
+- A forming candle is not stored and leaves no trace in raw (option 1); a later
+  download adds it once it is complete.
 - Mid basis, with open and close preserved: the canonical bar keeps bid and ask
   open, high, low and close and the volume, and mid is a method.
