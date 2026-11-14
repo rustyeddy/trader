@@ -183,3 +183,9 @@ func TestApp_Cleanup_IsSafeToCallTwice(t *testing.T) {
 	require.NoError(t, a.cleanup())
 	require.NoError(t, a.cleanup())
 }
+
+// slogDefault and restoreSlog let a test that runs the whole app put slog's
+// default back, since the app installs its own for the run.
+func slogDefault() *slog.Logger { return slog.Default() }
+
+func restoreSlog(l *slog.Logger) { slog.SetDefault(l) }
