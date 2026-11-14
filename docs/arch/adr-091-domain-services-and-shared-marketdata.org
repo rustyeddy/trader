@@ -1,0 +1,165 @@
+#+TITLE: ADR-091: Domain-owned services and shared market-data model
+#+STARTUP: overview indent
+
+* Status
+
+Proposed (owner discussion 2026-11-14). This records an agreed architectural
+direction for review before acceptance and code migration. It refines the
+service boundaries in accepted ADR-022, the current market-data boundary in
+ADR-089, and the canonical Bar location in proposed ADR-090. It does not
+silently amend those records: their existing accepted requirements remain in
+force until an explicit amendment/supersession is approved.
+
+* Context
+
+Trader's root package has accumulated responsibilities. Market-data Bar is
+needed by strategies, studies, scanners, backtests, and external Go consumers,
+but the stage-4 canonical implementation also defines a Bar. Raw and canonical
+code currently live under =internal/marketdata=, which protects them from other
+modules, not from unrelated packages inside Trader. The CLI must not compose
+orchestrate domain implementations; it is a transport adapter.
+
+ADR-022 already specifies thin transports and transport-neutral application
+services, but its earlier concrete package arrangement was =service/marketdata=.
+ADR-089 currently makes =cmd/trader= a composition root for the market-data
+milestone. This proposal replaces those particular placement/composition
+decisions while retaining their transport-neutral intent.
+
+* Decision (proposed)
+
+** Unidirectional service hierarchy
+
+#+begin_example
+cmd/trader, HTTP, gRPC             transport adapters
+             |
+             v
+service/                           application/use-case services
+             |
+             +------> marketdata/service/
+             +------> execution/service/
+             +------> account/service/
+             +------> other domain services
+                           |
+                           v
+                    domain/internal/
+
+Shared public models and foundational capabilities (marketdata, num,
+instrument, storage, configuration, logging) are imported directly as needed;
+no service wrapper solely for access.
+#+end_example
+
+- Transports parse inputs and format outputs; they do not compose domain
+  implementations or implement workflows.
+- Application services in =service/= orchestrate cross-domain use cases such
+  as backtest, live, study and scan. Repeated cross-domain orchestration belongs
+  in helpers in this layer. They return transport-neutral results and typed
+  errors; HTTP/JSON/CLI output formatting remains at transport boundaries.
+- A domain's =<domain>/service= exposes its capabilities and composes its
+  own =<domain>/internal= implementations.
+- Domain services do not depend on other domain services or application
+  services. An application service coordinates multi-domain use cases.
+- Public domain models have no dependency on domain services, application
+  services, transports, or private adapters. =marketdata= depends only on
+  =num= and the Go standard library.
+- Foundational packages are accessible directly when appropriate; a package
+  may depend on another lower-level public model without requiring a service.
+  Avoid unnecessary interfaces, service wrappers, and general managers.
+- Use Go's =internal= rules to enforce domain-private implementation access.
+  Other forbidden dependencies between public service packages require
+  architecture checks in CI; Go alone does not forbid them.
+
+** Market-data package boundary
+
+#+begin_example
+marketdata/
+    bar.go                        public Bar and OHLC
+    service/                      market-data domain service
+    internal/
+        canonical/                canonical format and validation
+        oanda/                    current adapter location (subject to
+                                  provider organization decision)
+        layout/                   current path resolver
+service/                          application orchestration
+cmd/trader/                       transport
+num/                              shared fixed-point numbers
+#+end_example
+
+=marketdata/internal= may be imported from =marketdata/service=, but not
+from =service/= or =cmd/trader=. In particular, =marketdata= itself must not
+import =marketdata/service= or =marketdata/internal=, avoiding an import cycle.
+
+** Shared Bar and OHLC (next implementation task)
+
+- One public =marketdata.Bar= and =marketdata.OHLC= replaces the duplicate
+  canonical and root-engine definitions at their appropriate integration
+  boundaries. Preserve opening =Time=, modeled =AvailableAt=, and =Volume=.
+- Exported =Bid=, =Ask=, =Mid=, and when supported =Trade= OHLC fields
+  may be accessed directly; do not require boilerplate getters.
+- The all-zero OHLC means that price representation is unavailable; a present
+  OHLC must contain all four valid, positive price values; partially populated
+  OHLC is invalid. At least one representation must exist.
+- =Bar.OHLC() OHLC= returns the preferred available series in this order:
+  MID, TRADE, BID, ASK; it returns the zero OHLC when no series exists.
+  A caller that needs a specific basis uses =Bar.Bid=, =Bar.Ask=, etc. and
+  checks =IsZero()= if absence matters. No error or mandatory selected-basis
+  return is imposed on simple access.
+- BID and ASK supplied together imply a derived MID under the canonical-v2
+  rules. Do not infer a missing side for execution; a single-price provider
+  stores the side or trade price actually observed.
+- ADR-090 currently persists BID/ASK/MID only; adding Trade to persisted
+  canonical-v2 requires a separate schema/ADR decision. The promotion must
+  preserve existing canonical-v2 data and behavior unless explicitly revised.
+- Consumers use =marketdata.Bar= directly; do not create an indefinite
+  parallel Bar representation. Migrate in explicit, testable steps.
+
+** Foundational infrastructure and provider adapters
+
+- Storage owns shared file operations (path/file lifecycle, locking, atomic
+  commit, cleanup); the canonical codec owns its own serialization contract.
+  The manager/consolidation is a separate change, not a prerequisite for the
+  Bar promotion.
+- Provider integrations may benefit from being grouped by external vendor,
+  e.g. =provider/oanda/{data,broker,account}=, =provider/alpaca/...=,
+  =provider/stooq/data=, with shared authenticated HTTP client, rate limiting
+  and retry behavior. This is an *open proposal*, not a package-placement
+  decision. Before relocating adapters, resolve how import visibility is
+  enforced and how domain services obtain provider capabilities without
+  calling other domain services.
+- Do not introduce a cross-domain provider service solely to share a
+  connection. Shared clients are infrastructure and must not force upward
+  dependencies.
+
+* Consequences
+
+- Compiler-enforced domain internals protect implementation details from
+  unrelated Trader packages.
+- Root =trader= is gradually thinned; consumers and external Go users import
+  =marketdata.Bar= without importing canonical files, clients or services.
+- Application orchestration is reusable across transports without duplicating
+  workflows in CLI commands.
+- Domain-services-not-calling-domain-services is a convention checked by
+  architecture tests in addition to Go's =internal= rule.
+- Existing accepted ADR-022 and ADR-089 placement rules need explicit
+  amendment once this proposal is accepted. Do not imply implementation is
+  already migrated.
+
+* Implementation sequence
+
+1. Finish the focused canonical stage-4a PR (#631).
+2. Promote Bar and OHLC into =marketdata/=, retain canonical-v2 behavior,
+   change consumers and tests, and make domain boundaries compile.
+3. Build the minimal =marketdata/service= facade and relocate internals as
+   required for the actual use case; keep CLI thin.
+4. Continue stage 4b. Separately decide provider organization and the
+   shared storage owner before proliferating adapters or file I/O.
+
+* Alternatives considered
+
+- =internal/marketdata=: allows unrelated Trader packages to import domain
+  internals; rejected as long-term enforcement boundary.
+- =marketdata= importing its own =internal= implementation: creates Go
+  import cycles when the implementation imports public =marketdata.Bar=.
+- All functionality through services: rejects unnecessary layers for simple
+  public models and foundational infrastructure.
+- Services free to invoke each other: risks cycles and hides cross-domain
+  orchestration; prefer application-service coordination.
