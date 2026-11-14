@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,8 @@ const testToken = "tok-SECRET-abc123"
 type fakeOANDA struct {
 	*httptest.Server
 	hits    atomic.Int32
+	mu      sync.Mutex
+	times   []time.Time // when each request arrived
 	series  []time.Time
 	forming bool
 }
@@ -40,6 +43,9 @@ func newFakeOANDA(t *testing.T, from time.Time, n int) *fakeOANDA {
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.hits.Add(1)
+		f.mu.Lock()
+		f.times = append(f.times, time.Now())
+		f.mu.Unlock()
 		if r.Header.Get("Authorization") != "Bearer "+testToken {
 			http.Error(w, "unauthorized: "+r.Header.Get("Authorization"), http.StatusUnauthorized) // a hostile body that echoes the credential it was sent
 			return
@@ -79,6 +85,7 @@ func runData(t *testing.T, env map[string]string, args ...string) (stdout, logs 
 	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "run.log")
 	a := newApp()
+	a.requestGap = 0 // tests do not wait
 	a.getenv = func(k string) string { return env[k] }
 	var out bytes.Buffer
 	a.cmd.SetOut(&out)
@@ -238,6 +245,7 @@ func TestDataDownload_ASummaryWriteFailureIsReported(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 3)
 			a := newApp()
+			a.requestGap = 0
 			a.getenv = func(k string) string { return map[string]string{envOANDAToken: testToken}[k] }
 			a.cmd.SetOut(&failingWriter{n: okWrites})
 			a.cmd.SetErr(io.Discard)
@@ -253,6 +261,34 @@ func TestDataDownload_ASummaryWriteFailureIsReported(t *testing.T) {
 			assert.Contains(t, err.Error(), "disk full")
 		})
 	}
+}
+
+func TestDataDownload_RequestsAreSpacedByTheGap(t *testing.T) {
+	srv := newFakeOANDA(t, utc(2024, 1, 31, 20), 8) // two months, so two requests
+	a := newApp()
+	a.requestGap = 60 * time.Millisecond
+	a.getenv = func(k string) string { return map[string]string{envOANDAToken: testToken}[k] }
+	var out bytes.Buffer
+	a.cmd.SetOut(&out)
+	a.cmd.SetErr(io.Discard)
+	a.cmd.SetArgs([]string{"--log-level", "DEBUG", "--log-output", filepath.Join(t.TempDir(), "run.log"),
+		"data", "download", "--config", writeConfig(t, ""), "--data-root", t.TempDir(), "--instrument", "EURUSD", "--interval", "h1",
+		"--from", "2024-01-31", "--to", "2024-02-02", "--base-url", srv.URL})
+	prev := slogDefault()
+	defer restoreSlog(prev)
+
+	require.NoError(t, a.execute())
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	require.GreaterOrEqual(t, len(srv.times), 2)
+	for i := 1; i < len(srv.times); i++ {
+		assert.GreaterOrEqual(t, srv.times[i].Sub(srv.times[i-1]), 50*time.Millisecond, "requests are paced")
+	}
+}
+
+func TestNewApp_PacesRequestsByDefault(t *testing.T) {
+	assert.Equal(t, 500*time.Millisecond, newApp().requestGap)
 }
 
 func TestDataCommand_PrintsHelpWithoutASubcommand(t *testing.T) {
