@@ -49,8 +49,14 @@ lint:
 # TRADER_OANDA_TOKEN in your shell (never on a command line) and writes only to a
 # temp directory. For a live-account token also set
 # TRADER_OANDA_BASE_URL=https://api-fxtrade.oanda.com.
+# The full output goes to bin/smoke.log; stdout gets only the verdict.
+SMOKE_LOG := bin/smoke.log
+
 smoke:
-	go test -tags oandasmoke ./cmd/trader -run TestSmokeOANDA -v -count=1
+	@mkdir -p bin
+	@go test -tags oandasmoke ./cmd/trader -run TestSmokeOANDA -v -count=1 > $(SMOKE_LOG) 2>&1; rc=$$?; \
+	if [ $$rc -eq 0 ]; then echo "smoke: PASS (log: $(SMOKE_LOG))"; else echo "smoke: FAIL (log: $(SMOKE_LOG))"; fi; \
+	exit $$rc
 
 build:
 	go build -o $(BIN) ./cmd/trader
