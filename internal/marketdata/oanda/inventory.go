@@ -79,14 +79,12 @@ type Partition struct {
 	// are populated only when Status is PartitionStatusOK.
 	RowCount        int
 	IncompleteCount int
-
 	// DuplicateTimes lists every Time value that appears more than once
 	// in the partition, sorted ascending. It is empty, not nil, when
 	// none are found and Status is PartitionStatusOK.
 	DuplicateTimes []time.Time
 	FirstTime      time.Time
 	LastTime       time.Time
-
 	// LastComplete is the provider-declared Complete flag of whichever
 	// record's Time equals LastTime — never any other record's, even if
 	// rows are not stored in Time order. It is meaningful only when
@@ -162,6 +160,20 @@ type Inventory struct {
 // Inventory describing every partition file found beneath it. Inspect
 // never writes, renames, deletes, or otherwise modifies anything under
 // root.
+//
+// Inspect never searches for root; the caller supplies the data root, and
+// only <root>/oanda/raw is scanned (layout.StageDir). A
+// sibling tree that happens to share the same PAIR/YYYY/MM shape — a
+// candles backup or save tree, for example — is therefore never seen
+// unless the caller mistakenly points root at it directly: Inspect only
+// ever descends from the root it is given, and never walks upward or
+// sideways to find one. Nor can such a tree be mistaken for the real
+// archive by being nested *inside* root (a backup subtree parallel to
+// the pair directories, or a stray file filed under the wrong
+// pair/year/month directory): every candidate file's path relative to
+// the raw stage directory must itself be exactly SYMBOL/YYYY/MM/<filename>, agreeing with
+// what the file name resolves to, or it is recorded as skipped rather
+// than inventoried as a partition — see verifyPathLayout.
 //
 // A file that cannot be opened, or whose rows fail to parse, is recorded
 // in the returned Inventory with a non-OK PartitionStatus and Err rather
