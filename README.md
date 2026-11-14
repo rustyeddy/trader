@@ -100,7 +100,7 @@ targets are:
 - `make test` — run `go test ./...`
 - `make race` — run tests with the race detector
 - `make check` — the canonical verification: `tidy-check`, `fmt-check`, `vet`,
-  `lint`, `test`, and `race`, the same gates as CI (default target); see
+  `lint`, `test`, and `race`, the same gates as CI (run first by the default `make` target); see
   [Testing](docs/workflows/testing.org)
 
 ## License
