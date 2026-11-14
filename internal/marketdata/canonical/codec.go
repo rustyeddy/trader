@@ -30,8 +30,8 @@ type metaJSON struct {
 	ValidatorVersion   string `json:"validator_version"`
 	AvailabilityPolicy string `json:"availability_policy"`
 	BuiltAt            string `json:"built_at"`
-	BarCount           int    `json:"bar_count"`
-	BadCount           int    `json:"bad_count"`
+	BarCount           *int   `json:"bar_count"` // a pointer, so a missing or null count is detectable
+	BadCount           *int   `json:"bad_count"`
 	FirstBar           string `json:"first_bar,omitempty"`
 	LastBar            string `json:"last_bar,omitempty"`
 }
@@ -73,6 +73,9 @@ func parsePrice(s string) (num.Price, error) {
 // the "# meta" line, one "# bad" line per rejected record, the column header and
 // one row per bar.
 func Encode(ctx context.Context, w io.Writer, f File) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := f.Validate(); err != nil {
 		return err
 	}
@@ -83,10 +86,11 @@ func Encode(ctx context.Context, w io.Writer, f File) error {
 	_, _ = fmt.Fprintf(bw, "# schema=%s provider=%s symbol=%s interval=%s year=%04d month=%02d\n",
 		Schema, k.Source, k.Symbol, string(k.Interval), k.Year, int(k.Month))
 
+	barCount, badCount := len(f.Bars), len(f.Bad)
 	meta := metaJSON{
 		RawFingerprint: f.Meta.RawFingerprint, BuilderVersion: f.Meta.BuilderVersion,
 		ValidatorVersion: f.Meta.ValidatorVersion, AvailabilityPolicy: f.Meta.AvailabilityPolicy,
-		BuiltAt: formatTime(f.Meta.BuiltAt), BarCount: len(f.Bars), BadCount: len(f.Bad),
+		BuiltAt: formatTime(f.Meta.BuiltAt), BarCount: &barCount, BadCount: &badCount,
 	}
 	if n := len(f.Bars); n > 0 {
 		meta.FirstBar, meta.LastBar = formatTime(f.Bars[0].Time), formatTime(f.Bars[n-1].Time)
@@ -176,6 +180,9 @@ func Decode(r io.Reader) (File, error) {
 			if err := dec.Decode(&meta); err != nil {
 				return File{}, malformed(n, "meta: %v", err)
 			}
+			if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+				return File{}, malformed(n, "meta: unexpected content after the metadata object")
+			}
 			haveMeta = true
 		case strings.HasPrefix(line, "# bad "):
 			b, err := parseBadLine(strings.TrimPrefix(line, "# bad "))
@@ -235,9 +242,12 @@ func Decode(r io.Reader) (File, error) {
 }
 
 func checkMetaCounts(m metaJSON, f File) error {
-	if m.BarCount != len(f.Bars) || m.BadCount != len(f.Bad) {
+	if m.BarCount == nil || m.BadCount == nil {
+		return fmt.Errorf("%w: meta must give bar_count and bad_count", ErrMalformedData)
+	}
+	if *m.BarCount != len(f.Bars) || *m.BadCount != len(f.Bad) {
 		return fmt.Errorf("%w: meta says %d bars and %d bad records, the file has %d and %d",
-			ErrMalformedData, m.BarCount, m.BadCount, len(f.Bars), len(f.Bad))
+			ErrMalformedData, *m.BarCount, *m.BadCount, len(f.Bars), len(f.Bad))
 	}
 	var first, last string
 	if n := len(f.Bars); n > 0 {

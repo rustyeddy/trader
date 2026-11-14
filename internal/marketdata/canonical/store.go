@@ -49,9 +49,12 @@ func Read(ctx context.Context, root string, k Key) (File, error) {
 // leaves an existing file untouched; a cancellation after it does not undo it.
 //
 // Canonical is derived data (ADR-020), rebuilt whole from raw, so replacing is
-// the intent and no merge is involved. Two builds of the same inputs write the
-// same bytes, so the process-local partition lock raw needs for merging is not
-// needed here.
+// the intent and no merge is involved, which is why there is no partition lock
+// as raw has for its read-merge-write. The contract is one builder per
+// partition: two builds of the same inputs differ only in Meta.BuiltAt, but
+// which of two concurrent builds ends up visible is not defined. Atomic rename
+// guarantees a reader never sees a partial file. Revisit when the storage
+// manager (a later phase) owns all file access.
 func Write(ctx context.Context, root string, f File) error {
 	if err := ctx.Err(); err != nil {
 		return err

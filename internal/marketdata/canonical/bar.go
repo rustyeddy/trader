@@ -124,6 +124,9 @@ func (b Bar) Validate() error {
 	return nil
 }
 
+// validate checks one side's shape. A price must be positive: num.Price cannot
+// be negative (its parsers and arithmetic refuse it), so zero is the only
+// non-positive value it can hold.
 func (o OHLC) validate() error {
 	for _, p := range []struct {
 		name  string

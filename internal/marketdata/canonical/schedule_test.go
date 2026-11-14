@@ -1,6 +1,8 @@
 package canonical
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -83,4 +85,34 @@ func TestInterval_Valid(t *testing.T) {
 	assert.True(t, D1.Valid())
 	assert.False(t, Interval("h4").Valid())
 	assert.False(t, Interval("").Valid())
+}
+
+func TestNewYorkZone_IsPinnedAndIgnoresTheHost(t *testing.T) {
+	sum := sha256.Sum256(newYorkTZif)
+	assert.Equal(t, "d7f2206b3a45989fc9ad63d558922532fa7352280d5f87176bf1db79cb1d1fa9", hex.EncodeToString(sum[:]),
+		"the zone bytes changed: that is a new availability policy, not an edit (ADR-090)")
+
+	// A host with different zone data, or a different TZ, changes nothing: the
+	// zone is loaded from the embedded bytes, never by name.
+	t.Setenv("ZONEINFO", t.TempDir())
+	t.Setenv("TZ", "Asia/Tokyo")
+	l, err := loadNewYork()
+	require.NoError(t, err)
+	_, winter := time.Date(2024, 1, 15, 12, 0, 0, 0, l).Zone()
+	_, summer := time.Date(2024, 7, 15, 12, 0, 0, 0, l).Zone()
+	assert.Equal(t, -5*3600, winter)
+	assert.Equal(t, -4*3600, summer)
+
+	got, err := AvailableAt(D1, utc(2024, 3, 9, 22))
+	require.NoError(t, err)
+	assert.True(t, got.Equal(utc(2024, 3, 10, 21)))
+}
+
+func TestAvailableAt_FollowsTheZoneRuleBeyondTheTable(t *testing.T) {
+	// 2040 is past the zone table's last transition: the footer rule gives the
+	// 23-hour day (second Sunday of March is the 11th).
+	got, err := AvailableAt(D1, utc(2040, 3, 10, 22))
+
+	require.NoError(t, err)
+	assert.True(t, got.Equal(utc(2040, 3, 11, 21)), "got %s", got)
 }

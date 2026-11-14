@@ -1,14 +1,11 @@
 package canonical
 
 import (
+	_ "embed" // newYorkTZif
 	"errors"
 	"fmt"
 	"sync"
 	"time"
-
-	// The time zone database is embedded so the availability rule never depends
-	// on the host having one.
-	_ "time/tzdata"
 )
 
 // Interval is a canonical bar interval token, lower case as in the layout and
@@ -44,9 +41,22 @@ const sessionZone = "America/New_York"
 // sessionHour is the local hour a daily bar opens.
 const sessionHour = 17
 
-var newYork = sync.OnceValues(func() (*time.Location, error) {
-	return time.LoadLocation(sessionZone)
-})
+// newYorkTZif is the America/New_York zone, pinned in this repository: the
+// entry of Go 1.26's lib/time/zoneinfo.zip, 1744 bytes with the rule for years
+// beyond the table in its footer (EST5EDT,M3.2.0,M11.1.0). It is loaded from
+// these bytes, never by name, so neither the host's zoneinfo, ZONEINFO nor TZ can
+// change an availability time. The rule's version is its policy name: replacing
+// these bytes means a new PolicyScheduledCloseV2 and a rebuild (ADR-090), and a
+// test pins their hash so they cannot change silently.
+//
+//go:embed newyork.tzif
+var newYorkTZif []byte
+
+func loadNewYork() (*time.Location, error) {
+	return time.LoadLocationFromTZData(sessionZone, newYorkTZif)
+}
+
+var newYork = sync.OnceValues(loadNewYork)
 
 // Aligned reports whether t is exactly on an interval boundary, where a bar of
 // that interval opens: on the hour for H1, 17:00 America/New_York for D1.

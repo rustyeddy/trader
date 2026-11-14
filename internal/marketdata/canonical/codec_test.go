@@ -201,3 +201,48 @@ func TestParsePriceAndFormatPrice(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, px("107.272"), p)
 }
+
+func TestEncode_StopsWhenCancelledEvenWithNoGoodBars(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for name, f := range map[string]File{
+		"empty":    {Key: jan24H1(), Meta: testMeta()},
+		"bad only": {Key: jan24H1(), Meta: testMeta(), Bad: []BadRecord{{Time: utc(2024, 1, 2, 0), Reason: ReasonCrossed, RawRow: 1}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+
+			err := Encode(ctx, &buf, f)
+
+			assert.ErrorIs(t, err, context.Canceled)
+			assert.Zero(t, buf.Len(), "nothing is written")
+		})
+	}
+}
+
+func TestDecode_MetaMustBeExactlyOneObjectWithBothCounts(t *testing.T) {
+	good := encode(t, File{Key: jan24H1(), Meta: testMeta()})
+	lines := strings.Split(strings.TrimSuffix(good, "\n"), "\n")
+	meta := lines[1]
+	require.Contains(t, meta, `"bar_count":0,"bad_count":0`)
+	withMeta := func(m string) string { return lines[0] + "\n" + m + "\n" + lines[2] + "\n" }
+
+	_, err := Decode(strings.NewReader(good))
+	require.NoError(t, err, "a clean empty partition is valid")
+
+	for name, m := range map[string]string{
+		"second object":     meta + " {}",
+		"trailing garbage":  meta + " garbage",
+		"trailing comma":    meta + ",",
+		"missing bar_count": strings.Replace(meta, `"bar_count":0,`, "", 1),
+		"missing bad_count": strings.Replace(meta, `,"bad_count":0`, "", 1),
+		"null bar_count":    strings.Replace(meta, `"bar_count":0`, `"bar_count":null`, 1),
+		"null bad_count":    strings.Replace(meta, `"bad_count":0`, `"bad_count":null`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Decode(strings.NewReader(withMeta(m)))
+
+			require.ErrorIs(t, err, ErrMalformedData)
+		})
+	}
+}

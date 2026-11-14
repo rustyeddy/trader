@@ -142,8 +142,10 @@ the next run. The gaps stage treats an absent bar at the end of a downloaded ran
 as possibly still forming, not as proof of a gap. Records with the same time keep the first as the good row and
 record the later ones as =duplicate=.
 
-Alignment: =h1= on the hour; =d1= at 17:00 America/New_York, using the embedded
-time zone database. One small function, tested at the DST and month boundaries; no
+Alignment: =h1= on the hour; =d1= at 17:00 America/New_York, using America/New_York
+zone bytes pinned in the repository (loaded from the bytes, never by name, so the
+host's zone data cannot change a stored time; changing them is a new policy name).
+One small function, tested at the DST and month boundaries; no
 =Calendar= interface. A weekend or holiday gap is not an error and nothing is
 filled.
 
