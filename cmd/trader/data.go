@@ -25,6 +25,11 @@ const (
 	// defaultBaseURL is OANDA's practice host, so a run without a base URL can
 	// only read demo data; the live host is chosen explicitly.
 	defaultBaseURL = "https://api-fxpractice.oanda.com"
+
+	// defaultRequestGap spaces provider requests so a long download stays well
+	// inside OANDA's limits. A 401 is still never retried: it is a permanent
+	// error (the credential), not something pacing or retrying can fix.
+	defaultRequestGap = 500 * time.Millisecond
 )
 
 // newDataCmd is the "data" command group. cmd/trader is the composition root
@@ -131,6 +136,8 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 		BaseURL:    baseURL,
 		Credential: tokenFromEnv{getenv: a.getenv},
 		Logger:     log,
+
+		MinRequestInterval: a.requestGap,
 	})
 	if err != nil {
 		return err

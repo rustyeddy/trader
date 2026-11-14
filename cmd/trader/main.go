@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -44,12 +45,15 @@ type app struct {
 	// does (ADR-078 S-1, ADR-089); tests replace it.
 	getenv func(string) string
 
+	// requestGap is the minimum spacing between provider requests.
+	requestGap time.Duration
+
 	prev   *slog.Logger // slog's default before install
 	closer io.Closer    // the log output; nil when none is open
 }
 
 func newApp() *app {
-	a := &app{run: trader.Run, getenv: os.Getenv}
+	a := &app{run: trader.Run, getenv: os.Getenv, requestGap: defaultRequestGap}
 	a.cmd = &cobra.Command{
 		Use:           "trader",
 		Short:         "Backtest the EMAX scenarios and print a summary of each",
