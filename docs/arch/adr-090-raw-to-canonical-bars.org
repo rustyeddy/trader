@@ -15,9 +15,10 @@ given.
 
 Implementation (2026-11-15): the canonical package, the public =Bar=, the provider
 mapping, the domain service and =trader data build= are built and merged (#631,
-#636, #639, #650); the v1 spread cross-check of section 6 and the loader that
-refuses a partition with bad records (#647) are not. Acceptance is the owner's
-decision (#643).
+#636, #639, #650), and so is the loader (#647): =marketdata/service.Load= and
+=trader data status= refuse a partition with bad records unless the caller allows
+it, and never use a stale one. The v1 spread cross-check of section 6 is not built.
+Acceptance is the owner's decision (#643).
 
 * Context
 

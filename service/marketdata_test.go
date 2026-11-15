@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	mdservice "github.com/rustyeddy/trader/marketdata/service"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/provider/oanda"
 	"github.com/rustyeddy/trader/store"
@@ -211,12 +212,12 @@ func TestBuildCanonical_BuiltAtDefaultsToNow(t *testing.T) {
 }
 
 // TestService_ImportsOnlyTheDomainServiceAndProviders keeps the application
-// service in its place (ADR-091): within the module it may import the market-data
-// domain service and a provider, never a transport, the root engine, the store or
+// service in its place (ADR-091): within the module it may import the public
+// market-data model, the market-data domain service and a provider, never a transport, the root engine, the store or
 // the layout directly. File data goes through the domain service and the provider.
 func TestService_ImportsOnlyTheDomainServiceAndProviders(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod + "/marketdata/service": true, mod + "/provider/oanda": true}
+	allowed := map[string]bool{mod + "/marketdata": true, mod + "/marketdata/service": true, mod + "/provider/oanda": true}
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
 	checked := 0
@@ -278,4 +279,91 @@ func TestBuildCanonical_FromTheArchiveFixtures(t *testing.T) {
 			t.Logf("%s: %d raw rows, %d good, %d bad", tc.file, len(raw), got[0].Good, got[0].Bad)
 		})
 	}
+}
+
+// buildAll writes raw months and builds them, so there are canonical files to load.
+func buildAll(t *testing.T, symbol string, months map[time.Month][]int) {
+	t.Helper()
+	for m, days := range months {
+		var recs []oanda.Record
+		for _, d := range days {
+			recs = append(recs, rec(utc(2024, m, d, 0), true))
+		}
+		putRaw(t, symbol, 2024, m, recs...)
+	}
+	require.NoError(t, BuildCanonical(context.Background(), nil, janToMar(symbol), nil))
+}
+
+func loadReq(instruments ...string) LoadRequest {
+	return LoadRequest{Instruments: instruments, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 3, 1, 0)}
+}
+
+func TestLoadSeries_LoadsEachInstrumentInRequestOrder(t *testing.T) {
+	storetest.Root(t)
+	buildAll(t, "EURUSD", map[time.Month][]int{time.January: {2, 3}, time.February: {1}})
+	buildAll(t, "GBPUSD", map[time.Month][]int{time.January: {2}, time.February: {1}})
+
+	got, err := LoadSeries(context.Background(), nil, loadReq("GBPUSD", "EURUSD"))
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "GBPUSD", got[0].Instrument)
+	assert.Len(t, got[0].Series.Bars, 2)
+	assert.Equal(t, "EURUSD", got[1].Instrument)
+	assert.Len(t, got[1].Series.Bars, 3)
+	assert.Equal(t, "EURUSD", got[1].Series.Bars[0].Instrument)
+	require.Len(t, got[1].Months, 2)
+	assert.Equal(t, MonthLoaded, got[1].Months[0].State)
+	assert.NoError(t, got[1].Err)
+}
+
+func TestLoadSeries_AnInstrumentThatCannotLoadDoesNotStopTheRest(t *testing.T) {
+	storetest.Root(t)
+	buildAll(t, "EURUSD", map[time.Month][]int{time.January: {2}, time.February: {1}})
+	buildAll(t, "GBPUSD", map[time.Month][]int{time.January: {2}}) // February missing
+
+	got, err := LoadSeries(context.Background(), nil, loadReq("GBPUSD", "EURUSD"))
+
+	require.ErrorIs(t, err, ErrNotLoadable)
+	require.Len(t, got, 2)
+	assert.ErrorIs(t, got[0].Err, mdservice.ErrIncomplete)
+	assert.Empty(t, got[0].Series.Bars)
+	assert.Equal(t, []MonthState{MonthLoaded, MonthMissing}, []MonthState{got[0].Months[0].State, got[0].Months[1].State},
+		"the failed instrument still reports every month")
+	require.NoError(t, got[1].Err)
+	assert.Len(t, got[1].Series.Bars, 2, "EURUSD loads")
+}
+
+func TestLoadSeries_AllowFlagsReachTheDomainService(t *testing.T) {
+	storetest.Root(t)
+	buildAll(t, "GBPUSD", map[time.Month][]int{time.January: {2}})
+	req := loadReq("GBPUSD")
+	req.AllowMissing = true
+
+	got, err := LoadSeries(context.Background(), nil, req)
+
+	require.NoError(t, err)
+	assert.Len(t, got[0].Series.Bars, 1)
+	assert.Equal(t, MonthMissing, got[0].Months[1].State)
+}
+
+func TestLoadSeries_RefusesARequestItCannotRun(t *testing.T) {
+	storetest.Root(t)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, noInstrument := LoadSeries(context.Background(), nil, loadReq())
+	reversed := loadReq("EURUSD")
+	reversed.From, reversed.To = reversed.To, reversed.From
+	_, errRange := LoadSeries(context.Background(), nil, reversed)
+	_, errCtx := LoadSeries(cancelled, nil, loadReq("EURUSD"))
+	h4 := loadReq("EURUSD")
+	h4.Interval = "h4"
+	got, errInterval := LoadSeries(context.Background(), nil, h4)
+
+	assert.Error(t, noInstrument)
+	assert.Error(t, errRange)
+	assert.ErrorIs(t, errCtx, context.Canceled)
+	require.ErrorIs(t, errInterval, ErrNotLoadable, "the domain's refusal is the instrument's, reported in its result")
+	assert.ErrorIs(t, got[0].Err, mdservice.ErrUnsupportedInterval)
 }

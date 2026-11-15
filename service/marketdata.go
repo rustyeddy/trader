@@ -5,9 +5,10 @@
 //
 // marketdata.go is the market-data use case so far: BuildCanonical reads a raw
 // provider partition, hands it to the market-data domain service as a
-// marketdata.SourcePartition, and reports what each partition came to. One file
-// is enough while the services are this small; a package per service waits until
-// they are not.
+// marketdata.SourcePartition, and reports what each partition came to; LoadSeries
+// asks the domain service for canonical bars as series and reports every month's
+// state. One file is enough while the services are this small; a package per
+// service waits until they are not.
 package service
 
 import (
@@ -18,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	mdservice "github.com/rustyeddy/trader/marketdata/service"
 	"github.com/rustyeddy/trader/provider/oanda"
 )
@@ -148,4 +150,94 @@ func failed(log *slog.Logger, res PartitionResult, err error) PartitionResult {
 func monthStart(t time.Time) time.Time {
 	t = t.UTC()
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// The month states and statuses of a load, as the domain service defines them, so
+// a transport can show them without importing the domain service.
+type (
+	// MonthState is what one month's canonical file came to.
+	MonthState = mdservice.MonthState
+	// MonthStatus is the state of one UTC month of a load.
+	MonthStatus = mdservice.MonthStatus
+)
+
+// The month states.
+const (
+	MonthLoaded  = mdservice.Loaded
+	MonthBad     = mdservice.Bad
+	MonthMissing = mdservice.Missing
+	MonthStale   = mdservice.Stale
+)
+
+// ErrNotLoadable reports that LoadSeries finished but one or more instruments
+// could not be loaded as asked. Each failure is in its SeriesResult.
+var ErrNotLoadable = errors.New("service: series not loadable")
+
+// LoadRequest is what one load asks for: every instrument's canonical bars at one
+// interval whose opening time is in [From, To). The values come from the
+// transport. By default a month that is missing or has bad records fails the
+// instrument; AllowMissing and AllowBad accept them. A stale month never loads.
+type LoadRequest struct {
+	Instruments []string
+	// Interval is the lower-case token, h1 or d1.
+	Interval     string
+	From, To     time.Time
+	AllowBad     bool
+	AllowMissing bool
+}
+
+// SeriesResult is what one instrument's load came to.
+type SeriesResult struct {
+	Instrument string
+	// Series holds the bars when Err is nil, and is empty otherwise.
+	Series marketdata.Series
+	// Months is the status of every month the range touches, in order, even when
+	// the load failed.
+	Months []MonthStatus
+	// Err is why the instrument could not be loaded: an incomplete range, or a
+	// failure to read.
+	Err error
+}
+
+// LoadSeries loads the canonical series for req, one instrument at a time, from
+// the OANDA canonical files. An instrument that cannot be loaded as asked is
+// reported in its result and the rest carry on; at the end ErrNotLoadable is
+// returned if any failed. Cancellation stops the run at once and returns the
+// context's error. Nothing is written. log may be nil.
+func LoadSeries(ctx context.Context, log *slog.Logger, req LoadRequest) ([]SeriesResult, error) {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	if len(req.Instruments) == 0 {
+		return nil, errors.New("load: no instrument")
+	}
+	if !req.To.After(req.From) {
+		return nil, errors.New("load: --to must be after --from")
+	}
+	var results []SeriesResult
+	failed := 0
+	for _, symbol := range req.Instruments {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
+		got, err := mdservice.Load(ctx, mdservice.LoadRequest{
+			Source: "oanda", Instrument: symbol, Interval: req.Interval, From: req.From, To: req.To,
+			AllowBad: req.AllowBad, AllowMissing: req.AllowMissing,
+		})
+		if cerr := ctx.Err(); cerr != nil {
+			return results, cerr
+		}
+		res := SeriesResult{Instrument: symbol, Series: got.Series, Months: got.Months, Err: err}
+		if err != nil {
+			failed++
+			log.Warn("series not loaded", "symbol", symbol, "error", err)
+		} else {
+			log.Info("series loaded", "symbol", symbol, "bars", len(got.Series.Bars), "months", len(got.Months))
+		}
+		results = append(results, res)
+	}
+	if failed > 0 {
+		return results, fmt.Errorf("%w: %d of %d instruments", ErrNotLoadable, failed, len(results))
+	}
+	return results, nil
 }

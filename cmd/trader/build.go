@@ -64,34 +64,53 @@ h1 and d1 only.`,
 	return cmd
 }
 
-// runBuild resolves every option (flag, environment, file) and hands the request
-// to the application service. It is transport only: no provider and no domain
-// package is imported here.
-func (a *app) runBuild(cmd *cobra.Command, f buildFlags) error {
+// rangeOptions are the options build and status share: what to read, and the data
+// root, resolved from flag, environment and file.
+type rangeOptions struct {
+	symbols  []string
+	interval string
+	from, to time.Time
+}
+
+// resolveRange resolves the shared options (flag, environment, file) and points
+// the store at the configured data root. It reads no token and makes no request.
+func (a *app) resolveRange(cmd *cobra.Command, f buildFlags) (rangeOptions, error) {
 	fl := cmd.Flags()
 	cfg, err := loadConfig(f.config, fl.Changed("config"))
 	if err != nil {
-		return err
+		return rangeOptions{}, err
 	}
 	md := cfg.Marketdata
 	if md.Provider != "" && md.Provider != "oanda" {
-		return fmt.Errorf("config: marketdata.provider %q is not supported (only oanda)", md.Provider)
+		return rangeOptions{}, fmt.Errorf("config: marketdata.provider %q is not supported (only oanda)", md.Provider)
 	}
 	if err := useRoot(resolveRoot(f.dataRoot, a.getenv(envDataRoot), md.Root)); err != nil {
-		return err
+		return rangeOptions{}, err
 	}
 	symbols := pick(fl.Changed("instrument"), f.instruments, md.Instruments)
 	if len(symbols) == 0 {
-		return errors.New("no instrument: set --instrument or marketdata.instruments in " + defaultConfigPath)
+		return rangeOptions{}, errors.New("no instrument: set --instrument or marketdata.instruments in " + defaultConfigPath)
 	}
 	interval := strings.ToLower(pickString(fl.Changed("interval"), f.interval, md.Interval))
 	if interval == "" {
-		return errors.New("no interval: set --interval or marketdata.interval in " + defaultConfigPath)
+		return rangeOptions{}, errors.New("no interval: set --interval or marketdata.interval in " + defaultConfigPath)
 	}
 	from, to, err := parseRange(f.from, f.to)
 	if err != nil {
+		return rangeOptions{}, err
+	}
+	return rangeOptions{symbols: symbols, interval: interval, from: from, to: to}, nil
+}
+
+// runBuild resolves every option and hands the request to the application
+// service. It is transport only: no provider and no domain package is imported
+// here.
+func (a *app) runBuild(cmd *cobra.Command, f buildFlags) error {
+	opts, err := a.resolveRange(cmd, f)
+	if err != nil {
 		return err
 	}
+	symbols, interval, from, to := opts.symbols, opts.interval, opts.from, opts.to
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()

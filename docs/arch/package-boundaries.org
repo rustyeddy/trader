@@ -10,7 +10,7 @@ the rule is broken.
 | Package | Role | May import (within the module) |
 |---------+------+--------------------------------|
 | =cmd/trader= | transport: flags, environment, config file | =trader= (the engine, for the backtest run), =service=, =store=, =internal/logging=; the download command still imports =provider/oanda= and =store= directly until it moves behind a service (#641). =build.go= may import only the service, the store and logging (test) |
-| =service= | application services | =marketdata/service=, =provider/oanda= only (test) |
+| =service= | application services | =marketdata=, =marketdata/service=, =provider/oanda= only (test) |
 | =marketdata/service= | market-data domain service | =marketdata=, =marketdata/internal/canonical=, =num=, =internal/marketdata/layout=, =store=; never a provider or another domain service |
 | =marketdata/internal/canonical= | canonical-v2 format and availability rule | =marketdata=, =num=, =layout=, =store=; importable only from =marketdata/= (compiler and test) |
 | =marketdata= | public model: =Bar=, =OHLC=, =SourcePartition= | =num= only for the model; the tree may import only =num=, =layout=, =store= and itself (test) |

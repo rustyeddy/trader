@@ -40,6 +40,7 @@ make build                       # builds bin/trader (or: go build -o trader ./c
 trader                           # backtest the EMAX scenarios and print a summary of each
 trader data download ...         # download OANDA candles into the raw store
 trader data build ...            # build canonical-v2 bars from the raw store
+trader data status ...           # show which canonical months a range can load
 ```
 
 `trader data download` fetches bid/ask candles for a UTC range into month

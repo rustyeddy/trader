@@ -71,6 +71,14 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   row as a bad record, and publishes. `canonical.Publish` writes nothing when the
   same build (raw fingerprint, builder, validator, availability policy) is already
   there.
+- Reading is the other direction: `marketdata/service.Load` reads the canonical
+  files of a range and returns a `marketdata.Series` (one instrument's bars at one
+  interval, strictly ascending by time and by availability) with the state of every
+  month: `loaded`, `bad` (has bad records), `missing`, or `stale` (another build in
+  force, never used). Strict by default: a stale month always fails the load, and a
+  missing or bad one fails it unless the request allows it. `AvailableAt` is the
+  stored one, never recomputed. `service.LoadSeries` is the application-service
+  path; `trader data status` is its first consumer.
 - `Bar.Instrument` names a bar. Readers set it from the file's key; it is never a
   column of a row.
 
@@ -79,8 +87,9 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
 The root package runs on `marketdata.Bar`. Prices are read through `Bar.OHLC()`
 (mid first). The scenario files in `testdata/emax` use one synthetic price series,
 read as mid. Frames and merging (`replay.go`) deliver bars in availability order.
-Reading canonical bars into the engine, and the series type that carries them, are
-not built yet (#647).
+The series type and the canonical reader exist (`marketdata.Series`, `Load`);
+running a backtest on a `Series` (a run configuration, and `marketData` as a view
+over it) is not built yet.
 
 ## Tests
 
