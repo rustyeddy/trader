@@ -21,6 +21,7 @@ go run ./cmd/trader   # or run without building
 | `trader` | Backtests the six EMAX scenarios in `testdata/emax` and prints a summary of each. Deterministic: the output is the same every run. |
 | `trader data download` | Downloads OANDA bid/ask candles into the raw store. Needs a token and the network. |
 | `trader data build` | Builds canonical bars from the raw store. Needs no token and makes no network call. |
+| `trader data status` | Shows which canonical months a range can load (loaded, bad, missing, stale) without changing anything. Needs no token and makes no network call. |
 
 Global flags, accepted by every command: `--log-level` (DEBUG, INFO, WARN, ERROR;
 default INFO), `--log-format` (text or json) and `--log-output` (stderr, stdout or a
@@ -121,6 +122,34 @@ Builds canonical-v2 files for `h1` or `d1` (ADR-090). For each month:
 Output: one line per month (`<path>: built|unchanged|replaced, good N, bad N`, or
 `no raw partition` / `failed: ...`), then `total: built N, unchanged N, replaced N,
 missing raw N, failed N; good bars N, bad records N`.
+
+### trader data status
+
+```sh
+trader data status --instrument EURUSD --interval h1 --from 2024-01-01 --to 2024-04-01
+```
+
+A read-only check of the canonical bars a range would load, with the same options as
+`build` plus `--allow-bad` and `--allow-missing`. For each instrument it reads every
+UTC month the range touches and reports:
+
+- `loaded`: a valid file from the build in force with no bad records;
+- `bad`: the file has bad records, so it is not complete data;
+- `missing`: there is no canonical file for the month;
+- `stale`: the file is not from the build in force (another availability policy,
+  builder or validator version) or is not canonical-v2. A stale month is **never
+  used**: rebuild it with `trader data build`.
+
+By default the command fails if any month is stale, missing or bad. `--allow-bad`
+accepts months with bad records (their good bars load, and the month is still
+reported as bad); `--allow-missing` accepts a month with no file (a gap in the
+series). Output: one line per month (`<instrument> <year>-<month>: loaded, good N`,
+`bad, good N, bad N`, `missing`, `stale: <reason>`), one line per instrument (`N bars`
+or `not loadable`) and `total: loaded N, bad N, missing N, stale N; bars N`.
+
+`status` looks at the files' state and build, not inside a month: a bar missing from
+the middle of a loaded month is not reported yet, and it does not compare a file with
+the raw it was built from.
 
 ### Checking a live account
 
