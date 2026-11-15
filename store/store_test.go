@@ -202,6 +202,34 @@ func TestUpdate_SeesNoFileThenTheFile(t *testing.T) {
 	assert.Equal(t, []bool{false, true}, sawExists)
 }
 
+func TestUpdate_ErrUnchangedLeavesTheFileAloneAndIsNotAnError(t *testing.T) {
+	root := storetest.Root(t)
+	ctx := context.Background()
+	require.NoError(t, store.Write(ctx, "u.csv", []byte("keep")))
+	before, err := os.Stat(filepath.Join(root, "u.csv"))
+	require.NoError(t, err)
+
+	err = store.Update(ctx, "u.csv", func([]byte, bool) ([]byte, error) { return []byte("changed"), store.ErrUnchanged })
+
+	require.NoError(t, err)
+	got, rerr := store.Read("u.csv")
+	require.NoError(t, rerr)
+	assert.Equal(t, "keep", string(got))
+	after, serr := os.Stat(filepath.Join(root, "u.csv"))
+	require.NoError(t, serr)
+	assert.True(t, os.SameFile(before, after), "the file was not replaced")
+}
+
+func TestUpdate_ErrUnchangedOnAMissingFileCreatesNothing(t *testing.T) {
+	storetest.Root(t)
+
+	err := store.Update(context.Background(), "new.csv", func([]byte, bool) ([]byte, error) { return nil, store.ErrUnchanged })
+
+	require.NoError(t, err)
+	_, rerr := store.Read("new.csv")
+	assert.ErrorIs(t, rerr, fs.ErrNotExist)
+}
+
 func TestUpdate_ErrorFromTheCallbackLeavesTheFileUntouched(t *testing.T) {
 	storetest.Root(t)
 	ctx := context.Background()

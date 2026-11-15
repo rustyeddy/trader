@@ -44,6 +44,7 @@ func newDataCmd(a *app) *cobra.Command {
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	data.AddCommand(newDownloadCmd(a))
+	data.AddCommand(newBuildCmd(a))
 	return data
 }
 

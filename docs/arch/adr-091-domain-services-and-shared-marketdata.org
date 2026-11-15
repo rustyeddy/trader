@@ -76,13 +76,14 @@ marketdata/
     service/                      market-data domain service
     internal/
         canonical/                canonical format and validation
-        oanda/                    current adapter location (subject to
-                                  provider organization decision)
-        layout/                   current path resolver
 service/                          application orchestration
+                                  (marketdata.go: one file for now)
 cmd/trader/                       transport
 num/                              shared fixed-point numbers
 #+end_example
+
+(OANDA now lives in =provider/oanda= (#634), the path resolver in
+=internal/marketdata/layout= and file I/O in =store= (#644).)
 
 =marketdata/internal= may be imported from =marketdata/service=, but not
 from =service/= or =cmd/trader=. In particular, =marketdata= itself must not

@@ -73,3 +73,59 @@ func Write(ctx context.Context, f File) error {
 	}
 	return nil
 }
+
+// Outcome says what Publish did to the partition's file.
+type Outcome string
+
+// The outcomes of Publish.
+const (
+	// Built: there was no file, and one was written.
+	Built Outcome = "built"
+	// Unchanged: a file with the same build (raw fingerprint, builder, validator
+	// and availability policy) was already there, so nothing was written.
+	Unchanged Outcome = "unchanged"
+	// Replaced: a file was there that came from a different build, or could not
+	// be read as canonical-v2, and it was replaced.
+	Replaced Outcome = "replaced"
+)
+
+// Publish makes f the partition's file, doing only what is needed (ADR-090 s4).
+// Under the file's lock it compares the file on disk with f: when the build is
+// the same (Meta.SameBuild, which ignores BuiltAt) it writes nothing; when there
+// is none it writes one; when the file is from another build, or is not readable
+// as canonical-v2 (an old canonical-v1 file, say), it replaces it. Canonical is
+// derived data, so replacing is safe and raw is never touched. The write is the
+// store's atomic one; a cancellation before the commit leaves any file as it was.
+func Publish(ctx context.Context, f File) (Outcome, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	path, err := f.Key.Path()
+	if err != nil {
+		return "", err
+	}
+	if err := f.Validate(); err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := Encode(ctx, &buf, f); err != nil {
+		return "", err
+	}
+	outcome := Built
+	err = store.Update(ctx, path, func(old []byte, exists bool) ([]byte, error) {
+		if !exists {
+			return buf.Bytes(), nil
+		}
+		prev, derr := Decode(bytes.NewReader(old))
+		if derr == nil && prev.Key == f.Key && prev.Meta.SameBuild(f.Meta) {
+			outcome = Unchanged
+			return nil, store.ErrUnchanged
+		}
+		outcome = Replaced
+		return buf.Bytes(), nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("canonical: publish: %w", err)
+	}
+	return outcome, nil
+}
