@@ -36,7 +36,8 @@ the MCP server, the Alpaca and Stooq providers, account activity, the strategy
 protocol and process manager, the public SDK surface, and similar) may name
 packages, commands or paths that exist only in the archive. Their reasoning still
 informs the design; where an ADR names a path, check the tree. ADR-004, ADR-078 and
-ADR-086 to ADR-092 describe the live tree. Whether an archived-code ADR is
+ADR-086 to ADR-092 describe the live tree (ADR-090 to ADR-092 are Proposed: implemented,
+not yet accepted). Whether an archived-code ADR is
 superseded when its code is ported is decided when it is ported.
 
 * Status Definitions

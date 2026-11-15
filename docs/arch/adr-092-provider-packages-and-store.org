@@ -34,16 +34,19 @@ the same fixed-decimals price text rules.
    imports only public models and the foundational packages; it applies no domain
    rule. No package is created for a provider that does not exist.
 2. *One package owns data-file I/O: =store= (#644).* It owns the data root
-   (default =/srv/data=, set by =cmd/trader= from the resolved configuration, and
-   by tests to a temporary directory) and offers byte-oriented =Read=, =Write=,
+   (its default is =/srv/data=; =cmd/trader= sets another when one is
+   configured, and tests set a temporary directory) and offers byte-oriented =Read=, =Write=,
    =Create=, =Update= and =List= on root-relative paths. Writes are atomic and hold
    a per-path lock; =Update= is the locked read-modify-write; =ErrUnchanged= lets a
    callback leave a file alone. It is format-agnostic. An architecture test forbids
    the provider and market-data packages calling standard-library file functions.
 3. *Data APIs take no root.* =layout= builds paths relative to the root;
    =provider/oanda= and =canonical= functions lost their =root= parameter. The
-   composition root (=cmd/trader=) is still the only place that resolves the root
-   from a flag, the environment and the config file; with none configured it fails.
+   composition root (=cmd/trader=) is still the only place that resolves the root,
+   in this order: =--data-root=, =TRADER_DATA_ROOT=, =marketdata.root= in the config
+   file, then the store's default =/srv/data= (owner decision on #659, implemented
+   in #660). The default is the store's alone: =cmd/trader= passes a root to the
+   store only when one is configured.
 4. *The market-data flow is three layers (ADR-091):* =cmd/trader= (transport) to
    =service/marketdata.go= (application service, one file) to =marketdata/service=
    (domain service) over =marketdata/internal/canonical=, with the provider mapping

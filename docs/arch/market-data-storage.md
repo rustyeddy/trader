@@ -16,7 +16,7 @@ All persisted instrument price data, including production, research, and synthet
 - `YYYY` and `MM` identify the partition; `MM` is zero-padded.
 - Canonical files **must** be named `<instrument>-<YYYY>-<MM>-<interval>.csv`. Interval tokens must be consistent with Trader's supported interval identifiers.
 
-Example (the data root is the `data` directory itself; Trader's default root is `/srv/data`, and `trader` takes it from `--data-root`, `TRADER_DATA_ROOT` or `marketdata.root`):
+Example (the data root is the `data` directory itself. `trader` takes it from `--data-root`, then `TRADER_DATA_ROOT`, then `marketdata.root`, then the `store` package's default, `/srv/data`):
 
 ```text
 /srv/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-h1.csv

@@ -12,8 +12,9 @@ lives in [`_archive/`](_archive) as a donor and is ported one layer at a time. T
 market-data layers (download, raw store, canonical bars) are being rebuilt first
 (milestone "Market Data", issue #584).
 
-**Trader is not ready for real-money trading.** Paper trading and simulation are
-the only modes; real-money execution is not available and is not scheduled.
+**Trader is not ready for real-money trading.** Backtest simulation is available;
+paper trading is planned; real-money execution is unavailable and is not
+scheduled.
 
 ## Design Principles
 

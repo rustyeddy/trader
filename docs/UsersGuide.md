@@ -44,18 +44,21 @@ ever added to. Canonical is derived from raw and can always be rebuilt.
 Each option comes from, in order: the flag, the environment, then the config file
 (`etc/trader.yml` by default, `--config` to name another; copy
 [`etc/trader.example.yml`](../etc/trader.example.yml)). A missing default file is
-fine when the flags or the environment supply everything.
+fine when the flags or the environment supply everything. The data root has one
+more step: `--data-root`, then `TRADER_DATA_ROOT`, then `marketdata.root`, then the
+default `/srv/data`.
 
 | Option | Flag | Environment | Config key |
 |---|---|---|---|
-| data root | `--data-root` | `TRADER_DATA_ROOT` | `marketdata.root` |
+| data root | `--data-root` | `TRADER_DATA_ROOT` | `marketdata.root` (default `/srv/data`) |
 | instruments | `--instrument` (repeat or comma-separated) | | `marketdata.instruments` |
 | interval | `--interval` | | `marketdata.interval` |
 | OANDA host | `--base-url` (download only) | | `marketdata.base_url` |
 | OANDA token | none | `TRADER_OANDA_TOKEN` | none |
 
-There is no default data root: with none configured the command stops and says so.
-The **token is read only from `TRADER_OANDA_TOKEN`**; there is deliberately no flag
+The data root defaults to `/srv/data` (the `store` package's default), so a bare
+`trader data download` writes into that directory: give `--data-root` or
+`marketdata.root` to use another. The **token is read only from `TRADER_OANDA_TOKEN`**; there is deliberately no flag
 and no config key for it, and a config file containing a secret-looking key is
 rejected. The host defaults to OANDA's practice host, so a run with no `base_url`
 can only read demo data; name the live host (`https://api-fxtrade.oanda.com`)

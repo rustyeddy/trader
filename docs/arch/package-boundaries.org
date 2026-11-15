@@ -4,7 +4,7 @@
 
 The matrix of the earlier, larger runtime (ADR-065) is kept in
 =_archive/docs/package-boundaries.org=; it does not describe this tree. This table
-is the current one. Each rule marked (test) is an architecture test that fails when
+is the current one: the implemented structure, which ADR-091 and ADR-092 (Proposed, #643) record. Each rule marked (test) is an architecture test that fails when
 the rule is broken.
 
 | Package | Role | May import (within the module) |

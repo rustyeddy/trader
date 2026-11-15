@@ -2,12 +2,14 @@
 
 ## Current
 
+"Current" means implemented in the code; it is not the same as an accepted decision. ADR-090, ADR-091 and ADR-092 are Proposed until the owner accepts them (#643).
+
 | Document | What it is |
 |---|---|
 | [User's Guide](UsersGuide.md) | the commands, configuration and data layout |
 | [Developer's Guide](DevelopersGuide.md) | packages, layering, the market-data pipeline, tests |
 | [arch/package-boundaries.org](arch/package-boundaries.org) | the live packages and what each may import |
-| [arch/adr-decisions.org](arch/adr-decisions.org) | the registry of architecture decisions (ADR-089 to ADR-091 describe the current market-data structure) |
+| [arch/adr-decisions.org](arch/adr-decisions.org) | the registry of architecture decisions. ADR-089 (accepted, amended in part) and ADR-090 to ADR-092 (Proposed, implemented) describe the current market-data structure |
 | [arch/market-data-storage.md](arch/market-data-storage.md) | the data path convention |
 | [CONTRIBUTING.org](CONTRIBUTING.org) | issue, branch, pull request and merge process |
 | [workflows/](workflows) | testing, AI-assisted development, review rubric, Go testing rules |
