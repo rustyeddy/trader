@@ -85,7 +85,7 @@ func levelBelow(equity, used num.Money, level num.Rate) (bool, error) {
 // defaultMarginPolicy warns when equity falls below the margin in use (a
 // margin level of 100%) and liquidates below half of it, as a retail forex
 // broker with a 50% closeout level does.
-var defaultMarginPolicy = marginLevelPolicy(rateOne, rateHalf)
+var defaultMarginPolicy = marginLevelPolicy(rateOne, num.Half)
 
 // closeWorstLoser picks the position with the largest unrealized loss. Ties go
 // to the lowest instrument name so a run is replayable.

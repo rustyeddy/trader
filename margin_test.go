@@ -74,9 +74,9 @@ func TestDefaultMarginPolicy_UnrealizedLossCountsTowardEquity(t *testing.T) {
 func TestLevelBelow_IsStrictAtTheBoundary(t *testing.T) {
 	below := func(equity, used money, level rate) bool { return must1(levelBelow(equity, used, level)) }
 
-	assert.False(t, below(cents(50), cents(100), rateHalf), "50/100 is not below 50%: equality is healthy")
-	assert.True(t, below(cents(49), cents(100), rateHalf))
-	assert.True(t, below(mneg(cents(5)), cents(1), rateHalf), "negative equity is below any level")
+	assert.False(t, below(cents(50), cents(100), num.Half), "50/100 is not below 50%: equality is healthy")
+	assert.True(t, below(cents(49), cents(100), num.Half))
+	assert.True(t, below(mneg(cents(5)), cents(1), num.Half), "negative equity is below any level")
 	assert.False(t, below(usd(1), usd(1), rateOne), "equity equal to margin is a 100% level")
 }
 
@@ -85,7 +85,7 @@ func TestLevelBelow_IsStrictAtTheBoundary(t *testing.T) {
 func TestLevelBelow_ToleranceIsRatePrecision(t *testing.T) {
 	used := usd(1_000_000)
 	half := usd(500_000)
-	below := func(equity money) bool { return must1(levelBelow(equity, used, rateHalf)) }
+	below := func(equity money) bool { return must1(levelBelow(equity, used, num.Half)) }
 
 	assert.False(t, below(msub(half, num.MustParseMoney("0.004", usdCurrency))), "0.004 under rounds to the boundary at 1e-8")
 	assert.True(t, below(msub(half, num.MustParseMoney("0.01", usdCurrency))), "a cent under is below")

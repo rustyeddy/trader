@@ -47,6 +47,18 @@ func TestMustParseRate(t *testing.T) {
 	assert.Panics(t, func() { MustParseRate("not a rate") })
 }
 
+func TestHalf(t *testing.T) {
+	assert.Equal(t, MustParseRate("0.5"), Half)
+	assert.Equal(t, "0.5", Half.String())
+
+	mid, err := MustParsePrice("1.10010").Add(MustParsePrice("1.10000"))
+	require.NoError(t, err)
+	got, err := mid.MulRate(Half)
+
+	require.NoError(t, err)
+	assert.Equal(t, "1.10005", got.String(), "the midpoint of two prices")
+}
+
 func TestRateZeroValueIsValidZero(t *testing.T) {
 	var r Rate
 	assert.True(t, r.IsZero())

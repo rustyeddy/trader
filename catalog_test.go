@@ -16,7 +16,7 @@ func TestRate_Constants(t *testing.T) {
 	assert.Equal(t, rt(20_000), rateTwoPercent, "2%")
 	assert.Equal(t, rt(50_000), rateFivePercent, "5%")
 	assert.Equal(t, rt(1_000_000), rateOne, "100%")
-	assert.Equal(t, rt(500_000), rateHalf, "50%")
+	assert.Equal(t, rt(500_000), num.Half, "50%")
 }
 
 // rawMarket builds one catalog entry with every part adjustable, so a test can

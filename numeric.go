@@ -36,7 +36,6 @@ var (
 	rateTwoPercent  = num.MustParseRate("0.02")
 	rateFivePercent = num.MustParseRate("0.05")
 	rateOne         = num.MustParseRate("1")
-	rateHalf        = num.MustParseRate("0.5")
 )
 
 // defaultMaxOrderNotional is the largest notional one order may have, in USD:
