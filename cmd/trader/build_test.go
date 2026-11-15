@@ -100,6 +100,19 @@ func TestDataBuild_ReportsMissingRawBadRecordsAndFailures(t *testing.T) {
 	assert.Contains(t, out, "total: built 1, unchanged 0, replaced 0, missing raw 1, failed 1; good bars 1, bad records 1")
 }
 
+// With no flag, environment or config root the store's own root stands: here the
+// package's temporary root, in production the default /srv/data.
+func TestDataBuild_WithNoConfiguredRootUsesTheStoresRoot(t *testing.T) {
+	root := storetest.Root(t)
+	putRawMonth(t, "EURUSD", oanda.RawH1, 2024, time.January, rawRec(utc(2024, 1, 2, 0), true))
+
+	_, _, err := runData(t, nil, "data", "build", "--config", writeConfig(t, ""), "--instrument", "EURUSD",
+		"--interval", "h1", "--from", "2024-01-01", "--to", "2024-02-01")
+
+	require.NoError(t, err)
+	assert.FileExists(t, filepath.Join(root, "oanda", "canonical", "EURUSD", "2024", "01", "EURUSD-2024-01-h1.csv"))
+}
+
 func TestDataBuild_TakesItsOptionsFromTheConfigFile(t *testing.T) {
 	root := storetest.Root(t)
 	putRawMonth(t, "GBPUSD", oanda.RawH1, 2024, time.January, rawRec(utc(2024, 1, 2, 0), true))
@@ -132,7 +145,6 @@ func TestDataBuild_RejectsBadOptionsBeforeDoingAnything(t *testing.T) {
 		args []string
 		want string
 	}{
-		"no root":        {base("--data-root"), "no data root"},
 		"no instrument":  {base("--instrument"), "no instrument"},
 		"no interval":    {base("--interval"), "no interval"},
 		"no range":       {base("--from", "--to"), "--from and --to"},

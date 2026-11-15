@@ -46,7 +46,8 @@ that cannot be built is reported as failed and the rest carry on. A file already
 built from the same raw bytes is left alone; one from a different build is
 replaced. Raw is only read. The command needs no token and makes no network call.
 The data root is --data-root, then ` + envDataRoot + `, then marketdata.root in
-` + defaultConfigPath + `; --instrument and --interval also fall back to that file.
+` + defaultConfigPath + `, then the default ` + store.DefaultRoot + `; --instrument and
+--interval also fall back to that file.
 h1 and d1 only.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -55,7 +56,7 @@ h1 and d1 only.`,
 	}
 	fl := cmd.Flags()
 	fl.StringVar(&f.config, "config", defaultConfigPath, "config file (a missing default file is fine when flags or the environment supply the values)")
-	fl.StringVar(&f.dataRoot, "data-root", "", "data root (default: "+envDataRoot+", then marketdata.root in the config file)")
+	fl.StringVar(&f.dataRoot, "data-root", "", "data root (default: "+envDataRoot+", then marketdata.root in the config file, then "+store.DefaultRoot+")")
 	fl.StringSliceVar(&f.instruments, "instrument", nil, "instrument, such as EURUSD; repeat or separate with commas (default: marketdata.instruments)")
 	fl.StringVar(&f.interval, "interval", "", "h1 or d1 (default: marketdata.interval)")
 	fl.StringVar(&f.from, "from", "", "first instant, UTC: YYYY-MM-DD or RFC 3339 (required)")
@@ -76,11 +77,7 @@ func (a *app) runBuild(cmd *cobra.Command, f buildFlags) error {
 	if md.Provider != "" && md.Provider != "oanda" {
 		return fmt.Errorf("config: marketdata.provider %q is not supported (only oanda)", md.Provider)
 	}
-	root, err := resolveRoot(f.dataRoot, a.getenv(envDataRoot), md.Root)
-	if err != nil {
-		return err
-	}
-	if err := store.SetRoot(root); err != nil {
+	if err := useRoot(resolveRoot(f.dataRoot, a.getenv(envDataRoot), md.Root)); err != nil {
 		return err
 	}
 	symbols := pick(fl.Changed("instrument"), f.instruments, md.Instruments)

@@ -71,7 +71,7 @@ Rows already on file are never changed; only missing rows are added, and a
 candle the provider still reports as forming is never stored (a price that is
 still moving belongs to a tick feed, not to the immutable candle archive). The token is read
 only from ` + envOANDAToken + `. The data root is --data-root, then ` + envDataRoot + `, then
-marketdata.root in ` + defaultConfigPath + `; --instrument, --interval and --base-url also
+marketdata.root in ` + defaultConfigPath + `, then the default ` + store.DefaultRoot + `; --instrument, --interval and --base-url also
 fall back to that file.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -80,7 +80,7 @@ fall back to that file.`,
 	}
 	fl := cmd.Flags()
 	fl.StringVar(&f.config, "config", defaultConfigPath, "config file (a missing default file is fine when flags or the environment supply the values)")
-	fl.StringVar(&f.dataRoot, "data-root", "", "data root (default: "+envDataRoot+", then marketdata.root in the config file)")
+	fl.StringVar(&f.dataRoot, "data-root", "", "data root (default: "+envDataRoot+", then marketdata.root in the config file, then "+store.DefaultRoot+")")
 	fl.StringSliceVar(&f.instruments, "instrument", nil, "instrument, such as EURUSD; repeat or separate with commas (default: marketdata.instruments)")
 	fl.StringVar(&f.interval, "interval", "", "m1, h1, h4 or d1 (default: marketdata.interval)")
 	fl.StringVar(&f.from, "from", "", "first instant, UTC: YYYY-MM-DD or RFC 3339 (required)")
@@ -102,13 +102,7 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 		return fmt.Errorf("config: marketdata.provider %q is not supported (only oanda)", md.Provider)
 	}
 
-	root, err := resolveRoot(f.dataRoot, a.getenv(envDataRoot), md.Root)
-	if err != nil {
-		return err
-	}
-	// The composition root decides the data root; every data file operation
-	// then goes through the store, which resolves paths under it.
-	if err := store.SetRoot(root); err != nil {
+	if err := useRoot(resolveRoot(f.dataRoot, a.getenv(envDataRoot), md.Root)); err != nil {
 		return err
 	}
 	symbols := pick(fl.Changed("instrument"), f.instruments, md.Instruments)

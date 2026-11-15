@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/rustyeddy/trader/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -139,13 +140,24 @@ func walkKeys(n *yaml.Node) error {
 }
 
 // resolveRoot picks the data root: the flag, then TRADER_DATA_ROOT, then the
-// file. With none it fails and names all three, so the operator knows where to
-// set it. Nothing hard-codes a default root.
-func resolveRoot(flag, env, file string) (string, error) {
+// file. With none it returns "" and the command leaves the store's own root, the
+// default (store.DefaultRoot), in place; the default is the store's alone and is
+// not repeated here.
+func resolveRoot(flag, env, file string) string {
 	for _, v := range []string{flag, env, file} {
 		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v), nil
+			return strings.TrimSpace(v)
 		}
 	}
-	return "", errors.New("no data root: set --data-root, TRADER_DATA_ROOT, or marketdata.root in " + defaultConfigPath)
+	return ""
+}
+
+// useRoot makes root the store's data root when one was configured; an empty root
+// leaves the store's default. cmd/trader is the composition root: every data file
+// operation then goes through the store, which resolves paths under that root.
+func useRoot(root string) error {
+	if root == "" {
+		return nil
+	}
+	return store.SetRoot(root)
 }
