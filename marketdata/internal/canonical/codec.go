@@ -261,6 +261,7 @@ func Decode(r io.Reader) (File, error) {
 		if err != nil {
 			return File{}, malformed(n+line, "%v", err)
 		}
+		b.Instrument = f.Key.Symbol // named from the key; never a column
 		f.Bars = append(f.Bars, b)
 	}
 

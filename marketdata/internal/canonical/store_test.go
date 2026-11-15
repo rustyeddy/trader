@@ -25,6 +25,7 @@ func TestWriteRead_RoundTripsThroughTheLayoutPath(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, got.Bars, 3)
+	assert.Equal(t, "EURUSD", got.Bars[0].Instrument, "Read names the bars from the key")
 	assert.Len(t, got.Bad, 1)
 	assert.False(t, got.Clean())
 	path, _ := f.Key.Path()

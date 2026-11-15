@@ -196,7 +196,9 @@ file through =marketdata/internal/canonical= and the =store= package.
   =SourcePartition= / =SourceRow=: one provider raw partition with its names, the
   fingerprint of its bytes and, per row, the raw row number, the provider's
   complete flag and an *unvalidated* =Bar= (provider prices, no mid, no
-  =AvailableAt=). A bare =[]Bar= cannot carry the bad records, row numbers or
+  =AvailableAt=). =Bar.Instrument= (#650) names a bar: readers set it from the
+  file's key, it is never a column, and =File.Validate= and
+  =SourcePartition.Validate= require it to be empty or the key's symbol. A bare =[]Bar= cannot carry the bad records, row numbers or
   fingerprint this ADR needs, so the hand-off is the partition. It imports =num=
   and the standard library only.
 - =provider/oanda=: =ReadSourcePartition= reads the raw partition through the

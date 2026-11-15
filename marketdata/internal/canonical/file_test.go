@@ -83,14 +83,16 @@ func TestFile_Validate(t *testing.T) {
 		"trade series": {func(f *File) {
 			f.Bars[1].Trade = marketdata.OHLC{Open: px("1.1"), High: px("1.2"), Low: px("1.0"), Close: px("1.15")}
 		}, ErrMalformedData},
-		"invalid bar":          {func(f *File) { f.Bars[1].Volume = -5 }, ErrMalformedData},
-		"bar in another month": {func(f *File) { f.Bars[2] = goodBar(t, utc(2024, 2, 1, 0)) }, ErrMalformedData},
-		"bars not ascending":   {func(f *File) { f.Bars[1], f.Bars[2] = f.Bars[2], f.Bars[1] }, ErrMalformedData},
-		"duplicate bar time":   {func(f *File) { f.Bars[2] = f.Bars[1] }, ErrMalformedData},
-		"misaligned bar":       {func(f *File) { f.Bars[1] = goodBarAt(t, utc(2024, 1, 2, 1).Add(time.Minute)) }, ErrMalformedData},
-		"wrong availability":   {func(f *File) { f.Bars[0].AvailableAt = f.Bars[0].Time.Add(2 * time.Hour) }, ErrMalformedData},
-		"bad reason":           {func(f *File) { f.Bad = []BadRecord{{Time: utc(2024, 1, 3, 0), Reason: "nope", RawRow: 1}} }, ErrMalformedData},
-		"bad row zero":         {func(f *File) { f.Bad = []BadRecord{{Time: utc(2024, 1, 3, 0), Reason: ReasonCrossed, RawRow: 0}} }, ErrMalformedData},
+		"bar of the key's instrument": {func(f *File) { f.Bars[1].Instrument = "EURUSD" }, nil},
+		"bar of another instrument":   {func(f *File) { f.Bars[1].Instrument = "GBPUSD" }, ErrMalformedData},
+		"invalid bar":                 {func(f *File) { f.Bars[1].Volume = -5 }, ErrMalformedData},
+		"bar in another month":        {func(f *File) { f.Bars[2] = goodBar(t, utc(2024, 2, 1, 0)) }, ErrMalformedData},
+		"bars not ascending":          {func(f *File) { f.Bars[1], f.Bars[2] = f.Bars[2], f.Bars[1] }, ErrMalformedData},
+		"duplicate bar time":          {func(f *File) { f.Bars[2] = f.Bars[1] }, ErrMalformedData},
+		"misaligned bar":              {func(f *File) { f.Bars[1] = goodBarAt(t, utc(2024, 1, 2, 1).Add(time.Minute)) }, ErrMalformedData},
+		"wrong availability":          {func(f *File) { f.Bars[0].AvailableAt = f.Bars[0].Time.Add(2 * time.Hour) }, ErrMalformedData},
+		"bad reason":                  {func(f *File) { f.Bad = []BadRecord{{Time: utc(2024, 1, 3, 0), Reason: "nope", RawRow: 1}} }, ErrMalformedData},
+		"bad row zero":                {func(f *File) { f.Bad = []BadRecord{{Time: utc(2024, 1, 3, 0), Reason: ReasonCrossed, RawRow: 0}} }, ErrMalformedData},
 		"bad rows not ascending": {func(f *File) {
 			f.Bad = []BadRecord{{Time: utc(2024, 1, 3, 0), Reason: ReasonCrossed, RawRow: 5}, {Time: utc(2024, 1, 3, 1), Reason: ReasonCrossed, RawRow: 5}}
 		}, ErrMalformedData},

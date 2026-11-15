@@ -129,7 +129,7 @@ func convert(ctx context.Context, key canonical.Key, p marketdata.SourcePartitio
 			return nil, nil, fmt.Errorf("%w: row %d opens at %s, outside %04d-%02d",
 				marketdata.ErrInvalidSource, r.Row, t.Format(time.RFC3339), p.Year, int(p.Month))
 		}
-		bar, reason, err := classify(key.Interval, r, t)
+		bar, reason, err := classify(key, r, t)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -157,23 +157,23 @@ func convert(ctx context.Context, key canonical.Key, p marketdata.SourcePartitio
 // reason that applies wins, in this order: incomplete, misaligned, invalid
 // (a missing side, an overflow computing the mid, or a bar that fails
 // marketdata.Bar.Validate), crossed.
-func classify(i canonical.Interval, r marketdata.SourceRow, t time.Time) (marketdata.Bar, canonical.Reason, error) {
+func classify(key canonical.Key, r marketdata.SourceRow, t time.Time) (marketdata.Bar, canonical.Reason, error) {
 	if !r.Complete {
 		return marketdata.Bar{}, canonical.ReasonIncomplete, nil
 	}
-	ok, err := canonical.Aligned(i, t)
+	ok, err := canonical.Aligned(key.Interval, t)
 	if err != nil {
 		return marketdata.Bar{}, "", err
 	}
 	if !ok {
 		return marketdata.Bar{}, canonical.ReasonMisaligned, nil
 	}
-	avail, err := canonical.AvailableAt(i, t)
+	avail, err := canonical.AvailableAt(key.Interval, t)
 	if err != nil {
 		return marketdata.Bar{}, "", err
 	}
 	b := r.Bar
-	b.Time, b.AvailableAt = t, avail
+	b.Instrument, b.Time, b.AvailableAt = key.Symbol, t, avail
 	if b.Bid.IsZero() || b.Ask.IsZero() {
 		return marketdata.Bar{}, canonical.ReasonInvalid, nil
 	}

@@ -9,7 +9,7 @@ import (
 // ReadSourcePartition reads the raw partition for key through the store and maps
 // it to the provider-neutral marketdata.SourcePartition the market-data service
 // converts to canonical bars. It parses and maps only: each row becomes a
-// marketdata.SourceRow carrying the provider's bid and ask exactly as stored, its
+// marketdata.SourceRow carrying the instrument, the provider's bid and ask exactly as stored, its
 // 1-based position among the data rows, and OANDA's complete flag. It derives no
 // mid, sets no AvailableAt and rejects nothing: a crossed or oddly shaped row is
 // passed through for the domain to judge, and only a row that cannot be parsed
@@ -26,10 +26,11 @@ func ReadSourcePartition(ctx context.Context, key PartitionKey) (marketdata.Sour
 			Row:      i + 1,
 			Complete: r.Complete,
 			Bar: marketdata.Bar{
-				Time:   r.Time.UTC(),
-				Volume: r.Volume,
-				Bid:    marketdata.OHLC{Open: r.BidOpen, High: r.BidHigh, Low: r.BidLow, Close: r.BidClose},
-				Ask:    marketdata.OHLC{Open: r.AskOpen, High: r.AskHigh, Low: r.AskLow, Close: r.AskClose},
+				Instrument: key.Symbol,
+				Time:       r.Time.UTC(),
+				Volume:     r.Volume,
+				Bid:        marketdata.OHLC{Open: r.BidOpen, High: r.BidHigh, Low: r.BidLow, Close: r.BidClose},
+				Ask:        marketdata.OHLC{Open: r.AskOpen, High: r.AskHigh, Low: r.AskLow, Close: r.AskClose},
 			},
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,34 @@ func TestEncode_RoundTripsGoodAndBadRecords(t *testing.T) {
 		assert.Equal(t, f.Bad[i].RawRow, got.Bad[i].RawRow)
 	}
 	assert.False(t, got.Clean())
+}
+
+// The instrument is named from the file's key by the reader and is never a
+// column, so naming bars does not change a file's bytes.
+func TestInstrument_IsSetByDecodeFromTheKeyAndNeverWritten(t *testing.T) {
+	plain := goodFile(t)
+	named := goodFile(t)
+	for i := range named.Bars {
+		named.Bars[i].Instrument = "EURUSD"
+	}
+
+	got, err := Decode(strings.NewReader(encode(t, plain)))
+
+	require.NoError(t, err)
+	require.Len(t, got.Bars, 3)
+	for _, b := range got.Bars {
+		assert.Equal(t, "EURUSD", b.Instrument, "the reader names each bar from the key")
+	}
+	assert.Equal(t, encode(t, plain), encode(t, named), "the same bytes whether or not the bars are named")
+}
+
+func TestEncode_RefusesABarOfAnotherInstrument(t *testing.T) {
+	f := goodFile(t)
+	f.Bars[0].Instrument = "GBPUSD"
+
+	err := Encode(context.Background(), io.Discard, f)
+
+	assert.ErrorIs(t, err, ErrMalformedData)
 }
 
 func TestEncode_AFileWithOnlyBadRecordsRoundTrips(t *testing.T) {

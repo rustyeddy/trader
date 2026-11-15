@@ -141,7 +141,8 @@ func (f File) Clean() bool { return len(f.Bad) == 0 }
 // Validate reports ErrMalformedData (or the key's error) unless the file obeys
 // the canonical-v2 rules: a valid key; build metadata present; bars valid,
 // aligned, strictly ascending and inside the partition's UTC month; availability
-// times as the named policy gives when it is PolicyScheduledCloseV1; bad records
+// times as the named policy gives when it is PolicyScheduledCloseV1; an
+// instrument that is empty or the key's symbol; bad records
 // with valid reasons, times inside the month and strictly ascending raw rows.
 func (f File) Validate() error {
 	if err := f.Key.Validate(); err != nil {
@@ -183,6 +184,9 @@ func (f File) checkBar(i int, b marketdata.Bar) error {
 	at := b.Time.UTC().Format(time.RFC3339)
 	if err := b.Validate(); err != nil {
 		return fmt.Errorf("%w: bar %s: %v", ErrMalformedData, at, err)
+	}
+	if b.Instrument != "" && b.Instrument != f.Key.Symbol {
+		return fmt.Errorf("%w: bar %s is of %q, the file's key names %q", ErrMalformedData, at, b.Instrument, f.Key.Symbol)
 	}
 	if !b.Trade.IsZero() {
 		return fmt.Errorf("%w: bar %s has a trade series, which canonical-v2 does not store", ErrMalformedData, at)

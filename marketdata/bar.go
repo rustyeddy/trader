@@ -44,6 +44,15 @@ func (o OHLC) IsZero() bool { return o == OHLC{} }
 // leaves the others absent. Nothing infers a missing side: code that needs the
 // bid or the ask reads that field and checks IsZero if absence matters.
 type Bar struct {
+	// Instrument names what the bar is of: the symbol as spelled in the data
+	// path (for example "EURUSD"). Readers set it from the file's key; it is
+	// never written as a column of a row, so a stored file is unchanged by it.
+	// It lets frames, merging and orders carry the instrument without a wrapper
+	// type. Validate does not require it: storage and domain code may handle a
+	// bar before a reader has named it, and the engine checks it where it needs
+	// it. A file's key is the one source of truth: a bar whose Instrument is set
+	// and differs from its file's key is refused.
+	Instrument string
 	// Time is the bar's opening instant.
 	Time time.Time
 	// AvailableAt is the earliest time the completed bar may be consumed. The

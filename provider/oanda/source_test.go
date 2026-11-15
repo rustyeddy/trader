@@ -38,6 +38,7 @@ func TestReadSourcePartition_MapsRowsFingerprintAndNamesWithoutJudging(t *testin
 	require.Len(t, got.Rows, 3)
 	for i, r := range got.Rows {
 		assert.Equal(t, i+1, r.Row, "1-based among the data rows")
+		assert.Equal(t, "EURUSD", r.Bar.Instrument, "the mapper names each row's bar")
 		assert.Equal(t, records[i].Time, r.Bar.Time)
 		assert.Equal(t, records[i].Complete, r.Complete)
 		assert.Equal(t, int64(100), r.Bar.Volume)
