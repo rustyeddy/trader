@@ -117,14 +117,12 @@ func MidOf(bid, ask OHLC) (OHLC, error) {
 		if err != nil {
 			return OHLC{}, fmt.Errorf("marketdata: mid: %w", err)
 		}
-		if *c.dst, err = sum.MulRate(half); err != nil {
+		if *c.dst, err = sum.MulRate(num.Half); err != nil {
 			return OHLC{}, fmt.Errorf("marketdata: mid: %w", err)
 		}
 	}
 	return m, nil
 }
-
-var half = num.MustParseRate("0.5")
 
 // IsComplete reports whether availability has been established, as the owner's
 // design for the bar defines completeness (#619).

@@ -319,7 +319,7 @@ func TestAccount_Size_Open_RiskIsBoundedAndTight(t *testing.T) {
 	balances := []money{cents(1), usd(1), usd(11), usd(100), usd(999), usd(10000), usd(123456), usd(10_000_000_000)}
 	prices := []price{px(10), px(50000), px(110000), px(250000), px(12_345_678)}
 	// 1% and 2% keep risk the limit; 50% and 100% make margin the limit.
-	risks := []rate{rateOnePercent, rateTwoPercent, rateHalf, rateOne}
+	risks := []rate{rateOnePercent, rateTwoPercent, num.Half, rateOne}
 	// The budgets are each one half-even rounding at 1e-8 of the account
 	// currency (ADR-087), so a size is safe within that tolerance.
 	tolerance := big.NewRat(5, 1_000_000_000)

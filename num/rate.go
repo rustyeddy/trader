@@ -48,6 +48,10 @@ func MustParseRate(s string) Rate {
 	return r
 }
 
+// Half is the exact rate 0.5: the midpoint weight, and 50%. It is a shared
+// constant; callers must not assign to it.
+var Half = MustParseRate("0.5")
+
 // String returns r formatted as canonical decimal text.
 func (r Rate) String() string {
 	return fixed.Format(r.raw)
