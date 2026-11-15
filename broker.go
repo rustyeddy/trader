@@ -611,11 +611,18 @@ func (br *broker) fill(o *order, p num.Price, at time.Time) error {
 	return nil
 }
 
-// openOnly returns b as known at its open: the price series the engine reads
-// (OHLC, mid first) collapsed to its open, since all that has happened so far is
-// the open. The engine reads prices only through OHLC(), so setting Mid is enough.
+// openOnly returns b as known at its open: each price series the bar has (bid,
+// ask, mid, trade) collapsed independently to its own opening price, since all
+// that has happened so far is the open. A series the bar lacks stays absent,
+// nothing is synthesized, and a valid bar stays valid: the mid of the collapsed
+// bid and ask is still the collapsed mid, and an ask that was not below the bid at
+// the open is not below it now.
 func openOnly(b marketdata.Bar) marketdata.Bar {
-	o := b.OHLC().Open
-	b.Mid = marketdata.OHLC{Open: o, High: o, Low: o, Close: o}
+	for _, s := range []*marketdata.OHLC{&b.Bid, &b.Ask, &b.Mid, &b.Trade} {
+		if !s.IsZero() {
+			o := s.Open
+			*s = marketdata.OHLC{Open: o, High: o, Low: o, Close: o}
+		}
+	}
 	return b
 }

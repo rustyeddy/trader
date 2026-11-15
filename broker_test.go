@@ -573,16 +573,65 @@ func TestBroker_OnBar_MarginCloseoutRecordsATrade(t *testing.T) {
 		reason: reasonMarginCloseout, pnl: mneg(usd(1990))}}, act.trades)
 }
 
-func TestOpenOnly_CollapsesTheSeriesTheEngineReadsToItsOpen(t *testing.T) {
-	full := marketdata.Bar{Instrument: "EURUSD", Time: testStart, Mid: marketdata.OHLC{Open: px(110000), High: px(110400), Low: px(109500), Close: px(110200)}}
-	bidOnly := marketdata.Bar{Instrument: "EURUSD", Time: testStart, Bid: marketdata.OHLC{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}}
+func TestOpenOnly_CollapsesEachPresentSeriesToItsOwnOpenAndInventsNone(t *testing.T) {
+	flat := func(o num.Price) marketdata.OHLC { return marketdata.OHLC{Open: o, High: o, Low: o, Close: o} }
+	bid := marketdata.OHLC{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}
+	ask := marketdata.OHLC{Open: px(110010), High: px(110410), Low: px(109510), Close: px(110210)}
+	mid, err := marketdata.MidOf(bid, ask)
+	require.NoError(t, err)
+	trade := marketdata.OHLC{Open: px(110005), High: px(110300), Low: px(109600), Close: px(110100)}
+	open := testStart
+	mk := func(mutate func(*marketdata.Bar)) marketdata.Bar {
+		b := marketdata.Bar{Instrument: "EURUSD", Time: open, AvailableAt: open.Add(time.Hour), Volume: 7, Bid: bid, Ask: ask, Mid: mid}
+		mutate(&b)
+		return b
+	}
+	for name, tc := range map[string]struct {
+		in   marketdata.Bar
+		want marketdata.Bar
+	}{
+		"mid only": {
+			mk(func(b *marketdata.Bar) { b.Bid, b.Ask = marketdata.OHLC{}, marketdata.OHLC{} }),
+			mk(func(b *marketdata.Bar) { b.Bid, b.Ask, b.Mid = marketdata.OHLC{}, marketdata.OHLC{}, flat(mid.Open) }),
+		},
+		"bid only: no mid is made up": {
+			mk(func(b *marketdata.Bar) { b.Ask, b.Mid = marketdata.OHLC{}, marketdata.OHLC{} }),
+			mk(func(b *marketdata.Bar) { b.Ask, b.Mid, b.Bid = marketdata.OHLC{}, marketdata.OHLC{}, flat(bid.Open) }),
+		},
+		"ask only: no mid is made up": {
+			mk(func(b *marketdata.Bar) { b.Bid, b.Mid = marketdata.OHLC{}, marketdata.OHLC{} }),
+			mk(func(b *marketdata.Bar) { b.Bid, b.Mid, b.Ask = marketdata.OHLC{}, marketdata.OHLC{}, flat(ask.Open) }),
+		},
+		"bid, ask and mid": {
+			mk(func(*marketdata.Bar) {}),
+			mk(func(b *marketdata.Bar) { b.Bid, b.Ask, b.Mid = flat(bid.Open), flat(ask.Open), flat(mid.Open) }),
+		},
+		"trade only": {
+			mk(func(b *marketdata.Bar) {
+				b.Bid, b.Ask, b.Mid, b.Trade = marketdata.OHLC{}, marketdata.OHLC{}, marketdata.OHLC{}, trade
+			}),
+			mk(func(b *marketdata.Bar) {
+				b.Bid, b.Ask, b.Mid, b.Trade = marketdata.OHLC{}, marketdata.OHLC{}, marketdata.OHLC{}, flat(trade.Open)
+			}),
+		},
+		"every series, trade too": {
+			mk(func(b *marketdata.Bar) { b.Trade = trade }),
+			mk(func(b *marketdata.Bar) {
+				b.Bid, b.Ask, b.Mid, b.Trade = flat(bid.Open), flat(ask.Open), flat(mid.Open), flat(trade.Open)
+			}),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			original := tc.in
+			require.NoError(t, original.Validate(), "the fixture is a valid bar")
 
-	got := openOnly(full)
-	gotBid := openOnly(bidOnly)
+			got := openOnly(tc.in)
 
-	assert.Equal(t, marketdata.OHLC{Open: px(110000), High: px(110000), Low: px(110000), Close: px(110000)}, got.OHLC())
-	assert.Equal(t, marketdata.OHLC{Open: px(109990), High: px(109990), Low: px(109990), Close: px(109990)}, gotBid.OHLC())
-	assert.Equal(t, "EURUSD", got.Instrument)
-	assert.Equal(t, testStart, got.Time)
-	assert.Equal(t, px(110400), full.OHLC().High, "the original bar is not changed")
+			assert.Equal(t, tc.want, got)
+			assert.NoError(t, got.Validate(), "the open-only copy of a valid bar is valid")
+			assert.Equal(t, original, tc.in, "the original is untouched")
+			assert.Equal(t, original.OHLC().Open, got.OHLC().Open, "the engine's price at the open is the same")
+			assert.Equal(t, got.OHLC().Open, got.OHLC().Close)
+		})
+	}
 }
