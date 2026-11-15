@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/internal/logging"
-	"github.com/rustyeddy/trader/internal/marketdata/oanda"
+	"github.com/rustyeddy/trader/provider/oanda"
 )
 
 const (

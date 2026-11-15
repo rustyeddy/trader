@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/internal/marketdata/oanda"
+	"github.com/rustyeddy/trader/provider/oanda"
 )
 
 // TestSmokeOANDA downloads a small real range from OANDA into a temporary data

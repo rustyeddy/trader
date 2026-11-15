@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/rustyeddy/trader/internal/marketdata/oanda"
+	"github.com/rustyeddy/trader/provider/oanda"
 )
 
 // candleFetcher is the part of the OANDA client the download needs.
