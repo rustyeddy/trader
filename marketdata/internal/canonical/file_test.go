@@ -12,12 +12,10 @@ import (
 )
 
 func TestKey_PathIsTheLayoutPath(t *testing.T) {
-	root := t.TempDir()
-
-	got, err := jan24H1().Path(root)
+	got, err := jan24H1().Path()
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(root, "oanda", "canonical", "EURUSD", "2024", "01", "EURUSD-2024-01-h1.csv"), got)
+	assert.Equal(t, filepath.Join("oanda", "canonical", "EURUSD", "2024", "01", "EURUSD-2024-01-h1.csv"), got)
 }
 
 func TestKey_Validate(t *testing.T) {
@@ -27,7 +25,7 @@ func TestKey_Validate(t *testing.T) {
 	assert.ErrorIs(t, bad(func(k *Key) { k.Symbol = "../x" }).Validate(), layout.ErrInvalidComponent)
 	assert.ErrorIs(t, bad(func(k *Key) { k.Source = "" }).Validate(), layout.ErrInvalidComponent)
 	assert.ErrorIs(t, bad(func(k *Key) { k.Month = 13 }).Validate(), layout.ErrInvalidComponent)
-	_, err := bad(func(k *Key) { k.Interval = "w1" }).Path(t.TempDir())
+	_, err := bad(func(k *Key) { k.Interval = "w1" }).Path()
 	assert.ErrorIs(t, err, ErrUnsupportedInterval)
 }
 

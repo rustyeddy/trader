@@ -3,12 +3,15 @@ package oanda
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,10 +52,23 @@ func TestCrossCheckSchemaRejects(t *testing.T) {
 	}
 }
 
-func fixture(name string) string { return filepath.Join("testdata", name) }
+// fixture copies the testdata file name into the test store root, if it
+// exists, and returns its path relative to that root. Open reads through the
+// store, so a fixture has to live under the store's root; a name with no
+// fixture is returned unchanged and is reported by whatever reads it.
+func fixture(t *testing.T, name string) string {
+	t.Helper()
+	rel := filepath.Join("fixtures", name)
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		return rel
+	}
+	require.NoError(t, store.Write(context.Background(), rel, data))
+	return rel
+}
 
 func TestReadFileEURUSDH1(t *testing.T) {
-	meta, records, err := ReadFile(context.Background(), fixture("EURUSD-2020-05-h1.csv"))
+	meta, records, err := ReadFile(context.Background(), fixture(t, "EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
 
 	assert.Equal(t, RawH1, meta.Interval)
@@ -79,7 +95,7 @@ func TestReadFileEURUSDH1(t *testing.T) {
 }
 
 func TestReadFileJPYPairExactDecimals(t *testing.T) {
-	meta, records, err := ReadFile(context.Background(), fixture("USDJPY-2020-05-h1.csv"))
+	meta, records, err := ReadFile(context.Background(), fixture(t, "USDJPY-2020-05-h1.csv"))
 	require.NoError(t, err)
 	assert.Equal(t, "USDJPY", meta.Symbol)
 	require.NotEmpty(t, records)
@@ -90,26 +106,26 @@ func TestReadFileJPYPairExactDecimals(t *testing.T) {
 // The daily partition names the interval d1 in the file name but tf=d in the
 // schema comment; both resolve to D1 and the cross-check must accept it.
 func TestReadFileDailyIntervalTokenReconciled(t *testing.T) {
-	meta, records, err := ReadFile(context.Background(), fixture("EURUSD-2020-05-d1.csv"))
+	meta, records, err := ReadFile(context.Background(), fixture(t, "EURUSD-2020-05-d1.csv"))
 	require.NoError(t, err)
 	assert.Equal(t, RawD1, meta.Interval)
 	require.NotEmpty(t, records)
 }
 
 func TestOpenXAUUSDOutOfScope(t *testing.T) {
-	r, err := Open(fixture("XAUUSD-2026-06-h4.csv"))
+	r, err := Open(fixture(t, "XAUUSD-2026-06-h4.csv"))
 	assert.Nil(t, r)
 	assert.ErrorIs(t, err, ErrInstrumentOutOfScope)
 }
 
 func TestOpenW1Unsupported(t *testing.T) {
-	r, err := Open(fixture("EURUSD-2020-05-w1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2020-05-w1.csv"))
 	assert.Nil(t, r)
 	assert.ErrorIs(t, err, ErrUnsupportedInterval)
 }
 
 func TestMeta(t *testing.T) {
-	r, err := Open(fixture("EURUSD-2020-05-h1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
 	defer func() { _ = r.Close() }()
 
@@ -132,7 +148,7 @@ func TestReadFileMalformedRows(t *testing.T) {
 		"EURUSD-2021-01-h1.csv": "missing column header",
 	}
 	for name, kind := range cases {
-		_, _, err := ReadFile(context.Background(), fixture(name))
+		_, _, err := ReadFile(context.Background(), fixture(t, name))
 		assert.ErrorIs(t, err, ErrMalformedData, kind)
 	}
 }
@@ -140,7 +156,7 @@ func TestReadFileMalformedRows(t *testing.T) {
 // A header with the same columns in a different order must be rejected, not
 // read positionally — otherwise bid_h values would be assigned to bid_o.
 func TestOpenReorderedHeaderRejected(t *testing.T) {
-	r, err := Open(fixture("EURUSD-2021-02-h1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2021-02-h1.csv"))
 	if r != nil {
 		_ = r.Close()
 	}
@@ -154,14 +170,14 @@ func TestOpenBadYearMonthInFileName(t *testing.T) {
 		"EURUSD-2020-13-h1.csv", // month out of range
 		"EURUSD-2020-00-h1.csv", // month out of range
 	} {
-		_, err := Open(fixture(name))
+		_, err := Open(fixture(t, name))
 		assert.ErrorIs(t, err, ErrMalformedData, name)
 	}
 }
 
 func TestOpenSchemaInstrumentMismatch(t *testing.T) {
 	// File name says EURUSD; schema comment says GBPUSD.
-	r, err := Open(fixture("EURUSD-2020-09-h1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2020-09-h1.csv"))
 	if r != nil {
 		_ = r.Close()
 	}
@@ -170,7 +186,7 @@ func TestOpenSchemaInstrumentMismatch(t *testing.T) {
 
 func TestOpenSchemaMonthMismatch(t *testing.T) {
 	// File name says month 10; schema comment says month 05.
-	r, err := Open(fixture("EURUSD-2020-10-h1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2020-10-h1.csv"))
 	if r != nil {
 		_ = r.Close()
 	}
@@ -178,7 +194,7 @@ func TestOpenSchemaMonthMismatch(t *testing.T) {
 }
 
 func TestReaderStreamingAndClose(t *testing.T) {
-	r, err := Open(fixture("EURUSD-2020-05-h1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
 
 	// Stream two records, then close early — Close must release the file and
@@ -196,7 +212,7 @@ func TestReaderStreamingAndClose(t *testing.T) {
 }
 
 func TestReaderNextReturnsEOF(t *testing.T) {
-	r, err := Open(fixture("EURUSD-2020-05-h1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
 	defer func() { _ = r.Close() }()
 
@@ -213,7 +229,7 @@ func TestReaderNextReturnsEOF(t *testing.T) {
 }
 
 func TestReaderHonorsContextCancellation(t *testing.T) {
-	r, err := Open(fixture("EURUSD-2020-05-h1.csv"))
+	r, err := Open(fixture(t, "EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
 	defer func() { _ = r.Close() }()
 
@@ -225,7 +241,7 @@ func TestReaderHonorsContextCancellation(t *testing.T) {
 }
 
 func TestOpenBadFileName(t *testing.T) {
-	_, err := Open(fixture("not-a-valid-name.csv"))
+	_, err := Open(fixture(t, "not-a-valid-name.csv"))
 	assert.Error(t, err)
 }
 
@@ -239,16 +255,16 @@ func TestNewReaderFromBytesBadFileName(t *testing.T) {
 
 func TestOpenMissingFile(t *testing.T) {
 	// A well-formed, in-scope name that does not exist on disk.
-	_, err := Open(fixture("EURUSD-1999-01-h1.csv"))
+	_, err := Open(fixture(t, "EURUSD-1999-01-h1.csv"))
 	assert.Error(t, err)
 }
 
 func TestReader_RejectsARowOutsideItsPartitionMonth(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "05")
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+h1Row(at(2020, 5, 1, 0), true)+h1Row(at(2020, 6, 1, 0), true))
 
-	_, err := ReadPartitionRecords(context.Background(), root, PartitionKey{"EURUSD", RawH1, 2020, time.May})
+	_, err := ReadPartitionRecords(context.Background(), PartitionKey{"EURUSD", RawH1, 2020, time.May})
 
 	require.ErrorIs(t, err, ErrMalformedData)
 	assert.Contains(t, err.Error(), "2020-06-01T00:00:00Z")

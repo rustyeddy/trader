@@ -41,15 +41,14 @@ func (k PartitionKey) Validate() error {
 	return nil
 }
 
-// Path returns the partition file's absolute path under the data root, through
-// the one layout resolver (ADR-089): root/oanda/raw/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-tf.csv.
-// The path is also the partition's lock key, so it is the same for every
-// spelling of one root.
-func (k PartitionKey) Path(root string) (string, error) {
+// Path returns the partition file's path relative to the data root, through the
+// one layout resolver (ADR-089): oanda/raw/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-tf.csv.
+// The store resolves it under its root.
+func (k PartitionKey) Path() (string, error) {
 	if err := k.Validate(); err != nil {
 		return "", err
 	}
-	path, err := k.layout().Path(root)
+	path, err := k.layout().Path()
 	if err != nil {
 		return "", fmt.Errorf("oanda: %w", err)
 	}

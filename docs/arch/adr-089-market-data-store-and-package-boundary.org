@@ -50,8 +50,14 @@ What exists, checked on the owner's machine:
 - =provider/oanda= (moved there in
   #634) holds OANDA's raw record, scope, reader, writer and
   inventory now, and its HTTP client in a later stage. It imports =num=,
-  =instrument=, =layout= and the standard library. It never imports another
+  =instrument=, =layout=, =store= and the standard library. It never imports another
   provider package, the root package, or =cmd=.
+- =store= (#644, module root) owns the data root (default =/srv/data=, changed by
+  =store.SetRoot=) and is the one place data files are read, written (atomically,
+  under a per-path lock) and listed, as bytes at root-relative paths. It imports
+  only the standard library; the provider and market-data packages go through it,
+  and an architecture test forbids their calling file functions directly. Path
+  building stays in =layout=.
 - =cmd/trader= is the composition root: the only place that reads the process
   environment, chooses the data root (flag, environment, then =etc/trader.yml=), builds the logger (ADR-023) and passes a
   credential into the client.
@@ -118,12 +124,14 @@ resolver's.
 - The path is authoritative; a header that disagrees with it is an error. Rows
   are in ascending time with the provider's timestamps verbatim, never rebuilt
   from row position. A malformed row is an error, never skipped.
-- Writes are atomic: a temporary file beside the destination, flushed and
-  synced, then committed. A create-only write links it into place so an existing
+- Writes go through the =store= package (#644), which owns the data root and all
+  data file reads, writes and listings (=Read=, =Write=, =Create=, =Update=,
+  =List=; paths relative to the root). Writes are atomic: a temporary file beside
+  the destination, flushed and synced, then committed. A create-only write links it into place so an existing
   authoritative file is never silently replaced (=ErrPartitionAlreadyExists=); an
   explicit extend replaces it by rename, with the caller having merged the
-  existing records. Writers that share a partition hold a per-partition lock across
-  the whole read, merge and commit sequence, as the archived writer does. The
+  existing records. Writers that share a partition hold a per-path lock (in
+  =store=) across the whole read, merge and commit sequence. The
   guarantee is process-local (one process, one lock per partition path); two
   processes writing the same partition are not coordinated and are not supported
   until a cross-process lock is decided. The reason for the lock: an
@@ -207,8 +215,9 @@ of the existing archive.
     provider: oanda
   #+end_example
 
-  The packages still take the root as an argument and hard-code
-  nothing. The config file holds no secret: the OANDA token stays in
+  =cmd/trader= resolves the root and calls =store.SetRoot= (#644); the packages
+  below it no longer take a root argument, and only =store= knows a default
+  (=/srv/data=). The config file holds no secret: the OANDA token stays in
   =TRADER_OANDA_TOKEN= only (ADR-078 S-1), and a secret key in the file is an
   error. A missing file is not an error when a flag or the environment supplies the
   root; with no source at all the command fails and names the three. The file is

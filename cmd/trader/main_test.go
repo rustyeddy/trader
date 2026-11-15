@@ -12,10 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMain points the store at a temporary directory for the whole package, so
+// a test that forgets storetest.Root still never touches the real data root.
+func TestMain(m *testing.M) { os.Exit(storetest.Main(m)) }
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()

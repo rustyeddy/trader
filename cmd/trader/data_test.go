@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,7 +103,7 @@ func runData(t *testing.T, env map[string]string, args ...string) (stdout, logs 
 
 func TestDataDownload_WritesTheMonthFilesAndPrintsASummary(t *testing.T) {
 	srv := newFakeOANDA(t, utc(2024, 1, 31, 20), 8) // Jan 31 20:00 .. Feb 1 03:00
-	root := t.TempDir()
+	root := storetest.Root(t)
 
 	out, logs, err := runData(t, map[string]string{envOANDAToken: testToken},
 		"data", "download", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD", "--interval", "h1",
@@ -125,7 +126,7 @@ func TestDataDownload_WritesTheMonthFilesAndPrintsASummary(t *testing.T) {
 
 func TestDataDownload_ARerunAddsNothing(t *testing.T) {
 	srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 6)
-	root := t.TempDir()
+	root := storetest.Root(t)
 	args := []string{"data", "download", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD", "--interval", "h1",
 		"--from", "2024-01-01", "--to", "2024-01-02", "--base-url", srv.URL}
 	env := map[string]string{envOANDAToken: testToken}
@@ -172,7 +173,7 @@ func TestDataDownload_OptionsComeFromTheFileAndTheFlagWins(t *testing.T) {
 
 func TestDataDownload_RefusesBeforeAnyRequest(t *testing.T) {
 	srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 2)
-	root := t.TempDir()
+	root := storetest.Root(t)
 	base := func(extra ...string) []string {
 		return append([]string{"data", "download", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD", "--interval", "h1",
 			"--from", "2024-01-01", "--to", "2024-01-02", "--base-url", srv.URL}, extra...)
@@ -215,7 +216,7 @@ func TestDataDownload_RefusesBeforeAnyRequest(t *testing.T) {
 
 func TestDataDownload_AHostileProviderBodyNeverLeaksTheToken(t *testing.T) {
 	srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 2)
-	root := t.TempDir()
+	root := storetest.Root(t)
 
 	// The server rejects this token and echoes it back in the body.
 	out, logs, err := runData(t, map[string]string{envOANDAToken: "wrong-token-ZZZ"},

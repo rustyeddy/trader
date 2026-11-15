@@ -13,6 +13,7 @@ import (
 
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/provider/oanda"
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,25 +59,25 @@ func hourly(from time.Time, n int) []oanda.Record {
 	return out
 }
 
-func run(t *testing.T, f candleFetcher, root string, req downloadRequest) []partitionResult {
+func run(t *testing.T, f candleFetcher, req downloadRequest) []partitionResult {
 	t.Helper()
 	var got []partitionResult
-	require.NoError(t, downloadMonths(context.Background(), quiet(), f, root, req, func(r partitionResult) { got = append(got, r) }))
+	require.NoError(t, downloadMonths(context.Background(), quiet(), f, req, func(r partitionResult) { got = append(got, r) }))
 	return got
 }
 
 func TestDownloadMonths_WritesOneFilePerMonthInTheNewLayout(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	f := &fakeFetcher{series: hourly(utc(2024, 1, 30, 0), 72)} // Jan 30 .. Feb 1, 23:00
 	req := downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 30, 0), To: utc(2024, 2, 2, 0)}
 
-	got := run(t, f, root, req)
+	got := run(t, f, req)
 
 	require.Len(t, got, 2)
 	assert.Equal(t, 48, got[0].Added, "January holds Jan 30 and Jan 31")
 	assert.Equal(t, 24, got[1].Added, "February holds Feb 1")
 	assert.Equal(t, root+"/oanda/raw/EURUSD/2024/01/EURUSD-2024-01-h1.csv", got[0].Path)
-	jan, err := oanda.ReadPartitionRecords(context.Background(), root, got[0].Key)
+	jan, err := oanda.ReadPartitionRecords(context.Background(), got[0].Key)
 	require.NoError(t, err)
 	assert.Len(t, jan, 48)
 	assert.Equal(t, []oanda.CandleRequest{
@@ -86,16 +87,16 @@ func TestDownloadMonths_WritesOneFilePerMonthInTheNewLayout(t *testing.T) {
 }
 
 func TestDownloadMonths_ARerunChangesNothing(t *testing.T) {
-	root := t.TempDir()
+	storetest.Root(t)
 	f := &fakeFetcher{series: hourly(utc(2024, 1, 1, 0), 24)}
 	req := downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)}
-	first := run(t, f, root, req)
+	first := run(t, f, req)
 	before, err := os.Stat(first[0].Path)
 	require.NoError(t, err)
 	bytesBefore, err := os.ReadFile(first[0].Path)
 	require.NoError(t, err)
 
-	second := run(t, f, root, req)
+	second := run(t, f, req)
 
 	assert.Equal(t, 0, second[0].Added)
 	assert.Equal(t, 24, second[0].Kept)
@@ -108,38 +109,38 @@ func TestDownloadMonths_ARerunChangesNothing(t *testing.T) {
 }
 
 func TestDownloadMonths_ExtendsAnExistingFileWithoutTouchingItsRows(t *testing.T) {
-	root := t.TempDir()
+	storetest.Root(t)
 	key := oanda.PartitionKey{Symbol: "EURUSD", Interval: oanda.RawH1, Year: 2024, Month: time.January}
 	stored := rec(utc(2024, 1, 1, 0), "1.20000", true) // differs from what the provider reports now
-	require.NoError(t, oanda.WritePartition(context.Background(), root, key, []oanda.Record{stored}, true))
+	require.NoError(t, oanda.WritePartition(context.Background(), key, []oanda.Record{stored}, true))
 	f := &fakeFetcher{series: hourly(utc(2024, 1, 1, 0), 3)}
 
-	got := run(t, f, root, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
+	got := run(t, f, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
 
 	assert.Equal(t, 2, got[0].Added)
 	assert.Equal(t, 1, got[0].Kept)
 	assert.Equal(t, 1, got[0].Differing)
-	rows, err := oanda.ReadPartitionRecords(context.Background(), root, key)
+	rows, err := oanda.ReadPartitionRecords(context.Background(), key)
 	require.NoError(t, err)
 	require.Len(t, rows, 3)
 	assert.Equal(t, "1.2", rows[0].BidOpen.String(), "the stored row keeps its own values")
 }
 
 func TestDownloadMonths_NeverStoresAFormingCandleAndCreatesNoEmptyFile(t *testing.T) {
-	root := t.TempDir()
+	storetest.Root(t)
 	f := &fakeFetcher{series: []oanda.Record{rec(utc(2024, 1, 1, 0), "1.10000", true), rec(utc(2024, 1, 1, 1), "1.10000", false)}}
 
-	got := run(t, f, root, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
+	got := run(t, f, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
 
 	assert.Equal(t, 1, got[0].Added)
 	assert.Equal(t, 1, got[0].Incomplete)
-	rows, err := oanda.ReadPartitionRecords(context.Background(), root, got[0].Key)
+	rows, err := oanda.ReadPartitionRecords(context.Background(), got[0].Key)
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
 
-	empty := t.TempDir()
+	storetest.Root(t) // a fresh, empty root
 	only := &fakeFetcher{series: []oanda.Record{rec(utc(2024, 1, 1, 0), "1.10000", false)}}
-	res := run(t, only, empty, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
+	res := run(t, only, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
 	assert.Equal(t, 0, res[0].Added)
 	_, statErr := os.Stat(res[0].Path)
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "a month with nothing to store leaves no file")
@@ -148,30 +149,30 @@ func TestDownloadMonths_NeverStoresAFormingCandleAndCreatesNoEmptyFile(t *testin
 // Daily bars open at 21:00 or 22:00 UTC, so the last bar of a month opens on its
 // last evening and belongs to that month's file (ADR-089).
 func TestDownloadMonths_DailyBarsLandInTheirUTCOpeningMonth(t *testing.T) {
-	root := t.TempDir()
+	storetest.Root(t)
 	f := &fakeFetcher{series: []oanda.Record{
 		rec(utc(2020, 4, 29, 21), "1.10000", true),
 		rec(utc(2020, 4, 30, 21), "1.10000", true), // opens in April, trades into May
 		rec(utc(2020, 5, 3, 21), "1.10000", true),
 	}}
 
-	got := run(t, f, root, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawD1, From: utc(2020, 4, 1, 0), To: utc(2020, 5, 10, 0)})
+	got := run(t, f, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawD1, From: utc(2020, 4, 1, 0), To: utc(2020, 5, 10, 0)})
 
 	require.Len(t, got, 2)
-	april, err := oanda.ReadPartitionRecords(context.Background(), root, got[0].Key)
+	april, err := oanda.ReadPartitionRecords(context.Background(), got[0].Key)
 	require.NoError(t, err)
 	assert.Len(t, april, 2)
 	assert.True(t, april[1].Time.Equal(utc(2020, 4, 30, 21)))
-	may, err := oanda.ReadPartitionRecords(context.Background(), root, got[1].Key)
+	may, err := oanda.ReadPartitionRecords(context.Background(), got[1].Key)
 	require.NoError(t, err)
 	assert.Len(t, may, 1)
 }
 
 func TestDownloadMonths_SeveralInstrumentsInOrder(t *testing.T) {
-	root := t.TempDir()
+	storetest.Root(t)
 	f := &fakeFetcher{series: hourly(utc(2024, 1, 1, 0), 2)}
 
-	got := run(t, f, root, downloadRequest{Symbols: []string{"GBPUSD", "EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
+	got := run(t, f, downloadRequest{Symbols: []string{"GBPUSD", "EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
 
 	require.Len(t, got, 2)
 	assert.Equal(t, "GBPUSD", got[0].Key.Symbol)
@@ -192,7 +193,7 @@ func TestDownloadMonths_FailuresStopAndNameThePartition(t *testing.T) {
 		"reversed span": {&fakeFetcher{}, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 3, 0), To: utc(2024, 1, 2, 0)}, "--to must be after --from"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := downloadMonths(context.Background(), quiet(), tc.f, t.TempDir(), tc.req, nil)
+			err := downloadMonths(context.Background(), quiet(), tc.f, tc.req, nil)
 
 			require.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), tc.want), err.Error())
@@ -201,12 +202,12 @@ func TestDownloadMonths_FailuresStopAndNameThePartition(t *testing.T) {
 }
 
 func TestDownloadMonths_ACancelledContextWritesNothing(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	f := &fakeFetcher{series: hourly(utc(2024, 1, 1, 0), 2)}
 
-	err := downloadMonths(ctx, quiet(), &cancelAware{f}, root, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)}, nil)
+	err := downloadMonths(ctx, quiet(), &cancelAware{f}, downloadRequest{Symbols: []string{"EURUSD"}, Interval: oanda.RawH1, From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)}, nil)
 
 	require.ErrorIs(t, err, context.Canceled)
 	entries, rerr := os.ReadDir(root)
@@ -248,10 +249,10 @@ func TestDownloadMonths_RejectsACandleOutsideTheRequestedWindowBeforeWriting(t *
 		"another month":        utc(2024, 2, 1, 0),
 	} {
 		t.Run(name, func(t *testing.T) {
-			root := t.TempDir()
+			root := storetest.Root(t)
 			f := strayFetcher{out: []oanda.Record{rec(utc(2024, 1, 10, 1), "1.10000", true), rec(stray, "1.10000", true)}}
 
-			err := downloadMonths(context.Background(), quiet(), f, root, req, nil)
+			err := downloadMonths(context.Background(), quiet(), f, req, nil)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "outside the requested window")

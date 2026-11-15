@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/marketdata/layout"
+	"github.com/rustyeddy/trader/store"
 )
 
 // PartitionStatus classifies the outcome of inspecting one monthly raw
@@ -189,8 +188,8 @@ type Inventory struct {
 // being malformed (see inspectFile). It performs no long-running
 // background work and starts no goroutines; it returns once the walk
 // completes, fails, or ctx is done.
-func Inspect(ctx context.Context, root string) (Inventory, error) {
-	return InspectMatching(ctx, root, nil)
+func Inspect(ctx context.Context) (Inventory, error) {
+	return InspectMatching(ctx, nil)
 }
 
 // InspectMatching is Inspect restricted to the partitions match accepts
@@ -200,45 +199,42 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 // parse every other instrument's and interval's files. Files match
 // rejects are omitted entirely (neither Partitions nor Skipped), and
 // Gaps reflects only the accepted partitions.
-func InspectMatching(ctx context.Context, root string, match func(symbol string, interval RawInterval) bool) (Inventory, error) {
-	inv := Inventory{Root: root}
+func InspectMatching(ctx context.Context, match func(symbol string, interval RawInterval) bool) (Inventory, error) {
+	inv := Inventory{Root: store.Root()}
 	// The raw stage of this source lives at <root>/oanda/raw (ADR-089); Inspect
 	// scans nothing else and never falls back to the retired <stage>/<source> order.
-	stage, err := layout.StageDir(root, source, layout.Raw)
+	stage, err := layout.StageDir(source, layout.Raw)
 	if err != nil {
 		return Inventory{}, fmt.Errorf("oanda: inspect: %w", err)
 	}
 
-	walkErr := filepath.WalkDir(stage, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return fmt.Errorf("oanda: inspect: walk %s: %w", path, err)
-		}
+	files, listErr := store.List(stage)
+	if listErr != nil {
+		return Inventory{}, fmt.Errorf("oanda: inspect %s: %w", stage, listErr)
+	}
+	for _, path := range files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
+			return Inventory{}, fmt.Errorf("oanda: inspect %s: %w", stage, ctxErr)
 		}
-		if d.IsDir() || filepath.Ext(path) != ".csv" {
-			return nil
+		if filepath.Ext(path) != ".csv" {
+			continue
 		}
 
 		partition, skipped, fatalErr := inspectFile(ctx, stage, path, match)
 		if errors.Is(fatalErr, errNotMatched) {
-			return nil
+			continue
 		}
 		if fatalErr != nil {
 			// Only ctx cancellation/deadline reaches here (see
 			// inspectFile): archive corruption is never fatal to the
 			// walk, but the caller asking Inspect to stop is.
-			return fatalErr
+			return Inventory{}, fmt.Errorf("oanda: inspect %s: %w", stage, fatalErr)
 		}
 		if skipped != nil {
 			inv.Skipped = append(inv.Skipped, *skipped)
-			return nil
+			continue
 		}
 		inv.Partitions = append(inv.Partitions, partition)
-		return nil
-	})
-	if walkErr != nil {
-		return Inventory{}, fmt.Errorf("oanda: inspect %s: %w", stage, walkErr)
 	}
 
 	sortPartitions(inv.Partitions)
@@ -250,7 +246,7 @@ func InspectMatching(ctx context.Context, root string, match func(symbol string,
 // readFile reads one candidate partition file. It is a variable only so a
 // test can observe which files an inspection opens (the filter must keep
 // rejected files from ever reaching it).
-var readFile = os.ReadFile
+var readFile = store.Read
 
 // errNotMatched is inspectFile's internal signal that match rejected the
 // file; InspectMatching drops it without recording anything.

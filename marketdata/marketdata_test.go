@@ -123,16 +123,17 @@ func goFiles(t *testing.T, dir string) []string {
 	return files
 }
 
-// TestMarketdataTree_DependsOnlyOnNumLayoutAndItself enforces ADR-091's flow for
+// TestMarketdataTree_DependsOnlyOnNumLayoutStoreAndItself enforces ADR-091's flow for
 // the whole market-data tree, public package and internal implementation alike:
-// within the module it may import num, the shared path resolver (storage, until
-// it has its own home) and itself, and nothing else: not a provider, the
+// within the module it may import num, the shared path resolver, the store (the
+// one place data files are read and written) and itself, and nothing else: not a provider, the
 // transport, an application service, or the root engine. Go does not forbid
 // those imports; this does.
-func TestMarketdataTree_DependsOnlyOnNumLayoutAndItself(t *testing.T) {
+func TestMarketdataTree_DependsOnlyOnNumLayoutStoreAndItself(t *testing.T) {
 	allowed := func(path string) bool {
 		return path == modulePath+"/num" ||
 			path == modulePath+"/internal/marketdata/layout" ||
+			path == modulePath+"/store" ||
 			path == modulePath+"/marketdata" || strings.HasPrefix(path, modulePath+"/marketdata/")
 	}
 	checked := 0
@@ -143,7 +144,7 @@ func TestMarketdataTree_DependsOnlyOnNumLayoutAndItself(t *testing.T) {
 		checked++
 		for _, path := range importsOf(t, file) {
 			if path == modulePath || strings.HasPrefix(path, modulePath+"/") {
-				assert.True(t, allowed(path), "%s imports %s: the marketdata tree may import only num, the layout resolver and itself", file, path)
+				assert.True(t, allowed(path), "%s imports %s: the marketdata tree may import only num, the layout resolver, the store and itself", file, path)
 			}
 		}
 	}

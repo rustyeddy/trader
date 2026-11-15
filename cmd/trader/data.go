@@ -14,6 +14,7 @@ import (
 
 	"github.com/rustyeddy/trader/internal/logging"
 	"github.com/rustyeddy/trader/provider/oanda"
+	"github.com/rustyeddy/trader/store"
 )
 
 const (
@@ -104,6 +105,11 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 	if err != nil {
 		return err
 	}
+	// The composition root decides the data root; every data file operation
+	// then goes through the store, which resolves paths under it.
+	if err := store.SetRoot(root); err != nil {
+		return err
+	}
 	symbols := pick(fl.Changed("instrument"), f.instruments, md.Instruments)
 	if len(symbols) == 0 {
 		return errors.New("no instrument: set --instrument or marketdata.instruments in " + defaultConfigPath)
@@ -154,7 +160,7 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 			writeErr = fmt.Errorf("write summary: %w", werr)
 		}
 	}
-	err = downloadMonths(ctx, logging.WithComponent(log, logging.ComponentMarketData), client, root, req, func(r partitionResult) {
+	err = downloadMonths(ctx, logging.WithComponent(log, logging.ComponentMarketData), client, req, func(r partitionResult) {
 		total.Fetched += r.Fetched
 		total.Added += r.Added
 		total.Kept += r.Kept

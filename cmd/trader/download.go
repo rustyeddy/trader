@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/rustyeddy/trader/provider/oanda"
+	"github.com/rustyeddy/trader/store"
 )
 
 // candleFetcher is the part of the OANDA client the download needs.
@@ -45,13 +47,13 @@ var errNothingToAdd = errors.New("nothing to add")
 // reports as forming is not stored, since its values will change. report is
 // called after each partition, in order. On error the partitions already done
 // stay done.
-func downloadMonths(ctx context.Context, log *slog.Logger, f candleFetcher, root string, req downloadRequest, report func(partitionResult)) error {
+func downloadMonths(ctx context.Context, log *slog.Logger, f candleFetcher, req downloadRequest, report func(partitionResult)) error {
 	if !req.To.After(req.From) {
 		return errors.New("download: --to must be after --from")
 	}
 	for _, symbol := range req.Symbols {
 		for ms := monthStart(req.From); ms.Before(req.To); ms = ms.AddDate(0, 1, 0) {
-			res, err := downloadMonth(ctx, log, f, root, symbol, req, ms)
+			res, err := downloadMonth(ctx, log, f, symbol, req, ms)
 			if err != nil {
 				return fmt.Errorf("%s %04d-%02d: %w", symbol, ms.Year(), int(ms.Month()), err)
 			}
@@ -68,12 +70,14 @@ func monthStart(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
-func downloadMonth(ctx context.Context, log *slog.Logger, f candleFetcher, root, symbol string, req downloadRequest, ms time.Time) (partitionResult, error) {
+func downloadMonth(ctx context.Context, log *slog.Logger, f candleFetcher, symbol string, req downloadRequest, ms time.Time) (partitionResult, error) {
 	key := oanda.PartitionKey{Symbol: symbol, Interval: req.Interval, Year: ms.Year(), Month: ms.Month()}
-	path, err := key.Path(root)
+	rel, err := key.Path()
 	if err != nil {
 		return partitionResult{}, err
 	}
+	// The path shown to the user is the full one, under the store's root.
+	path := filepath.Join(store.Root(), rel)
 	res := partitionResult{Key: key, Path: path}
 
 	from, to := later(req.From.UTC(), ms), earlier(req.To.UTC(), ms.AddDate(0, 1, 0))
@@ -100,7 +104,7 @@ func downloadMonth(ctx context.Context, log *slog.Logger, f candleFetcher, root,
 		fresh = append(fresh, r)
 	}
 
-	err = oanda.UpdatePartition(ctx, root, key, func(existing []oanda.Record) ([]oanda.Record, error) {
+	err = oanda.UpdatePartition(ctx, key, func(existing []oanda.Record) ([]oanda.Record, error) {
 		have := make(map[int64]oanda.Record, len(existing))
 		for _, r := range existing {
 			have[r.Time.UnixNano()] = r

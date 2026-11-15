@@ -189,8 +189,8 @@ per-partition lock, and the report says it was replaced. A build never touches r
   imports =num= and the standard library only.
 - =marketdata/internal/canonical= (moved there in #635, ADR-091): the
   =canonical-v2= reader and writer, the bad-record type, file validation and the
-  alignment and availability rule. It imports =marketdata=, =num=, =layout= and the
-  standard library; never a provider.
+  alignment and availability rule. It imports =marketdata=, =num=, =layout=, =store=
+  and the standard library; never a provider.
 - The mapping from a raw record to a canonical bar or a bad record. Its
   location is undecided and is settled in Stage 4b. OANDA is now
   =provider/oanda= (#634), and =canonical= is =marketdata/internal=, which a

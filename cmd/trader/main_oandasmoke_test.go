@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -35,7 +36,7 @@ func TestSmokeOANDA(t *testing.T) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
-	root := t.TempDir()
+	root := storetest.Root(t)
 	now := time.Now().UTC().Truncate(24 * time.Hour)
 
 	for _, tc := range []struct {
@@ -60,12 +61,13 @@ func TestSmokeOANDA(t *testing.T) {
 			for y := tc.from.Year(); y <= tc.to.Year(); y++ {
 				for m := time.January; m <= time.December; m++ {
 					key := oanda.PartitionKey{Symbol: "EURUSD", Interval: oanda.RawInterval(tc.interval), Year: y, Month: m}
-					path, perr := key.Path(root)
+					path, perr := key.Path()
 					require.NoError(t, perr)
+					path = filepath.Join(root, path)
 					if _, serr := os.Stat(path); serr != nil {
 						continue
 					}
-					recs, rerr := oanda.ReadPartitionRecords(context.Background(), root, key)
+					recs, rerr := oanda.ReadPartitionRecords(context.Background(), key)
 					require.NoError(t, rerr, "every file the run wrote reads back, so the UTC-month rule holds")
 					assert.True(t, strings.HasPrefix(path, filepath.Join(root, "oanda", "raw", "EURUSD")), path)
 					for i, r := range recs {

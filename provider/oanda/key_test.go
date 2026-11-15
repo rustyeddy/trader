@@ -11,19 +11,16 @@ import (
 )
 
 func TestPartitionKeyPath_UsesTheLayoutResolver(t *testing.T) {
-	root := t.TempDir()
-
-	got, err := PartitionKey{"EURUSD", RawH4, 2024, time.July}.Path(root)
+	got, err := PartitionKey{"EURUSD", RawH4, 2024, time.July}.Path()
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(root, "oanda", "raw", "EURUSD", "2024", "07", "EURUSD-2024-07-h4.csv"), got)
-	p, err := layout.Parse(root, got)
+	assert.Equal(t, filepath.Join("oanda", "raw", "EURUSD", "2024", "07", "EURUSD-2024-07-h4.csv"), got, "relative to the data root")
+	p, err := layout.Parse(got)
 	require.NoError(t, err)
 	assert.Equal(t, layout.Partition{Source: "oanda", Stage: layout.Raw, Instrument: "EURUSD", Year: 2024, Month: time.July, Interval: "h4"}, p)
 }
 
 func TestPartitionKeyPath_RejectsWhatIsNotInTheCorpus(t *testing.T) {
-	root := t.TempDir()
 	for name, tc := range map[string]struct {
 		symbol   string
 		interval RawInterval
@@ -42,13 +39,11 @@ func TestPartitionKeyPath_RejectsWhatIsNotInTheCorpus(t *testing.T) {
 		"year 99":         {"EURUSD", RawH1, 99, 1, layout.ErrInvalidComponent},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := PartitionKey{tc.symbol, tc.interval, tc.year, tc.month}.Path(root)
+			_, err := PartitionKey{tc.symbol, tc.interval, tc.year, tc.month}.Path()
 
 			assert.ErrorIs(t, err, tc.want)
 		})
 	}
-	_, err := PartitionKey{"EURUSD", RawH1, 2024, 1}.Path("")
-	assert.ErrorIs(t, err, layout.ErrInvalidRoot)
 }
 
 func TestPartitionKeyValidate(t *testing.T) {
@@ -60,7 +55,6 @@ func TestPartitionKeyValidate(t *testing.T) {
 }
 
 func TestMetaKeyRoundTripsThroughThePath(t *testing.T) {
-	root := t.TempDir()
 	for _, f := range fixtures {
 		meta, _, err := parsePathMeta(filepath.Join("testdata", f.file))
 		require.NoError(t, err)
@@ -68,7 +62,7 @@ func TestMetaKeyRoundTripsThroughThePath(t *testing.T) {
 		key := meta.Key()
 
 		assert.Equal(t, PartitionKey{f.symbol, f.interval, f.year, f.month}, key, f.file)
-		path, err := key.Path(root)
+		path, err := key.Path()
 		require.NoError(t, err)
 		assert.Equal(t, f.file, filepath.Base(path), "the file name is the fixture's name")
 	}

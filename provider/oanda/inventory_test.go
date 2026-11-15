@@ -11,11 +11,21 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/internal/marketdata/layout"
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// underRoot returns path relative to root, the form the store and Inspect use.
+func underRoot(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return rel
+}
 
 // writeFile creates dir/name (creating dir if needed) with content, and
 // returns the full path.
@@ -101,10 +111,10 @@ func findPartition(t *testing.T, inv Inventory, symbol string, interval RawInter
 }
 
 func TestInspect_OKPartitionSummary(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	p := findPartition(t, inv, "EURUSD", RawH1, 2020, time.May)
@@ -126,27 +136,27 @@ func TestInspect_OKPartitionSummary(t *testing.T) {
 }
 
 func TestInspect_LastCompleteReflectsTheLatestRecordSpecifically(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2020/06"
 	writeFile(t, dir, "EURUSD-2020-06-h1.csv",
 		fmtHeader("EURUSD", 2020, 6)+
 			h1Row(time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC), false)+ // earlier, incomplete
 			h1Row(time.Date(2020, 6, 1, 1, 0, 0, 0, time.UTC), true)) // latest, complete
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 	p := findPartition(t, inv, "EURUSD", RawH1, 2020, time.June)
 	assert.True(t, p.LastComplete, "the latest record is complete even though an earlier one was not")
 }
 
 func TestInspect_FingerprintDeterministicAndContentSensitive(t *testing.T) {
-	root1, root2 := t.TempDir(), t.TempDir()
+	root1 := storetest.Root(t)
 	buildArchive(t, root1)
-	buildArchive(t, root2)
-
-	inv1, err := Inspect(context.Background(), root1)
+	inv1, err := Inspect(context.Background())
 	require.NoError(t, err)
-	inv2, err := Inspect(context.Background(), root2)
+	root2 := storetest.Root(t)
+	buildArchive(t, root2)
+	inv2, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	p1 := findPartition(t, inv1, "EURUSD", RawH1, 2020, time.June)
@@ -158,10 +168,10 @@ func TestInspect_FingerprintDeterministicAndContentSensitive(t *testing.T) {
 }
 
 func TestInspect_MalformedPartition(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	p := findPartition(t, inv, "USDJPY", RawH1, 2020, time.May)
@@ -172,10 +182,10 @@ func TestInspect_MalformedPartition(t *testing.T) {
 }
 
 func TestInspect_SkipsOutOfScopeInstrument(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	for _, p := range inv.Partitions {
@@ -193,10 +203,10 @@ func TestInspect_SkipsOutOfScopeInstrument(t *testing.T) {
 }
 
 func TestInspect_SkipsUnsupportedInterval(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	var found *SkippedEntry
@@ -210,10 +220,10 @@ func TestInspect_SkipsUnsupportedInterval(t *testing.T) {
 }
 
 func TestInspect_SkipsUnrecognizedFileName(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	var found *SkippedEntry
@@ -227,10 +237,10 @@ func TestInspect_SkipsUnrecognizedFileName(t *testing.T) {
 }
 
 func TestInspect_MonthGap(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	require.Len(t, inv.Gaps, 1)
@@ -242,10 +252,10 @@ func TestInspect_MonthGap(t *testing.T) {
 }
 
 func TestInspect_NoGapsForSingleMonthPair(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	for _, g := range inv.Gaps {
@@ -254,22 +264,22 @@ func TestInspect_NoGapsForSingleMonthPair(t *testing.T) {
 }
 
 func TestInspect_Deterministic(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv1, err := Inspect(context.Background(), root)
+	inv1, err := Inspect(context.Background())
 	require.NoError(t, err)
-	inv2, err := Inspect(context.Background(), root)
+	inv2, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	assert.Equal(t, inv1, inv2)
 }
 
 func TestInspect_PartitionsSortedDeterministically(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	for i := 1; i < len(inv.Partitions); i++ {
@@ -282,13 +292,13 @@ func TestInspect_PartitionsSortedDeterministically(t *testing.T) {
 }
 
 func TestInspect_NeverModifiesSourceFiles(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 	path := filepath.Join(root, "oanda", "raw", "EURUSD", "2020", "05", "EURUSD-2020-05-h1.csv")
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	_, err = Inspect(context.Background(), root)
+	_, err = Inspect(context.Background())
 	require.NoError(t, err)
 
 	after, err := os.ReadFile(path)
@@ -297,18 +307,20 @@ func TestInspect_NeverModifiesSourceFiles(t *testing.T) {
 }
 
 func TestInspect_RootNotFound(t *testing.T) {
-	_, err := Inspect(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"))
+	storetest.Root(t) // restores the previous root when the test ends
+	require.NoError(t, store.SetRoot(filepath.Join(t.TempDir(), "does-not-exist")))
+	_, err := Inspect(context.Background())
 	assert.Error(t, err)
 }
 
 func TestInspect_ContextCancellation(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := Inspect(ctx, root)
+	_, err := Inspect(ctx)
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
@@ -329,14 +341,14 @@ func TestInspect_UnreadableFile(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: file permissions cannot make a file unreadable")
 	}
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2020/05"
 	path := writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
 	require.NoError(t, os.Chmod(path, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	p := findPartition(t, inv, "EURUSD", RawH1, 2020, time.May)
@@ -359,9 +371,9 @@ func TestMonthKey_Before(t *testing.T) {
 // Sanity check that errors.Is works through SkippedEntry.Reason the way
 // callers are expected to use it.
 func TestSkippedEntry_ReasonClassifiable(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	var sawScope, sawInterval, sawMalformed bool
@@ -406,10 +418,10 @@ func buildTieBreakArchive(t *testing.T, root string) {
 }
 
 func TestInspect_GapSortTiebreaksAcrossIntervalAndYear(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildTieBreakArchive(t, root)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	type gapKey struct {
@@ -473,7 +485,7 @@ func TestFindGaps_OutOfOrderInputAndSymbolTiebreak(t *testing.T) {
 // DuplicateTimes' sort comparator needs at least two duplicate groups to
 // actually compare two elements.
 func TestInspect_MultipleDuplicateTimesSorted(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+
@@ -482,7 +494,7 @@ func TestInspect_MultipleDuplicateTimesSorted(t *testing.T) {
 			h1Row(time.Date(2020, 5, 1, 1, 0, 0, 0, time.UTC), true)+
 			h1Row(time.Date(2020, 5, 1, 1, 0, 0, 0, time.UTC), true)) // duplicate #2 (earlier time)
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	p := findPartition(t, inv, "EURUSD", RawH1, 2020, time.May)
@@ -497,14 +509,14 @@ func TestInspect_MultipleDuplicateTimesSorted(t *testing.T) {
 // must not be accepted as an authoritative partition merely because its
 // own file name happens to parse.
 func TestInspect_NestedBackupTreeSkipped(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
 	nested := root + "/oanda/raw/backup/EURUSD/2020/05"
 	writeFile(t, nested, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	for _, p := range inv.Partitions {
@@ -515,7 +527,7 @@ func TestInspect_NestedBackupTreeSkipped(t *testing.T) {
 
 	var found *SkippedEntry
 	for i, s := range inv.Skipped {
-		if s.Path == filepath.Join(nested, "EURUSD-2020-05-h1.csv") {
+		if s.Path == underRoot(root, filepath.Join(nested, "EURUSD-2020-05-h1.csv")) {
 			found = &inv.Skipped[i]
 		}
 	}
@@ -528,7 +540,7 @@ func TestInspect_NestedBackupTreeSkipped(t *testing.T) {
 // accepted under the file name's identity: the directory placement
 // disagreeing with the file name is itself a corruption signal.
 func TestInspect_MisplacedFileSkipped(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
 	// Filed under USDJPY/2021/06, but named as an EURUSD 2020-05 file.
@@ -536,7 +548,7 @@ func TestInspect_MisplacedFileSkipped(t *testing.T) {
 	writeFile(t, misplacedDir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	for _, p := range inv.Partitions {
@@ -547,7 +559,7 @@ func TestInspect_MisplacedFileSkipped(t *testing.T) {
 
 	var found *SkippedEntry
 	for i, s := range inv.Skipped {
-		if s.Path == filepath.Join(misplacedDir, "EURUSD-2020-05-h1.csv") {
+		if s.Path == underRoot(root, filepath.Join(misplacedDir, "EURUSD-2020-05-h1.csv")) {
 			found = &inv.Skipped[i]
 		}
 	}
@@ -556,12 +568,12 @@ func TestInspect_MisplacedFileSkipped(t *testing.T) {
 }
 
 func TestInspect_WrongDepthBeneathRootSkipped(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	// Only two path components beneath root, not the required three.
 	writeFile(t, root+"/oanda/raw/EURUSD", "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	assert.Empty(t, inv.Partitions)
@@ -570,12 +582,12 @@ func TestInspect_WrongDepthBeneathRootSkipped(t *testing.T) {
 }
 
 func TestInspect_DirectoryYearMismatchSkipped(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2021/05" // directory year 2021, file name year 2020
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	assert.Empty(t, inv.Partitions)
@@ -584,12 +596,12 @@ func TestInspect_DirectoryYearMismatchSkipped(t *testing.T) {
 }
 
 func TestInspect_DirectoryMonthMismatchSkipped(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2020/06" // directory month 06, file name month 05
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	assert.Empty(t, inv.Partitions)
@@ -601,12 +613,12 @@ func TestInspect_DirectoryMonthMismatchSkipped(t *testing.T) {
 // classify as Malformed, exercised through the shared in-memory
 // (newReaderFromBytes-backed) parse path rather than a bad header.
 func TestInspect_MalformedDataRowAfterValidHeader(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+"not-a-valid-row-at-all\n")
 
-	inv, err := Inspect(context.Background(), root)
+	inv, err := Inspect(context.Background())
 	require.NoError(t, err)
 
 	p := findPartition(t, inv, "EURUSD", RawH1, 2020, time.May)
@@ -621,7 +633,7 @@ func TestInspect_MalformedDataRowAfterValidHeader(t *testing.T) {
 // observed by Reader.Next from *inside* inspectFile's own work, not
 // between files.
 func TestInspectFile_ContextCancelledDuringParseIsFatal(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
@@ -629,7 +641,7 @@ func TestInspectFile_ContextCancelledDuringParseIsFatal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	p, skipped, fatalErr := inspectFile(ctx, filepath.Join(root, "oanda", "raw"), filepath.Join(dir, "EURUSD-2020-05-h1.csv"), nil)
+	p, skipped, fatalErr := inspectFile(ctx, filepath.Join("oanda", "raw"), underRoot(root, filepath.Join(dir, "EURUSD-2020-05-h1.csv")), nil)
 	require.ErrorIs(t, fatalErr, context.Canceled)
 	assert.Zero(t, p, "no partition result when inspectFile fails fatally")
 	assert.Nil(t, skipped, "cancellation is not a skip reason")
@@ -642,7 +654,7 @@ func TestInspectFile_ContextCancelledDuringParseIsFatal(t *testing.T) {
 // successful Inventory containing a bogus Malformed partition when that
 // happens.
 func TestInspect_ContextCancelledDuringParsePropagates(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	dir := root + "/oanda/raw/EURUSD/2020/05"
 	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
 		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
@@ -650,20 +662,20 @@ func TestInspect_ContextCancelledDuringParsePropagates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	inv, err := Inspect(ctx, root)
+	inv, err := Inspect(ctx)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, inv.Partitions)
 	assert.Empty(t, inv.Skipped)
 }
 
 func TestInspectMatching_OnlyAcceptedPartitionsAreInventoried(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
 
-	full, err := Inspect(context.Background(), root)
+	full, err := Inspect(context.Background())
 	require.NoError(t, err)
 
-	got, err := InspectMatching(context.Background(), root, func(symbol string, interval RawInterval) bool {
+	got, err := InspectMatching(context.Background(), func(symbol string, interval RawInterval) bool {
 		return symbol == "EURUSD" && interval == RawH1
 	})
 	require.NoError(t, err)
@@ -686,36 +698,36 @@ func TestInspectMatching_OnlyAcceptedPartitionsAreInventoried(t *testing.T) {
 // filter: a file match rejects must not even be opened. The read hook
 // records every file read, so a post-read filter would fail here.
 func TestInspectMatching_RejectedFilesAreNeverRead(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	row := h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true)
 	good := writeFile(t, root+"/oanda/raw/EURUSD/2020/05", "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+row)
 	other := writeFile(t, root+"/oanda/raw/GBPUSD/2020/05", "GBPUSD-2020-05-h1.csv", fmtHeader("GBPUSD", 2020, 5)+row)
 	otherInterval := writeFile(t, root+"/oanda/raw/EURUSD/2020/05", "EURUSD-2020-05-h4.csv", fmtHeaderTF("EURUSD", "h4", 2020, 5)+row)
 	reads := recordReads(t)
 
-	inv, err := InspectMatching(context.Background(), root, func(symbol string, interval RawInterval) bool {
+	inv, err := InspectMatching(context.Background(), func(symbol string, interval RawInterval) bool {
 		return symbol == "EURUSD" && interval == RawH1
 	})
 	require.NoError(t, err)
 	require.Len(t, inv.Partitions, 1)
 	assert.Equal(t, PartitionStatusOK, inv.Partitions[0].Status)
-	assert.Equal(t, []string{good}, *reads, "only the accepted file is read")
-	assert.NotContains(t, *reads, other)
-	assert.NotContains(t, *reads, otherInterval)
+	assert.Equal(t, []string{underRoot(root, good)}, *reads, "only the accepted file is read")
+	assert.NotContains(t, *reads, underRoot(root, other))
+	assert.NotContains(t, *reads, underRoot(root, otherInterval))
 
 	*reads = nil
-	all, err := Inspect(context.Background(), root)
+	all, err := Inspect(context.Background())
 	require.NoError(t, err)
 	assert.Len(t, all.Partitions, 3)
 	assert.Len(t, *reads, 3, "without a filter every file is read")
 }
 
 func TestInspectMatching_NilMatchesEverything(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	buildArchive(t, root)
-	a, err := Inspect(context.Background(), root)
+	a, err := Inspect(context.Background())
 	require.NoError(t, err)
-	b, err := InspectMatching(context.Background(), root, nil)
+	b, err := InspectMatching(context.Background(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, a, b)
 }
@@ -727,26 +739,20 @@ func recordReads(t *testing.T) *[]string {
 	orig := readFile
 	readFile = func(path string) ([]byte, error) {
 		reads = append(reads, path)
-		return os.ReadFile(path)
+		return store.Read(path)
 	}
 	t.Cleanup(func() { readFile = orig })
 	return &reads
 }
 
 func TestInspect_DoesNotReadTheLegacyLayout(t *testing.T) {
-	root := t.TempDir()
+	root := storetest.Root(t)
 	legacy := filepath.Join(root, "raw", "oanda", "EURUSD", "2020", "05")
 	writeFile(t, legacy, "EURUSD-2020-05-h1.csv", fmtHeader("EURUSD", 2020, 5)+h1Row(at(2020, 5, 1, 0), true))
 
-	_, err := Inspect(context.Background(), root)
+	_, err := Inspect(context.Background())
 
 	require.Error(t, err, "no oanda/raw directory exists: the legacy tree is not a fallback")
 	assert.ErrorIs(t, err, fs.ErrNotExist)
-	assert.Contains(t, err.Error(), filepath.Join(root, "oanda", "raw"), "the path that was looked up is reported")
-}
-
-func TestInspect_RejectsAnEmptyRoot(t *testing.T) {
-	_, err := Inspect(context.Background(), "")
-
-	assert.ErrorIs(t, err, layout.ErrInvalidRoot)
+	assert.Contains(t, err.Error(), filepath.Join("oanda", "raw"), "the path that was looked up is reported")
 }
