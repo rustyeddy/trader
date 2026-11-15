@@ -56,25 +56,6 @@ func parseTime(s string) (time.Time, error) {
 	return t, nil
 }
 
-// formatPrice renders p as exact decimal text padded to the given decimals. A
-// price with more precision is an error, never rounded.
-func formatPrice(p num.Price, decimals int) (string, error) {
-	whole, frac, _ := strings.Cut(p.String(), ".")
-	if len(frac) > decimals {
-		return "", fmt.Errorf("%w: price %s has more than %d decimals", ErrMalformedData, p, decimals)
-	}
-	return whole + "." + frac + strings.Repeat("0", decimals-len(frac)), nil
-}
-
-// parsePrice reads a price written with exactly the given decimals and digits only.
-func parsePrice(s string, decimals int) (num.Price, error) {
-	whole, frac, ok := strings.Cut(s, ".")
-	if !ok || whole == "" || len(frac) != decimals || strings.Trim(whole+frac, "0123456789") != "" {
-		return num.Price{}, fmt.Errorf("price %q: want digits with exactly %d decimals", s, decimals)
-	}
-	return num.ParsePrice(s)
-}
-
 // formatOHLC writes the four prices of one series, or four empty fields when the
 // series is absent.
 func formatOHLC(o marketdata.OHLC, decimals int) ([]string, error) {
@@ -83,9 +64,9 @@ func formatOHLC(o marketdata.OHLC, decimals int) ([]string, error) {
 	}
 	out := make([]string, 0, 4)
 	for _, p := range []num.Price{o.Open, o.High, o.Low, o.Close} {
-		s, err := formatPrice(p, decimals)
+		s, err := p.FormatFixed(decimals)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrMalformedData, err)
 		}
 		out = append(out, s)
 	}
@@ -110,7 +91,7 @@ func parseOHLC(fields []string, decimals int) (marketdata.OHLC, error) {
 	var p [4]num.Price
 	for i, f := range fields {
 		var err error
-		if p[i], err = parsePrice(f, decimals); err != nil {
+		if p[i], err = num.ParsePriceFixed(f, decimals); err != nil {
 			return marketdata.OHLC{}, err
 		}
 	}

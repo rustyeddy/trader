@@ -11,7 +11,6 @@ import (
 	"io"
 	"io/fs"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/num"
@@ -136,17 +135,6 @@ func encodePartition(ctx context.Context, key PartitionKey, records []Record) ([
 // archive's raw-v1 files, for every pair (107.27200 and 1.08050 alike).
 const rawPriceDecimals = 5
 
-// formatRawPrice renders p as the archive spells a price: exact decimal text
-// padded with zeros to five decimals. It never rounds: a price with more
-// precision than the file format holds is an error, not a silently altered value.
-func formatRawPrice(p num.Price) (string, error) {
-	whole, frac, _ := strings.Cut(p.String(), ".")
-	if len(frac) > rawPriceDecimals {
-		return "", fmt.Errorf("%w: price %s has more than %d decimals", ErrMalformedData, p, rawPriceDecimals)
-	}
-	return whole + "." + frac + strings.Repeat("0", rawPriceDecimals-len(frac)), nil
-}
-
 // encodeRawPartition writes the schema comment, column header, and one
 // row per record, in the exact raw-v1 shape Open/Inspect parse.
 func encodeRawPartition(ctx context.Context, w *bufio.Writer, key PartitionKey, records []Record) error {
@@ -163,9 +151,9 @@ func encodeRawPartition(ctx context.Context, w *bufio.Writer, key PartitionKey, 
 		}
 		var prices [8]string
 		for i, p := range [8]num.Price{r.BidOpen, r.BidHigh, r.BidLow, r.BidClose, r.AskOpen, r.AskHigh, r.AskLow, r.AskClose} {
-			text, err := formatRawPrice(p)
+			text, err := p.FormatFixed(rawPriceDecimals)
 			if err != nil {
-				return fmt.Errorf("record at %s: %w", r.Time.UTC().Format(time.RFC3339), err)
+				return fmt.Errorf("record at %s: %w: %w", r.Time.UTC().Format(time.RFC3339), ErrMalformedData, err)
 			}
 			prices[i] = text
 		}
