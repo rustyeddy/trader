@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
 type strategy interface {
 	name() string
 	init() error
-	onBar(ctx context.Context, b bar) *order
+	onBar(ctx context.Context, b marketdata.Bar) *order
 }
 
 // emax is the EMA crossover strategy: long while the short EMA is above the long
@@ -70,7 +71,7 @@ func (e *emax) init() error {
 // until the trend turns, then emits a close the broker rejects with
 // errNoPosition, then the opposite open. This is the current contract, not an
 // oversight; see rule 11 in emax-validation.org and TODO 1 in todo.org.
-func (e *emax) onBar(ctx context.Context, b bar) *order {
+func (e *emax) onBar(ctx context.Context, b marketdata.Bar) *order {
 	// Feed both EMAs every bar so the long one warms up on the same data.
 	s, sok := e.emaShort.onBar(b)
 	l, lok := e.emaLong.onBar(b)
@@ -108,8 +109,8 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 		e.pending = trend
 		// close takes no direction: it acts on the existing position
 		return &order{
-			instrument: b.instrument,
-			price:      b.c,
+			instrument: b.Instrument,
+			price:      b.OHLC().Close,
 			action:     close,
 			orderType:  marketOrder,
 			Time:       b.Time,
@@ -117,14 +118,14 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 	}
 }
 
-func (e *emax) openOrder(b bar, d direction) *order {
-	stop, err := e.stopFor(b.c, d)
+func (e *emax) openOrder(b marketdata.Bar, d direction) *order {
+	stop, err := e.stopFor(b.OHLC().Close, d)
 	if err != nil || stop.IsZero() || stop.Cmp(maxPrice) > 0 {
 		return nil // skip the entry; clamping would change the configured risk
 	}
 	return &order{
-		instrument: b.instrument,
-		price:      b.c,
+		instrument: b.Instrument,
+		price:      b.OHLC().Close,
 		stopLoss:   stop,
 		action:     open,
 		orderType:  marketOrder,
@@ -201,8 +202,8 @@ func (s *emaxEach) init() error {
 	return nil
 }
 
-func (s *emaxEach) onBar(ctx context.Context, b bar) *order {
-	e, ok := s.byInstrument[b.instrument]
+func (s *emaxEach) onBar(ctx context.Context, b marketdata.Bar) *order {
+	e, ok := s.byInstrument[b.Instrument]
 	if !ok {
 		return nil
 	}

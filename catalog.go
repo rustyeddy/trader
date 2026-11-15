@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	instr "github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -148,8 +149,8 @@ func (c *catalog) keyFor(symbol string) (string, error) {
 
 // checkPrices reports an error unless every price of b is a whole number of
 // m's ticks.
-func (m *market) checkPrices(b ohlc) error {
-	for _, p := range []num.Price{b.o, b.h, b.l, b.c} {
+func (m *market) checkPrices(b marketdata.OHLC) error {
+	for _, p := range []num.Price{b.Open, b.High, b.Low, b.Close} {
 		if ok, err := p.DivisibleBy(m.tick); err != nil || !ok {
 			return fmt.Errorf("%s price %s is not a multiple of the tick %s", m.key, p, m.tick)
 		}
@@ -181,12 +182,12 @@ func (m *market) checkOrderPrices(o *order) error {
 // held under the engine key. It changes nothing.
 func (c *catalog) checkFrame(f frame) error {
 	for _, b := range f.bars {
-		m, ok := c.byKey[b.instrument]
+		m, ok := c.byKey[b.Instrument]
 		if !ok {
-			return fmt.Errorf("%w: a bar for %q is not under an engine key; normalize the bars first", errUnknownInstrument, b.instrument)
+			return fmt.Errorf("%w: a bar for %q is not under an engine key; normalize the bars first", errUnknownInstrument, b.Instrument)
 		}
-		if err := m.checkPrices(b.ohlc); err != nil {
-			return fmt.Errorf("bar at %s: %w", b.Format(barTimeLayout), err)
+		if err := m.checkPrices(b.OHLC()); err != nil {
+			return fmt.Errorf("bar at %s: %w", b.Time.Format(barTimeLayout), err)
 		}
 	}
 	return nil
@@ -204,18 +205,18 @@ func (c *catalog) normalize(md *marketData) error {
 	}
 	m := c.byKey[key]
 	for _, b := range md.data {
-		if b.instrument != "" {
-			if bk, err := c.keyFor(b.instrument); err != nil || bk != key {
-				return fmt.Errorf("bars: a %q bar is in the %q set", b.instrument, key)
+		if b.Instrument != "" {
+			if bk, err := c.keyFor(b.Instrument); err != nil || bk != key {
+				return fmt.Errorf("bars: a %q bar is in the %q set", b.Instrument, key)
 			}
 		}
-		if err := m.checkPrices(b.ohlc); err != nil {
+		if err := m.checkPrices(b.OHLC()); err != nil {
 			return fmt.Errorf("bars: %w", err)
 		}
 	}
 	md.instrument = key
 	for i := range md.data {
-		md.data[i].instrument = key
+		md.data[i].Instrument = key
 	}
 	return nil
 }

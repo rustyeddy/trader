@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -198,8 +199,8 @@ func readBars(r io.Reader) (*marketData, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bars line %d: %w", line, err)
 		}
-		if n := len(md.data); n > 0 && !b.After(md.data[n-1].Time) {
-			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.data[n-1].Format(barTimeLayout))
+		if n := len(md.data); n > 0 && !b.Time.After(md.data[n-1].Time) {
+			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.data[n-1].Time.Format(barTimeLayout))
 		}
 		md.data = append(md.data, b)
 	}
@@ -213,29 +214,29 @@ func readBars(r io.Reader) (*marketData, error) {
 // lasts the given duration is available when its interval ends. The file does
 // not store that time: this is where the prototype builds a canonical bar, the
 // counterpart of production's raw-to-canonical conversion, which owns the rule.
-func parseBar(instrument string, rec []string, lasts time.Duration) (bar, error) {
+func parseBar(instrument string, rec []string, lasts time.Duration) (marketdata.Bar, error) {
 	t, err := time.Parse(barTimeLayout, rec[0])
 	if err != nil {
-		return bar{}, err
+		return marketdata.Bar{}, err
 	}
 	var px [4]num.Price
 	for i := range px {
 		if px[i], err = parsePrice(rec[i+1]); err != nil {
-			return bar{}, err
+			return marketdata.Bar{}, err
 		}
 	}
 	v, err := strconv.Atoi(rec[5])
 	if err != nil {
-		return bar{}, fmt.Errorf("volume: %w", err)
+		return marketdata.Bar{}, fmt.Errorf("volume: %w", err)
 	}
 	if v < 0 {
-		return bar{}, fmt.Errorf("volume %d is negative", v)
+		return marketdata.Bar{}, fmt.Errorf("volume %d is negative", v)
 	}
 	o, h, l, c := px[0], px[1], px[2], px[3]
 	if h.Cmp(num.Max(o, c)) < 0 || l.Cmp(num.Min(o, c)) > 0 {
-		return bar{}, fmt.Errorf("high %s and low %s do not contain open %s and close %s", h, l, o, c)
+		return marketdata.Bar{}, fmt.Errorf("high %s and low %s do not contain open %s and close %s", h, l, o, c)
 	}
-	return bar{instrument: instrument, Time: t, ohlc: ohlc{o: o, h: h, l: l, c: c, v: v}, availableAt: t.Add(lasts)}, nil
+	return marketdata.Bar{Instrument: instrument, Time: t, Volume: int64(v), Mid: marketdata.OHLC{Open: o, High: h, Low: l, Close: c}, AvailableAt: t.Add(lasts)}, nil
 }
 
 // parsePrice reads a positive price written with exactly five decimals, the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +14,7 @@ func TestBars_YieldsAllInOrder(t *testing.T) {
 	var got []price
 	for b, err := range md.bars(context.Background()) {
 		require.NoError(t, err)
-		got = append(got, b.c)
+		got = append(got, b.OHLC().Close)
 	}
 	require.Equal(t, []price{px(1), px(2), px(3)}, got)
 }
@@ -105,10 +106,10 @@ func TestPrice_Float64(t *testing.T) {
 }
 
 // testBars builds bars whose closes are the given integer points.
-func testBars(closes ...price) []bar {
-	bars := make([]bar, len(closes))
+func testBars(closes ...price) []marketdata.Bar {
+	bars := make([]marketdata.Bar, len(closes))
 	for i, c := range closes {
-		bars[i] = bar{instrument: "TEST", Time: testStart.AddDate(0, 0, i), ohlc: ohlc{c: c}}
+		bars[i] = marketdata.Bar{Instrument: "TEST", Time: testStart.AddDate(0, 0, i), Mid: marketdata.OHLC{Close: c}}
 	}
 	return bars
 }
@@ -120,7 +121,7 @@ func TestBars_YieldsInstrumentAndTime(t *testing.T) {
 	for b, err := range md.bars(context.Background()) {
 		require.NoError(t, err)
 		assert.Equal(t, md.data[n], b)
-		assert.Equal(t, "TEST", b.instrument)
+		assert.Equal(t, "TEST", b.Instrument)
 		assert.Equal(t, testStart.AddDate(0, 0, n), b.Time)
 		n++
 	}

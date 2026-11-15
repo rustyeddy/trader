@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -157,9 +158,9 @@ func brokerOpen(accountID string) *order {
 }
 
 // fillBar is a EURUSD bar on day d (0 = testStart) opening at o.
-func fillBar(d int, oN int64) bar {
+func fillBar(d int, oN int64) marketdata.Bar {
 	o := px(oN)
-	return daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, h: px(oN + 100), l: o, c: px(oN + 100)}})
+	return daily(marketdata.Bar{Instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), Mid: marketdata.OHLC{Open: o, High: px(oN + 100), Low: o, Close: px(oN + 100)}})
 }
 
 // submitted is an order the broker has accepted on day 0.
@@ -219,7 +220,7 @@ func TestBroker_OnBar_IgnoresOtherInstrumentsAndUntouchedLimits(t *testing.T) {
 	require.NoError(t, br.submit(context.Background(), limit))
 
 	other := fillBar(1, 111500)
-	other.instrument = "GBPUSD"
+	other.Instrument = "GBPUSD"
 	require.NoError(t, br.onBar(context.Background(), other))
 	assert.Equal(t, stateSubmitted, market.state, "a bar for another instrument does not fill it")
 
@@ -313,7 +314,7 @@ func TestBroker_OnFrame_CancelledContextWithNothingQueued(t *testing.T) {
 	cancel()
 	clock := br.clock
 
-	err := br.onFrame(ctx, frame{availableAt: b.availableAt, bars: []bar{b}})
+	err := br.onFrame(ctx, frame{availableAt: b.AvailableAt, bars: []marketdata.Bar{b}})
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, clock, br.clock, "no state moved")
@@ -487,10 +488,10 @@ func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
 	closeoutBar := fillBar(0, points(eurusd1_10))
-	act.closedOutAt = closeoutBar.availableAt
+	act.closedOutAt = closeoutBar.AvailableAt
 
 	o := brokerOpen("a")
-	o.decidedAt = closeoutBar.availableAt // decided on the closeout bar
+	o.decidedAt = closeoutBar.AvailableAt // decided on the closeout bar
 	err := br.submit(context.Background(), o)
 
 	require.ErrorIs(t, err, errCloseoutGuard)
@@ -502,7 +503,7 @@ func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	require.NoError(t, br.submit(context.Background(), cl))
 	next := fillBar(1, points(eurusd1_10))
 	later := brokerOpen("a")
-	later.Time, later.decidedAt = next.Time, next.availableAt // decided on the next bar
+	later.Time, later.decidedAt = next.Time, next.AvailableAt // decided on the next bar
 	require.NoError(t, br.submit(context.Background(), later))
 }
 
@@ -518,7 +519,7 @@ func TestBroker_OnBar_CloseoutBlocksTheStrategyOpenOnTheSameBar(t *testing.T) {
 	require.Empty(t, act.positions, "liquidated")
 
 	o := brokerOpen("a")
-	o.Time, o.decidedAt = b.Time, b.availableAt // decided on the closeout bar
+	o.Time, o.decidedAt = b.Time, b.AvailableAt // decided on the closeout bar
 	require.ErrorIs(t, br.submit(context.Background(), o), errCloseoutGuard)
 }
 
@@ -568,6 +569,69 @@ func TestBroker_OnBar_MarginCloseoutRecordsATrade(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), b))
 
 	assert.Equal(t, []trade{{instrument: "EURUSD", direction: long, units: qty(10000),
-		entryPrice: eurusd1_10, entryTime: testStart, exitPrice: b.c, exitTime: b.Time,
+		entryPrice: eurusd1_10, entryTime: testStart, exitPrice: b.OHLC().Close, exitTime: b.Time,
 		reason: reasonMarginCloseout, pnl: mneg(usd(1990))}}, act.trades)
+}
+
+func TestOpenOnly_CollapsesEachPresentSeriesToItsOwnOpenAndInventsNone(t *testing.T) {
+	flat := func(o num.Price) marketdata.OHLC { return marketdata.OHLC{Open: o, High: o, Low: o, Close: o} }
+	bid := marketdata.OHLC{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}
+	ask := marketdata.OHLC{Open: px(110010), High: px(110410), Low: px(109510), Close: px(110210)}
+	mid, err := marketdata.MidOf(bid, ask)
+	require.NoError(t, err)
+	trade := marketdata.OHLC{Open: px(110005), High: px(110300), Low: px(109600), Close: px(110100)}
+	open := testStart
+	mk := func(mutate func(*marketdata.Bar)) marketdata.Bar {
+		b := marketdata.Bar{Instrument: "EURUSD", Time: open, AvailableAt: open.Add(time.Hour), Volume: 7, Bid: bid, Ask: ask, Mid: mid}
+		mutate(&b)
+		return b
+	}
+	for name, tc := range map[string]struct {
+		in   marketdata.Bar
+		want marketdata.Bar
+	}{
+		"mid only": {
+			mk(func(b *marketdata.Bar) { b.Bid, b.Ask = marketdata.OHLC{}, marketdata.OHLC{} }),
+			mk(func(b *marketdata.Bar) { b.Bid, b.Ask, b.Mid = marketdata.OHLC{}, marketdata.OHLC{}, flat(mid.Open) }),
+		},
+		"bid only: no mid is made up": {
+			mk(func(b *marketdata.Bar) { b.Ask, b.Mid = marketdata.OHLC{}, marketdata.OHLC{} }),
+			mk(func(b *marketdata.Bar) { b.Ask, b.Mid, b.Bid = marketdata.OHLC{}, marketdata.OHLC{}, flat(bid.Open) }),
+		},
+		"ask only: no mid is made up": {
+			mk(func(b *marketdata.Bar) { b.Bid, b.Mid = marketdata.OHLC{}, marketdata.OHLC{} }),
+			mk(func(b *marketdata.Bar) { b.Bid, b.Mid, b.Ask = marketdata.OHLC{}, marketdata.OHLC{}, flat(ask.Open) }),
+		},
+		"bid, ask and mid": {
+			mk(func(*marketdata.Bar) {}),
+			mk(func(b *marketdata.Bar) { b.Bid, b.Ask, b.Mid = flat(bid.Open), flat(ask.Open), flat(mid.Open) }),
+		},
+		"trade only": {
+			mk(func(b *marketdata.Bar) {
+				b.Bid, b.Ask, b.Mid, b.Trade = marketdata.OHLC{}, marketdata.OHLC{}, marketdata.OHLC{}, trade
+			}),
+			mk(func(b *marketdata.Bar) {
+				b.Bid, b.Ask, b.Mid, b.Trade = marketdata.OHLC{}, marketdata.OHLC{}, marketdata.OHLC{}, flat(trade.Open)
+			}),
+		},
+		"every series, trade too": {
+			mk(func(b *marketdata.Bar) { b.Trade = trade }),
+			mk(func(b *marketdata.Bar) {
+				b.Bid, b.Ask, b.Mid, b.Trade = flat(bid.Open), flat(ask.Open), flat(mid.Open), flat(trade.Open)
+			}),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			original := tc.in
+			require.NoError(t, original.Validate(), "the fixture is a valid bar")
+
+			got := openOnly(tc.in)
+
+			assert.Equal(t, tc.want, got)
+			assert.NoError(t, got.Validate(), "the open-only copy of a valid bar is valid")
+			assert.Equal(t, original, tc.in, "the original is untouched")
+			assert.Equal(t, original.OHLC().Open, got.OHLC().Open, "the engine's price at the open is the same")
+			assert.Equal(t, got.OHLC().Open, got.OHLC().Close)
+		})
+	}
 }

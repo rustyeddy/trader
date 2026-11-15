@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,11 +23,11 @@ func scanSet(instrument string, hours []int, closes []price) *marketData {
 	md := &marketData{instrument: instrument}
 	for i, hour := range hours {
 		open := mergeStart.Add(time.Duration(hour) * time.Hour)
-		md.data = append(md.data, bar{
-			instrument:  instrument,
+		md.data = append(md.data, marketdata.Bar{
+			Instrument:  instrument,
 			Time:        open,
-			ohlc:        ohlc{c: closes[i]},
-			availableAt: open.Add(time.Hour),
+			Mid:         marketdata.OHLC{Close: closes[i]},
+			AvailableAt: open.Add(time.Hour),
 		})
 	}
 	return md
@@ -151,13 +152,13 @@ func TestRunEMAScan_AConstantPriceIsFlat(t *testing.T) {
 
 func TestRunEMAScan_ReturnsNoPartialResultsOnADataError(t *testing.T) {
 	boom := errors.New("bad row")
-	bars := func(yield func(bar, error) bool) {
+	bars := func(yield func(marketdata.Bar, error) bool) {
 		for _, b := range scanASet().data {
 			if !yield(b, nil) {
 				return
 			}
 		}
-		yield(bar{}, boom)
+		yield(marketdata.Bar{}, boom)
 	}
 
 	got, err := runEMAScan(bars, 2, 3)

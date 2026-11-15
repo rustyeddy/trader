@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,9 +22,9 @@ func limitUntil(t *testing.T, br *broker, exp int) *order {
 }
 
 // dayBar is a EURUSD bar on day d with the given range.
-func dayBar(d int, oN int64, hN int64, lN int64, cN int64) bar {
+func dayBar(d int, oN int64, hN int64, lN int64, cN int64) marketdata.Bar {
 	o, h, l, c := px(oN), px(hN), px(lN), px(cN)
-	return daily(bar{instrument: "EURUSD", Time: day(d), ohlc: ohlc{o: o, h: h, l: l, c: c}})
+	return daily(marketdata.Bar{Instrument: "EURUSD", Time: day(d), Mid: marketdata.OHLC{Open: o, High: h, Low: l, Close: c}})
 }
 
 func TestBroker_OnBar_OrderIsLiveBeforeItsExpiry(t *testing.T) {
@@ -88,7 +89,7 @@ func TestBroker_OnBar_ExpiryIsOnlyCheckedForTheBarsInstrument(t *testing.T) {
 	br, _ := newFillBroker()
 	o := limitUntil(t, br, 2)
 	other := dayBar(5, 1, 1, 1, 1)
-	other.instrument = "GBPUSD"
+	other.Instrument = "GBPUSD"
 
 	require.NoError(t, br.onBar(context.Background(), other))
 

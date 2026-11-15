@@ -53,8 +53,10 @@ type Bar struct {
 	// it. A file's key is the one source of truth: a bar whose Instrument is set
 	// and differs from its file's key is refused.
 	Instrument string
+
 	// Time is the bar's opening instant.
 	Time time.Time
+
 	// AvailableAt is the earliest time the completed bar may be consumed. The
 	// zero value means availability has not been established, which a stored
 	// bar never has. It is modeled under a named policy (canonical's
@@ -66,9 +68,11 @@ type Bar struct {
 
 	Bid OHLC
 	Ask OHLC
+
 	// Mid is the midpoint series. When Bid and Ask are both present it is
 	// exactly MidOf(Bid, Ask); Validate enforces that.
 	Mid OHLC
+
 	// Trade is the series of traded prices, for sources that give trades. It is
 	// part of the API model; whether and how it is persisted is a separate
 	// decision (canonical-v2 stores bid, ask and mid only).

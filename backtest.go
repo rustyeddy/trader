@@ -8,20 +8,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
 type backtest struct {
 }
 
-func (bt *backtest) run(ctx context.Context, bars iter.Seq2[bar, error], tr *trader) error {
-	var last bar // most recent bar processed, for error context
+func (bt *backtest) run(ctx context.Context, bars iter.Seq2[marketdata.Bar, error], tr *trader) error {
+	var last marketdata.Bar // most recent bar processed, for error context
 	for b, err := range bars {
 		if err != nil {
-			if last.instrument == "" {
+			if last.Instrument == "" {
 				return fmt.Errorf("reading bars: %w", err)
 			}
-			return fmt.Errorf("reading bars after %s %s: %w", last.instrument, last.Format(time.DateOnly), err)
+			return fmt.Errorf("reading bars after %s %s: %w", last.Instrument, last.Time.Format(time.DateOnly), err)
 		}
 		last = b
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,14 +17,14 @@ import (
 // records the bars it was shown.
 type scriptStrategy struct {
 	orders []*order
-	seen   []bar
+	seen   []marketdata.Bar
 }
 
 func (s *scriptStrategy) name() string { return "script" }
 
 func (s *scriptStrategy) init() error { return nil }
 
-func (s *scriptStrategy) onBar(_ context.Context, b bar) *order {
+func (s *scriptStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	i := len(s.seen)
 	s.seen = append(s.seen, b)
 	if i < len(s.orders) && s.orders[i] != nil {
@@ -39,16 +40,16 @@ func openOrder() *order {
 }
 
 // eurBars is closes for EURUSD, the instrument the test account can size.
-func eurBars(vals ...float64) []bar {
+func eurBars(vals ...float64) []marketdata.Bar {
 	bars := closes(vals...)
 	for i := range bars {
-		bars[i].instrument = "EURUSD"
+		bars[i].Instrument = "EURUSD"
 	}
 	return bars
 }
 
 // runTrader runs the bars through a trader built on the strategy.
-func runTrader(ctx context.Context, tr *trader, strat strategy, bars iter.Seq2[bar, error]) error {
+func runTrader(ctx context.Context, tr *trader, strat strategy, bars iter.Seq2[marketdata.Bar, error]) error {
 	tr.strategy = strat
 	return (&backtest{}).run(ctx, bars, tr)
 }
@@ -62,11 +63,11 @@ func opens(n int) []*order {
 	return orders
 }
 
-func seq(bars []bar, errAt int, err error) iter.Seq2[bar, error] {
-	return func(yield func(bar, error) bool) {
+func seq(bars []marketdata.Bar, errAt int, err error) iter.Seq2[marketdata.Bar, error] {
+	return func(yield func(marketdata.Bar, error) bool) {
 		for i, b := range bars {
 			if i == errAt {
-				yield(bar{}, err)
+				yield(marketdata.Bar{}, err)
 				return
 			}
 			if !yield(b, nil) {
@@ -189,7 +190,7 @@ type cancelStrategy struct {
 	cancel context.CancelFunc
 }
 
-func (s *cancelStrategy) onBar(ctx context.Context, b bar) *order {
+func (s *cancelStrategy) onBar(ctx context.Context, b marketdata.Bar) *order {
 	s.cancel()
 	return s.scriptStrategy.onBar(ctx, b)
 }
@@ -296,7 +297,7 @@ type rejectFirstOpen struct {
 	at   []int
 }
 
-func (s *rejectFirstOpen) onBar(ctx context.Context, b bar) *order {
+func (s *rejectFirstOpen) onBar(ctx context.Context, b marketdata.Bar) *order {
 	if len(s.got) > 0 {
 		s.act.balance = s.cash // margin becomes available on the bar after the open
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -213,9 +214,9 @@ func TestReadBars_ParsesExactPointsInOrder(t *testing.T) {
 	assert.Equal(t, "d1", md.interval)
 	first := time.Date(2010, time.January, 4, 0, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
-	assert.Equal(t, []bar{
-		{instrument: "EURUSD", Time: first, ohlc: ohlc{o: px(110323), h: px(110650), l: px(109197), c: px(110001), v: 1000}, availableAt: second},
-		{instrument: "EURUSD", Time: second, ohlc: ohlc{o: px(110015), h: px(110130), l: px(110005), c: px(110100)}, availableAt: second.AddDate(0, 0, 1)},
+	assert.Equal(t, []marketdata.Bar{
+		{Instrument: "EURUSD", Time: first, Volume: 1000, Mid: marketdata.OHLC{Open: px(110323), High: px(110650), Low: px(109197), Close: px(110001)}, AvailableAt: second},
+		{Instrument: "EURUSD", Time: second, Mid: marketdata.OHLC{Open: px(110015), High: px(110130), Low: px(110005), Close: px(110100)}, AvailableAt: second.AddDate(0, 0, 1)},
 	}, md.data)
 }
 
@@ -236,7 +237,7 @@ func TestReadBars_AvailableWhenTheIntervalEnds(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, md.data, 1)
 			assert.Equal(t, open, md.data[0].Time, "the opening time is unchanged")
-			assert.Equal(t, tt.want, md.data[0].availableAt)
+			assert.Equal(t, tt.want, md.data[0].AvailableAt)
 		})
 	}
 }

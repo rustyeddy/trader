@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,13 +43,13 @@ func scenarioPrices(t *testing.T, scenario string) *marketData {
 	return prices
 }
 
-func scenarioBars(t *testing.T, scenario string) iter.Seq2[bar, error] {
+func scenarioBars(t *testing.T, scenario string) iter.Seq2[marketdata.Bar, error] {
 	t.Helper()
 	return scenarioPrices(t, scenario).bars(context.Background())
 }
 
 // run takes the bars through the real backtest.
-func (r emaxRun) run(t *testing.T, bars iter.Seq2[bar, error]) {
+func (r emaxRun) run(t *testing.T, bars iter.Seq2[marketdata.Bar, error]) {
 	t.Helper()
 	require.NoError(t, (&backtest{}).run(context.Background(), bars, r.trader))
 }
@@ -178,10 +179,10 @@ func orderIDs(orders []*order) []string {
 // watchEMAX takes the bars through the run and returns its state after each one.
 // yield returns only once the backtest has processed the bar, so no production
 // callback is needed to see between bars.
-func watchEMAX(t *testing.T, r emaxRun, bars iter.Seq2[bar, error]) []barState {
+func watchEMAX(t *testing.T, r emaxRun, bars iter.Seq2[marketdata.Bar, error]) []barState {
 	t.Helper()
 	var states []barState
-	r.run(t, func(yield func(bar, error) bool) {
+	r.run(t, func(yield func(marketdata.Bar, error) bool) {
 		for b, err := range bars {
 			if !yield(b, err) {
 				return
@@ -475,7 +476,7 @@ func assertEMAs(t *testing.T, scenario string, exact []struct{ short, long float
 	bars := scenarioBars(t, scenario)
 
 	i := 0
-	r.run(t, func(yield func(bar, error) bool) {
+	r.run(t, func(yield func(marketdata.Bar, error) bool) {
 		for b, err := range bars {
 			if !yield(b, err) {
 				return
@@ -536,11 +537,11 @@ func TestEMAXBacktest_ScenarioAFixtureHoldsItsBoundaries(t *testing.T) {
 	prices := scenarioPrices(t, "a-reversal-exit")
 	require.Len(t, prices.data, 10)
 
-	assert.Equal(t, px(110300), prices.data[3].c, "signal close")
-	assert.Equal(t, px(110323), prices.data[4].o, "entry open")
-	assert.Equal(t, px(109197+1), prices.data[5].l, "one point above the stop")
+	assert.Equal(t, px(110300), prices.data[3].OHLC().Close, "signal close")
+	assert.Equal(t, px(110323), prices.data[4].OHLC().Open, "entry open")
+	assert.Equal(t, px(109197+1), prices.data[5].OHLC().Low, "one point above the stop")
 	for i, b := range prices.data[4:] {
-		priceGreater(t, b.l, px(109197), "bar %d stays above the stop", i+4)
+		priceGreater(t, b.OHLC().Low, px(109197), "bar %d stays above the stop", i+4)
 	}
 }
 
@@ -635,9 +636,9 @@ type positionWatcher struct {
 	sides   []direction
 }
 
-func (w *positionWatcher) onBar(ctx context.Context, b bar) *order {
+func (w *positionWatcher) onBar(ctx context.Context, b marketdata.Bar) *order {
 	side := noDirection
-	if p := w.account.positions[b.instrument]; p != nil {
+	if p := w.account.positions[b.Instrument]; p != nil {
 		side = p.direction
 	}
 	w.sides = append(w.sides, side)
@@ -780,18 +781,18 @@ func TestEMAXBacktest_StopOutFixturesHoldTheirBoundaries(t *testing.T) {
 	stop := px(109197)
 
 	b1 := scenarioPrices(t, "b1-stop-wick").data[5]
-	assert.Equal(t, stop, b1.l, "B1's low touches the stop exactly")
-	priceGreater(t, b1.o, stop)
-	priceGreater(t, b1.c, stop)
+	assert.Equal(t, stop, b1.OHLC().Low, "B1's low touches the stop exactly")
+	priceGreater(t, b1.OHLC().Open, stop)
+	priceGreater(t, b1.OHLC().Close, stop)
 
 	b2 := scenarioPrices(t, "b2-stop-cross").data[5]
-	priceGreater(t, b2.o, stop)
-	priceLess(t, b2.l, stop, "B2's low goes past the stop")
-	priceLess(t, b2.c, stop)
+	priceGreater(t, b2.OHLC().Open, stop)
+	priceLess(t, b2.OHLC().Low, stop, "B2's low goes past the stop")
+	priceLess(t, b2.OHLC().Close, stop)
 
 	b3 := scenarioPrices(t, "b3-stop-gap").data[5]
-	priceLess(t, b3.o, stop, "B3's open is already past the stop")
-	priceGreater(t, b3.c, stop, "and the bar recovers")
+	priceLess(t, b3.OHLC().Open, stop, "B3's open is already past the stop")
+	priceGreater(t, b3.OHLC().Close, stop, "and the bar recovers")
 }
 
 // Scenario C is scenario A with two more bars, so the reversal plays out in full: flat
@@ -844,9 +845,9 @@ func TestEMAXBacktest_ScenarioCOrderHistories(t *testing.T) {
 func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 	r := newEMAXRun(t, usd(10000))
 	prices := scenarioPrices(t, "c-reversal")
-	next := func(day int, oN int64, hN int64, lN int64, cN int64) bar {
+	next := func(day int, oN int64, hN int64, lN int64, cN int64) marketdata.Bar {
 		o, h, l, c := px(oN), px(hN), px(lN), px(cN)
-		return daily(bar{instrument: "EURUSD", Time: jan(day), ohlc: ohlc{o: o, h: h, l: l, c: c, v: 1000}})
+		return daily(marketdata.Bar{Instrument: "EURUSD", Time: jan(day), Volume: 1000, Mid: marketdata.OHLC{Open: o, High: h, Low: l, Close: c}})
 	}
 	prices.data = append(slices.Clone(prices.data[:9]),
 		next(15, 110687, 112050, 110650, 112000),
@@ -855,12 +856,12 @@ func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 		next(20, 112120, 112200, 112100, 112180),
 	)
 
-	bars := func(yield func(bar, error) bool) {
+	bars := func(yield func(marketdata.Bar, error) bool) {
 		for b, err := range prices.bars(context.Background()) {
 			if !yield(b, err) {
 				return
 			}
-			if b.Equal(jan(15)) {
+			if b.Time.Equal(jan(15)) {
 				assert.Greater(t, r.emax.emaShort.value, r.emax.emaLong.value, "the trend is long again when the short goes in")
 			}
 		}
@@ -939,17 +940,17 @@ func TestEMAXBacktest_ReversalAndShortStopEMAs(t *testing.T) {
 func TestEMAXBacktest_ReversalAndShortStopFixturesHoldTheirBoundaries(t *testing.T) {
 	c := scenarioPrices(t, "c-reversal").data
 	assert.Equal(t, scenarioPrices(t, "a-reversal-exit").data, c[:10], "C is A with more bars")
-	assert.NotEqual(t, c[9].c, c[10].o, "the short fills away from its signal close")
+	assert.NotEqual(t, c[9].OHLC().Close, c[10].OHLC().Open, "the short fills away from its signal close")
 	for i, b := range c[10:] {
-		priceLess(t, b.h, px(111554), "bar %d stays below the short's stop", i+10)
+		priceLess(t, b.OHLC().High, px(111554), "bar %d stays below the short's stop", i+10)
 	}
 
 	stop := px(110797)
 	d := scenarioPrices(t, "d-short-stop").data
-	priceLess(t, d[4].h, stop, "the entry bar stays below the stop")
-	priceLess(t, d[5].o, stop)
-	assert.Equal(t, must1(stop.Add(px(3))), d[5].h, "the high goes past the stop")
-	priceLess(t, d[5].c, stop, "and the bar closes back below it")
+	priceLess(t, d[4].OHLC().High, stop, "the entry bar stays below the stop")
+	priceLess(t, d[5].OHLC().Open, stop)
+	assert.Equal(t, must1(stop.Add(px(3))), d[5].OHLC().High, "the high goes past the stop")
+	priceLess(t, d[5].OHLC().Close, stop, "and the bar closes back below it")
 }
 
 // floorDiv divides, rounding toward negative infinity.
@@ -1032,12 +1033,12 @@ func TestEMAXBacktest_OpenPositionReconcilesAtTheLastMark(t *testing.T) {
 
 			unrealized, used, reserved := cents(0), cents(0), cents(0)
 			if p := st.position; p != nil {
-				assert.Equal(t, last.c, p.markPrice, "marked at the last close")
+				assert.Equal(t, last.OHLC().Close, p.markPrice, "marked at the last close")
 				assert.Equal(t, short, p.direction)
-				moved := pts(p.entryPrice) - pts(last.c)
+				moved := pts(p.entryPrice) - pts(last.OHLC().Close)
 				assert.NotZero(t, moved*whole(p.units)*100%100_000, "a fraction of a cent to floor")
-				unrealized = pnlFromFills(p.direction, p.units, p.entryPrice, last.c)
-				used = marginAt(p.units, last.c)
+				unrealized = pnlFromFills(p.direction, p.units, p.entryPrice, last.OHLC().Close)
+				used = marginAt(p.units, last.OHLC().Close)
 			}
 			for _, o := range r.broker.orders["EURUSD"] {
 				if o.action == open {
