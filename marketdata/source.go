@@ -20,7 +20,8 @@ type SourceRow struct {
 	// Row is the row's position in the raw file: 1-based, counting data rows
 	// only (the schema comment and column header are not counted).
 	Row int
-	// Bar holds Time, Volume, Bid and Ask as the provider gave them.
+	// Bar holds Time, Volume, Bid and Ask as the provider gave them. Its
+	// Instrument is the partition's, or empty.
 	Bar Bar
 	// Complete is the provider's own flag that the candle had closed.
 	Complete bool
@@ -52,8 +53,8 @@ type SourcePartition struct {
 }
 
 // Validate reports ErrInvalidSource unless p names a partition and its rows
-// carry positive, strictly ascending row numbers. It looks at nothing about the
-// prices or times: that is the market-data service's job.
+// carry positive, strictly ascending row numbers and an instrument that is empty
+// or the partition's. It looks at nothing about the prices or times: that is the market-data service's job.
 func (p SourcePartition) Validate() error {
 	switch {
 	case p.Source == "":
@@ -71,6 +72,9 @@ func (p SourcePartition) Validate() error {
 	for _, r := range p.Rows {
 		if r.Row < 1 || r.Row <= prev {
 			return fmt.Errorf("%w: row numbers must be positive and ascending, got %d after %d", ErrInvalidSource, r.Row, prev)
+		}
+		if r.Bar.Instrument != "" && r.Bar.Instrument != p.Instrument {
+			return fmt.Errorf("%w: row %d is of %q, the partition's instrument is %q", ErrInvalidSource, r.Row, r.Bar.Instrument, p.Instrument)
 		}
 		prev = r.Row
 	}

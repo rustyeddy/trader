@@ -146,3 +146,14 @@ func TestBar_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestBar_InstrumentIsNotPartOfValidityOrTheChosenSeries(t *testing.T) {
+	named := goodBar(t)
+	named.Instrument = "EURUSD"
+
+	assert.NoError(t, goodBar(t).Validate(), "a bar no reader has named is still valid")
+	assert.NoError(t, named.Validate(), "naming a bar changes nothing about its validity")
+	assert.Equal(t, goodBar(t).OHLC(), named.OHLC())
+	assert.NotEqual(t, goodBar(t), named, "the name is part of the value, so bars of two instruments differ")
+	assert.Equal(t, named, named, "a Bar stays comparable")
+}

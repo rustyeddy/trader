@@ -72,6 +72,7 @@ func TestBuild_GoodRowsBecomeBarsWithAvailabilityAndMid(t *testing.T) {
 	assert.Equal(t, ask, first.Ask, "the provider's ask is stored unchanged")
 	assert.Equal(t, px("1.10005"), first.Mid.Open, "the mid is derived here, not by the provider")
 	assert.Equal(t, int64(100), first.Volume)
+	assert.Equal(t, "EURUSD", first.Instrument, "the bars are named from the partition's key")
 	assert.Equal(t, "sha256:aaa", f.Meta.RawFingerprint)
 	assert.Equal(t, BuilderVersion, f.Meta.BuilderVersion)
 	assert.Equal(t, ValidatorVersion, f.Meta.ValidatorVersion)
@@ -230,4 +231,19 @@ func TestBuild_WritesOnlyUnderTheStoreRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"oanda/canonical/EURUSD/2024/01/EURUSD-2024-01-h1.csv"}, files)
 	assert.DirExists(t, root)
+}
+
+func TestBuild_ARowOfAnotherInstrumentIsRefused(t *testing.T) {
+	storetest.Root(t)
+	other := row(2, utc(2024, 1, 2, 1))
+	other.Bar.Instrument = "GBPUSD"
+	named := row(1, utc(2024, 1, 2, 0))
+	named.Bar.Instrument = "EURUSD" // the partition's own name is fine
+
+	ok, err := Build(context.Background(), h1Source(named), builtAt)
+	_, errOther := Build(context.Background(), h1Source(named, other), builtAt)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, ok.Good)
+	assert.ErrorIs(t, errOther, marketdata.ErrInvalidSource)
 }
