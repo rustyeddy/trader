@@ -11,6 +11,38 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 )
 
+// marketData is one instrument's bars at one interval, in time order: the series
+// the engine replays. The public series container and the reader of canonical
+// files are a separate piece of work (#647); until then this stays private.
+type marketData struct {
+	instrument string
+	interval   string
+
+	data []marketdata.Bar
+}
+
+// bars returns an iterator over the bars in order. If ctx is cancelled the
+// iterator yields ctx.Err() once and stops, even after the last bar, so a
+// consumer that reads ahead (frames) still learns of it before publishing what
+// it holds. No goroutine is involved, so breaking out of the loop early leaks
+// nothing.
+func (md *marketData) bars(ctx context.Context) iter.Seq2[marketdata.Bar, error] {
+	return func(yield func(marketdata.Bar, error) bool) {
+		for _, b := range md.data {
+			if err := ctx.Err(); err != nil {
+				yield(marketdata.Bar{}, err)
+				return
+			}
+			if !yield(b, nil) {
+				return
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			yield(marketdata.Bar{}, err)
+		}
+	}
+}
+
 // mergedBars delivers the bars of several instruments as one sequence, each bar
 // once it is available: by availableAt, then by instrument name, so the order
 // does not depend on the order of sets. A bar that opened first can arrive later

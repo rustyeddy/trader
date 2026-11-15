@@ -214,3 +214,17 @@ func TestBroker_Submit_ReportsAReservedMarginOverflow(t *testing.T) {
 	require.ErrorIs(t, err, num.ErrOverflow)
 	assert.False(t, isRejection(err))
 }
+
+func TestPrice_Float64(t *testing.T) {
+	tests := []struct {
+		p    price
+		want float64
+	}{
+		{px(0), 0},
+		{px(110000), 1.1},
+		{px(1), 0.00001},
+	}
+	for _, tt := range tests {
+		assert.InDelta(t, tt.want, tt.p.Float64(), 1e-12)
+	}
+}
