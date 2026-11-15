@@ -50,12 +50,14 @@ func mustPath(t *testing.T, root string) string {
 }
 
 // TestProviderOanda_ImportsOnlyFoundationalPackages keeps the provider a leaf:
-// within the module it may import only the foundational packages it already
-// uses, never the root engine, cmd, marketdata, another provider or a service.
+// within the module it may import only foundational packages (the public
+// marketdata model Bar/OHLC, instrument, num, logging and layout), never
+// marketdata/internal, a service, cmd, the root engine or another provider.
 func TestProviderOanda_ImportsOnlyFoundationalPackages(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
 	allowed := map[string]bool{
 		mod + "/instrument":                 false,
+		mod + "/marketdata":                 false,
 		mod + "/num":                        false,
 		mod + "/internal/logging":           false,
 		mod + "/internal/marketdata/layout": false,
