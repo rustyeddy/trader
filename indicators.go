@@ -22,7 +22,7 @@ func newEMA(window int) *ema {
 // onBar returns the current EMA, and false until a full window has been
 // seen to seed it.
 func (e *ema) onBar(b bar) (float64, bool) {
-	val := b.c.Float64()
+	val := b.OHLC().Close.Float64()
 	if e.count < e.window {
 		e.count++
 		e.sum += val
@@ -66,8 +66,8 @@ func newATR(window int) *atr {
 // have been seen: a true range needs a previous close, so the first bar only
 // supplies one.
 func (a *atr) onBar(b bar) (float64, bool) {
-	prev := a.prev
-	a.prev = b.c
+	prev, px := a.prev, b.OHLC()
+	a.prev = px.Close
 	if a.bars == 0 {
 		a.bars = 1
 		return 0, false
@@ -76,7 +76,7 @@ func (a *atr) onBar(b bar) (float64, bool) {
 	// The true range is the largest of the bar's range and how far it reached
 	// past the previous close on either side. Each term is a distance, so a bar
 	// that stays on one side of the close contributes nothing for the other.
-	tr := num.Max(mustDiff(b.h, b.l), above(b.h, prev), above(prev, b.l))
+	tr := num.Max(mustDiff(px.High, px.Low), above(px.High, prev), above(prev, px.Low))
 	sum, err := a.sum.Add(tr)
 	if err == nil {
 		sum, err = sum.Sub(a.ranges[a.next])

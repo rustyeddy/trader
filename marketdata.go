@@ -3,25 +3,12 @@ package trader
 import (
 	"context"
 	"iter"
-	"time"
 
-	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
-type ohlc struct {
-	o, h, l, c num.Price
-	v          int
-}
-
-// bar is one observation: an instrument's OHLCV for one interval. Time is when
-// the interval opened. availableAt is when the bar is complete, the earliest a
-// consumer may see it; whoever builds the bar sets it, and consumers only read it.
-type bar struct {
-	instrument string
-	time.Time
-	ohlc
-	availableAt time.Time
-}
+type ohlc = marketdata.OHLC
+type bar = marketdata.Bar
 
 type marketData struct {
 	instrument string

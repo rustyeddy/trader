@@ -332,8 +332,8 @@ func (act *account) overBudget(o *order, m *market, units num.Quantity, riskBudg
 // broker calls it after the bar's fills, so a position opened at the bar's open
 // is valued at its close.
 func (a *account) mark(b bar) {
-	if pos := a.positions[b.instrument]; pos != nil {
-		pos.markPrice = b.c
+	if pos := a.positions[b.Instrument]; pos != nil {
+		pos.markPrice = b.OHLC().Close
 	}
 }
 

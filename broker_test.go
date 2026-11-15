@@ -159,7 +159,7 @@ func brokerOpen(accountID string) *order {
 // fillBar is a EURUSD bar on day d (0 = testStart) opening at o.
 func fillBar(d int, oN int64) bar {
 	o := px(oN)
-	return daily(bar{instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), ohlc: ohlc{o: o, h: px(oN + 100), l: o, c: px(oN + 100)}})
+	return daily(bar{Instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), Mid: ohlc{Open: o, High: px(oN + 100), Low: o, Close: px(oN + 100)}})
 }
 
 // submitted is an order the broker has accepted on day 0.
@@ -219,7 +219,7 @@ func TestBroker_OnBar_IgnoresOtherInstrumentsAndUntouchedLimits(t *testing.T) {
 	require.NoError(t, br.submit(context.Background(), limit))
 
 	other := fillBar(1, 111500)
-	other.instrument = "GBPUSD"
+	other.Instrument = "GBPUSD"
 	require.NoError(t, br.onBar(context.Background(), other))
 	assert.Equal(t, stateSubmitted, market.state, "a bar for another instrument does not fill it")
 
@@ -313,7 +313,7 @@ func TestBroker_OnFrame_CancelledContextWithNothingQueued(t *testing.T) {
 	cancel()
 	clock := br.clock
 
-	err := br.onFrame(ctx, frame{availableAt: b.availableAt, bars: []bar{b}})
+	err := br.onFrame(ctx, frame{availableAt: b.AvailableAt, bars: []bar{b}})
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, clock, br.clock, "no state moved")
@@ -487,10 +487,10 @@ func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
 	closeoutBar := fillBar(0, points(eurusd1_10))
-	act.closedOutAt = closeoutBar.availableAt
+	act.closedOutAt = closeoutBar.AvailableAt
 
 	o := brokerOpen("a")
-	o.decidedAt = closeoutBar.availableAt // decided on the closeout bar
+	o.decidedAt = closeoutBar.AvailableAt // decided on the closeout bar
 	err := br.submit(context.Background(), o)
 
 	require.ErrorIs(t, err, errCloseoutGuard)
@@ -502,7 +502,7 @@ func TestBroker_Submit_RefusesOpensOnTheBarOfAMarginCloseout(t *testing.T) {
 	require.NoError(t, br.submit(context.Background(), cl))
 	next := fillBar(1, points(eurusd1_10))
 	later := brokerOpen("a")
-	later.Time, later.decidedAt = next.Time, next.availableAt // decided on the next bar
+	later.Time, later.decidedAt = next.Time, next.AvailableAt // decided on the next bar
 	require.NoError(t, br.submit(context.Background(), later))
 }
 
@@ -518,7 +518,7 @@ func TestBroker_OnBar_CloseoutBlocksTheStrategyOpenOnTheSameBar(t *testing.T) {
 	require.Empty(t, act.positions, "liquidated")
 
 	o := brokerOpen("a")
-	o.Time, o.decidedAt = b.Time, b.availableAt // decided on the closeout bar
+	o.Time, o.decidedAt = b.Time, b.AvailableAt // decided on the closeout bar
 	require.ErrorIs(t, br.submit(context.Background(), o), errCloseoutGuard)
 }
 
@@ -568,6 +568,20 @@ func TestBroker_OnBar_MarginCloseoutRecordsATrade(t *testing.T) {
 	require.NoError(t, br.onBar(context.Background(), b))
 
 	assert.Equal(t, []trade{{instrument: "EURUSD", direction: long, units: qty(10000),
-		entryPrice: eurusd1_10, entryTime: testStart, exitPrice: b.c, exitTime: b.Time,
+		entryPrice: eurusd1_10, entryTime: testStart, exitPrice: b.OHLC().Close, exitTime: b.Time,
 		reason: reasonMarginCloseout, pnl: mneg(usd(1990))}}, act.trades)
+}
+
+func TestOpenOnly_CollapsesTheSeriesTheEngineReadsToItsOpen(t *testing.T) {
+	full := bar{Instrument: "EURUSD", Time: testStart, Mid: ohlc{Open: px(110000), High: px(110400), Low: px(109500), Close: px(110200)}}
+	bidOnly := bar{Instrument: "EURUSD", Time: testStart, Bid: ohlc{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}}
+
+	got := openOnly(full)
+	gotBid := openOnly(bidOnly)
+
+	assert.Equal(t, ohlc{Open: px(110000), High: px(110000), Low: px(110000), Close: px(110000)}, got.OHLC())
+	assert.Equal(t, ohlc{Open: px(109990), High: px(109990), Low: px(109990), Close: px(109990)}, gotBid.OHLC())
+	assert.Equal(t, "EURUSD", got.Instrument)
+	assert.Equal(t, testStart, got.Time)
+	assert.Equal(t, px(110400), full.OHLC().High, "the original bar is not changed")
 }

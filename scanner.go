@@ -75,17 +75,17 @@ func runEMAScan(bars iter.Seq2[bar, error], short, long int) ([]trendReading, er
 		if err != nil {
 			return nil, fmt.Errorf("ema scan: reading bars: %w", err)
 		}
-		pair := pairs[b.instrument]
+		pair := pairs[b.Instrument]
 		if pair == nil {
 			pair = &emaPair{short: newEMA(short), long: newEMA(long)}
-			pairs[b.instrument] = pair
+			pairs[b.Instrument] = pair
 		}
 
 		// Feed both every bar, so the long one warms up on the same data.
 		s, sok := pair.short.onBar(b)
 		l, lok := pair.long.onBar(b)
 		if sok && lok {
-			readings = append(readings, trendReading{b.instrument, b.availableAt, classifyTrend(s, l)})
+			readings = append(readings, trendReading{b.Instrument, b.AvailableAt, classifyTrend(s, l)})
 		}
 	}
 	return readings, nil

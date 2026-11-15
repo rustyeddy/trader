@@ -20,9 +20,9 @@ var atrStart = time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
 func atrBar(day int, hN int64, lN int64, cN int64) bar {
 	h, l, c := px(hN), px(lN), px(cN)
 	return bar{
-		instrument: atrInstrument,
+		Instrument: atrInstrument,
 		Time:       atrStart.AddDate(0, 0, day),
-		ohlc:       ohlc{o: l, h: h, l: l, c: c},
+		Mid:        ohlc{Open: l, High: h, Low: l, Close: c},
 	}
 }
 

@@ -102,16 +102,16 @@ func TestNewATR_RefusesAWindowThatCouldLeaveTheRange(t *testing.T) {
 
 func TestATR_TrueRangeIncludesTheGapFromThePreviousClose(t *testing.T) {
 	a := newATR(1)
-	_, ok := a.onBar(bar{ohlc: ohlc{o: px(100000), h: px(100500), l: px(99500), c: px(100000)}})
+	_, ok := a.onBar(bar{Mid: ohlc{Open: px(100000), High: px(100500), Low: px(99500), Close: px(100000)}})
 	require.False(t, ok, "the first bar only supplies a close")
 
 	// Gaps up: the range 100100..100300 is 200 points, but the high is 300 above the previous close.
-	got, ok := a.onBar(bar{ohlc: ohlc{o: px(100200), h: px(100300), l: px(100100), c: px(100250)}})
+	got, ok := a.onBar(bar{Mid: ohlc{Open: px(100200), High: px(100300), Low: px(100100), Close: px(100250)}})
 	require.True(t, ok)
 	assert.InDelta(t, 0.003, got, 1e-12)
 
 	// Gaps down: the low is 400 below the previous close of 100250.
-	got, ok = a.onBar(bar{ohlc: ohlc{o: px(99900), h: px(99950), l: px(99850), c: px(99900)}})
+	got, ok = a.onBar(bar{Mid: ohlc{Open: px(99900), High: px(99950), Low: px(99850), Close: px(99900)}})
 	require.True(t, ok)
 	assert.InDelta(t, 0.004, got, 1e-12)
 }
@@ -195,7 +195,7 @@ func TestTrailStops_AStopNeverMovesBelowZero(t *testing.T) {
 	br.orders["EURUSD"] = []*order{stop}
 
 	// The high 1.10 less a trail of 5.00 is below zero: the stop stays.
-	br.trailStops(bar{instrument: "EURUSD", ohlc: ohlc{o: px(110000), h: px(110000), l: px(109000), c: px(110000)}})
+	br.trailStops(bar{Instrument: "EURUSD", Mid: ohlc{Open: px(110000), High: px(110000), Low: px(109000), Close: px(110000)}})
 
 	assert.Equal(t, px(100000), stop.price)
 	assert.Empty(t, stop.history)

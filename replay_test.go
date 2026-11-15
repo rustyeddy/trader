@@ -21,10 +21,10 @@ func barSet(instrument string, lasts time.Duration, opens ...time.Duration) *mar
 	for i, offset := range opens {
 		open := mergeStart.Add(offset)
 		md.data = append(md.data, bar{
-			instrument:  instrument,
+			Instrument:  instrument,
 			Time:        open,
-			ohlc:        ohlc{c: px(int64(100000 + i))},
-			availableAt: open.Add(lasts),
+			Mid:         ohlc{Close: px(int64(100000 + i))},
+			AvailableAt: open.Add(lasts),
 		})
 	}
 	return md
@@ -32,7 +32,7 @@ func barSet(instrument string, lasts time.Duration, opens ...time.Duration) *mar
 
 // label names a bar by instrument and opening time, for readable expectations.
 func label(b bar) string {
-	return b.instrument + " " + b.Format("15:04")
+	return b.Instrument + " " + b.Time.Format("15:04")
 }
 
 func delivered(t *testing.T, sets ...*marketData) []string {
@@ -53,7 +53,7 @@ func frameLabels(t *testing.T, sets ...*marketData) [][]string {
 		require.NoError(t, err)
 		var labels []string
 		for _, b := range f.bars {
-			assert.Equal(t, f.availableAt, b.availableAt)
+			assert.Equal(t, f.availableAt, b.AvailableAt)
 			labels = append(labels, label(b))
 		}
 		got = append(got, labels)
@@ -97,7 +97,7 @@ func TestMergedBars_SingleSetIsUnchanged(t *testing.T) {
 
 func TestMergedBars_RefusesBadInput(t *testing.T) {
 	noAvailability := barSet("EURUSD", time.Hour, 0)
-	noAvailability.data[0].availableAt = time.Time{}
+	noAvailability.data[0].AvailableAt = time.Time{}
 
 	tests := []struct {
 		name string
@@ -115,7 +115,7 @@ func TestMergedBars_RefusesBadInput(t *testing.T) {
 			var gotErr error
 			for b, err := range mergedBars(context.Background(), tt.sets...) {
 				items++
-				assert.Empty(t, b.instrument, "no bar may be delivered")
+				assert.Empty(t, b.Instrument, "no bar may be delivered")
 				gotErr = err
 			}
 			assert.Equal(t, 1, items)
@@ -306,7 +306,7 @@ func TestDelivery_BarsCanMixMomentsAndFramesCannot(t *testing.T) {
 	latest := map[string]price{}
 	for b, err := range mergedBars(context.Background(), sets()...) {
 		require.NoError(t, err)
-		latest[b.instrument] = b.c
+		latest[b.Instrument] = b.OHLC().Close
 		if len(latest) == 2 {
 			byBar = append(byBar, closeSum(latest))
 		}
@@ -317,7 +317,7 @@ func TestDelivery_BarsCanMixMomentsAndFramesCannot(t *testing.T) {
 	for f, err := range frames(mergedBars(context.Background(), sets()...)) {
 		require.NoError(t, err)
 		for _, b := range f.bars {
-			latest[b.instrument] = b.c
+			latest[b.Instrument] = b.OHLC().Close
 		}
 		byFrame = append(byFrame, closeSum(latest))
 	}

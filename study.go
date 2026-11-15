@@ -26,7 +26,7 @@ func runATRStudy(bars iter.Seq2[bar, error], window int) ([]atrObservation, erro
 			return nil, fmt.Errorf("atr study: reading bars: %w", err)
 		}
 		if value, ok := indicator.onBar(b); ok {
-			observations = append(observations, atrObservation{instrument: b.instrument, opened: b.Time, value: value})
+			observations = append(observations, atrObservation{instrument: b.Instrument, opened: b.Time, value: value})
 		}
 	}
 	return observations, nil

@@ -27,16 +27,16 @@ func hour(h int) time.Time { return pairStart.Add(time.Duration(h) * time.Hour) 
 func hbar(instrument string, opened time.Time, oN int64, cN int64) bar {
 	o, c := px(oN), px(cN)
 	return bar{
-		instrument:  instrument,
+		Instrument:  instrument,
 		Time:        opened,
-		ohlc:        ohlc{o: o, h: num.Max(o, c), l: num.Min(o, c), c: c},
-		availableAt: opened.Add(time.Hour),
+		Mid:         ohlc{Open: o, High: num.Max(o, c), Low: num.Min(o, c), Close: c},
+		AvailableAt: opened.Add(time.Hour),
 	}
 }
 
 // pairFrame is the frame of the given bars, which share an availability.
 func pairFrame(bars ...bar) frame {
-	return frame{availableAt: bars[0].availableAt, bars: bars}
+	return frame{availableAt: bars[0].AvailableAt, bars: bars}
 }
 
 // reactStrategy answers each bar with whatever react returns and keeps the
@@ -62,7 +62,7 @@ func openOn(on string, instrument string, pN int64, stopN int64) *reactStrategy 
 	p, stop := px(pN), px(stopN)
 	done := false
 	return &reactStrategy{react: func(b bar) *order {
-		if done || b.instrument != on {
+		if done || b.Instrument != on {
 			return nil
 		}
 		done = true
@@ -90,23 +90,23 @@ func lastReason(o *order) string {
 func TestCheckFrame_RefusesFramesItCannotOrder(t *testing.T) {
 	eur, gbp := hbar("EURUSD", hour(1), 110000, 110000), hbar("GBPUSD", hour(1), 130000, 130000)
 	unknown := eur
-	unknown.availableAt = time.Time{}
+	unknown.AvailableAt = time.Time{}
 	late := gbp
-	late.availableAt = gbp.availableAt.Add(time.Minute)
+	late.AvailableAt = gbp.AvailableAt.Add(time.Minute)
 	offset := hbar("GBPUSD", hour(1).Add(-30*time.Minute), 130000, 130000)
-	offset.availableAt = eur.availableAt // available together, opened apart
+	offset.AvailableAt = eur.AvailableAt // available together, opened apart
 
 	tests := []struct {
 		name string
 		f    frame
 		want string
 	}{
-		{"no bars", frame{availableAt: eur.availableAt}, "no bars"},
+		{"no bars", frame{availableAt: eur.AvailableAt}, "no bars"},
 		{"no availability", frame{bars: []bar{unknown}}, "no availability"},
-		{"a bar from another moment", frame{availableAt: eur.availableAt, bars: []bar{eur, late}}, "is available at"},
-		{"instruments out of order", frame{availableAt: eur.availableAt, bars: []bar{gbp, eur}}, "in order"},
-		{"an instrument twice", frame{availableAt: eur.availableAt, bars: []bar{eur, eur}}, "in order"},
-		{"mixed opening times", frame{availableAt: eur.availableAt, bars: []bar{eur, offset}}, "mixed opening times"},
+		{"a bar from another moment", frame{availableAt: eur.AvailableAt, bars: []bar{eur, late}}, "is available at"},
+		{"instruments out of order", frame{availableAt: eur.AvailableAt, bars: []bar{gbp, eur}}, "in order"},
+		{"an instrument twice", frame{availableAt: eur.AvailableAt, bars: []bar{eur, eur}}, "in order"},
+		{"mixed opening times", frame{availableAt: eur.AvailableAt, bars: []bar{eur, offset}}, "mixed opening times"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,7 +121,7 @@ func TestBroker_OnBar_RefusesABarWithoutAvailability(t *testing.T) {
 	captureLogs(t)
 	br, _ := newFillBroker()
 	b := fillBar(1, 110000)
-	b.availableAt = time.Time{}
+	b.AvailableAt = time.Time{}
 
 	require.ErrorContains(t, br.onBar(context.Background(), b), "no availability")
 }
@@ -343,7 +343,7 @@ func pairBars() (*marketData, *marketData) {
 	for h, c := range []price{px(100000), px(100300), px(100600), px(100900), px(101200)} {
 		o := c
 		if h > 0 {
-			o = eur.data[h-1].c
+			o = eur.data[h-1].OHLC().Close
 		}
 		eur.data = append(eur.data, hbar("EURUSD", hour(h), points(o), points(c)))
 	}
@@ -510,7 +510,7 @@ func TestTrader_OnFrame_ReportsABrokerFailureWithTheFrame(t *testing.T) {
 	tr, _ := pairTrader(usd(10000), &reactStrategy{react: func(bar) *order { return nil }})
 	eur, gbp := hbar("EURUSD", hour(1), 110000, 110000), hbar("GBPUSD", hour(1), 130000, 130000)
 
-	err := tr.onFrame(context.Background(), frame{availableAt: eur.availableAt, bars: []bar{gbp, eur}})
+	err := tr.onFrame(context.Background(), frame{availableAt: eur.AvailableAt, bars: []bar{gbp, eur}})
 
 	require.Error(t, err)
 	assert.True(t, strings.HasPrefix(err.Error(), "broker on frame at "), err.Error())
@@ -520,7 +520,7 @@ func TestTrader_OnBar_ReportsABrokerFailureWithTheBar(t *testing.T) {
 	captureLogs(t)
 	tr, _ := pairTrader(usd(10000), &reactStrategy{react: func(bar) *order { return nil }})
 	b := hbar("EURUSD", hour(1), 110000, 110000)
-	b.availableAt = time.Time{}
+	b.AvailableAt = time.Time{}
 
 	err := tr.onBar(context.Background(), b)
 

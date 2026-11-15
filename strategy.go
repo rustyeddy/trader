@@ -108,8 +108,8 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 		e.pending = trend
 		// close takes no direction: it acts on the existing position
 		return &order{
-			instrument: b.instrument,
-			price:      b.c,
+			instrument: b.Instrument,
+			price:      b.OHLC().Close,
 			action:     close,
 			orderType:  marketOrder,
 			Time:       b.Time,
@@ -118,13 +118,13 @@ func (e *emax) onBar(ctx context.Context, b bar) *order {
 }
 
 func (e *emax) openOrder(b bar, d direction) *order {
-	stop, err := e.stopFor(b.c, d)
+	stop, err := e.stopFor(b.OHLC().Close, d)
 	if err != nil || stop.IsZero() || stop.Cmp(maxPrice) > 0 {
 		return nil // skip the entry; clamping would change the configured risk
 	}
 	return &order{
-		instrument: b.instrument,
-		price:      b.c,
+		instrument: b.Instrument,
+		price:      b.OHLC().Close,
 		stopLoss:   stop,
 		action:     open,
 		orderType:  marketOrder,
@@ -202,7 +202,7 @@ func (s *emaxEach) init() error {
 }
 
 func (s *emaxEach) onBar(ctx context.Context, b bar) *order {
-	e, ok := s.byInstrument[b.instrument]
+	e, ok := s.byInstrument[b.Instrument]
 	if !ok {
 		return nil
 	}

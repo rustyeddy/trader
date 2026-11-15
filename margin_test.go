@@ -189,9 +189,9 @@ func lossBar() bar { return fillBar(1, 109900) }
 // a flat bar for each extra instrument, so every position has a current price.
 func lossFrame(extra ...string) frame {
 	b := lossBar()
-	f := frame{availableAt: b.availableAt, bars: []bar{b}}
+	f := frame{availableAt: b.AvailableAt, bars: []bar{b}}
 	for _, inst := range append([]string{"GBPUSD"}, extra...) {
-		f.bars = append(f.bars, daily(bar{instrument: inst, Time: b.Time, ohlc: ohlc{o: px(150000), h: px(150000), l: px(150000), c: px(150000)}}))
+		f.bars = append(f.bars, daily(bar{Instrument: inst, Time: b.Time, Mid: ohlc{Open: px(150000), High: px(150000), Low: px(150000), Close: px(150000)}}))
 	}
 	return f
 }
@@ -256,7 +256,7 @@ func TestBroker_OnFrame_DeferredCompleteCloseoutResumesUntilEverythingIsClosed(t
 	err := br.submit(ctx, o)
 	require.ErrorIs(t, err, errCloseoutGuard, "the closeout is still owed")
 
-	gbp := daily(bar{instrument: "GBPUSD", Time: testStart.AddDate(0, 0, 3), ohlc: ohlc{o: px(149000), h: px(149000), l: px(148000), c: px(148000)}})
+	gbp := daily(bar{Instrument: "GBPUSD", Time: testStart.AddDate(0, 0, 3), Mid: ohlc{Open: px(149000), High: px(149000), Low: px(148000), Close: px(148000)}})
 	require.NoError(t, br.onBar(ctx, gbp))
 	assert.Empty(t, act.positions)
 	assert.False(t, act.closeoutPending)

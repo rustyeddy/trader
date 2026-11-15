@@ -198,8 +198,8 @@ func readBars(r io.Reader) (*marketData, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bars line %d: %w", line, err)
 		}
-		if n := len(md.data); n > 0 && !b.After(md.data[n-1].Time) {
-			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.data[n-1].Format(barTimeLayout))
+		if n := len(md.data); n > 0 && !b.Time.After(md.data[n-1].Time) {
+			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.data[n-1].Time.Format(barTimeLayout))
 		}
 		md.data = append(md.data, b)
 	}
@@ -235,7 +235,7 @@ func parseBar(instrument string, rec []string, lasts time.Duration) (bar, error)
 	if h.Cmp(num.Max(o, c)) < 0 || l.Cmp(num.Min(o, c)) > 0 {
 		return bar{}, fmt.Errorf("high %s and low %s do not contain open %s and close %s", h, l, o, c)
 	}
-	return bar{instrument: instrument, Time: t, ohlc: ohlc{o: o, h: h, l: l, c: c, v: v}, availableAt: t.Add(lasts)}, nil
+	return bar{Instrument: instrument, Time: t, Volume: int64(v), Mid: ohlc{Open: o, High: h, Low: l, Close: c}, AvailableAt: t.Add(lasts)}, nil
 }
 
 // parsePrice reads a positive price written with exactly five decimals, the

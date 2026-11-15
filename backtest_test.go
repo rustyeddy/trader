@@ -42,7 +42,7 @@ func openOrder() *order {
 func eurBars(vals ...float64) []bar {
 	bars := closes(vals...)
 	for i := range bars {
-		bars[i].instrument = "EURUSD"
+		bars[i].Instrument = "EURUSD"
 	}
 	return bars
 }

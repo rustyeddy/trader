@@ -23,10 +23,10 @@ func scanSet(instrument string, hours []int, closes []price) *marketData {
 	for i, hour := range hours {
 		open := mergeStart.Add(time.Duration(hour) * time.Hour)
 		md.data = append(md.data, bar{
-			instrument:  instrument,
+			Instrument:  instrument,
 			Time:        open,
-			ohlc:        ohlc{c: closes[i]},
-			availableAt: open.Add(time.Hour),
+			Mid:         ohlc{Close: closes[i]},
+			AvailableAt: open.Add(time.Hour),
 		})
 	}
 	return md

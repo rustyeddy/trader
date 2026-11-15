@@ -208,7 +208,7 @@ func (o *order) phase() int {
 
 // onBar advances the broker by one bar: onFrame with a frame of that bar alone.
 func (br *broker) onBar(ctx context.Context, b bar) error {
-	return br.onFrame(ctx, frame{availableAt: b.availableAt, bars: []bar{b}})
+	return br.onFrame(ctx, frame{availableAt: b.AvailableAt, bars: []bar{b}})
 }
 
 // onFrame executes the orders waiting on the frame's instruments for every
@@ -249,22 +249,21 @@ func (br *broker) onFrame(ctx context.Context, f frame) error {
 	if err := br.markets.checkFrame(f); err != nil {
 		return err
 	}
-	if f.bars[0].Before(br.clock) {
+	if f.bars[0].Time.Before(br.clock) {
 		return fmt.Errorf("%w: frame at %s opens at %s, before %s, when the previous frame was available",
-			errFrameOverlap, f.availableAt.Format(time.RFC3339), f.bars[0].Format(time.RFC3339), br.clock.Format(time.RFC3339))
+			errFrameOverlap, f.availableAt.Format(time.RFC3339), f.bars[0].Time.Format(time.RFC3339), br.clock.Format(time.RFC3339))
 	}
 	br.clock = f.availableAt
 	atOpen := make([]bar, len(f.bars))
 	for i, b := range f.bars {
 		br.expire(b)
-		atOpen[i] = b
-		atOpen[i].h, atOpen[i].l, atOpen[i].c = b.o, b.o, b.o // all that is known to have happened so far
+		atOpen[i] = openOnly(b)
 		br.mark(atOpen[i])
 	}
 	for _, seen := range [][]bar{atOpen, f.bars} {
 		for _, b := range seen {
 			for phase := 0; phase < phases; phase++ {
-				for _, o := range slices.Clone(br.orders[b.instrument]) {
+				for _, o := range slices.Clone(br.orders[b.Instrument]) {
 					if o.phase() != phase {
 						continue
 					}
@@ -314,24 +313,24 @@ func checkFrame(f frame) error {
 		return errors.New("frame has no bars")
 	}
 	if f.availableAt.IsZero() {
-		return fmt.Errorf("frame of %s at %s has no availability", f.bars[0].instrument, f.bars[0].Format(time.RFC3339))
+		return fmt.Errorf("frame of %s at %s has no availability", f.bars[0].Instrument, f.bars[0].Time.Format(time.RFC3339))
 	}
 	for i, b := range f.bars {
-		if !b.availableAt.Equal(f.availableAt) {
+		if !b.AvailableAt.Equal(f.availableAt) {
 			return fmt.Errorf("frame at %s: %s bar is available at %s",
-				f.availableAt.Format(time.RFC3339), b.instrument, b.availableAt.Format(time.RFC3339))
+				f.availableAt.Format(time.RFC3339), b.Instrument, b.AvailableAt.Format(time.RFC3339))
 		}
 		if i == 0 {
 			continue
 		}
-		if prev := f.bars[i-1]; prev.instrument >= b.instrument {
+		if prev := f.bars[i-1]; prev.Instrument >= b.Instrument {
 			return fmt.Errorf("frame at %s: %s after %s, want distinct instruments in order",
-				f.availableAt.Format(time.RFC3339), b.instrument, prev.instrument)
+				f.availableAt.Format(time.RFC3339), b.Instrument, prev.Instrument)
 		}
-		if !b.Equal(f.bars[0].Time) {
+		if !b.Time.Equal(f.bars[0].Time) {
 			return fmt.Errorf("frame at %s: %s opened at %s, %s at %s; mixed opening times are not supported",
-				f.availableAt.Format(time.RFC3339), f.bars[0].instrument, f.bars[0].Format(time.RFC3339),
-				b.instrument, b.Format(time.RFC3339))
+				f.availableAt.Format(time.RFC3339), f.bars[0].Instrument, f.bars[0].Time.Format(time.RFC3339),
+				b.Instrument, b.Time.Format(time.RFC3339))
 		}
 	}
 	return nil
@@ -341,7 +340,7 @@ func checkFrame(f frame) error {
 // reached, before the bar can execute them.
 func (br *broker) expire(b bar) {
 	br.cancelWhere(b.Time, "expired", func(o *order) bool {
-		return o.instrument == b.instrument && !o.expires.IsZero() && !b.Before(o.expires)
+		return o.instrument == b.Instrument && !o.expires.IsZero() && !b.Time.Before(o.expires)
 	})
 }
 
@@ -404,7 +403,7 @@ func (br *broker) enforceMargin(ctx context.Context, f frame, act *account) erro
 			act.closeoutPending = false
 			return nil // nothing left to close
 		}
-		i := slices.IndexFunc(f.bars, func(b bar) bool { return b.instrument == pos.instrument })
+		i := slices.IndexFunc(f.bars, func(b bar) bool { return b.Instrument == pos.instrument })
 		if i < 0 {
 			slog.Warn("margin closeout deferred: no current price",
 				"broker", br.id, "account", act.id, "instrument", pos.instrument, "time", at)
@@ -456,7 +455,7 @@ func (br *broker) placeExit(o *order, typ orderType, why orderReason, p num.Pric
 // stop and hit the raised level: the path within the bar is unknown, and this
 // takes no view on it. Each move is an event in the order's history.
 func (br *broker) trailStops(b bar) {
-	for _, o := range br.orders[b.instrument] {
+	for _, o := range br.orders[b.Instrument] {
 		if o.reason != reasonStopLoss || o.trail.IsZero() {
 			continue
 		}
@@ -464,12 +463,12 @@ func (br *broker) trailStops(b bar) {
 		if o.direction == long {
 			// The high less the trail, when that is above the stop (it can also
 			// be below zero, which is below any stop).
-			if h := b.h; h.Cmp(o.trail) > 0 {
+			if h := b.OHLC().High; h.Cmp(o.trail) > 0 {
 				if level, err := h.Sub(o.trail); err == nil {
 					moved = num.Max(o.price, level)
 				}
 			}
-		} else if level, err := b.l.Add(o.trail); err == nil {
+		} else if level, err := b.OHLC().Low.Add(o.trail); err == nil {
 			moved = num.Min(o.price, level)
 		}
 		if !moved.Equal(o.price) {
@@ -561,15 +560,16 @@ func (br *broker) processOrder(ctx context.Context, b bar, o *order) error {
 // buy limit and a sell stop wait for the price to fall, a sell limit and a buy
 // stop for it to rise. Opening a long buys, closing one sells.
 func (o *order) execution(b bar) (num.Price, bool) {
-	if o.state != stateSubmitted || o.instrument != b.instrument {
+	if o.state != stateSubmitted || o.instrument != b.Instrument {
 		return num.Price{}, false
 	}
-	if o.reason == reasonStrategy && (!b.After(o.Time) || b.Before(o.decidedAt)) || b.Before(o.Time) {
+	if o.reason == reasonStrategy && (!b.Time.After(o.Time) || b.Time.Before(o.decidedAt)) || b.Time.Before(o.Time) {
 		return num.Price{}, false
 	}
+	px := b.OHLC()
 	switch o.orderType {
 	case marketOrder:
-		return b.o, true
+		return px.Open, true
 	case limitOrder, stopOrder:
 		// Resting orders use the trigger calculation below.
 	default:
@@ -578,10 +578,10 @@ func (o *order) execution(b bar) (num.Price, bool) {
 	buys := (o.action == open) == (o.direction == long)
 	below := buys == (o.orderType == limitOrder)
 	switch {
-	case below && b.l.Cmp(o.price) <= 0:
-		return num.Min(o.price, b.o), true
-	case !below && b.h.Cmp(o.price) >= 0:
-		return num.Max(o.price, b.o), true
+	case below && px.Low.Cmp(o.price) <= 0:
+		return num.Min(o.price, px.Open), true
+	case !below && px.High.Cmp(o.price) >= 0:
+		return num.Max(o.price, px.Open), true
 	}
 	return num.Price{}, false
 }
@@ -608,4 +608,13 @@ func (br *broker) fill(o *order, p num.Price, at time.Time) error {
 		br.placeExits(o)
 	}
 	return nil
+}
+
+// openOnly returns b as known at its open: the price series the engine reads
+// (OHLC, mid first) collapsed to its open, since all that has happened so far is
+// the open. The engine reads prices only through OHLC(), so setting Mid is enough.
+func openOnly(b bar) bar {
+	o := b.OHLC().Open
+	b.Mid = ohlc{Open: o, High: o, Low: o, Close: o}
+	return b
 }

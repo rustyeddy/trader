@@ -35,17 +35,17 @@ func mergeSets(sets []*marketData) ([]bar, error) {
 		seen[md.instrument] = true
 
 		for i, b := range md.data {
-			if b.availableAt.IsZero() {
-				return nil, fmt.Errorf("merge bars: %s bar at %s has no availability", b.instrument, b.Format(barTimeLayout))
+			if b.AvailableAt.IsZero() {
+				return nil, fmt.Errorf("merge bars: %s bar at %s has no availability", b.Instrument, b.Time.Format(barTimeLayout))
 			}
-			if i > 0 && !b.availableAt.After(md.data[i-1].availableAt) {
-				return nil, fmt.Errorf("merge bars: %s bar at %s is not available after the one before it", b.instrument, b.Format(barTimeLayout))
+			if i > 0 && !b.AvailableAt.After(md.data[i-1].AvailableAt) {
+				return nil, fmt.Errorf("merge bars: %s bar at %s is not available after the one before it", b.Instrument, b.Time.Format(barTimeLayout))
 			}
 		}
 		merged = append(merged, md.data...)
 	}
 	slices.SortFunc(merged, func(a, b bar) int {
-		return cmp.Or(a.availableAt.Compare(b.availableAt), cmp.Compare(a.instrument, b.instrument))
+		return cmp.Or(a.AvailableAt.Compare(b.AvailableAt), cmp.Compare(a.Instrument, b.Instrument))
 	})
 	return merged, nil
 }
@@ -70,13 +70,13 @@ func frames(bars iter.Seq2[bar, error]) iter.Seq2[frame, error] {
 				yield(frame{}, err)
 				return
 			}
-			if len(pending.bars) > 0 && !b.availableAt.Equal(pending.availableAt) {
+			if len(pending.bars) > 0 && !b.AvailableAt.Equal(pending.availableAt) {
 				if !yield(pending, nil) {
 					return
 				}
 				pending = frame{}
 			}
-			pending.availableAt = b.availableAt
+			pending.availableAt = b.AvailableAt
 			pending.bars = append(pending.bars, b)
 		}
 		if len(pending.bars) > 0 {
