@@ -187,9 +187,10 @@ per-partition lock, and the report says it was replaced. A build never touches r
 
 - =marketdata= (public): =OHLC=, =Bar=, =MidOf= and bar validation (#633). It
   imports =num= and the standard library only.
-- =internal/marketdata/canonical=: the =canonical-v2= reader and writer, the
-  bad-record type, file validation and the alignment and availability rule. It
-  imports =marketdata=, =num=, =layout= and the standard library; never a provider.
+- =marketdata/internal/canonical= (moved there in #635, ADR-091): the
+  =canonical-v2= reader and writer, the bad-record type, file validation and the
+  alignment and availability rule. It imports =marketdata=, =num=, =layout= and the
+  standard library; never a provider.
 - =internal/marketdata/oanda=: the mapping from a raw record to a canonical bar or
   a bad record. It imports =canonical=.
 - =cmd/trader=: =trader data build=, flags as =download= (=--data-root=,
