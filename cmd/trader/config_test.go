@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,21 +80,28 @@ func TestResolveRoot_FlagThenEnvironmentThenFile(t *testing.T) {
 		{"blank values are not set", "  ", "", "/file", "/file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := resolveRoot(tc.flag, tc.env, tc.file)
-
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, resolveRoot(tc.flag, tc.env, tc.file))
 		})
 	}
 }
 
-func TestResolveRoot_NoSourceNamesAllThree(t *testing.T) {
-	_, err := resolveRoot("", "", "")
+func TestResolveRoot_NoSourceIsEmptySoTheStoreDefaultStands(t *testing.T) {
+	assert.Equal(t, "", resolveRoot("", "", ""))
+	assert.Equal(t, "", resolveRoot(" ", "\t", ""), "blank values are not set")
+}
 
-	require.Error(t, err)
-	for _, want := range []string{"--data-root", "TRADER_DATA_ROOT", "marketdata.root"} {
-		assert.Contains(t, err.Error(), want)
-	}
+func TestUseRoot_SetsAConfiguredRootAndLeavesTheDefaultOtherwise(t *testing.T) {
+	root := storetest.Root(t)
+	other := t.TempDir()
+
+	require.NoError(t, useRoot(""))
+	assert.Equal(t, root, store.Root(), "no configured root changes nothing")
+	require.NoError(t, useRoot(other))
+	assert.Equal(t, other, store.Root())
+}
+
+func TestStoreDefaultRoot_IsTheDocumentedDefault(t *testing.T) {
+	assert.Equal(t, "/srv/data", store.DefaultRoot)
 }
 
 func TestLoadConfig_ErrorsNeverQuoteAValue(t *testing.T) {

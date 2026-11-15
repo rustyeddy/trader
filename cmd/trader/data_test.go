@@ -124,6 +124,20 @@ func TestDataDownload_WritesTheMonthFilesAndPrintsASummary(t *testing.T) {
 	assert.NotEmpty(t, logs, "the run is logged")
 }
 
+// With no flag, environment or config root the store's own root stands: here the
+// package's temporary root, in production the default /srv/data.
+func TestDataDownload_WithNoConfiguredRootUsesTheStoresRoot(t *testing.T) {
+	srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 3)
+	root := storetest.Root(t)
+
+	_, _, err := runData(t, map[string]string{envOANDAToken: testToken},
+		"data", "download", "--config", writeConfig(t, ""), "--instrument", "EURUSD", "--interval", "h1",
+		"--from", "2024-01-01", "--to", "2024-01-02", "--base-url", srv.URL)
+
+	require.NoError(t, err)
+	assert.FileExists(t, filepath.Join(root, "oanda", "raw", "EURUSD", "2024", "01", "EURUSD-2024-01-h1.csv"))
+}
+
 func TestDataDownload_ARerunAddsNothing(t *testing.T) {
 	srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 6)
 	root := storetest.Root(t)
@@ -185,7 +199,6 @@ func TestDataDownload_RefusesBeforeAnyRequest(t *testing.T) {
 		want string
 	}{
 		"no token":          {nil, base(), envOANDAToken},
-		"no root":           {withToken, []string{"data", "download", "--config", writeConfig(t, ""), "--instrument", "EURUSD", "--interval", "h1", "--from", "2024-01-01", "--to", "2024-01-02"}, "no data root"},
 		"no instrument":     {withToken, []string{"data", "download", "--config", writeConfig(t, ""), "--data-root", root, "--interval", "h1", "--from", "2024-01-01", "--to", "2024-01-02"}, "no instrument"},
 		"no interval":       {withToken, []string{"data", "download", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD", "--from", "2024-01-01", "--to", "2024-01-02"}, "no interval"},
 		"no range":          {withToken, []string{"data", "download", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD", "--interval", "h1"}, "--from and --to"},
