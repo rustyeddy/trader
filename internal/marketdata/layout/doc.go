@@ -1,9 +1,9 @@
 // Package layout is the one resolver for where persisted price data lives
 // (ADR-089, docs/arch/market-data-storage.md). Every path has the form
 //
-//	<root>/<source>/<stage>/<instrument>/<YYYY>/<MM>/<instrument>-<YYYY>-<MM>-<interval>.csv
+//	<source>/<stage>/<instrument>/<YYYY>/<MM>/<instrument>-<YYYY>-<MM>-<interval>.csv
 //
-// and is built and parsed only here, so the command line, services, ingestion
+// relative to the data root, which belongs to the store package, and is built and parsed only here, so the command line, services, ingestion
 // and tests cannot each invent their own and path traversal is rejected in a
 // single place.
 //

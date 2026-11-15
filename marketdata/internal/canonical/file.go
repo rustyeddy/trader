@@ -46,13 +46,13 @@ func (k Key) Validate() error {
 	return nil
 }
 
-// Path returns the partition file's path under root, through the layout
-// resolver: root/<source>/canonical/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-<interval>.csv.
-func (k Key) Path(root string) (string, error) {
+// Path returns the partition file's path relative to the data root, through the
+// layout resolver: <source>/canonical/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-<interval>.csv.
+func (k Key) Path() (string, error) {
 	if err := k.Validate(); err != nil {
 		return "", err
 	}
-	p, err := k.layout().Path(root)
+	p, err := k.layout().Path()
 	if err != nil {
 		return "", fmt.Errorf("canonical: %w", err)
 	}

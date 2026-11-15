@@ -2,6 +2,7 @@ package oanda
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,13 +10,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/store"
 )
 
 // ErrPartitionAlreadyExists marks an attempt to write a brand-new raw
@@ -39,7 +39,7 @@ func rawTF(interval RawInterval) string {
 }
 
 // WritePartition atomically writes records as a raw-v1 partition file
-// for (symbol, interval, year, month) under root: a schema comment, the
+// for (symbol, interval, year, month) under the data root: a schema comment, the
 // raw-v1 column header (reader.go's rawV1Header, reused verbatim so a
 // file this writes and a file Open reads never drift apart), then one
 // row per record in ascending Time order. records need not already be
@@ -78,97 +78,58 @@ func rawTF(interval RawInterval) string {
 // more immediately before the commit step — the actual commit point. A
 // cancellation that arrives after the commit does not undo it.
 //
-// WritePartition holds the partition's process-local lock (see UpdatePartition)
-// for the duration of the write, so a replace never interleaves with a
-// read-merge-commit by UpdatePartition on the same partition.
-func WritePartition(ctx context.Context, root string, key PartitionKey, records []Record, mustNotExist bool) error {
+// The store holds the partition's process-local lock for the duration of the
+// write, so a replace never interleaves with a read-merge-commit by
+// UpdatePartition on the same partition.
+func WritePartition(ctx context.Context, key PartitionKey, records []Record, mustNotExist bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path, err := key.Path(root)
+	path, err := key.Path()
 	if err != nil {
 		return err
 	}
-	unlock, err := lockPartition(ctx, path)
+	data, err := encodePartition(ctx, key, records)
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	return writeLocked(ctx, path, key, records, mustNotExist)
-}
-
-// writeLocked is the atomic write itself. The caller holds the partition's lock.
-func writeLocked(ctx context.Context, path string, key PartitionKey, records []Record, mustNotExist bool) error {
-	for _, r := range records {
-		if err := checkRecordMonth(key, r.Time); err != nil {
-			return fmt.Errorf("oanda: write partition: %w", err)
-		}
-	}
-	sorted := append([]Record(nil), records...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("oanda: write partition: %w", err)
-	}
-
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("oanda: write partition: %w", err)
-	}
-	tmpPath := tmp.Name()
-	succeeded := false
-	defer func() {
-		_ = tmp.Close()
-		if !succeeded {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	bw := bufio.NewWriter(tmp)
-	if err := encodeRawPartition(ctx, bw, key, sorted); err != nil {
-		return fmt.Errorf("oanda: write partition: %w", err)
-	}
-	if err := bw.Flush(); err != nil {
-		return fmt.Errorf("oanda: write partition: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		return fmt.Errorf("oanda: write partition: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("oanda: write partition: %w", err)
-	}
-	// The commit point: checked once more here even though the caller
-	// and encodeRawPartition may already have observed ctx earlier, so a
-	// cancellation up to and including this instant still leaves path
-	// completely untouched.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
 	if mustNotExist {
-		// Atomic create-if-not-exists: see the doc comment above for why
-		// this is Link, not a Stat check followed by Rename.
-		if err := os.Link(tmpPath, path); err != nil {
+		// Atomic create-if-absent in the store (link(2), not a Stat check
+		// followed by a rename): see the doc comment above.
+		if err := store.Create(ctx, path, data); err != nil {
 			if errors.Is(err, fs.ErrExist) {
 				return fmt.Errorf("%w: %s", ErrPartitionAlreadyExists, path)
 			}
 			return fmt.Errorf("oanda: write partition: %w", err)
 		}
-		succeeded = true
-		// The temporary name is now a second link to the same file
-		// Link just created at path; remove it so only path remains.
-		// Best-effort: the durable copy is already safely at path
-		// regardless of whether this cleanup succeeds.
-		_ = os.Remove(tmpPath)
 		return nil
 	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := store.Write(ctx, path, data); err != nil {
 		return fmt.Errorf("oanda: write partition: %w", err)
 	}
-	succeeded = true
 	return nil
+}
+
+// encodePartition renders records as the partition's raw-v1 file: it rejects a
+// record outside the partition's month and writes a sorted copy.
+func encodePartition(ctx context.Context, key PartitionKey, records []Record) ([]byte, error) {
+	for _, r := range records {
+		if err := checkRecordMonth(key, r.Time); err != nil {
+			return nil, fmt.Errorf("oanda: write partition: %w", err)
+		}
+	}
+	sorted := append([]Record(nil), records...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := encodeRawPartition(ctx, bw, key, sorted); err != nil {
+		return nil, fmt.Errorf("oanda: write partition: %w", err)
+	}
+	if err := bw.Flush(); err != nil {
+		return nil, fmt.Errorf("oanda: write partition: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // rawPriceDecimals is the fixed number of decimals every price has in the
@@ -223,12 +184,21 @@ func encodeRawPartition(ctx context.Context, w *bufio.Writer, key PartitionKey, 
 // "extend" sync can merge new records with what is already on disk
 // without duplicating Open's own parsing; it is a thin wrapper over
 // Open/Reader that discards Meta, since the caller already knows it.
-func ReadPartitionRecords(ctx context.Context, root string, key PartitionKey) ([]Record, error) {
-	path, err := key.Path(root)
+func ReadPartitionRecords(ctx context.Context, key PartitionKey) ([]Record, error) {
+	path, err := key.Path()
 	if err != nil {
 		return nil, err
 	}
-	r, err := Open(path)
+	data, err := store.Read(path)
+	if err != nil {
+		return nil, err
+	}
+	return decodeRecords(ctx, path, data)
+}
+
+// decodeRecords parses the raw-v1 bytes of the partition at path into records.
+func decodeRecords(ctx context.Context, path string, data []byte) ([]Record, error) {
+	r, err := newReaderFromBytes(path, data)
 	if err != nil {
 		return nil, err
 	}
@@ -268,12 +238,12 @@ func ReadPartitionRecords(ctx context.Context, root string, key PartitionKey) ([
 // partition's records and its fingerprint describing the exact same
 // bytes must use ReadPartitionSnapshot instead, not this function
 // followed by ReadPartitionRecords (or the reverse order).
-func FingerprintPartition(root string, key PartitionKey) (string, error) {
-	path, err := key.Path(root)
+func FingerprintPartition(key PartitionKey) (string, error) {
+	path, err := key.Path()
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	data, err := store.Read(path)
 	if err != nil {
 		return "", err
 	}
@@ -305,38 +275,20 @@ type PartitionSnapshot struct {
 // normalization build, issue #81 — that needs a raw fingerprint to
 // record alongside the canonical bars built from that exact data must
 // use this function, not the two-open pattern.
-func ReadPartitionSnapshot(ctx context.Context, root string, key PartitionKey) (PartitionSnapshot, error) {
-	path, err := key.Path(root)
+func ReadPartitionSnapshot(ctx context.Context, key PartitionKey) (PartitionSnapshot, error) {
+	path, err := key.Path()
 	if err != nil {
 		return PartitionSnapshot{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := store.Read(path)
 	if err != nil {
 		return PartitionSnapshot{}, err
 	}
-	fingerprint := fingerprintBytes(data)
-
-	r, err := newReaderFromBytes(path, data)
+	records, err := decodeRecords(ctx, path, data)
 	if err != nil {
 		return PartitionSnapshot{}, err
 	}
-	defer func() { _ = r.Close() }()
-
-	var records []Record
-	for {
-		if err := ctx.Err(); err != nil {
-			return PartitionSnapshot{}, err
-		}
-		rec, err := r.Next(ctx)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return PartitionSnapshot{}, err
-		}
-		records = append(records, rec)
-	}
-	return PartitionSnapshot{Records: records, Fingerprint: fingerprint}, nil
+	return PartitionSnapshot{Records: records, Fingerprint: fingerprintBytes(data)}, nil
 }
 
 // UpdatePartition is the safe read-merge-commit for extending a partition: it
@@ -352,27 +304,26 @@ func ReadPartitionSnapshot(ctx context.Context, root string, key PartitionKey) (
 // coordinated (ADR-089). A failure or a context cancellation observed before the
 // commit leaves any existing file untouched; one that arrives after does not
 // undo it.
-func UpdatePartition(ctx context.Context, root string, key PartitionKey, merge func(existing []Record) ([]Record, error)) error {
+func UpdatePartition(ctx context.Context, key PartitionKey, merge func(existing []Record) ([]Record, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path, err := key.Path(root)
+	path, err := key.Path()
 	if err != nil {
 		return err
 	}
-	unlock, err := lockPartition(ctx, path)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
-	existing, err := ReadPartitionRecords(ctx, root, key)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	merged, err := merge(existing)
-	if err != nil {
-		return err
-	}
-	return writeLocked(ctx, path, key, merged, false)
+	return store.Update(ctx, path, func(old []byte, exists bool) ([]byte, error) {
+		var existing []Record
+		if exists {
+			existing, err = decodeRecords(ctx, path, old)
+			if err != nil {
+				return nil, err
+			}
+		}
+		merged, err := merge(existing)
+		if err != nil {
+			return nil, err
+		}
+		return encodePartition(ctx, key, merged)
+	})
 }

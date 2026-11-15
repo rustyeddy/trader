@@ -3,6 +3,7 @@ package oanda
 import (
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,8 +12,13 @@ import (
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMain points the store at a temporary directory for the whole package, so
+// a test that forgets storetest.Root still never touches the real data root.
+func TestMain(m *testing.M) { os.Exit(storetest.Main(m)) }
 
 // eurusdMeta is the Meta a valid EURUSD 2020-05 H1 partition resolves to.
 func eurusdMeta() Meta {
@@ -44,14 +50,15 @@ var fixtures = []fixtureCase{
 
 func mustPath(t *testing.T, root string) string {
 	t.Helper()
-	p, err := PartitionKey{"EURUSD", RawH1, 2024, time.January}.Path(root)
+	p, err := PartitionKey{"EURUSD", RawH1, 2024, time.January}.Path()
 	require.NoError(t, err)
+	p = filepath.Join(root, p)
 	return p
 }
 
 // TestProviderOanda_ImportsOnlyFoundationalPackages keeps the provider a leaf:
 // within the module it may import only foundational packages (the public
-// marketdata model Bar/OHLC, instrument, num, logging and layout), never
+// marketdata model Bar/OHLC, instrument, num, logging, layout and store), never
 // marketdata/internal, a service, cmd, the root engine or another provider.
 func TestProviderOanda_ImportsOnlyFoundationalPackages(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
@@ -61,6 +68,7 @@ func TestProviderOanda_ImportsOnlyFoundationalPackages(t *testing.T) {
 		mod + "/num":                        false,
 		mod + "/internal/logging":           false,
 		mod + "/internal/marketdata/layout": false,
+		mod + "/store":                      false,
 	}
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)

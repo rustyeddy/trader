@@ -6,13 +6,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/store"
 )
 
 // rawV1Header is the exact raw-v1 column header. It is matched verbatim so a
@@ -24,20 +24,21 @@ const rawV1Header = "time,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume
 const rawFieldCount = 11
 
 // Reader streams the rows of one raw OANDA CSV partition as provider-native
-// Record values. It owns the underlying file: the caller must Close it when
-// done, whether iteration finished, errored, or was cancelled.
+// Record values. The partition is read through the store once, in full, when
+// the Reader is opened; Close is still the way to finish with it, whether
+// iteration finished, errored, or was cancelled.
 //
 // A Reader is not safe for concurrent use; a single goroutine drives Next.
 type Reader struct {
 	path    string
 	meta    Meta
-	file    *os.File
 	scanner *bufio.Scanner
 	line    int // 1-based line number of the most recently read line
 	closed  bool
 }
 
-// Open resolves path's partition metadata, opens the file, and consumes its
+// Open resolves path's partition metadata (path is relative to the data root),
+// reads the file through the store, and consumes its
 // schema and column-header lines, leaving the Reader positioned at the first
 // data row.
 //
@@ -53,12 +54,12 @@ func Open(path string) (*Reader, error) {
 		return nil, err
 	}
 
-	f, err := os.Open(path)
+	data, err := store.Read(path)
 	if err != nil {
 		return nil, err
 	}
 
-	return newReader(path, meta, token, f, f)
+	return newReader(path, meta, token, bytes.NewReader(data))
 }
 
 // newReaderFromBytes builds a Reader over data already read into memory,
@@ -73,22 +74,19 @@ func newReaderFromBytes(path string, data []byte) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newReader(path, meta, token, bytes.NewReader(data), nil)
+	return newReader(path, meta, token, bytes.NewReader(data))
 }
 
 // newReader is Open and newReaderFromBytes's shared constructor: it wraps
 // src in a Reader, consuming its schema and column-header lines. file is
 // non-nil only when there is an underlying *os.File Close must release.
-func newReader(path string, meta Meta, token string, src io.Reader, file *os.File) (*Reader, error) {
-	r := &Reader{path: path, meta: meta, file: file, scanner: bufio.NewScanner(src)}
+func newReader(path string, meta Meta, token string, src io.Reader) (*Reader, error) {
+	r := &Reader{path: path, meta: meta, scanner: bufio.NewScanner(src)}
 	// m1 partitions can be a few MB; grow the scanner's line budget well past
 	// bufio's 64 KiB default even though rows are short, to be safe.
 	r.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	if err := r.consumeHeader(meta, token); err != nil {
-		if file != nil {
-			_ = file.Close()
-		}
 		return nil, err
 	}
 	return r, nil
@@ -162,16 +160,14 @@ func (r *Reader) Next(ctx context.Context) (Record, error) {
 	return Record{}, io.EOF
 }
 
-// Close releases the underlying file. It is safe to call more than once.
+// Close marks the Reader finished; the partition is already in memory, so there
+// is nothing to release. It is safe to call more than once.
 func (r *Reader) Close() error {
 	if r.closed {
 		return nil
 	}
 	r.closed = true
-	if r.file == nil {
-		return nil
-	}
-	return r.file.Close()
+	return nil
 }
 
 // scan advances the scanner one line and tracks the line number.

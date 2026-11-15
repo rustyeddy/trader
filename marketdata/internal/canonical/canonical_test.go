@@ -1,11 +1,13 @@
 package canonical
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/store/storetest"
 )
 
 func px(s string) num.Price { return num.MustParsePrice(s) }
@@ -13,6 +15,10 @@ func px(s string) num.Price { return num.MustParsePrice(s) }
 func utc(y int, m time.Month, d, h int) time.Time { return time.Date(y, m, d, h, 0, 0, 0, time.UTC) }
 
 // goodBar is a valid H1 bar opening at open.
+// TestMain points the store at a temporary directory for the whole package, so
+// a test that forgets storetest.Root still never touches the real data root.
+func TestMain(m *testing.M) { os.Exit(storetest.Main(m)) }
+
 func goodBar(t *testing.T, open time.Time) marketdata.Bar {
 	t.Helper()
 	avail, err := AvailableAt(H1, open)

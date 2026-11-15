@@ -25,8 +25,6 @@ func (s Stage) Valid() bool { return s == Raw || s == Canonical }
 var (
 	// ErrInvalidComponent reports an identifier that cannot be a path component.
 	ErrInvalidComponent = errors.New("layout: invalid path component")
-	// ErrInvalidRoot reports an empty data root.
-	ErrInvalidRoot = errors.New("layout: invalid data root")
 	// ErrNotPartitionPath reports a path that is not a partition file under the root.
 	ErrNotPartitionPath = errors.New("layout: not a partition path")
 )
@@ -73,12 +71,12 @@ func (p Partition) Validate() error {
 	return nil
 }
 
-// Dir returns the partition's directory under root.
-func (p Partition) Dir(root string) (string, error) {
+// Dir returns the partition's directory, relative to the data root.
+func (p Partition) Dir() (string, error) {
 	if err := p.Validate(); err != nil {
 		return "", err
 	}
-	base, err := StageDir(root, p.Source, p.Stage)
+	base, err := StageDir(p.Source, p.Stage)
 	if err != nil {
 		return "", err
 	}
@@ -93,9 +91,10 @@ func (p Partition) FileName() (string, error) {
 	return fmt.Sprintf("%s-%04d-%02d-%s%s", p.Instrument, p.Year, int(p.Month), p.Interval, fileExt), nil
 }
 
-// Path returns the partition file's path under root.
-func (p Partition) Path(root string) (string, error) {
-	dir, err := p.Dir(root)
+// Path returns the partition file's path, relative to the data root (the root
+// itself belongs to the store package).
+func (p Partition) Path() (string, error) {
+	dir, err := p.Dir()
 	if err != nil {
 		return "", err
 	}
@@ -103,40 +102,29 @@ func (p Partition) Path(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return underRoot(root, filepath.Join(dir, name))
+	return filepath.Join(dir, name), nil
 }
 
 // StageDir returns the directory that holds every instrument of one source and
-// stage: <root>/<source>/<stage>.
-func StageDir(root, source string, stage Stage) (string, error) {
-	if root == "" {
-		return "", ErrInvalidRoot
-	}
+// stage, relative to the data root: <source>/<stage>.
+func StageDir(source string, stage Stage) (string, error) {
 	if err := validComponent("source", source); err != nil {
 		return "", err
 	}
 	if !stage.Valid() {
 		return "", fmt.Errorf("%w: stage %q is not raw or canonical", ErrInvalidComponent, stage)
 	}
-	return underRoot(root, filepath.Join(root, source, string(stage)))
+	return filepath.Join(source, string(stage)), nil
 }
 
-// Parse is the inverse of Path: it returns the Partition a file under root
+// Parse is the inverse of Path: it returns the Partition a root-relative path
 // names, or ErrNotPartitionPath when the path is not exactly
 // <source>/<stage>/<instrument>/<YYYY>/<MM>/<file> with a file name that agrees
 // with the directories.
-func Parse(root, path string) (Partition, error) {
-	if root == "" {
-		return Partition{}, ErrInvalidRoot
-	}
-	absRoot, rerr := filepath.Abs(root)
-	absPath, perr := filepath.Abs(path)
-	if rerr != nil || perr != nil {
-		return Partition{}, fmt.Errorf("%w: %s is not under the data root", ErrNotPartitionPath, path)
-	}
-	rel, err := filepath.Rel(absRoot, absPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return Partition{}, fmt.Errorf("%w: %s is not under the data root", ErrNotPartitionPath, path)
+func Parse(path string) (Partition, error) {
+	rel := filepath.Clean(path)
+	if rel == "." || !filepath.IsLocal(rel) {
+		return Partition{}, fmt.Errorf("%w: %s is not relative to the data root", ErrNotPartitionPath, path)
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if len(parts) != 6 {
@@ -170,26 +158,6 @@ func Parse(root, path string) (Partition, error) {
 		return Partition{}, fmt.Errorf("%w: file name %q does not match its directories (want %q)", ErrNotPartitionPath, name, want)
 	}
 	return p, nil
-}
-
-// underRoot returns path as an absolute, cleaned path and confirms it is inside
-// root: defense in depth, since validated components cannot escape. The result
-// is absolute so that a relative root and its absolute spelling name the same
-// file, which the writers rely on to key their per-partition locks.
-func underRoot(root, path string) (string, error) {
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidRoot, err)
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidComponent, err)
-	}
-	rel, err := filepath.Rel(absRoot, absPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("%w: %s escapes the data root", ErrInvalidComponent, absPath)
-	}
-	return absPath, nil
 }
 
 func validComponent(what, s string) error {

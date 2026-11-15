@@ -7,10 +7,10 @@
 //
 // Every path comes from internal/marketdata/layout, so a raw partition lives at
 //
-//	<root>/oanda/raw/PAIR/YYYY/MM/PAIR-YYYY-MM-<tf>.csv
+//	oanda/raw/PAIR/YYYY/MM/PAIR-YYYY-MM-<tf>.csv
 //
-// with <tf> one of m1, h1, h4, d1. root is the caller's data root; nothing here
-// hard-codes one. There is no fallback to the retired <stage>/<source> order:
+// relative to the data root, with <tf> one of m1, h1, h4, d1. The root belongs to
+// the store package (#644); nothing here knows it or hard-codes one. There is no fallback to the retired <stage>/<source> order:
 // the existing archive is migrated separately, by renaming, before this package
 // can read it.
 //
@@ -38,14 +38,15 @@
 //
 // # Writing
 //
-// WritePartition is atomic: a temporary file beside the destination, synced,
-// then committed. Create-only links it into place, so an existing authoritative
-// file is never silently replaced (ErrPartitionAlreadyExists). UpdatePartition
-// is the safe extend: it holds a process-local per-partition lock across the
-// read, the caller's merge and the replace, so overlapping updates cannot lose
-// records. Separate processes are not coordinated. A failure or cancellation
-// before the commit leaves any existing file untouched; one after it does not
-// undo the commit.
+// All file reads and writes go through the store package. WritePartition is
+// atomic: the store writes a temporary file beside the destination, syncs it and
+// commits it. Create-only links it into place, so an existing authoritative file
+// is never silently replaced (ErrPartitionAlreadyExists). UpdatePartition is the
+// safe extend: the store holds a process-local per-path lock across the read, the
+// caller's merge and the replace, so overlapping updates cannot lose records.
+// Separate processes are not coordinated. A failure or cancellation before the
+// commit leaves any existing file untouched; one after it does not undo the
+// commit.
 //
 // # Client
 //
