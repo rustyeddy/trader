@@ -3,8 +3,11 @@ package trader
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
@@ -195,4 +198,140 @@ func TestRun_ExportedEntryPointPrintsTheApprovedSummary(t *testing.T) {
 	require.NoError(t, Run(&out))
 
 	assert.Equal(t, approvedSummary, out.String())
+}
+
+const barsHeader = "# schema=design-bars-v1 source=synthetic instrument=EURUSD tf=d1 year=2010 month=01 scenario=test\n" +
+	"time,open,high,low,close,volume\n"
+
+func TestReadBars_ParsesExactPointsInOrder(t *testing.T) {
+	md, err := readBars(strings.NewReader(barsHeader +
+		"2010-01-04T00:00:00Z,1.10323,1.10650,1.09197,1.10001,1000\n" +
+		"2010-01-05T00:00:00Z,1.10015,1.10130,1.10005,1.10100,0\n"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "EURUSD", md.instrument)
+	assert.Equal(t, "d1", md.interval)
+	first := time.Date(2010, time.January, 4, 0, 0, 0, 0, time.UTC)
+	second := first.AddDate(0, 0, 1)
+	assert.Equal(t, []bar{
+		{instrument: "EURUSD", Time: first, ohlc: ohlc{o: px(110323), h: px(110650), l: px(109197), c: px(110001), v: 1000}, availableAt: second},
+		{instrument: "EURUSD", Time: second, ohlc: ohlc{o: px(110015), h: px(110130), l: px(110005), c: px(110100)}, availableAt: second.AddDate(0, 0, 1)},
+	}, md.data)
+}
+
+func TestReadBars_AvailableWhenTheIntervalEnds(t *testing.T) {
+	open := time.Date(2010, time.January, 4, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		tf   string
+		want time.Time
+	}{
+		{"h1", open.Add(time.Hour)},
+		{"d1", open.AddDate(0, 0, 1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tf, func(t *testing.T) {
+			md, err := readBars(strings.NewReader("# schema=design-bars-v1 instrument=EURUSD tf=" + tt.tf + "\n" +
+				"time,open,high,low,close,volume\n" +
+				"2010-01-04T10:00:00Z,1.10000,1.10100,1.09900,1.10050,1000\n"))
+			require.NoError(t, err)
+			require.Len(t, md.data, 1)
+			assert.Equal(t, open, md.data[0].Time, "the opening time is unchanged")
+			assert.Equal(t, tt.want, md.data[0].availableAt)
+		})
+	}
+}
+
+func TestReadBars_RefusesAnUnsupportedInterval(t *testing.T) {
+	for _, tf := range []string{"w1", "h2", "H1"} {
+		t.Run(tf, func(t *testing.T) {
+			_, err := readBars(strings.NewReader("# schema=design-bars-v1 instrument=EURUSD tf=" + tf + "\n" +
+				"time,open,high,low,close,volume\n" +
+				"2010-01-04T10:00:00Z,1.10000,1.10100,1.09900,1.10050,1000\n"))
+			require.ErrorContains(t, err, "unsupported tf")
+		})
+	}
+}
+
+func TestReadBars_RefusesMalformedInput(t *testing.T) {
+	const row = "2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.10050,1000\n"
+	for name, in := range map[string]string{
+		"empty":            "",
+		"header only line": "# schema=design-bars-v1 instrument=EURUSD tf=d1",
+		"not a comment":    "schema=design-bars-v1 instrument=EURUSD tf=d1\n" + row,
+		"wrong schema":     "# schema=canonical-v1 instrument=EURUSD tf=d1\ntime,open,high,low,close,volume\n" + row,
+		"no instrument":    "# schema=design-bars-v1 tf=d1\ntime,open,high,low,close,volume\n" + row,
+		"no interval":      "# schema=design-bars-v1 instrument=EURUSD\ntime,open,high,low,close,volume\n" + row,
+		"no columns":       "# schema=design-bars-v1 instrument=EURUSD tf=d1\n",
+		"wrong columns":    "# schema=design-bars-v1 instrument=EURUSD tf=d1\ntime,high,open,low,close,volume\n" + row,
+		"quoted five-field columns": "# schema=design-bars-v1 instrument=EURUSD tf=d1\n\"time,open\",high,low,close,volume\n" +
+			"2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.10050\n",
+		"quoted one-field columns": "# schema=design-bars-v1 instrument=EURUSD tf=d1\n\"time,open,high,low,close,volume\"\n" +
+			"2010-01-04T00:00:00Z\n",
+		"no rows":          barsHeader,
+		"short row":        barsHeader + "2010-01-04T00:00:00Z,1.10000,1.10100\n",
+		"date only":        barsHeader + "2010-01-04,1.10000,1.10100,1.09900,1.10050,1000\n",
+		"offset time":      barsHeader + "2010-01-04T00:00:00+01:00,1.10000,1.10100,1.09900,1.10050,1000\n",
+		"four decimals":    barsHeader + "2010-01-04T00:00:00Z,1.1000,1.10100,1.09900,1.10050,1000\n",
+		"six decimals":     barsHeader + "2010-01-04T00:00:00Z,1.100000,1.10100,1.09900,1.10050,1000\n",
+		"no whole part":    barsHeader + "2010-01-04T00:00:00Z,.10000,1.10100,1.09900,1.10050,1000\n",
+		"signed price":     barsHeader + "2010-01-04T00:00:00Z,-1.10000,1.10100,1.09900,1.10050,1000\n",
+		"signed fraction":  barsHeader + "2010-01-04T00:00:00Z,1.+1000,1.10100,1.09900,1.10050,1000\n",
+		"zero price":       barsHeader + "2010-01-04T00:00:00Z,0.00000,1.10100,1.09900,1.10050,1000\n",
+		"overflow":         barsHeader + "2010-01-04T00:00:00Z,99999999999999999.00000,1.10100,1.09900,1.10050,1000\n",
+		"above the bound":  barsHeader + "2010-01-04T00:00:00Z,10000.00001,10000.00002,10000.00001,10000.00001,1000\n",
+		"high below open":  barsHeader + "2010-01-04T00:00:00Z,1.10200,1.10100,1.09900,1.10050,1000\n",
+		"high below close": barsHeader + "2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.10150,1000\n",
+		"low above open":   barsHeader + "2010-01-04T00:00:00Z,1.09800,1.10100,1.09900,1.10050,1000\n",
+		"low above close":  barsHeader + "2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.09800,1000\n",
+		"bad volume":       barsHeader + "2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.10050,many\n",
+		"negative volume":  barsHeader + "2010-01-04T00:00:00Z,1.10000,1.10100,1.09900,1.10050,-1\n",
+		"duplicate time":   barsHeader + row + row,
+		"out of order":     barsHeader + row + "2010-01-03T00:00:00Z,1.10000,1.10100,1.09900,1.10050,1000\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := readBars(strings.NewReader(in))
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLoadBars_NamesTheFileInErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := loadBars(filepath.Join(dir, "missing.csv"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	path := filepath.Join(dir, "bad.csv")
+	require.NoError(t, os.WriteFile(path, []byte(barsHeader), 0o600))
+	_, err = loadBars(path)
+	require.ErrorContains(t, err, path)
+}
+
+func TestParsePrice_RefusesWhatTheBarsFileDoesNot(t *testing.T) {
+	for name, in := range map[string]string{
+		"four decimals":  "1.1000",
+		"six decimals":   "1.100000",
+		"no decimals":    "1",
+		"no whole part":  ".10000",
+		"signed":         "-1.10000",
+		"plus sign":      "+1.10000",
+		"letters":        "1.1a000",
+		"zero":           "0.00000",
+		"above the max":  "10000.00001",
+		"not a decimal":  "x.xxxxx",
+		"empty":          "",
+		"exponent":       "1e1.0000",
+		"embedded space": "1 .10000",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := parsePrice(in)
+			assert.Error(t, err, in)
+		})
+	}
+	got, err := parsePrice("10000.00000")
+	require.NoError(t, err, "the maximum itself is allowed")
+	assert.Equal(t, maxPrice, got)
+	got, err = parsePrice("0.00001")
+	require.NoError(t, err)
+	assert.Equal(t, px(1), got)
 }

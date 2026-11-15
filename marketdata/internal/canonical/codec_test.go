@@ -192,25 +192,6 @@ func TestDecode_ReportsAReadFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "read failed")
 }
 
-func TestParsePriceAndFormatPrice(t *testing.T) {
-	s, err := formatPrice(px("1.1"), 5)
-	require.NoError(t, err)
-	assert.Equal(t, "1.10000", s)
-	s, err = formatPrice(px("107"), 5)
-	require.NoError(t, err)
-	assert.Equal(t, "107.00000", s)
-	s, err = formatPrice(px("1.100555"), 6)
-	require.NoError(t, err)
-	assert.Equal(t, "1.100555", s)
-	_, err = formatPrice(px("1.100555"), 5)
-	assert.ErrorIs(t, err, ErrMalformedData)
-	p, err := parsePrice("107.27200", 5)
-	require.NoError(t, err)
-	assert.Equal(t, px("107.272"), p)
-	_, err = parsePrice("107.27200", 6)
-	assert.Error(t, err)
-}
-
 func TestEncode_AbsentSeriesAreEmptyFieldsAndRoundTrip(t *testing.T) {
 	f := File{Key: jan24H1(), Meta: testMeta()}
 	midOnly := goodBar(t, utc(2024, 1, 2, 0))

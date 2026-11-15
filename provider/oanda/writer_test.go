@@ -277,28 +277,6 @@ func TestWritePartition_CancellationAtAndAfterTheCommitPoint(t *testing.T) {
 	assert.Len(t, got, 2, "cancelled after the commit: the replacement is not undone")
 }
 
-func TestFormatRawPrice(t *testing.T) {
-	for in, want := range map[string]string{
-		"1.0805":    "1.08050",
-		"107.272":   "107.27200",
-		"107.27200": "107.27200",
-		"1":         "1.00000",
-		"0":         "0.00000",
-		"1.08107":   "1.08107",
-	} {
-		got, err := formatRawPrice(num.MustParsePrice(in))
-
-		require.NoError(t, err, in)
-		assert.Equal(t, want, got, in)
-	}
-}
-
-func TestFormatRawPrice_RefusesToRound(t *testing.T) {
-	_, err := formatRawPrice(num.MustParsePrice("1.123456"))
-
-	assert.ErrorIs(t, err, ErrMalformedData)
-}
-
 func TestWritePartition_PriceTooPreciseWritesNothing(t *testing.T) {
 	root := storetest.Root(t)
 	rec := testRecord(at(2024, 1, 1, 0), true)

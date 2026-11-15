@@ -87,35 +87,6 @@ func TestFormatPrice_FiveDecimals(t *testing.T) {
 	assert.Equal(t, "1.10437", formatPrice(num.MustParsePrice("1.104379")), "digits beyond the tick are cut, never rounded")
 }
 
-func TestParsePrice_RefusesWhatTheBarsFileDoesNot(t *testing.T) {
-	for name, in := range map[string]string{
-		"four decimals":  "1.1000",
-		"six decimals":   "1.100000",
-		"no decimals":    "1",
-		"no whole part":  ".10000",
-		"signed":         "-1.10000",
-		"plus sign":      "+1.10000",
-		"letters":        "1.1a000",
-		"zero":           "0.00000",
-		"above the max":  "10000.00001",
-		"not a decimal":  "x.xxxxx",
-		"empty":          "",
-		"exponent":       "1e1.0000",
-		"embedded space": "1 .10000",
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := parsePrice(in)
-			assert.Error(t, err, in)
-		})
-	}
-	got, err := parsePrice("10000.00000")
-	require.NoError(t, err, "the maximum itself is allowed")
-	assert.Equal(t, maxPrice, got)
-	got, err = parsePrice("0.00001")
-	require.NoError(t, err)
-	assert.Equal(t, px(1), got)
-}
-
 func TestAbove_IsTheDistanceAboveOrZero(t *testing.T) {
 	assert.Equal(t, px(4), above(px(9), px(5)))
 	assert.True(t, above(px(5), px(9)).IsZero(), "below is no distance above")

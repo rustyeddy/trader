@@ -369,3 +369,99 @@ func TestPriceFloat64ZeroValue(t *testing.T) {
 	var p Price
 	assert.Equal(t, float64(0), p.Float64())
 }
+
+func TestParsePriceFixed(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       string
+		decimals int
+		want     string
+		wantErr  error
+	}{
+		{name: "five decimals", in: "1.08473", decimals: 5, want: "1.08473"},
+		{name: "trailing zeros are kept as given", in: "1.10000", decimals: 5, want: "1.1"},
+		{name: "six decimals", in: "1.104370", decimals: 6, want: "1.10437"},
+		{name: "high price", in: "9999.00000", decimals: 5, want: "9999"},
+		{name: "zero", in: "0.00000", decimals: 5, want: "0"},
+		{name: "no decimals", in: "123", decimals: 0, want: "123"},
+		{name: "eight decimals", in: "0.00000001", decimals: 8, want: "0.00000001"},
+
+		{name: "too few decimals", in: "1.1", decimals: 5, wantErr: ErrSyntax},
+		{name: "too many decimals", in: "1.123456", decimals: 5, wantErr: ErrSyntax},
+		{name: "no point", in: "1", decimals: 5, wantErr: ErrSyntax},
+		{name: "point where none wanted", in: "1.0", decimals: 0, wantErr: ErrSyntax},
+		{name: "empty whole part", in: ".12345", decimals: 5, wantErr: ErrSyntax},
+		{name: "empty", in: "", decimals: 5, wantErr: ErrSyntax},
+		{name: "sign", in: "+1.10000", decimals: 5, wantErr: ErrSyntax},
+		{name: "minus", in: "-1.10000", decimals: 5, wantErr: ErrSyntax},
+		{name: "letters", in: "1.1000a", decimals: 5, wantErr: ErrSyntax},
+		{name: "exponent", in: "1e3.00000", decimals: 5, wantErr: ErrSyntax},
+		{name: "space", in: " 1.10000", decimals: 5, wantErr: ErrSyntax},
+		{name: "two points", in: "1.1.1000", decimals: 5, wantErr: ErrSyntax},
+		{name: "negative decimals", in: "1", decimals: -1, wantErr: ErrSyntax},
+		{name: "too many decimals asked", in: "1.123456789", decimals: 9, wantErr: ErrSyntax},
+		{name: "out of range", in: "999999999999999999.00000", decimals: 5, wantErr: ErrRange},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParsePriceFixed(tt.in, tt.decimals)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.Equal(t, Price{}, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.String())
+		})
+	}
+}
+
+func TestPriceFormatFixed(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       string
+		decimals int
+		want     string
+		wantErr  error
+	}{
+		{name: "pads with zeros", in: "1.1", decimals: 5, want: "1.10000"},
+		{name: "exact", in: "1.10437", decimals: 5, want: "1.10437"},
+		{name: "whole number", in: "10", decimals: 5, want: "10.00000"},
+		{name: "zero", in: "0", decimals: 5, want: "0.00000"},
+		{name: "smallest tick", in: "0.00005", decimals: 5, want: "0.00005"},
+		{name: "six decimals", in: "1.100055", decimals: 6, want: "1.100055"},
+		{name: "no decimals", in: "123", decimals: 0, want: "123"},
+		{name: "eight decimals", in: "0.00000001", decimals: 8, want: "0.00000001"},
+		{name: "high price", in: "92233720368.54775807", decimals: 8, want: "92233720368.54775807"},
+
+		{name: "more precision is refused, not rounded", in: "1.123456", decimals: 5, wantErr: ErrPrecision},
+		{name: "fraction with no decimals", in: "1.5", decimals: 0, wantErr: ErrPrecision},
+		{name: "negative decimals", in: "1", decimals: -1, wantErr: ErrPrecision},
+		{name: "too many decimals asked", in: "1", decimals: 9, wantErr: ErrPrecision},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := MustParsePrice(tt.in).FormatFixed(tt.decimals)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestFormatFixedAndParsePriceFixedAreInverse(t *testing.T) {
+	for _, in := range []string{"0", "0.00001", "1.10437", "9999.99999", "123.45"} {
+		p := MustParsePrice(in)
+
+		text, err := p.FormatFixed(5)
+		require.NoError(t, err)
+		back, err := ParsePriceFixed(text, 5)
+
+		require.NoError(t, err, in)
+		assert.Equal(t, p, back, in)
+	}
+}

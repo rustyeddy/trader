@@ -2,6 +2,8 @@ package num
 
 import (
 	"cmp"
+	"fmt"
+	"strings"
 
 	"github.com/rustyeddy/trader/num/internal/fixed"
 )
@@ -35,6 +37,47 @@ func ParsePrice(s string) (Price, error) {
 		return Price{}, ErrNegative
 	}
 	return Price{raw: raw}, nil
+}
+
+// ParsePriceFixed parses a price written with exactly the given number of
+// decimal places and nothing but digits: no sign, no letters, no missing or extra
+// decimals. It is for fixed-width file formats, where "1.1" in a five-decimal
+// column is as wrong as "1.123456". The digits are parsed exactly (nothing goes
+// through a float), so the result is what ParsePrice returns for the same text.
+// decimals must be 0 to 8, the scale's resolution; with 0 the text has no
+// decimal point. Text of the wrong shape is ErrSyntax; a value outside the
+// representable range is ErrRange.
+func ParsePriceFixed(s string, decimals int) (Price, error) {
+	if decimals < 0 || decimals > maxDecimals {
+		return Price{}, fmt.Errorf("%w: %d decimals is not 0 to %d", ErrSyntax, decimals, maxDecimals)
+	}
+	whole, frac, hasPoint := strings.Cut(s, ".")
+	if hasPoint != (decimals > 0) || whole == "" || len(frac) != decimals || strings.Trim(whole+frac, "0123456789") != "" {
+		return Price{}, fmt.Errorf("%w: %q: want digits with exactly %d decimals", ErrSyntax, s, decimals)
+	}
+	return ParsePrice(s)
+}
+
+// maxDecimals is the most decimal places a Price carries (the scale of ADR-004).
+const maxDecimals = 8
+
+// FormatFixed renders p as exact decimal text with exactly the given number of
+// decimal places, padding with zeros: the inverse of ParsePriceFixed. A price
+// carrying more precision than decimals is an error (ErrPrecision), never
+// rounded or truncated, so a fixed-width file can never silently hold a value it
+// was not given. decimals must be 0 to 8; with 0 the text has no decimal point.
+func (p Price) FormatFixed(decimals int) (string, error) {
+	if decimals < 0 || decimals > maxDecimals {
+		return "", fmt.Errorf("%w: %d decimals is not 0 to %d", ErrPrecision, decimals, maxDecimals)
+	}
+	whole, frac, _ := strings.Cut(p.String(), ".")
+	if len(frac) > decimals {
+		return "", fmt.Errorf("%w: price %s has more than %d decimals", ErrPrecision, p, decimals)
+	}
+	if decimals == 0 {
+		return whole, nil
+	}
+	return whole + "." + frac + strings.Repeat("0", decimals-len(frac)), nil
 }
 
 // MustParsePrice is like ParsePrice but panics on error.

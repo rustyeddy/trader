@@ -3,8 +3,9 @@ package canonical
 import (
 	"errors"
 	"fmt"
-	"github.com/rustyeddy/trader/marketdata"
 	"time"
+
+	"github.com/rustyeddy/trader/marketdata"
 
 	"github.com/rustyeddy/trader/internal/marketdata/layout"
 )
