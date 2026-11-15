@@ -126,7 +126,8 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 		}
 		result.Months = append(result.Months, st)
 		usable := st.State == Loaded || (st.State == Bad && req.AllowBad)
-		if !usable && !(st.State == Missing && req.AllowMissing) {
+		gapAllowed := st.State == Missing && req.AllowMissing
+		if !usable && !gapAllowed {
 			stopped = append(stopped, st)
 		}
 		if !usable {
