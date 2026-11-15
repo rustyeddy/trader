@@ -10,6 +10,14 @@ ADR-089, and the canonical Bar location in proposed ADR-090. It does not
 silently amend those records: their existing accepted requirements remain in
 force until an explicit amendment/supersession is approved.
 
+Implementation (2026-11-15): the service boundaries are built for market data:
+the public =marketdata= package (#636), =marketdata/internal/canonical= (#637),
+=provider/oanda= (#638), =store= (#645), the domain and application services
+(#646) and =Bar.Instrument= (#651); the engine runs on =marketdata.Bar= (#653,
+#657). ADR-092 records the package changes against ADR-089. The amendments to
+ADR-022 and ADR-071 this record promises are still to be made when it is
+accepted (#643).
+
 * Context
 
 Trader's root package has accumulated responsibilities. Market-data Bar is

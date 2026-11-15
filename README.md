@@ -1,118 +1,110 @@
 # Trader
 
-Trader is a Go algorithmic-trading framework with a supported external
-strategy/research API. Its private runtime provides capabilities for:
-
-- market research
-- backtesting
-- broker simulation
-- paper trading
-- eventual live execution
+Trader is a Go framework for strategy research and trading: exact numerics, a
+market-data pipeline (download, raw store, canonical bars), a deterministic
+backtest engine and a simulated broker.
 
 ## Project Status
 
-Trader is in an early, greenfield architectural phase. Core public packages,
-adapters, and application services are still being established. The repository
-is under active development.
+Trader is in an early architectural phase and under active development. The
+repository was restarted from a small, executable design; earlier, broader code
+lives in [`_archive/`](_archive) as a donor and is ported one layer at a time. The
+market-data layers (download, raw store, canonical bars) are being rebuilt first
+(milestone "Market Data", issue #584).
 
-**Trader is not ready for real-money trading.** Paper trading is the intended
-default operating mode for any live-like runtime; real-money execution is not
-available and is not scheduled as a milestone deliverable in the current plan.
+**Trader is not ready for real-money trading.** Backtest simulation is available;
+paper trading is planned; real-money execution is unavailable and is not
+scheduled.
 
 ## Design Principles
 
-Trader's architecture is guided by a small set of principles:
+- **Simple and understandable.** Concrete types, ordinary functions, small
+  interfaces; no abstraction without a present use.
+- **Deterministic by design.** Time, identifiers and data order are controllable,
+  so a backtest is reproducible and a bar is usable only from its availability
+  time.
+- **Exact numbers.** Prices, quantities and money are exact fixed-point values
+  (`num`), never floats on the authoritative path.
+- **No invented data.** No synthetic or carried-forward bars. Bad source rows are
+  kept and counted, never hidden.
+- **Layered.** Transports call application services, which coordinate domain
+  services and providers; one package owns all data-file I/O (ADR-091).
+- **Secrets stay in the environment.** The OANDA token is read only from
+  `TRADER_OANDA_TOKEN` (ADR-078).
 
-- **Deterministic by design.** Time, identifiers, data order, and simulation
-  models are controllable so that backtests are reproducible.
-- **Paper trading by default.** A minimally configured live runtime never
-  submits real-money orders; enabling real money requires an explicit,
-  operator-visible decision.
-- **Strategies emit intents, not broker orders.** Strategies describe what
-  they want to accomplish; an execution layer translates intents into concrete
-  orders.
-- **Risk and execution are separate stages.** Risk decides whether a proposed
-  exposure is acceptable; execution decides how to realize it.
-- **Broker truth is reconciled into local state.** The broker is authoritative
-  for orders, fills, positions, and balances; Trader maintains reconciled
-  projections for speed, reporting, and recovery.
-
-## Stooq canonical bars
-
-The convenience command converts one downloaded Stooq daily archive through
-Trader's normal raw and canonical data services:
+## What it does today
 
 ```sh
-bin/stq2bars SPY
-bin/stq2bars SPY --from 2010-01-01 --to 2020-01-01
+make build                       # builds bin/trader (or: go build -o trader ./cmd/trader)
+
+trader                           # backtest the EMAX scenarios and print a summary of each
+trader data download ...         # download OANDA candles into the raw store
+trader data build ...            # build canonical-v2 bars from the raw store
 ```
 
-The command defaults to provider `stooq`, interval `D1`, and the configured
-Trader data roots. Set `TRADER_ARCHIVE_ROOT`, or pass `--archive-root`, for the
-native Stooq ZIP directory. Use `--archive` to name one ZIP directly. SPY, QQQ,
-and AAPL have reference listing metadata; other symbols require both
-`--exchange` and `--kind` (for example, `--exchange NASDAQ --kind equity`).
-The source ZIP is read-only and extraction is temporary.
+`trader data download` fetches bid/ask candles for a UTC range into month
+partition files; `trader data build` converts them to canonical bars with a mid
+price and a modeled availability time, keeping every rejected row as a bad record.
+The commands, flags and configuration are in the [User's Guide](docs/UsersGuide.md).
 
 ## Packages
 
-Trader's supported Go API is the external strategy/research/value surface:
-`sdk`, `indicator`, `analysis`, `marketdata`, `instrument`, `num`, `order`,
-`version`, and `protocol/strategy/v1`. Runtime composition, data acquisition,
-brokers, orders, backtesting, and reporting live under `internal/` (ADR-065).
+| Package | Role |
+|---|---|
+| `trader` (module root) | the engine: orders, broker, account, strategy, scanner, scenarios |
+| `cmd/trader` | the command line: flags, environment and config file; no domain logic |
+| `service` | application services that coordinate providers and domain services |
+| `marketdata` | public market-data model: `Bar`, `OHLC`, `SourcePartition` |
+| `marketdata/service` | the market-data domain service: classification, availability, publishing |
+| `marketdata/internal/canonical` | the canonical-v2 file format (private to `marketdata`) |
+| `provider/oanda` | OANDA: raw store, REST client, raw-to-source mapping |
+| `store` | the one place data files are read and written |
+| `num`, `instrument` | exact numeric values; instrument identity |
+| `internal/logging`, `internal/marketdata/layout` | structured logging; the data path resolver |
 
-Guest strategies use [`sdk`](sdk) (`github.com/rustyeddy/trader/sdk`).
-See [`examples/sdk-minimal`](examples/sdk-minimal) for a complete example.
-`sdk.Clock` exposes host time through `Now()`; Protocol v1 has no guest timer
-capability. Runtime packages are not supported external imports.
-
-See the [package boundary matrix](docs/arch/package-boundaries.org) and
-[Developer's Guide](docs/DevelopersGuide.md) for public contracts and private
-implementation details. This pre-release change has no compatibility shims.
+The dependency rules and their tests are in
+[docs/arch/package-boundaries.org](docs/arch/package-boundaries.org) and the
+[Developer's Guide](docs/DevelopersGuide.md).
 
 ## Documentation
 
-- [User's Guide](docs/UsersGuide.md)
-- [Developer's Guide](docs/DevelopersGuide.md)
-- [Framework requirements](docs/arch/trader-framework-requirements.org)
-- [Framework architecture](docs/arch/trader-framework-architecture.org)
+- [User's Guide](docs/UsersGuide.md): commands, configuration, data layout
+- [Developer's Guide](docs/DevelopersGuide.md): packages, layering, tests
+- [Documentation index](docs/README.md): what is current and what is historical
 - [Architecture Decision Records](docs/arch/adr-decisions.org)
 - [Package boundaries](docs/arch/package-boundaries.org)
-- [Contribution guide](CONTRIBUTING.org)
-- [Workflows](docs/workflows/workflows.org)
-- [Testing](docs/workflows/testing.org)
-- [AI-assisted development](docs/workflows/ai-development.org)
-- [Implementation checklist](docs/workflows/implementation-checklist.org)
-- [AI review rubric](docs/workflows/ai-review-rubric.org)
-- [Reusable agent workflows](docs/workflows/ai-skills.org)
-- [M0 foundation review](docs/reviews/m0-foundation-review.org)
+- [Market-data storage layout](docs/arch/market-data-storage.md)
+- [Contribution guide](docs/CONTRIBUTING.org), [agent instructions](AGENTS.md)
+- [Workflows](docs/workflows/workflows.org), [testing](docs/workflows/testing.org),
+  [AI-assisted development](docs/workflows/ai-development.org),
+  [reusable agent workflows](docs/workflows/ai-skills.org)
 
 ## Development
 
-Trader uses a `Makefile` to wrap the standard Go toolchain. The available
-targets are:
+`make` wraps the Go toolchain:
 
-- `make fmt` — format sources with `go fmt ./...`
-- `make fmt-check` — verify sources are already formatted
-- `make tidy-check` — verify `go.mod`/`go.sum` are tidy (`go mod tidy -diff`)
-- `make vet` — run `go vet ./...`
-- `make lint` — run the pinned `golangci-lint`
-- `make test` — run `go test ./...`
-- `make race` — run tests with the race detector
-- `make check` — the canonical verification: `tidy-check`, `fmt-check`, `vet`,
-  `lint`, `test`, and `race`, the same gates as CI (run first by the default `make` target); see
-  [Testing](docs/workflows/testing.org)
+- `make check`: the canonical verification, the same gates as CI, in order:
+  `tidy-check`, `fmt-check`, `vet`, `lint`, `test`, `race` (see
+  [Testing](docs/workflows/testing.org))
+- `make fmt`, `make fmt-check`, `make tidy-check`, `make vet`, `make lint`
+  (pinned `golangci-lint`), `make test`, `make race`, `make cover`
+- `make build`, `make run` (the EMAX backtest), `make clean`
+- `make smoke`: an opt-in live OANDA check, not part of `make check`; it needs
+  `TRADER_OANDA_TOKEN` in your shell, writes only to a temporary directory and
+  prints only the verdict (details in `bin/smoke.log`)
+
+Every pull request keeps the EMAX summaries unchanged:
+`go run ./cmd/trader 2>/dev/null | md5sum` must print
+`195e457a21def1223e7181c86cb824a4`.
 
 ## License
 
-Trader is distributed under the BSD 2-Clause License. See [LICENSE](LICENSE)
-for the full text.
+Trader is distributed under the BSD 2-Clause License. See [LICENSE](LICENSE) for
+the full text.
 
-## Relationship to the Legacy Trader Repository
+## Relationship to earlier code
 
-An earlier Trader implementation exists in a separate repository. The new
-Trader treats it as a selective code donor and behavior reference: proven
-algorithms and test fixtures may be transplanted after being adapted to the new
-architecture. The legacy repository is **not** a build or runtime dependency of
-the new Trader, and its package layout, configuration model, and broker
-coupling are not carried forward.
+Earlier Trader code, with its own package layout and broker coupling, is kept in
+[`_archive/`](_archive) and in the repository history. It is a selective donor and
+behavior reference: proven algorithms and fixtures are ported after being adapted
+to the current architecture. Nothing in `_archive/` is built or imported.

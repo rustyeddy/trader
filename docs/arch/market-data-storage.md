@@ -1,6 +1,6 @@
 # Market data storage layout and source provenance
 
-**Status:** Accepted storage-layout convention (2026-10-18). This document specifies the directory contract; existing files and callers still require migration.
+**Status:** Accepted storage-layout convention (2026-10-18). Implemented for new data by `internal/marketdata/layout` (the one path resolver) and `store` (the only data-file I/O), ADR-089 and ADR-092; the existing archive on disk still uses the old order and is migrated separately (#642).
 
 ## Invariant
 
@@ -16,14 +16,14 @@ All persisted instrument price data, including production, research, and synthet
 - `YYYY` and `MM` identify the partition; `MM` is zero-padded.
 - Canonical files **must** be named `<instrument>-<YYYY>-<MM>-<interval>.csv`. Interval tokens must be consistent with Trader's supported interval identifiers.
 
-Example:
+Example (the data root is the `data` directory itself. `trader` takes it from `--data-root`, then `TRADER_DATA_ROOT`, then `marketdata.root`, then the `store` package's default, `/srv/data`):
 
 ```text
-/srv/trading/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-h1.csv
+/srv/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-h1.csv
 <repo>/testdata/data/oanda/canonical/EURUSD/2024/03/EURUSD-2024-03-h1.csv
 ```
 
-The prefix can change; the subtree under `data/` must not. A package-local test fixture may similarly use `<package>/testdata/data/...`.
+The prefix can change; the subtree under the data root must not. Code builds paths relative to the root (`layout`) and the `store` package resolves them under its root, so a test points the root at a temporary directory. A package-local test fixture may similarly use `<package>/testdata/data/...`.
 
 ## Raw, canonical, and intermediates
 
@@ -42,7 +42,7 @@ Instrument-, interval-, or dataset-specific exceptions belong in scoped metadata
 ## Lookup and partitioning
 
 - Resolution of canonical instrument prices must identify **data root, source, instrument, interval, and requested time range**; the provider is not optional.
-- A single shared path resolver should own layout construction and discovery. CLI, services, ingestion adapters, and tests must not each invent their own paths.
+- A single shared path resolver owns layout construction (`internal/marketdata/layout`), and a single package owns reading and writing the files (`store`). CLI, services, providers, and tests must not each invent their own paths or file operations.
 - Use UTC as the partition reference for intraday data; place bars by their opening timestamp. Session-based daily/weekly/monthly partition semantics require explicit documented treatment so that provider trading calendars are not silently changed.
 - Resolve and validate identifiers as path components; reject traversal and ambiguous identifiers.
 - Report missing data and source mismatches explicitly; never silently fall back to another provider or the former directory layout.

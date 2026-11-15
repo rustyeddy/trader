@@ -1,570 +1,110 @@
 # Trader Developer's Guide
 
-This guide tours Trader's supported public API and private runtime packages, organized by architectural layer
-(foundation → domain → orchestration → adapters → applications), matching the
-dependency direction described in
-[the framework architecture document](arch/trader-framework-architecture.org).
-Each section names the package's responsibility, links to its own package doc
-comment for the full contract, and includes a short example where one clarifies
-the API faster than prose.
-
-See the [README](../README.md) for project status, design principles, and
-getting-started instructions. See
-[Architecture Decision Records](arch/adr-decisions.org) for the durable
-decisions behind each boundary mentioned here.
-
-## Supported external API
-
-Only `sdk`, `indicator`, `analysis`, `marketdata`, `instrument`, `num`, `order`,
-`version`, and `protocol/strategy/v1` are supported external library packages.
-All runtime composition examples below are for contributors working inside
-Trader's module; they cannot be imported from an external strategy repository.
-See [ADR-065](arch/adr-065-public-strategy-research-surface.org) for the
-pre-release compatibility decision and [the matrix](arch/package-boundaries.org).
-
-Guest authors implement `sdk.Strategy`; `sdk.Environment.Clock` is a
-`sdk.Clock` exposing only `Now() time.Time`, supplied by the host. Runtime
-clocks, IDs, and test builders are internal. The separate-module tests in
-`test/architecture` verify both usable public contracts and forbidden
-runtime imports.
-
-## Foundation Packages
-
-These packages have no dependency on Trader's trading domain. They are used
-throughout the rest of the tree.
-
-### num
-
-`num` provides Trader's exact numeric types — `Price`, `Quantity`, `Rate`,
-`Currency`, and `Money` — backed by scaled integers instead of binary
-floating point, so authoritative values never suffer float rounding error.
-Construct values from decimal text, then use their checked arithmetic
-methods; malformed input and cross-currency mistakes are caught as errors
-rather than silently miscomputed:
-
-```go
-price, err := num.ParsePrice("108.473")
-qty := num.MustParseQuantity("100")
-fee, err := price.MulRate(num.MustParseRate("0.001"))
-```
-
-Analytical code (indicators, statistics) that needs `float64` crosses through
-one sanctioned, direct conversion — `Price.Float64()` — never a
-serialize/reparse round-trip through decimal text; see
-[ADR-045](arch/adr-045-analytical-float64-conversion-boundary.org). See the
-[package doc comment](../num/doc.go) and
-[ADR-004](arch/adr-004-exact-numeric-representation.org) for the full exact
-numeric design rationale.
-
-### internal/id
-
-`internal/id` provides Trader-owned identifiers — `RunID`, `OrderID`, `FillID`,
-`EventID`, `CorrelationID`, `IntentID`, and `AccountID` — each a distinct Go
-type at compile time, backed internally by a monotonic ULID (time-sortable,
-generated from an injected `clock.Clock`) but never exposing that as a
-public dependency:
-
-```go
-g := id.NewGenerator(clock.Real{}, id.Random{})
-order, err := id.GenerateOrderID(g)
-// order.String() == "ord_01J8Z3K5H7T1MDCE9WNRP2VXY0"
-```
-
-`internal/id.Metadata` traces a value through a multi-stage workflow — one
-`CorrelationID` shared throughout, each stage's `CausationID` pointing at
-the `EventID` immediately before it. See the
-[package doc comment](../internal/id/doc.go) for the full identifier list and the
-worked intent → proposal → order → fill example.
-
-### internal/clock
-
-`internal/clock` is Trader's deterministic time seam: runtime code receives a
-`clock.Clock` instead of calling `time.Now`/`time.NewTimer`
-directly, so backtests and simulations can advance time manually with no
-wall-clock waiting. `Real` wraps the standard library for production;
-`Simulated` advances only when told to:
-
-```go
-c := clock.NewSimulated(start)
-timer := c.NewTimer(5 * time.Second)
-
-c.Advance(10 * time.Second)
-deadline := <-timer.C() // ready immediately, no sleep
-```
-
-See the [package doc comment](../internal/clock/doc.go) and
-[ADR-015](arch/adr-015-deterministic-time-and-clock-abstraction.org)
-for the full design rationale, including the precise equal-deadline
-ordering and UTC/monotonic-metadata guarantees.
-
-### internal/config
-
-`config` assembles typed application configuration for Trader's executable
-composition roots, resolving each field from defaults, a YAML file, the
-environment, and command-line overrides, in that precedence order. Define a
-struct with tags for defaults, required fields, and secrets, then load it in
-one call:
-
-```go
-type Settings struct {
-    Port     int    `default:"8080"`
-    APIKey   string `required:"true" secret:"true"`
-}
-
-cfg, err := config.Load[Settings](config.Options{EnvPrefix: "TRADER"})
-```
-
-See the [package doc comment](../internal/config/doc.go) for the tag reference and
-environment-variable naming convention.
-
-### internal/logging
-
-`logging` builds Trader's structured loggers on top of `log/slog` — text or
-JSON output, a configurable level, and canonical attribute names
-(`CorrelationID`, `OrderID`, `AccountID`, ...) so records stay correlatable
-across components. It is not a wrapper around `slog.Logger`: components
-accept and use `*slog.Logger` directly.
-
-```go
-logger, closer, err := logging.New(logging.Config{Format: "json"})
-defer closer.Close()
-
-logger.Info("order placed", logging.OrderID, "abc123", "password", logging.Secret(pw))
-```
-
-`logging.Config` works directly with `config.Load` — `slog.Level` already
-implements the same text encoding `config` expects. See the
-[package doc comment](../internal/logging/doc.go) for context propagation, redaction,
-and the `Discard`/`Capture` test helpers.
-
-## Domain Packages
-
-These packages define Trader's trading vocabulary — instruments, market
-data, orders, accounts, and strategies — independent of any particular
-broker, data vendor, or deployment shape.
-
-### instrument
-
-`instrument` separates *what an economic thing is* (`Instrument`) from *how
-a venue exposes it for trading* (`Listing`). Unlike `id`'s generated
-identifiers, `instrument.ID` is canonical and deterministic — two provider
-adapters parsing different spellings of the same pair resolve to the same
-identity:
-
-```go
-eur, usd := num.MustParseCurrency("EUR"), num.MustParseCurrency("USD")
-eurUsd, err := instrument.NewCurrencyPair(eur, usd)
-// eurUsd.ID().String() == "fx:EUR/USD", regardless of whether the
-// provider spelled it "EUR_USD", "EURUSD", or "EUR/USD"
-
-dec, err := instrument.NewFuture("ES", time.Date(2026, time.December, 19, 0, 0, 0, 0, time.UTC))
-mar, err := instrument.NewFuture("ES", time.Date(2027, time.March, 20, 0, 0, 0, 0, time.UTC))
-// dec and mar are distinct Instruments: an individual expiring contract,
-// not the contract family, is the Instrument
-```
-
-Initial kinds are currency pairs, equities, ETFs, individual futures
-contracts, non-orderable continuous research series, and indices. `Listing`
-keeps provider (a broker or data vendor, e.g. `"IBKR"`) distinct from venue
-(an exchange, e.g. `"NASDAQ"`) and rejects `Tradable: true` for a
-non-orderable `Instrument` — see the
-[package doc comment](../instrument/doc.go) for why futures split into two
-kinds instead of one, and why synthetic/multi-leg instruments are deferred.
-
-`instrument.Resolver` resolves provider symbols and `Instrument`+venue
-combinations to `Listing`s without ever letting a symbol or alias become
-identity. `MemoryResolver` is the in-memory reference implementation — a
-plain value with no package-level registry, so independent instances need
-no special setup:
-
-```go
-r := instrument.NewMemoryResolver()
-r.Register(oandaListing)
-r.RegisterAlias("OANDA", "", "EURUSD", "OANDA", "", "EUR_USD")
-
-listing, err := r.ResolveSymbol("OANDA", "", "EURUSD") // resolves via the alias
-// listing.Symbol() == "EUR_USD" -- the alias never becomes the identity
-```
-
-An unconstrained provider/venue that matches more than one `Listing`
-reports `ErrAmbiguousSymbol` rather than picking one; no match reports
-`ErrUnknownSymbol`. See [ADR-016](arch/adr-decisions.org) and the
-[package doc comment](../instrument/doc.go) for the full resolution
-semantics.
-
-### marketdata
-
-`marketdata` provides public bars, intervals, time ranges, calendars, bar sets,
-and canonical dataset metadata. It exports no manager or acquisition/storage
-entry point. The closed data subsystem lives in `internal/marketdata`, including
-its OANDA, Stooq, and Alpaca provider implementations.
-
-Inside Trader, import that runtime package as `marketruntime` alongside the
-public `marketdata` values:
-
-```go
-mgr, err := marketruntime.New(marketruntime.Config{
-    Clock: clock.Real{}, StoreRoot: "./canonical",
-    RawRoot: "/data/raw/oanda", Resolver: resolver, ProviderName: "oanda",
-})
-plan, err := mgr.Plan(ctx, marketruntime.BarQuery{
-    Instrument: eurUsd, Interval: marketdata.H1, Range: span,
-})
-```
-
-`Interval` is built from a typed unit and count, never parsed from a
-provider string, with five predefined values
-(`marketdata.M1/H1/H4/D1/W1`). `Calendar` aligns a `time.Time` to sessions
-and bar boundaries, and has two implementations: `FXCalendar`, where
-minute and hour bars align to the daily FX rollover (not UTC midnight
-— see ADR-021 in [the ADR registry](arch/adr-decisions.org)), while day
-and week bars align to the Sunday 17:00 New York session open, with
-`time.Date`-based arithmetic so daylight-saving transitions resolve
-correctly; and `USEquityCalendar` (`Bar` supports D1 only, anchored to
-midnight UTC to agree with Stooq's own equity bars, while `Status`/
-`Session` honestly compute the real 9:30-16:00 America/New_York
-regular session — including half-day truncation — decoupled from
-`Bar`'s own midnight-UTC label via a small optional `Calendar`
-capability, `BarSpanClassifier`, that answers "is this whole labeled
-trading day open" without sampling `Status` at the bar's own
-out-of-session literal endpoints — see
-[ADR-049](arch/adr-049-us-equity-market-calendar.org)). See
-[ADR-012](arch/adr-decisions.org),
-[ADR-020](arch/adr-020-historic-data.org), and the
-[package doc comment](../marketdata/doc.go) for the full half-open range
-convention and coverage/gap model. (The architecture document sketches a
-future selectable, query-time `AdjustmentMode`/`FetchPolicy`; neither is
-implemented today — ADR-047/ADR-048 defer that until a concrete need
-exists. What *is* implemented is `marketdata.AdjustmentPolicy`, a
-narrower, recorded-not-selected concept: every canonical `Manifest`
-names the one adjustment convention its source actually delivered —
-`AdjustmentNotApplicable` for FX, `AdjustmentSplitAdjusted` for Stooq
-and Alpaca equity data, confirmed empirically against AAPL's own
-historical splits — see
-[ADR-048](arch/adr-048-equity-bar-adjustment-semantics.org).)
-
-### indicator
-
-`indicator` owns mathematical transforms over price series — streaming
-primitives added one milestone-scoped capability at a time, not a
-general indicator framework: the EMA crossover strategy's exponential
-moving average, and the SMA / rolling standard deviation / Z-score
-primitives the mean-reversion research track needs. Indicator
-arithmetic is `float64` throughout (the architecture's sanctioned
-analytical domain); `indicator` never imports `num` or decides whether
-to buy or sell:
-
-```go
-ema, err := indicator.NewEMA(20) // SMA-seeded warm-up
-err = ema.Update(price.Float64())
-if ema.Ready() {
-    value := ema.Value()
-}
-
-z, err := indicator.NewZScore(20) // shared sliding-window accumulator
-err = z.Update(price.Float64())
-if score, ok := z.Value(); ok { // ok is false on a zero-variance window
-    _ = score
-}
-```
-
-`SMA`, `RollingStdDev`, and `ZScore` share one unexported sliding-window
-accumulator built on Welford's online mean/variance algorithm, adapted
-to support removing the outgoing sample as well as adding a new one —
-numerically stable for FX-close-price-shaped input, and inclusive of
-the sample just supplied (the window ending at time t includes t
-itself).
-
-See the [package doc comment](../indicator/doc.go) for warm-up/readiness
-semantics and the deterministic-replay guarantee.
-
-### analysis
-
-`analysis` owns observations derived from prices and indicators that
-are not themselves orders or broker actions — currently the Z-score
-forward-return event study the FX mean-reversion research track
-(`docs/research/mr-01-experiment-definition.org`) needs to measure
-whether large normalized price deviations tend to revert, not a
-general analysis framework. `analysis` may depend on `marketdata` and
-`indicator`, but never on `strategy`, `broker`, `execution`, `risk`,
-`pipeline`, `backtest`, `service`, `cmd`, `adapters`, or `journal` — it
-produces statistical evidence, never trading decisions:
-
-```go
-result, err := analysis.RunEventStudy(bars, analysis.EventStudyConfig{
-    Instrument:   eurusd, // required provenance, not inferred from bars
-    Interval:     marketdata.H1,
-    ZScorePeriod: 20,
-    Horizons:     analysis.MR01Horizons(), // 4h/12h/24h/48h against H1 bars
-})
-for _, s := range result.Stats {
-    // s.Bucket, s.Horizon, s.Count, s.MeanReturn, s.MedianReturn,
-    // s.StdDevReturn, s.FractionTowardMean
-}
-```
-
-`Instrument` and `Interval` are required, validated fields, not mere
-documentation: an hour-labeled horizon (as `MR01Horizons` produces) is
-checked against `Interval` whenever `Interval` has a fixed,
-calendar-independent bar duration, so a "4h" horizon accidentally run
-against D1 or H4 bars fails fast instead of silently mislabeling the
-result's cadence.
-
-Each observation at bar index `i` is built from only `bars[0:i+1]`;
-later bars are used solely to label that observation's forward return
-at each configured horizon, never to influence the observation itself.
-See the [package doc comment](../analysis/doc.go) for the no-lookahead
-guarantee and its regression test.
-
-### order
-
-The supported `order` package contains only `Side`, `PositionSide`, and
-`IntentKind`, their constants, and validation/display methods. Guest strategies
-use these values with `sdk` constructors. Runtime objects described next are
-private.
-
-### internal/order
-
-`order` defines Trader's broker-neutral order and execution vocabulary —
-what a proposal, request, accepted order, and fill are, not order-state
-transition rules or broker I/O. The stages are distinct types, not
-variations on one struct:
-
-```go
-proposal, err := order.NewProposal(order.Proposal{ /* ... */ })
-request, err := order.NewRequest(proposal, orderID) // orderID doubles as the idempotency key
-```
-
-`Order` embeds its originating `Request` (the requested values) alongside
-separate `Accepted*` fields (what the broker actually accepted, which may
-differ due to broker-side normalization); `RemainingQuantity` derives
-from the accepted quantity, never the requested one. `Fill` preserves
-both Trader's `FillID` and the broker's own `BrokerFillID`, plus its own
-`AccountID`, so it never requires a join through the parent order.
-
-`order` also validates lifecycle transitions: `Status.CanTransitionTo` is
-the legal transition graph, and named `Apply*` functions
-(`ApplyAcceptance`, `ApplyFill`, `ApplyCancelRequest`/`ApplyCancelResult`,
-`ApplyReplaceRequest`/`ApplyReplaceResult`, `ApplyExpiration`,
-`ApplyRejection`) apply one event to an `Order`, checking both the graph
-and that the event's identity actually matches the order. Redelivering an
-unchanged status is always a safe no-op; a duplicate `Fill` (by
-`BrokerFillID` or `FillID`) is detected and returns the order unchanged.
-
-`order.Intent` (`IntentEnter`, `IntentExit`, `IntentAdjustStop`,
-`IntentTargetExposure`) is what a strategy emits, and `order.Trade` is the
-derived entry/exit grouping backtest and report consume. See
-[ADR-005](arch/adr-005-strategy-emits-intents.org),
-[ADR-017](arch/adr-017-order-execution-vocabulary.org),
-[ADR-018](arch/adr-018-order-lifecycle-transitions.org), and the
-[package doc comment](../order/doc.go) for the full model.
-
-### internal/account
-
-`account` models one broker account's authoritative observed snapshot
-(ADR-019): an immutable value describing what a broker reported at one
-point in time. `Snapshot` performs no I/O and implies nothing about
-freshness beyond its own `AsOf`; it is deliberately distinct from a
-broker-scoped action handle (`broker.Account`, see below). Positions,
-open orders, and cash balances are deep-copied and revalidated through
-`order`'s own constructors on the way in, so a caller cannot hand
-`NewSnapshot` an already-invalid nested value. See the
-[package doc comment](../internal/account/doc.go).
-
-### internal/portfolio
-
-`portfolio` models a Trader-level view spanning one or more
-`account.Snapshot` values (ADR-019), preserving each contributing
-account's provenance rather than collapsing accounts into an opaque
-total. Currency conversion is explicit and caller-supplied — `portfolio`
-never fetches rates itself — and an account whose currency has no
-matching `ConversionRate` makes the whole portfolio's `Equity` report
-`ConversionIncomplete` rather than a silently partial sum. See the
-[package doc comment](../internal/portfolio/doc.go) for the full aggregation and
-exposure-grouping rules.
-
-### internal/strategy
-
-`strategy` defines Trader's broker-neutral strategy runtime contract
-(ADR-005): how a strategy receives market observations and emits
-`order.Intent` values, without knowing whether it is running inside a
-backtest or a future live session. The contract is deliberately small —
-`Describe`, `Start`, `OnBar` — with optional capabilities (tick/fill/
-account-event handlers, state snapshot/restore) added only when a real
-consumer needs them. A strategy never imports `broker`, `execution`,
-`risk`, or `pipeline`; `Environment.Intents` is the only way it
-constructs a canonical `Intent`, guaranteeing deterministic
-IDs/correlation without the strategy touching ID-generation machinery
-directly. See the [package doc comment](../internal/strategy/doc.go).
-
-`strategy/emacross` is Trader's first real strategy: a fast/slow EMA
-crossover against this contract, with a documented crossover/warm-up
-state machine (see
-[the EMA-01 research definition](research/ema-01-experiment-definition.org))
-and an optional `AllowedSide` restriction (`both`/`long-only`/`short-only`,
-issue #273) for isolating one direction's own performance.
-
-## Execution, Risk, and Orchestration
-
-These packages turn a strategy's intent into a broker submission, in three
-independent stages composed by one orchestration seam.
-
-### internal/execution
-
-`execution` defines Trader's execution-planning contract (ADR-006): the
-seam that translates one `order.Intent` into a broker-neutral
-`order.Proposal`, without approving risk or submitting anything to a
-broker. `Planner.Plan` is narrow by design — it never fetches its own
-account state, market data, or listing resolution, and it does not size
-an `IntentEnter` itself (sizing is risk's job). `execution` depends only
-on `order`, `account`, `instrument`, `num`, `id`, and `clock` — never on
-`broker` or `risk`. See the [package doc comment](../internal/execution/doc.go).
-
-### internal/risk
-
-`risk` defines Trader's risk-admission contract (ADR-006, ADR-029): the
-seam that admits or rejects one `order.Proposal` before it becomes an
-`order.Request`. `Engine.Evaluate` is a strict approve/reject result,
-never an adjusted proposal — every injected `Rule` runs, and a
-`Decision` aggregates every rule's violations/warnings rather than
-stopping at the first one. This package defines no concrete `Rule`
-itself; per-trade loss, exposure/position limits, and leverage/margin
-are each their own rule implementation. `risk` depends only on `order`,
-`account`, and `context` — never on `broker` or `execution`. See the
-[package doc comment](../internal/risk/doc.go).
-
-### internal/broker
-
-`internal/broker` defines Trader's private broker/account contracts (ADR-007,
-ADR-008) — the smallest stable ports needed by both the deterministic
-simulated broker and future real broker adapters. `Broker` is a
-session-level port (identity, account discovery, session lifecycle);
-`Account` is the operational handle for actions and queries scoped to
-one account. Every method takes and returns canonical `order`/`account`
-values, never a provider-native type; `Account.Events` (ADR-024) streams
-order/fill/account/status changes in deterministic, gap-free order. See
-the [package doc comment](../internal/broker/doc.go).
-
-### internal/pipeline
-
-`pipeline` composes execution, risk, and broker submission into
-Trader's one canonical M4 orchestration path (issue #185):
+How the code is organized, how the layers fit and how to change them. The
+decisions behind it are the ADRs ([registry](arch/adr-decisions.org)); the rules
+every contributor follows are in [AGENTS.md](../AGENTS.md) and
+[CONTRIBUTING.org](CONTRIBUTING.org). The guide for the earlier, larger runtime is
+kept in [`_archive/docs/DevelopersGuide.md`](../_archive/docs/DevelopersGuide.md);
+it does not describe this tree.
+
+## The tree
 
 ```
-Intent -> risk.Sizer (IntentEnter only) -> execution.Planner ->
-order.Proposal -> risk.Engine -> approved order.Request ->
-broker.Account.Submit
+cmd/trader/                transport: commands, flags, environment, config file
+service/                   application services (marketdata.go)
+marketdata/                public model: Bar, OHLC, MidOf, SourcePartition
+  service/                 domain service: Build (classify, availability, publish)
+  internal/canonical/      canonical-v2 files, availability rule (private)
+provider/oanda/            OANDA: raw store, REST client, raw-to-source mapping
+store/                     the only data-file I/O; storetest for tests
+internal/marketdata/layout/  the one data path resolver
+internal/logging/          structured logging on log/slog
+num/  instrument/          exact numbers; instrument identity
+(root package trader)      engine: orders, broker, account, strategy, scenarios
+_archive/                  earlier code and docs, a donor; never imported
 ```
 
-`Pipeline.Evaluate` is the read-only prefix (runs every stage through
-building the approved `Request`, never calls the broker); `Submit` is
-its thin mutating continuation, so there is exactly one implementation
-of the sizing → planning → risk → request-construction sequence, used
-identically by backtest and any future live runtime. See the
-[package doc comment](../internal/pipeline/doc.go).
+## Layering
 
-### internal/journal
+```
+cmd/trader  ->  service  ->  marketdata/service  ->  marketdata/internal/canonical  ->  store
+                   |
+                   +------>  provider/oanda  ->  store
+```
 
-`journal` defines the storage-neutral contract for a durable, replayable
-record of what happened during a run (ADR-036): the `Recorder` interface
-and the `Record`/`Entry`/`Kind` model (intent, proposal, decision,
-request, order, fill, account, status, trade, signal, run-started/
-completed). Concrete storage — the JSONL adapter under
-`adapters/journal/jsonl` — is a peer, not part of this package, so a
-future SQLite/Postgres adapter never widens `journal`'s own surface.
-`journal` depends only on `id`, `num`, `instrument`, `order`, `risk`,
-`broker`, and `account` — never on `pipeline` or `backtest` — so it
-remains reusable by a future live session. See the
-[package doc comment](../internal/journal/journal.go).
+- **Transport** (`cmd/trader`) parses flags, reads the environment and the config
+  file, sets the store's root and calls an application service. It contains no
+  domain logic and is the only place that reads the environment (ADR-078).
+- **Application service** (`service`) carries out one use case by coordinating a
+  provider and a domain service. It reads no environment. Today there is one,
+  `BuildCanonical`; a package per service waits until the services are not small.
+- **Domain service** (`marketdata/service`) owns the domain's rules. Domain
+  services never call each other. `marketdata/internal` may be imported only from
+  `marketdata/service` (Go's `internal` rule, plus an architecture test).
+- **Provider** (`provider/oanda`) is one external system: its HTTP client, its raw
+  file format, its symbols. It parses and maps; it applies no domain rule. It
+  imports only public models, `store`, `layout`, `num` and `instrument`.
+- **Store** (`store`) reads and writes bytes at paths relative to its root:
+  `Read`, `Write` and `Create` and `Update` (atomic, under a per-path lock), and
+  `List`. Nothing else opens, renames or walks data files; a test enforces it.
+- **Public models** (`marketdata`, `num`, `instrument`) import no service,
+  transport or provider.
 
-## Backtesting and Reporting
+Each boundary has an architecture test that fails when it is crossed; when you add
+a boundary, add its test and prove it fails (see AGENTS.md).
 
-### internal/backtest
+## The market-data pipeline
 
-`backtest` owns deterministic historical simulation orchestration
-(ADR-035): it reads already-published canonical market data through
-`internal/marketdata.Manager`, merges it into one chronologically ordered replay
-stream per strategy, and drives that stream through a simulation clock,
-the strategy, and the same `pipeline.Pipeline` used by live trading,
-recording results through `journal` and computing `Metrics` (return,
-drawdown, profit factor, per-instrument and per-side breakdowns).
-`backtest` never imports `adapters/broker/sim` or any other concrete
-adapter — only the composition root (`cmd/trader/backtest`) constructs
-adapters and injects ports. See
-[ADR-035](arch/adr-035-m5-backtesting-architecture.org),
-[ADR-041](arch/adr-041-backtest-determinism-suite.org) (the determinism
-regression suite), and the [package doc comment](../internal/backtest/doc.go).
+```
+download:  OANDA REST --provider/oanda--> raw partition  (<root>/oanda/raw/...)
+build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
+             --marketdata/service.Build--> canonical file (<root>/oanda/canonical/...)
+```
 
-### internal/report
+- A raw partition is the provider's own format (raw-v1). It stores only complete
+  candles and is never rewritten: rows are added, not changed.
+- `SourcePartition` carries what a bare `[]Bar` would lose: the raw row numbers,
+  the provider's complete flag and the fingerprint of the raw bytes. Its bars are
+  unvalidated: the provider sets no mid and no `AvailableAt`.
+- `Build` classifies each row (incomplete, misaligned, invalid, crossed, duplicate,
+  out of order), derives the mid and the availability time, keeps every rejected
+  row as a bad record, and publishes. `canonical.Publish` writes nothing when the
+  same build (raw fingerprint, builder, validator, availability policy) is already
+  there.
+- `Bar.Instrument` names a bar. Readers set it from the file's key; it is never a
+  column of a row.
 
-`report` renders backtest results without computing them (ADR-038): it
-projects `backtest.Result` into a report-owned view model,
-`BacktestReport`, once, then offers Org, text, and JSON renderers over
-that same model. No renderer touches `backtest.Result`/`backtest.Metrics`
-directly or performs arithmetic; the dependency runs one way only —
-`backtest` never imports `report`. See the
-[package doc comment](../internal/report/doc.go).
+## The engine
 
-## Application and Composition
+The root package runs on `marketdata.Bar`. Prices are read through `Bar.OHLC()`
+(mid first). The scenario files in `testdata/emax` use one synthetic price series,
+read as mid. Frames and merging (`replay.go`) deliver bars in availability order.
+Reading canonical bars into the engine, and the series type that carries them, are
+not built yet (#647).
 
-### internal/service
+## Tests
 
-`service` is the root of Trader's application/service layer (ADR-022):
-transport adapters (the CLI today, REST/WebSocket/SSE later) stay thin
-by parsing input, building a request type from a `service` subpackage,
-calling one service operation, and formatting the response. Each
-subpackage — `service/marketdata`, `service/broker`, `service/execution`,
-`service/backtest` — orchestrates one domain area and depends only on
-the runtime domain packages it wraps and supported public values; domain packages never import service wrappers back.
-See the [package doc comment](../internal/service/doc.go).
+- Every new or changed function has tests, including error and boundary cases.
+- One test file per source file, named after it; cross-file tests and shared helpers
+  in `<package>_test.go` (rules in [ai-skills.org](workflows/ai-skills.org)).
+- Tests never touch `/srv/data`: each package that uses the store has
+  `func TestMain(m *testing.M) { os.Exit(storetest.Main(m)) }`, and tests that
+  write call `storetest.Root(t)` for a fresh temporary root.
+- Fixtures: shared ones in the root `testdata/`, package ones in the package's
+  `testdata/` ([testing architecture](arch/testing.md)).
+- `make check` before every pull request, and the EMAX summaries unchanged
+  (`go run ./cmd/trader 2>/dev/null | md5sum` prints
+  `195e457a21def1223e7181c86cb824a4`).
 
-## Adapters
+## Adding things
 
-Concrete implementations of the ports the domain packages define. Only
-composition roots (`cmd/...`) import these directly.
-
-- **`adapters/broker/sim`** — the deterministic simulated broker: a real
-  `broker.Broker`/`broker.Account` implementation (not a special backtest
-  case), with configurable fill/fee/slippage models
-  ([ADR-028](arch/adr-028-simulator-fill-fee-slippage-models.org)) and
-  limit/stop trigger semantics
-  ([ADR-026](arch/adr-026-simulated-limit-stop-orders.org)).
-- **`adapters/journal/jsonl`** — a `journal.Recorder`/`Reader` pair
-  persisting one JSON object per line, with sequence assignment, fsync-on-
-  close durability, and corrupt-entry detection on read
-  ([ADR-036](arch/adr-036-backtest-journal.org)).
-
-## Commands
-
-`cmd/trader` is Trader's operator CLI, composed from thin per-area command
-groups that each call one `service` subpackage:
-
-- **`cmd/trader/data`** — sync/build canonical market data.
-- **`cmd/trader/broker`** — inspect broker accounts.
-- **`cmd/trader/execution`** — submit/evaluate order intents.
-- **`cmd/trader/backtest`** — run a backtest (`run`) and re-render a
-  persisted result (`show`); `--config` runs the real
-  `strategy/emacross` strategy from a YAML file
-  ([ADR-022](arch/adr-022-cli-app-service-layer.org),
-  [ADR-040](arch/adr-040-backtest-cli.org)).
-
-No command group contains strategy, execution, risk, or metric logic of
-its own — mechanically enforced by each group's own `boundary_test.go`.
-
-## Test Support
-
-### internal/tradertest
-
-`internal/tradertest` provides deterministic private builders and assertions for
-code that consumes Trader's domain packages — `instrument`, `order`,
-`account`, `portfolio` — so Trader's runtime tests don't have to
-reinvent "build me a valid EUR/USD listing" boilerplate. Every builder
-takes a small params struct with defaults and returns the real domain
-type via the real constructor (`order.NewProposal`, `account.NewSnapshot`,
-...), never a parallel object model; a `Must`-prefixed variant panics on
-error for terse setup. See the [package doc comment](../internal/tradertest/doc.go).
-
-### test/internal
-
-Repository-internal-only numeric/quantity study helpers used by a few
-packages' own tests. Not part of the public API.
+- **A command:** a file in `cmd/trader` that resolves options and calls a service;
+  import nothing but the service, the store and logging, and add the import-guard
+  test (see `build_test.go`).
+- **A provider capability:** in `provider/<name>`; map to the public model and add
+  nothing domain-specific. Wire it in an application service.
+- **A domain rule:** in the domain service, with a test per rule.
+- **A file format or path:** a new version name and a rebuild, never a silent
+  change; paths come from `layout`.
+- **An ADR:** one decision per record; do not edit an accepted ADR silently, add an
+  amendment or a new record.

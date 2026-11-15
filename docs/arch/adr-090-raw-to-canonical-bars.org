@@ -13,6 +13,12 @@ The bar-availability design the owner recorded on #619 (a bar has an opening =Ti
 and an =AvailableAt=; no stored close time; zero means not established) is taken as
 given.
 
+Implementation (2026-11-15): the canonical package, the public =Bar=, the provider
+mapping, the domain service and =trader data build= are built and merged (#631,
+#636, #639, #650); the v1 spread cross-check of section 6 and the loader that
+refuses a partition with bad records (#647) are not. Acceptance is the owner's
+decision (#643).
+
 * Context
 
 Checked read-only on the owner's machine:

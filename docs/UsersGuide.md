@@ -1,1072 +1,138 @@
 # Trader User's Guide
 
-This guide enumerates the actual commands and flags `trader` (the CLI in
-`cmd/trader`) currently supports, verified directly against `--help` output
-from a real build — not aspirational. Trader is under active development
-([Project Status](../README.md#project-status)); commands and flags will
-change as milestones land. See the
-[Developer's Guide](DevelopersGuide.md) for the packages behind each
-command.
+This guide lists what `trader` (the command in `cmd/trader`) does today, checked
+against its `--help` output. Trader is under active development
+([Project Status](../README.md#project-status)); commands and flags will change as
+the milestones land. The guide for the earlier, larger command line is kept for
+reference in [`_archive/docs/UsersGuide.md`](../_archive/docs/UsersGuide.md); it
+does not describe this program.
 
 ## Building
 
 ```sh
-go build -o trader ./cmd/trader
+make build            # writes bin/trader
+go run ./cmd/trader   # or run without building
 ```
 
-## Global Flags
+## Commands
 
-Every command accepts these, inherited from the root command:
-
-| Flag              | Default  | Meaning                             |
-|-------------------|----------|--------------------------------------|
-| `--log-format`    | `text`   | `text` or `json`                    |
-| `--log-level`     | `INFO`   | `DEBUG`, `INFO`, `WARN`, or `ERROR` |
-| `--log-output`    | `stderr` | `stderr`, `stdout`, or a file path  |
-| `--version`, `-v` | —        | print the version and exit (see [Versioning](#versioning) below) |
-
-## Versioning
-
-Trader's version is derived automatically from git tags at build time
-(ADR-064) — no source file is bumped by hand before a release.
-
-`trader --version`/`trader -v` prints the compact form, e.g. `trader
-version v0.3.0` for a build made exactly at tag `v0.3.0`, or `trader
-version v0.3.0-12-gabc1234-dirty` for a development build 12 commits
-past that tag with uncommitted local changes.
-
-`trader version` prints a fuller, multi-line report:
-
-```
-trader v0.3.0
-commit: abc1234def012
-commit-time: 2026-09-15T18:00:00Z
-```
-
-(`commit-time` is that commit's own timestamp, not when this
-particular binary happened to be compiled — Trader records no
-separate build-wall-clock timestamp.)
-
-Both forms require a build made via `make build`/`make install` (which
-inject `git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --always
---dirty` output at build time — restricted to Trader's own release-tag
-namespace, so an unrelated repository tag can never become Trader's
-own reported version) to report the exact git-describe version. A
-plain `go build`/`go install ./cmd/trader` run outside `make`, from a
-local git checkout, instead falls back to Go's own module-version
-inference (already a real, usable value on a modern toolchain) or,
-failing that, a `devel+<revision>` placeholder — still traceable to
-the exact commit, just not necessarily the exact git-describe string.
-A version-qualified module install (`go install .../trader@v0.3.0`)
-reports that exact version alone, with no commit info, since Go does
-not stamp VCS metadata for that install form. See
-[`version`](../version)'s own
-doc comment for the complete precedence/fallback chain.
-
-Trader follows semantic versioning while remaining at `v0` (ADR-011,
-ADR-064 in [`docs/arch/adr-decisions.org`](arch/adr-decisions.org));
-see [`CONTRIBUTING.org`](../CONTRIBUTING.org)'s "Releasing" section for
-how a version is tagged and released.
-
-## Command Overview
-
-```
-trader
-├── data        historical market-data commands
-│   ├── bars        read canonical historical bars
-│   ├── build       build and publish canonical data from raw data
-│   ├── coverage    report canonical/raw coverage and gaps
-│   ├── plan        report the work required to make a dataset available
-│   ├── sync        acquire raw data required to make a dataset available
-│   └── update      plan, sync, and build a dataset in one step
-├── account     broker account activity and the trades reconstructed from it
-│   ├── activity    sync and list broker account activity
-│   │   ├── sync        import new activity into the ledger
-│   │   └── list        list stored activity
-│   └── trades      list completed trades (show: inspect one)
-├── broker      simulated broker account inspection and order submission
-│   ├── accounts    list the simulated broker's accounts
-│   ├── snapshot    show the simulated account's current snapshot
-│   └── submit      submit an order to the simulated broker
-├── execution   execution/risk pipeline inspection and order submission
-│   ├── evaluate    size, plan, and risk-evaluate an intent (no submission)
-│   └── submit      size, plan, risk-evaluate, and submit an intent
-├── backtest    run backtests and inspect their results
-│   ├── run         run a backtest and render/persist its result
-│   └── show        render a previously run backtest's persisted result
-└── version     print Trader's version and build metadata (see Versioning above)
-```
-
-`trader completion` also exists (standard Cobra shell-completion
-boilerplate) and isn't covered further here.
-
----
-
-## `trader data` — Historical Market Data
-
-`internal/marketdata.Manager`'s CLI surface: query canonical bars, inspect coverage,
-and plan/sync/build/update a dataset. Every `data` subcommand takes the same
-two positional arguments and shares the same flag set.
-
-**Usage:** `trader data <subcommand> INSTRUMENT INTERVAL --from ... --to ...`
-
-INSTRUMENT is a plain symbol. For the default `oanda` provider (or any FX
-provider) it is a 6-letter FX pair, e.g. `EURUSD`. For a non-FX provider such
-as `alpaca` it is an equity or ETF ticker, e.g. `AAPL` or `SPY`. A bare ticker
-does not name its own listing exchange or asset kind the way an FX pair's
-symbol does, so `--exchange` and `--kind` are **required together** — except
-for the reference symbols SPY (ARCA ETF), QQQ (NASDAQ ETF), and AAPL (NASDAQ
-equity), which resolve without them. The same resolution is used by
-`backtest run` and `trader-mcp`.
-INTERVAL is one of the values listed under `backtest run` below.
-
-### Shared `data` flags
-
-| Flag                | Default                                | Meaning                                                                  |
-|---------------------|-----------------------------------------|---------------------------------------------------------------------------|
-| `--from`            | —                                      | range start (`YYYY-MM-DD` or RFC3339); **required**, except that `build`, `update`, and `coverage` accept omitting both ends (see each command) |
-| `--to`              | —                                      | range end (`YYYY-MM-DD` or RFC3339); given together with `--from`        |
-| `--format`          | `table`                                | `table` or `json`                                                       |
-| `--provider`        | `oanda`                                | canonical dataset provider name (e.g. `oanda`, `alpaca`)                |
-| `--raw-root`        | `$XDG_DATA_HOME/trader/raw/<provider>` | raw provider archive root                                                |
-| `--store-root`      | `$XDG_DATA_HOME/trader/data`           | canonical data store root                                                |
-| `--oanda-base-url`  | —                                      | OANDA API base URL; required only for `sync`/`update`                   |
-| `--alpaca-base-url` | `https://data.alpaca.markets`          | Alpaca Market Data API base URL; only used with `--provider alpaca`     |
-| `--exchange`        | —                                      | listing exchange (e.g. `ARCA`, `NASDAQ`); required for a non-FX provider unless the symbol has reference metadata |
-| `--kind`            | —                                      | `equity` or `etf`; required with `--exchange`                           |
-
-The OANDA API token itself is never a flag — set the `TRADER_OANDA_TOKEN`
-environment variable instead, or name a file holding it with
-`oanda_token_file` (see "Default config file" below). Likewise, Alpaca's key ID and secret key are
-never flags — set `TRADER_ALPACA_KEY_ID` and `TRADER_ALPACA_SECRET_KEY`
-instead. Neither provider's secret belongs in shell history or a process
-command line.
-
-#### Default config file
-
-The data commands (and `trader-mcp`) read `/etc/trader/config.yml` when it
-exists (issue #480); `TRADER_CONFIG=/path/to/file.yml` names a different
-file, which must exist. It is the lowest-precedence source: defaults <
-file < environment < flags. Keys are the data settings (`store_root`,
-`raw_root`, `archive_root`, `provider`, `oanda_base_url`,
-`alpaca_base_url`) plus `oanda_token_file`, a path (a leading `~/` is
-expanded) to a file containing the OANDA token. The token is never stored
-in the config file itself: any secret key there (`oanda_token`,
-`alpaca_key_id`, `alpaca_secret_key`) is an error, in any letter case
-(ADR-078). `TRADER_OANDA_TOKEN` wins
-over the file.
-
-```yaml
-# /etc/trader/config.yml
-oanda_base_url: https://api-fxtrade.oanda.com/v3
-oanda_token_file: ~/.config/oanda/pat.txt
-raw_root: /srv/trading/data/raw/oanda
-store_root: /srv/trading/data/canonical
-```
-
-Other sections in the file are ignored by the data commands.
-
-### `trader data bars INSTRUMENT INTERVAL`
-
-Reads canonical historical bars for the given range.
-
-```sh
-trader data bars EURUSD H1 --from 2024-01-01 --to 2024-02-01
-```
-
-### `trader data plan INSTRUMENT INTERVAL`
-
-Reports what work (if any) is required to make the requested dataset
-available — read-only, performs no acquisition or building.
-
-### `trader data sync INSTRUMENT INTERVAL`
-
-Acquires raw provider data for the requested range. Requires
-`--oanda-base-url` and `TRADER_OANDA_TOKEN` for the default `oanda`
-provider, or `TRADER_ALPACA_KEY_ID`/`TRADER_ALPACA_SECRET_KEY` (plus
-`--exchange`/`--kind`) for `--provider alpaca`:
-
-```sh
-trader data sync SPY D1 --provider alpaca --exchange ARCA --kind etf \
-  --from 2024-01-01 --to 2024-02-01
-```
-
-### `trader data build INSTRUMENT INTERVAL`
-
-Builds and publishes canonical data from the provider's native data — never
-fetches from a live provider. For `stooq` that is the native archive (under
-`--archive-root`), falling back to raw data already imported when no archive is
-found; for other providers it is the raw data already present under
-`--raw-root`. Omit `--from`/`--to` to build the whole source span. A range with
-no source data at all is an error, not a silent no-op. This is the same
-operation `trader-mcp`'s canonicalize tool runs.
-
-### `trader data update INSTRUMENT INTERVAL`
-
-Runs plan, then sync, then build, as each step actually requires — the
-one-command path to "make sure this dataset is current." Omit `--from`/`--to`
-to update from the last canonical bar through now; that needs existing
-canonical data (build it first). `stooq` has no live feed, so its update
-re-converts the native archive and picks up whatever newer data it holds. This
-is the same operation `trader-mcp`'s update tool runs.
-
-### `trader data coverage INSTRUMENT INTERVAL`
-
-Reports canonical/raw coverage and any gaps for the dataset over the given
-range. `--from` and `--to` are optional here: omit both to report over the
-dataset's existing canonical span. Before anything has been built that report
-is empty rather than an error.
-
-```sh
-trader data coverage EURUSD H1          # the whole canonical span
-```
-
----
-
-## `trader account` — Broker Account Activity and Trades
-
-Imports a broker account's history into a local ledger, lists it, and
-shows the trades reconstructed from it (ADR-079 to ADR-084). Today the broker
-is OANDA.
-
-Every command names its stream explicitly. There is **no default environment**,
-so a mistyped command cannot read or sync a live account:
-
-```
-trader account --environment practice --account 101-001-1234567-001 activity sync
-```
-
-### Shared `account` flags
-
-| Flag | Environment | Meaning |
-|------|-------------|---------|
-| `--environment` | `TRADER_ACCOUNTACTIVITY_ENVIRONMENT` | `practice` or `live` (required) |
-| `--account` | `TRADER_ACCOUNTACTIVITY_ACCOUNT` | the broker's account ID (required) |
-| `--broker` | `TRADER_ACCOUNTACTIVITY_BROKER` | broker, default `oanda` |
-| `--ledger-root` | `TRADER_ACCOUNTACTIVITY_ROOT` | ledger root, default `$XDG_DATA_HOME/trader/accountactivity` (else `~/.local/share/trader/accountactivity`) |
-| `--account-currency` | `TRADER_ACCOUNTACTIVITY_CURRENCY` | account currency, used only for slippage cost; default is the currency found in the ledger |
-| `--format` | | `table` (default) or `json` |
-
-The OANDA token is environment-only: `TRADER_OANDA_TOKEN`, or
-`oanda_token_file` in the config file naming a file that holds it. There is no
-token flag, and a token in the config file is refused.
-
-These variables are deliberately not `TRADER_ACCOUNT_ID`, which `trader broker`
-uses for a simulated account.
-
-### `trader account activity sync`
-
-Imports everything beyond the stream's checkpoint. A rerun is safe: activity
-already stored is counted as `unchanged`, and an interrupted run resumes from
-the last durable page.
-
-```
-trader account activity sync --environment practice --account 101-001-1234567-001
-trader account activity sync ... --from 2024-01-01 --to 2024-04-01   # bootstrap a window
-```
-
-It prints the stream, pages, fetched, new, unchanged, other events, cursor and
-checkpoint time.
-
-### `trader account activity list`
-
-```
-trader account activity list --from 2024-03-01 --to 2024-04-01 --kind fill,financing --limit 50
-```
-
-Half-open `[from, to)`; the earliest `--limit` rows (default 100) are shown, and
-the output says when more matched. Each fill shows `realized_pl`, `spread_cost`,
-`commission`, `financing` and `other_fees`, each either a value or `unknown`.
-
-### `trader account trades`
-
-```
-trader account trades                          # completed trades
-trader account trades --from 2024-03-01 --to 2024-04-01
-trader account trades --open                   # positions still open (not with --benchmark)
-trader account trades --benchmark broker-vwap  # add execution quality
-```
-
-Trades are reconstructed from the whole ledger first, and the range then
-selects trades by **close time**, so a trade that opened before the range is
-still a whole trade. Exits with no known entry and financing or fees that
-belong to no trade are listed at the end, never dropped.
-
-Spread cost is shown beside net but is not added to it: it is already inside
-the broker's realized P/L (`net = gross P/L + commission + financing + other fees`).
-
-`--open` cannot be combined with `--benchmark`; use `trades show <id> --benchmark ...`
-for an open position's fills.
-
-Slippage appears **only** with `--benchmark broker-vwap` or `broker-quote`
-(the benchmark comes from each fill's own broker data). Without the flag there
-is no slippage column; with it, a figure that cannot be measured prints as
-`unknown` and the reason is listed.
-
-### Trading journal: `--format org`
-
-```
-trader account trades --format org --from 2024-03-01 --to 2024-04-01 >> journal.org
-trader account trades show <id> --format org --benchmark broker-vwap
-```
-
-One Org entry per completed trade, headed by its **open** time. The property
-drawer holds the objective facts: trade ID, instrument, side, open and close
-times, quantity, average entry and exit, gross P/L, and spread cost,
-commission, financing, other fees and net as separate figures (spread is
-already inside gross P/L and is not added to net). With `--benchmark` it adds
-the benchmark and the trade's slippage cost, and the Execution section a
-per-fill table. A figure that is not known reads `unknown`, never `0.00`; one
-derived from other figures is marked `(derived)`. `SOURCES_FIRST`,
-`SOURCES_LAST` and `SOURCES_COUNT` trace the trade to its broker activities;
-`trades show <id>` gives the full audit.
-
-Each entry ends with an empty **Review** scaffold (Setup, What went well, What
-went wrong, Screenshot, Notes) that Trader never fills in. Output is
-deterministic and has no timestamp of its own, so the same ledger renders the
-same text. Re-running is a fresh render, not a merge: append with `>>` as above
-and mind that you will duplicate entries you already have. The journal covers
-completed trades only; `activity sync`, `activity list` and `--open` refuse
-`--format org`. Nothing is written to Trader's run journal.
-
-### `trader account trades show <id>`
-
-The audit view of one trade, completed or open: every leg with its price,
-units and broker trade ID, whether the division between closing and opening was
-the broker's or derived, the source activities in full, and whether each figure
-was reported or derived and from what. `<id>` is a full trade ID or a unique
-prefix; a prefix matching several trades lists them rather than choosing.
-
-### Output
-
-In the table, an unknown figure is the word `unknown` and a known zero is
-`0.00`. In JSON (`--format json`), `schema_version` is `1`, times are RFC 3339
-UTC at full precision, every financial figure is a decimal string, and each figure is either
-`{"state":"known","value":"...","basis":"reported|derived","source":"..."}` or
-`{"state":"unknown"}`.
-
----
-
-## `trader broker` — Simulated Broker
-
-Inspect and submit orders against a fresh, in-memory simulated broker.
-**Every invocation builds a new simulator; nothing persists between
-separate `trader` invocations.**
-
-### Shared `broker` flags
-
-| Flag              | Default           | Meaning                      |
-|-------------------|-------------------|------------------------------|
-| `--account-id`    | freshly generated | account id to use            |
-| `--currency`      | `USD`             | account currency             |
-| `--starting-cash` | `10000`           | starting account cash amount |
-
-### `trader broker accounts`
-
-Lists the simulated broker's accounts. `--format table\|json`.
-
-### `trader broker snapshot`
-
-Shows the simulated account's current snapshot (equity, positions, open
-orders). `--format table\|json`.
-
-### `trader broker submit`
-
-Submits one order directly to the simulated broker (no sizing or risk
-evaluation — see `trader execution submit` for that).
-
-| Flag                   | Default   | Meaning                                        |
-|------------------------|-----------|------------------------------------------------|
-| `--symbol`             | —         | instrument symbol, e.g. `EURUSD`, **required** |
-| `--side`               | —         | `buy` or `sell`, **required**                  |
-| `--quantity`           | —         | order quantity, **required**                   |
-| `--type`               | `market`  | `market`, `limit`, `stop`, or `stop-limit`     |
-| `--price`              | —         | fill price, required for `--type market`       |
-| `--limit-price`        | —         | required for `--type limit` or `stop-limit`    |
-| `--stop-price`         | —         | required for `--type stop` or `stop-limit`     |
-| `--tif`                | `GTC`     | time in force: `GTC`, `DAY`, `IOC`, or `FOK`   |
-| `--tick-size`          | `0.00001` | simulator tick size                            |
-| `--quantity-increment` | `1`       | simulator quantity increment                   |
-| `--multiplier`         | `1`       | simulator contract multiplier                  |
-| `--format`             | `table`   | `table` or `json`                              |
-
-```sh
-trader broker submit --symbol EURUSD --side buy --quantity 1000 \
-  --type market --price 1.10050
-```
-
----
-
-## `trader execution` — Execution/Risk Pipeline
-
-Drives one `order.Intent` through the real sizing → planning → risk →
-(optionally) submission pipeline (`pipeline.Pipeline`) against a fresh
-simulated broker — the same path a backtest or a future live runtime uses.
-Shares `broker`'s `--account-id`/`--currency`/`--starting-cash` flags.
-
-### `trader execution evaluate`
-
-Sizes, plans, and risk-evaluates an intent **without** submitting it.
-
-| Flag                   | Default   | Meaning                                               |
-|------------------------|-----------|-------------------------------------------------------|
-| `--symbol`             | —         | instrument symbol, **required**                       |
-| `--side`               | —         | `buy` or `sell`, **required**                         |
-| `--adverse-distance`   | —         | adverse price distance used for sizing, **required**  |
-| `--risk-fraction`      | `0.01`    | fraction of account equity to risk (1%)               |
-| `--reference-price`    | —         | valuation price for value-based risk rules (optional) |
-| `--tick-size`          | `0.00001` | simulator tick size                                   |
-| `--quantity-increment` | `1`       | simulator quantity increment                          |
-| `--multiplier`         | `1`       | simulator contract multiplier                         |
-| `--format`             | `table`   | `table` or `json`                                     |
-
-### `trader execution submit`
-
-Same as `evaluate`, plus an actual submission if risk approves. Adds:
-
-| Flag      | Default | Meaning                                                 |
-|-----------|---------|---------------------------------------------------------|
-| `--price` | —       | fill price for the resulting market order, **required** |
-
-```sh
-trader execution submit --symbol EURUSD --side buy \
-  --adverse-distance 0.0050 --risk-fraction 0.01 --price 1.10050
-```
-
----
-
-## `trader backtest` — Backtesting
-
-### `trader backtest run`
-
-Runs a backtest over the M5 application service (`service/backtest`) and
-persists/renders its result. Canonical market data must already exist
-under `--data-store-root`/`--data-raw-root` (via `trader data build` /
-`trader data sync`) — `run` never syncs from a live provider itself.
-
-There are three strategy paths:
-
-- **Without `--config`/`--strategy-exec`:** a provisional demo strategy — one
-  buy-and-hold entry per instrument's first bar. `--symbol` may be repeated
-  for a multi-instrument run (one shared account/pipeline, not a per-symbol
-  engine).
-- **With `--config`:** an in-process strategy selected by `strategy.name` in
-  the YAML file (see below). Any explicit flag still overrides its
-  corresponding config-file value.
-- **With `--strategy-exec` (or `strategy.exec` in `--config`):** an
-  out-of-tree strategy executable, launched and driven over Strategy
-  Protocol v1 — see [External strategies](#external-strategies) below. A
-  `--config` can carry everything such a run needs, so
-  `trader backtest run --config run.yml` alone is enough.
-
-| Flag                 | Default                         | Meaning                                                                                |
-|----------------------|---------------------------------|----------------------------------------------------------------------------------------|
-| `--symbol`           | —                               | instrument symbol, repeatable, **required** (or via `--config`)                        |
-| `--interval`         | `H1`                            | `M1`, `H1`, `H4`, `D1`, or `W1`                                                        |
-| `--from`             | —                               | replay range start, **required** (or via `--config`)                                   |
-| `--to`               | —                               | replay range end, **required** (or via `--config`)                                     |
-| `--currency`         | `USD`                           | account currency                                                                       |
-| `--starting-cash`    | `10000`                         | starting account cash amount                                                           |
-| `--risk-fraction`    | `0.01`                          | fraction of account equity to risk                                                     |
-| `--adverse-distance` | —                               | adverse price distance for sizing, **required** (or via `--config`)                    |
-| `--initial-margin-ratio` | `1`                         | equity required per unit of gross notional; `1` unlevered, `0.5` = 2×, `0.25` = 4× (see below) |
-| `--warmup-bars`      | `0`                             | warm-up bars before the **demo** strategy may trade (ignored with `--config`)          |
-| `--data-raw-root`    | —                               | raw archive root (required, or supplied by `market.data_raw_root`)                    |
-| `--data-store-root`  | `/srv/trading/data/canonical`\* | canonical data store root; an explicit empty value opts into a fresh temp dir per run  |
-| `--provider`         | `oanda`                         | market data provider name; `market.provider` in `--config` may supply it              |
-| `--config`           | —                               | YAML file supplying backtest/strategy parameters (see below)                           |
-| `--strategy-name`    | —                               | in-process strategy name selected by `--config`                                      |
-| `--fast-period`      | —                               | EMA fast period for `ema-cross`                                                       |
-| `--slow-period`      | —                               | EMA slow period for `ema-cross`                                                       |
-| `--allowed-side`     | `both`                          | restrict `ema-cross`: `both`, `long-only`, or `short-only`                           |
-| `--quantity`         | —                               | `buy-and-hold` quantity mode: buy exactly this quantity of the single `--symbol` (see below) |
-| `--buy-date`         | first bar                       | quantity mode: buy on the first bar at or after this date                             |
-| `--sell-date`        | —                               | quantity mode: exit on the first bar at or after this date; unset = hold to the run's end |
-| `--strategy-exec`    | —                               | path to an out-of-tree strategy executable; or `strategy.exec` in `--config`           |
-| `--strategy-args`    | —                               | extra argument passed to `--strategy-exec`'s own executable, unmodified; repeatable    |
-| `--strategy-config`  | —                               | path to a config file for the external executable (see below); or `strategy.config` in `--config` |
-| `--journal`          | —                               | optional path to write a durable JSONL audit trail; path must not already exist        |
-| `--output-dir`       | `./backtest-runs`               | where run snapshots are written / `show` reads from; also `TRADER_BACKTEST_OUTPUT_DIR` or `backtest.output_dir` in `--config` (the flag wins, then the environment, then the file). `trader-mcp` resolves the same setting, so either can read the other's runs |
-| `--format`           | `table`                         | `table`, `json`, or `org`; also `TRADER_BACKTEST_OUTPUT_FORMAT` or `backtest.output_format` in `--config` (the flag wins, then the environment, then the file) |
-
-\* The `/srv/trading/data/canonical` default is this repository's own local
-operational choice (issue #268) — a fresh clone on another machine should
-pass `--data-store-root` explicitly, or rely on the automatic temporary-
-directory fallback by passing an explicit empty value.
-
-```sh
-# This sizing is about 2.2x equity, so it opts into up to 4x leverage;
-# without --initial-margin-ratio the default (1, unlevered) rejects it.
-trader backtest run \
-  --symbol EURUSD --interval H1 --from 2024-01-01 --to 2024-06-01 \
-  --starting-cash 10000 --risk-fraction 0.01 --adverse-distance 0.0050 \
-  --initial-margin-ratio 0.25 \
-  --data-raw-root /path/to/raw/oanda --format table
-```
-
-#### `--config` YAML reference
-
-A config is one document of one `kind` (issue #474, ADR-077): `kind:
-backtest` (the default) simulates trading, and `kind: study` runs a
-trading-free executable (see [Study configs](#study-configs-kind-study)).
-Both describe their data in a shared `market:` section.
-
-```yaml
-kind: backtest                 # backtest (default) or study
-
-market:                        # what market data the run reads
-  symbols: EURUSD              # comma-separated universe; required
-  interval: H1                 # default H1
-  from: 2015-01-01T00:00:00Z   # required
-  to: 2025-01-01T00:00:00Z     # required
-  provider: oanda              # default oanda; e.g. stooq
-  data_raw_root: /path/to/raw/oanda    # required
-  data_store_root: /path/to/canonical  # default /srv/trading/data/canonical
-
-backtest:                      # simulation account and sizing only
-  currency: USD                # default USD
-  starting_capital: 10000      # default 10000
-  risk_fraction: 0.01          # default 0.01
-  adverse_distance: 0.0050     # required
-  initial_margin_ratio: 1      # default 1 (unlevered); must be positive
-
-strategy:
-  name: buy-and-hold            # registered in-process strategy; also supports ema-cross
-  fast_period: 20              # used when name is ema-cross
-  slow_period: 50              # used when name is ema-cross
-  allowed_side: both           # used when name is ema-cross
-  quantity: 8500               # buy-and-hold quantity mode (see below)
-  buy_date: 2024-01-08         # quantity mode; default: the first bar
-  sell_date: 2024-06-28        # quantity mode; optional
-```
-
-The pre-#474 grammar (market keys under `backtest:`, and the `model:`
-section) is not accepted: a document that uses it fails with a message naming
-the key's new home. To migrate, move `symbol`/`symbols`, `interval`, `from`,
-`to`, `provider`, `data_raw_root` and `data_store_root` from `backtest:` into
-`market:` (a single `symbol: X` becomes `symbols: X`), and turn a `model:`
-section into `kind: study` (below). Environment variables follow the section:
-`TRADER_BACKTEST_FROM` is now `TRADER_MARKET_FROM`.
-
-Precedence for each of the fields shown above (the ones with a `config:`
-tag backing them — see [Environment Variables](#environment-variables))
-is: explicit CLI flag > `TRADER_*` environment variable (`TRADER_MARKET_*`,
-`TRADER_BACKTEST_*`, `TRADER_STUDY_*`, `TRADER_STRATEGY_*`, `TRADER_KIND`) >
-`--config` file value > the default shown above.
-`--journal` and `--warmup-bars` are plain CLI flags with no
-`--config`/environment-variable backing at all — see the flag table above
-for which is which. `--output-dir` is shared with `show` and `trader-mcp`:
-see its row in the flag table.
-
-**Paths in a config file are relative to that file.** `market.data_raw_root`,
-`market.data_store_root` and `backtest.output_dir`, when written in the config
-file, resolve against the file's own directory, so a checked-in config runs the
-same from any working directory. Absolute paths are used as written, and a
-value from a flag, an environment variable or a default is relative to the
-working directory as before. An explicitly empty `market.data_store_root: ""`
-means a fresh temporary store for each run; leaving it out selects the
-production default.
-
-**`isolate_environment: true`** (a top-level key) makes a config mean exactly
-what it says: no `TRADER_*` environment variable is consulted for that run, so
-nothing exported can redirect its fixture, store, output directory or format.
-Flags typed on the command line still apply. Ordinary configs leave it out and
-keep the usual precedence of flag over environment over file. It is meant for
-self-contained regressions such as `testdata/backtest/ema-cross/config.yml`.
-
-`strategy.name` (or `--strategy-name`, or `TRADER_STRATEGY_NAME`) selects the
-strategy however it is supplied; `--config` is not required to choose
-`ema-cross`. The market data a run builds and reads uses the provider's own
-trading calendar (for example the US equity calendar for `stooq` and
-`alpaca`), as `trader data` does.
-
-#### Initial margin (`initial_margin_ratio`)
-
-Every backtest enforces an account-level **initial-margin** limit
-(ADR-066, `docs/account-risk.md`):
-
-```
-prospective gross notional × initial_margin_ratio ≤ equity
-```
-
-- **Gross notional** sums every open position's
-  `|quantity| × price × contract multiplier`, each at its current
-  price; longs and shorts both add.
-- The default `1` is unlevered: gross exposure may not exceed equity.
-  `0.5` permits 2×, `0.25` permits 4×.
-- One value configures two checks. They share the same ratio and the
-  same calculation, but they evaluate different states, so they don't
-  always reach the same outcome:
-  - **Admission** (the `account_initial_margin` risk rule) checks the
-    order at its reference price against equity before fees.
-  - **Fill time** (the simulator) checks the actual fill price, after
-    slippage, against equity after the fill's own commission. An order
-    admitted earlier can still be refused here, for example after a
-    next-bar gap up or because of its commission.
-- An order that would breach the limit is **refused, never resized**.
-  How it appears in the journal (`--journal`) depends on where it was
-  refused:
-  - At admission: a risk decision whose violation names
-    `account_initial_margin`, with the required margin and equity.
-  - A market order refused at fill: a broker order with status
-    `rejected` and reason `insufficient_margin`.
-  - A resting limit or stop order refused when it triggers: the broker
-    cancels it, with reason `insufficient_margin` in its
-    `cancel_reason`. There is no risk decision for this case.
-- Orders that reduce or close a position are always allowed, even when
-  the account is already over the limit.
-- There is no maintenance margin: a position is never liquidated
-  because prices later move against it. While the account is over the
-  limit, only exposure-reducing orders are accepted.
-- The ratio is recorded in the run manifest (`risk_rules`,
-  `margin_model`) and changes `config_digest`.
-- Every report (`table`, `json`, `org`) has a **Margin** section:
-  - the configured ratio (`none` when a run has no margin model)
-  - the number of refusals, split into admission and fill-time
-  - the peak gross notional and peak gross leverage (gross notional ÷
-    equity) observed across the run's equity curve
-
-**Sizing and margin are separate controls.** `risk_fraction` sizes a
-position from how much you're willing to lose at the adverse distance;
-it does not check whether the account can finance that position. For
-example, 1% risk over a 0.0050 adverse distance on $10,000 sizes
-20,000 EUR/USD (about 2.2× equity), which the default ratio rejects.
-Either size smaller or opt into leverage explicitly with a smaller
-`initial_margin_ratio`. Runs made before this limit existed had no
-margin cap at all, so no ratio reproduces them exactly.
-
-#### Margin and sizing
-
-Two separate questions decide whether a position is opened:
-
-- **Sizing: "how much am I willing to lose?"** `risk_fraction` sizes a
-  position from the loss you'll accept at the adverse distance. It says
-  nothing about whether the account can pay for the result.
-- **Margin: "can the account finance it?"** `initial_margin_ratio`
-  (above) admits or refuses the order. It never resizes it.
-
-#### Buy & Hold baseline (`buy-and-hold` quantity mode)
-
-Setting `quantity` switches `buy-and-hold` from its fixed-fraction demo
-behavior into the Buy & Hold baseline:
-
-| Setting | Meaning |
+| Command | What it does |
 |---|---|
-| instrument | the run's single `--symbol` / `market.symbols` |
-| `quantity` | exactly how much to buy; never sized or resized. Must be positive: an explicit `0` is an error, not a fallback to the demo |
-| `buy_date` | buy on the first bar at or after it (default: `market.from`) |
-| `sell_date` | optional: exit on the first bar at or after it, once the position is held; must be after the (effective) buy date |
+| `trader` | Backtests the six EMAX scenarios in `testdata/emax` and prints a summary of each. Deterministic: the output is the same every run. |
+| `trader data download` | Downloads OANDA bid/ask candles into the raw store. Needs a token and the network. |
+| `trader data build` | Builds canonical bars from the raw store. Needs no token and makes no network call. |
 
-- The strategy decides *what and when*. Margin decides whether that
-  quantity is admissible, and the simulator decides the fill.
-- An order is decided on a bar's close and fills at the **next bar's
-  open**. The entry always comes first: if both dates have passed by
-  the first available bar (for example over a weekend), it buys on
-  that bar and exits on a later one.
-- A quantity the account can't finance is rejected once, with a margin
-  rejection in the report. It is not resized and not retried.
-- **The run's end date is not a sell.** Without `sell_date` the position
-  stays open in the final account state, valued at the final mark, and
-  no closing trade is added.
-- The quantity and dates are recorded in the run manifest as strategy
-  parameters, so they change `config_digest`.
+Global flags, accepted by every command: `--log-level` (DEBUG, INFO, WARN, ERROR;
+default INFO), `--log-format` (text or json) and `--log-output` (stderr, stdout or a
+file to append to).
 
-**Choosing a financeable quantity.** Pick one where
+## Market data
+
+Data files live under one root, the **data root**. For one instrument, interval
+and month:
 
 ```
-quantity × price × multiplier  ≤  starting cash ÷ initial_margin_ratio
+<data root>/oanda/raw/EURUSD/2024/01/EURUSD-2024-01-h1.csv        raw: OANDA's candles
+<data root>/oanda/canonical/EURUSD/2024/01/EURUSD-2024-01-h1.csv  canonical: built from raw
 ```
 
-with headroom for the fill. The fill happens at the next bar's open, not
-the price you looked at, and any commission comes out of equity first.
-For example, with $10,000 at the default ratio of 1 and EUR/USD near
-1.10:
+Months are UTC months of the bar's opening time. Raw is the archive: it is only
+ever added to. Canonical is derived from raw and can always be rebuilt.
 
-- 9,000 units is about $9,900: it fills only if the next open doesn't
-  gap up more than about 1%.
-- 8,500 units is about $9,350, leaving about 6.5% headroom, which is a
-  reasonable baseline.
+### Configuration
 
-If the report shows a margin rejection and no trades, the quantity was
-too large for the account.
+Each option comes from, in order: the flag, the environment, then the config file
+(`etc/trader.yml` by default, `--config` to name another; copy
+[`etc/trader.example.yml`](../etc/trader.example.yml)). A missing default file is
+fine when the flags or the environment supply everything. The data root has one
+more step: `--data-root`, then `TRADER_DATA_ROOT`, then `marketdata.root`, then the
+default `/srv/data`.
 
-### External strategies
+| Option | Flag | Environment | Config key |
+|---|---|---|---|
+| data root | `--data-root` | `TRADER_DATA_ROOT` | `marketdata.root` (default `/srv/data`) |
+| instruments | `--instrument` (repeat or comma-separated) | | `marketdata.instruments` |
+| interval | `--interval` | | `marketdata.interval` |
+| OANDA host | `--base-url` (download only) | | `marketdata.base_url` |
+| OANDA token | none | `TRADER_OANDA_TOKEN` | none |
 
-`--strategy-exec` runs an out-of-tree strategy executable instead of an
-in-tree one, launched by `trader` itself and driven over Strategy Protocol
-v1 — a gRPC protocol over a Unix-domain socket (ADR-062, ADR-063). The
-executable's own `Describe()` — not `--symbol`/`--interval` — determines
-the actual replay universe; `--symbol`/`--interval` only control what
-canonical data `run` publishes beforehand, which must still cover whatever
-the executable will request.
+The data root defaults to `/srv/data` (the `store` package's default), so a bare
+`trader data download` writes into that directory: give `--data-root` or
+`marketdata.root` to use another. The **token is read only from `TRADER_OANDA_TOKEN`**; there is deliberately no flag
+and no config key for it, and a config file containing a secret-looking key is
+rejected. The host defaults to OANDA's practice host, so a run with no `base_url`
+can only read demo data; name the live host (`https://api-fxtrade.oanda.com`)
+explicitly to download from a live account.
 
-#### Building a Go external strategy
-
-Import [`sdk`](../sdk) and implement its `Strategy`
-interface (`Describe`/`Start`/`OnBar`, plus the optional `FillHandler`
-capability). `sdk.Serve(yourStrategy)` is normally the entire body
-of `main()`:
-
-```go
-func main() {
-    if err := sdk.Serve(NewMyStrategy(cfg)); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-See [`examples/sdk-minimal`](../examples/sdk-minimal) for
-the smallest complete, compiling example, and
-[`examples/sma-long-hold`](../examples/sma-long-hold) for a real,
-non-trivial one (SMA/indicator state, a ratcheting protective stop,
-decision-evidence signals) that is proven byte-for-byte equivalent to its
-in-tree counterpart, `strategy/smatrend`, by
-`cmd/trader/backtest/sma_long_hold_equivalence_test.go`.
-
-An external strategy never receives a broker handle, never evaluates risk,
-and never submits an order directly — it only describes intents, exactly
-like an in-tree `strategy.Strategy`. `sdk` itself, and every
-strategy built on it, is architecturally barred from importing Trader's
-`strategy`, `backtest`, `service`, `cmd`, `adapters`, `broker`, `execution`,
-`risk`, or `pipeline` packages.
-
-#### Running it from a config file
-
-`--config` may carry an external run in full (issue #469): `strategy.exec`
-names the executable, `strategy.config` the file forwarded to it, and
-`market.symbols` the universe as a comma-separated list (the config loader
-has no list type; a folded `>-` scalar keeps a long list readable). An
-explicit `--symbol` replaces the config's universe. With `strategy.exec` set,
-`strategy.name` is not checked against the in-process registry.
-`--strategy-args` remains flag-only. Relative paths resolve against the
-working directory, not the config file.
-
-```yaml
-kind: backtest
-market:
-  interval: D1
-  from: 2020-01-01T00:00:00Z
-  to: 2024-12-31T00:00:00Z
-  data_raw_root: /path/to/raw/oanda
-  symbols: >-
-    EURUSD, GBPUSD, AUDUSD
-backtest:
-  adverse_distance: 0.01
-strategy:
-  exec: ./my-scanner
-  config: my-scanner.yml
-```
+Set the token in your own shell without putting it on a command line, and unset it
+afterwards:
 
 ```sh
-trader backtest run --config run.yml
+read -rs TRADER_OANDA_TOKEN && export TRADER_OANDA_TOKEN
+# ... run trader data download ...
+unset TRADER_OANDA_TOKEN
 ```
 
-#### Study configs (`kind: study`)
-
-A study or scanner never trades, so it has no use for an account or position
-sizing. A `kind: study` document states only its market and the executable to
-launch (issues #471 and #474):
-
-```yaml
-kind: study
-
-market:
-  symbols: >-
-    EURUSD, GBPUSD, AUDUSD
-  interval: D1
-  provider: oanda
-  from: 2020-01-01T00:00:00Z
-  to: 2024-12-31T00:00:00Z
-  data_raw_root: /path/to/raw/oanda
-
-study:
-  name: my-scanner
-  exec: ./my-scanner
-  config: my-scanner.yml    # optional: defaults to this file itself
-```
-
-`study.name` and `study.exec` are required. Trader does not interpret the
-study's own parameters: they belong to the executable, which receives
-`study.config` (by default the run file itself, so a scanner can keep its
-settings in its own section of the same document, such as `scanner:`) as
-`TRADER_STRATEGY_CONFIG`. Unknown top-level sections are ignored by Trader.
-
-A study run does not print the backtest report (it trades nothing, so
-performance and trade statistics would be all zeros). It prints a short
-study summary (strategy, run id, span, interval, instrument count and the
-number of signals the strategy emitted); `--format json` prints the same
-fields as JSON. The signals themselves are journaled with `--journal PATH`.
-
-A document is exactly one kind, and mixing is an error rather than a guess.
-The check is by presence: any key of the other kind written in the file, the
-environment or the flags is rejected, even when it equals the default
-(`backtest.currency: USD` beside `kind: study` is an error). Beside `kind:
-study`, `backtest.*` and every `strategy.*` key are rejected (`strategy.exec`
-and `strategy.config` with a pointer to `study.exec`/`study.config`); beside
-`kind: backtest`, any `study.*` key is. For a study, `--strategy-exec`,
-`--strategy-config` and `--strategy-name` override `study.exec`,
-`study.config` and `study.name` (there is no such alias for the environment:
-use `TRADER_STUDY_EXEC` and friends). A study run has no sizing policy, so a
-strategy that emits an intent fails at sizing. Explicit command-line flags
-(`--from`, `--symbol`, ...) still override the market values.
-
-Because `trader` forwards `strategy.config` as `TRADER_STRATEGY_CONFIG`, a
-strategy can often read the same file it was launched with and need no
-`--strategy-args` at all.
-
-#### Running it with flags
+### trader data download
 
 ```sh
-go build -o /tmp/my-strategy ./cmd/my-strategy
-
-trader backtest run \
-  --strategy-exec /tmp/my-strategy \
-  --strategy-config my-strategy.json \
-  --symbol EURUSD --interval H1 --from 2024-01-01 --to 2024-06-01 \
-  --adverse-distance 0.0050 \
-  --data-raw-root /path/to/raw/oanda
+trader data download --data-root /srv/data --instrument EURUSD,GBPUSD \
+    --interval h1 --from 2024-01-01 --to 2024-04-01
 ```
 
-`--strategy-config`'s path is forwarded to the child process via the
-`TRADER_STRATEGY_CONFIG` environment variable — a `trader`-owned
-convention, not part of Strategy Protocol v1 itself, so a config file's
-own schema is entirely the strategy author's choice (`json.Unmarshal` a
-struct, parse YAML, whatever the strategy needs). `--strategy-args` passes
-additional arguments straight through to the executable, unmodified.
+`--from` and `--to` are UTC dates or RFC 3339 instants; the range is half-open
+(`--to` is not included). Intervals: `m1`, `h1`, `h4`, `d1`. The scope is the 26
+audited currency pairs.
 
-#### Process lifecycle and logs
+- Rows already on file are never changed; only missing rows are added, and a file
+  that would gain nothing is left alone. If the provider now reports different
+  values for a stored row, the stored row is kept and the difference is counted and
+  logged.
+- A candle the provider still reports as forming is never stored.
+- Requests are paced, and a transient failure (429, 5xx, network) is retried with
+  backoff. A rejected token (401) is retried only within the same attempt budget and
+  then reported; a 403 is not retried.
+- Output: one line per month, `<path>: fetched N, added N, kept N, not stored
+  (incomplete) N`, then a total.
 
-`trader` launches the executable, creates a fresh Unix-domain socket per
-run, and waits for it to complete Strategy Protocol v1's Handshake before
-the backtest replay begins; a child that fails to start, or exits before
-completing Handshake, fails the run immediately with a clear error rather
-than hanging. The child's own environment is inherited from `trader`'s own
-process (`PATH`, `HOME`, credentials, etc.), not a stripped one. The
-child's stderr is captured and logged as structured warning records under
-`external strategy stderr`; its stdout is not touched. On success, `trader`
-sends a normal-completion `SessionEnd` before terminating the process; on
-any other exit path the process still receives `SIGTERM`, escalating to
-`SIGKILL` after a grace period. A child that exits unexpectedly mid-run —
-even between two strategy callbacks that would not otherwise have
-surfaced the crash — is detected and reported as a run failure, never
-silently treated as a successful backtest.
-
-#### Protocol/version mismatch behavior
-
-`trader` and the strategy negotiate a Strategy Protocol version and a
-capability set (for example, whether the strategy implements
-`FillHandler`) during Handshake. A version the host does not recognize, or
-a capability the strategy's own guest-side runtime requires but the host's
-accepted response omits, fails the Handshake explicitly — `run` reports
-this as a clear startup error, never a silent degradation to a subset of
-behavior.
-
-#### Reproducibility
-
-Every external run's persisted report records unambiguous provenance
-under `run.strategy_parameters`, alongside the strategy's own
-`run.strategy_name`/`run.strategy_version` (from its Handshake
-`Descriptor`, the same fields any in-tree strategy's manifest carries):
-
-```json
-{
-  "mode": "external",
-  "strategy_name": "my-strategy",
-  "strategy_version": "1.0.0",
-  "protocol_version": "v1",
-  "transport": "unix",
-  "exec": "/tmp/my-strategy",
-  "exec_digest": "sha256:...",
-  "args": [],
-  "config": "/home/you/my-strategy.json",
-  "config_digest": "sha256:..."
-}
-```
-
-`exec_digest`/`config_digest` are content digests of the executable file
-and the `--strategy-config` file itself, both computed immediately before
-launch — they distinguish two different builds behind the identical
-`--strategy-exec` path, or two different config files behind the identical
-`--strategy-config` path (for example, the same path edited in place
-between two runs), neither of which a path/name alone can. `config_digest`
-is empty when `--strategy-config` is not given. The ephemeral Unix-domain
-socket path `trader` generates for that one run is never recorded anywhere
-in this provenance: it has no reproducibility meaning and is specific to
-that single process's lifetime.
-
-#### v1 limitations / non-goals
-
-- Only a local executable form is supported (`--strategy-exec /path/to/binary`
-  plus `--strategy-args`); `unix://`/`grpc://` remote endpoint forms are not
-  implemented in v1.
-- Exactly one strategy executable per run; there is no multi-strategy or
-  multi-process orchestration.
-- No sandboxing beyond normal OS process isolation — an external strategy
-  executable runs with the same OS-level privileges as the `trader`
-  process that launches it (though never with broker/risk/execution
-  access at the protocol level, per Strategy Protocol v1's own design).
-- Config-file schema is entirely the strategy author's own responsibility;
-  `trader` never parses or validates it.
-
-### `trader backtest show <run-id>`
-
-Renders a persisted run snapshot written by a prior `run` — no
-recomputation, byte-identical to what `run` itself rendered.
-
-| Flag           | Default           | Meaning                                     |
-|----------------|-------------------|---------------------------------------------|
-| `--output-dir` | `./backtest-runs` | directory the run's snapshot was written to; also `TRADER_BACKTEST_OUTPUT_DIR` |
-| `--format`     | `table`           | `table`, `json`, or `org`                   |
+### trader data build
 
 ```sh
-trader backtest show run_01HKK5WY00D5982ACAHT01Q80K --format org
+trader data build --data-root /srv/data --instrument EURUSD --interval h1 \
+    --from 2024-01-01 --to 2024-04-01
 ```
 
----
+Builds canonical-v2 files for `h1` or `d1` (ADR-090). For each month:
 
-## `trader-mcp` — MCP Server
+- a good bar gets its **mid** price (the exact midpoint of bid and ask) and a
+  **modeled availability time**: the next interval boundary, for `d1` 17:00
+  America/New_York (so a day is 23 or 25 hours across a daylight-saving change). A
+  consumer may use a bar only from that time;
+- a row that is not a good bar (still forming, off the interval boundary, crossed
+  bid/ask, impossible shape, a duplicate or out of order) is **kept in the file as a
+  bad record** with its reason and raw row number. A partition with bad records is
+  not complete data;
+- a month with no raw file is reported as missing and skipped; a month that cannot
+  be built (for example a damaged raw file) is reported as failed and the rest carry
+  on, with a non-zero exit at the end;
+- a file already built from the same raw bytes is left alone; one from a different
+  build, or in an old format, is replaced.
 
-`trader-mcp` serves Trader's research tools to MCP clients (Claude,
-Codex, and others) over stdio. Build it with
-`go build ./cmd/trader-mcp`, then register the binary as a stdio MCP
-server in your client.
+Output: one line per month (`<path>: built|unchanged|replaced, good N, bad N`, or
+`no raw partition` / `failed: ...`), then `total: built N, unchanged N, replaced N,
+missing raw N, failed N; good bars N, bad records N`.
 
-It resolves configuration exactly as `trader data` does: the same
-`TRADER_*` environment variables, default data roots, and credentials.
+### Checking a live account
 
-| Flag | Environment | Meaning |
-|---|---|---|
-| `--store-root`, `--raw-root`, `--archive-root` | `TRADER_STORE_ROOT`, `TRADER_RAW_ROOT`, `TRADER_ARCHIVE_ROOT` | data roots, as for `trader data` |
-| `--provider` | `TRADER_PROVIDER` | default provider (`oanda`, `alpaca`, or `stooq`) for requests that don't name one |
-| `--oanda-base-url`, `--alpaca-base-url` | `TRADER_OANDA_BASE_URL`, `TRADER_ALPACA_BASE_URL` | provider endpoints |
-| — | `TRADER_OANDA_TOKEN`, `TRADER_ALPACA_KEY_ID`, `TRADER_ALPACA_SECRET_KEY` | credentials (environment only; never logged or returned) |
-| `--allow-writes` | `TRADER_MCP_ALLOW_WRITES` | enable data-mutating tools (default off) |
-| `--backtest-output-dir` | `TRADER_BACKTEST_OUTPUT_DIR` | where backtest runs are saved and read (default `./backtest-runs`, shared with `trader backtest run`/`show`) |
-| `--log-level`, `--log-format`, `--log-output` | `TRADER_LEVEL`, `TRADER_FORMAT`, `TRADER_OUTPUT` | logging; output is stderr or a file, never stdout |
+`make smoke` runs the opt-in live check: it downloads a small bounded range into a
+temporary directory using your token from the environment, verifies what landed on
+disk and prints only PASS or FAIL (details in `bin/smoke.log`). It is not part of
+`make check`.
 
-- **Write access is off by default.** Tools that change data, by
-  writing to the raw or canonical store or downloading with your
-  credentials, refuse to run unless the server was started with
-  `--allow-writes`. Read-only tools always work.
-- A raw or archive root you configure applies to the default provider
-  only. Requests for another provider use that provider's own default
-  under the Trader data directory, because raw data is
-  provider-specific.
-- **stdout is the protocol stream.** `--log-output stdout` is rejected,
-  and logs default to stderr.
+## Backtests
 
-### Tools
-
-| Tool | Access | What it does |
-|---|---|---|
-| `trader_version` | read | the Trader build serving the session |
-| `trader_instruments` | read | resolve `symbols` for a `provider`: instrument ID, kind (`fx`, `equity`, `etf`), exchange, and the provider's symbol |
-| `trader_marketdata_coverage` | read | for `symbols` at an `interval` (`M1`, `H1`, `H4`, `D1`, `W1`): monthly partitions and their status, gaps, and the raw and canonical data held. `from`/`to` are optional; omit both to cover each symbol's existing canonical data |
-| `trader_marketdata_canonicalize` | write | build canonical data for `symbols` at an `interval` from data already held: a stooq archive under the archive root, or raw data in the raw store. Never downloads. Omit `from`/`to` for each symbol's whole source; `force` rebuilds current partitions. Same operation as `trader data build` |
-| `trader_run_backtest` | read* | run a backtest with an in-process strategy (`buy-and-hold` or `ema-cross`), as `trader backtest run` does with the same inputs and defaults, and return its run ID, config digest, and a summary (run, dataset, performance, trade statistics, margin, account, trade counts). The run is saved to the backtest output directory |
-| `trader_backtest_result` | read | a saved run's full report by run ID — the record `trader backtest show` reads, so either can read the other's runs. For a run made with `--strategy-exec`, the executable and config paths and the argument list are omitted (their content digests remain), since they are local to the machine |
-| `trader_marketdata_update` | write | bring canonical data forward: oanda and alpaca download new raw data; stooq has no live feed and re-reads its archive. Omit `from`/`to` to update from each symbol's last canonical bar through now (canonicalize first). Same operation as `trader data update` |
-
-The write tools return a result per symbol (`built`, `updated`, `current`, or
-`failed`, with the source used, the range acted on, canonical data before and
-after, and what was published) plus a summary with counts and `ok`. A failing
-symbol never fails the call. A client that sends a progress token receives a
-progress notification as each symbol finishes. Writes for one provider run one
-at a time, even across concurrent tool calls, so two overlapping updates can
-never lose each other's data; a call simply waits its turn. A typical workflow:
-
-\* `trader_run_backtest` always saves its report, but builds canonical market
-data first only with `--allow-writes`; without it, the run's data must already
-be current or the call fails saying so (run `trader_marketdata_canonicalize`).
-External strategy executables and journal files are not available over MCP.
-A backtest runs synchronously: the call returns when the run finishes, sending
-a progress notification per stage (preparing market data, running, saved) to a
-client that supplies a progress token. A client may cancel a run it no longer
-wants; set the client's tool timeout to cover your longest expected run.
-
-```text
-trader_marketdata_coverage   → what exists
-trader_marketdata_update     → bring it current (or canonicalize for a new archive)
-trader_marketdata_coverage   → confirm
-trader_run_backtest          → run it; trader_backtest_result for the full report
-```
-
-Every market-data tool takes a list of symbols and returns one result per
-symbol, so an unknown symbol is reported on its own entry without hiding
-the others. A bad interval, date, or provider, or an empty symbol list,
-fails the whole call. `provider` defaults to the server's. FX providers
-take 6-letter pairs (`EURUSD`); equity providers currently take the
-reference symbols `SPY`, `QQQ`, and `AAPL`. Results are the same as
-`trader data coverage` reports for the same data, and no tool returns
-bars.
-
-Error messages a client sees describe only what it sent (a bad symbol,
-interval, date, or provider). Any other failure, such as a storage or I/O
-error, is reported as "... failed; see the trader-mcp server log", with the
-details logged on the server, so tool results never reveal file paths or
-configuration.
-
----
-
-## Environment Variables
-
-**Not every flag documented above is settable as an environment
-variable.** Only fields actually loaded through `config.Load` (visible
-by their own `config:` struct tag in the command's source) get an
-environment-variable form; every other flag is a plain Cobra flag with
-no config-file or environment-variable backing at all, no matter how
-important it looks. Where a field *is* config-backed, the variable name
-follows `config`'s naming convention: prefix `TRADER_`, then the dotted
-config path, uppercased with `.` replaced by `_` — see the
-[`config` package doc comment](../internal/config/doc.go) for the full rule.
-
-Concretely, per command:
-
-- **`trader backtest run`** — only the fields shown in the `--config`
-  YAML reference above are env-backed: `TRADER_KIND`,
-  `TRADER_MARKET_SYMBOLS`, `_INTERVAL`, `_FROM`, `_TO`, `_PROVIDER`, `_DATA_STORE_ROOT`,
-  `_DATA_RAW_ROOT`, `TRADER_BACKTEST_CURRENCY`, `_STARTING_CAPITAL`,
-  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_INITIAL_MARGIN_RATIO`,
-  `TRADER_STUDY_NAME`, `_EXEC`, `_CONFIG`, and `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
-  `_ALLOWED_SIDE`, `_QUANTITY`, `_BUY_DATE`, `_SELL_DATE`, plus
-  `TRADER_BACKTEST_OUTPUT_DIR` (shared with `show` and `trader-mcp`).
-  `--journal`, `--format`, and `--warmup-bars` are **not**
-  env-backed — flag only.
-- **`trader data`** (all subcommands) — only the parent command's
-  persistent flags are env-backed: `TRADER_STORE_ROOT`,
-  `TRADER_RAW_ROOT`, `TRADER_ARCHIVE_ROOT`, `TRADER_PROVIDER`, `TRADER_OANDA_BASE_URL`. Each
-  leaf subcommand's own `--from`/`--to`/`--format` are flag only.
-- **`trader broker`** / **`trader execution`** — only the shared
-  `--starting-cash`/`--currency`/`--account-id` flags are env-backed
-  (`TRADER_STARTING_CASH`, `TRADER_CURRENCY`, `TRADER_ACCOUNT_ID`).
-  Every leaf-specific flag (`--symbol`, `--side`, `--quantity`,
-  `--type`, `--price`, `--adverse-distance`, `--format`, ...) is flag
-  only.
-
-These credentials are environment-only and have no flag at all:
-
-| Variable                   | Meaning                                                          |
-|-----------------------------|-------------------------------------------------------------------|
-| `TRADER_OANDA_TOKEN`        | OANDA API token, required for `trader data sync`/`update` and `trader account activity sync` |
-| `TRADER_ALPACA_KEY_ID`      | Alpaca API key ID, required (with the secret key below) for `trader data sync`/`update --provider alpaca` |
-| `TRADER_ALPACA_SECRET_KEY`  | Alpaca API secret key, required (with the key ID above) for `trader data sync`/`update --provider alpaca` |
-
-### `trader data stq2bars <symbol>`
-
-Converts one native Stooq daily ZIP into Trader managed raw partitions and
-canonical D1 bars. The command imports the source before checking/building, so
-refreshed ZIP contents participate in the normal raw fingerprint and stale-data
-semantics.
-
-```sh
-bin/stq2bars SPY
-bin/stq2bars SPY --from 2010-01-01 --to 2020-01-01
-bin/stq2bars SPY --rebuild
-```
-
-The provider defaults to `stooq` when no provider is configured, and the range
-defaults to the archive's actual first and last dates. Set `TRADER_ARCHIVE_ROOT`
-or pass `--archive-root` to locate native ZIPs; `--archive` selects one ZIP
-explicitly. SPY, QQQ, and AAPL have reference listing metadata. Other symbols
-must provide `--exchange` and `--kind`. Extraction is temporary and source ZIPs
-are never modified.
+`trader` with no command runs the EMAX scenarios (one per `testdata/emax`
+directory): a reversal exit, three stop cases (wick, cross, gap), a reversal and a
+short stop. Each prints its bar count, orders and result. Scenario bars are
+synthetic design data with a single price series, treated as the mid price. Running
+a backtest on canonical bars is not available yet.

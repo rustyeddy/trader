@@ -9,6 +9,11 @@ accepted storage convention in =docs/arch/market-data-storage.md= and builds on
 ADR-020 (historic data), ADR-023 (structured logging), ADR-078 (security, S-1)
 and ADR-088 (the per-run instrument catalog).
 
+Amended in part by ADR-092 (Proposed): the package paths (OANDA is
+=provider/oanda=), the =store= package that owns data-file I/O and the data root,
+and APIs that take no root. The text below carries that implementation state; the
+layout, the raw format, immutability and the secret rule are unchanged.
+
 This ADR covers the first Market Data layer only: where raw data lives, the one
 resolver that owns paths, the OANDA raw store, and the package boundary. The
 client and the command line are later stages and are named here only so their

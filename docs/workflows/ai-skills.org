@@ -26,8 +26,7 @@ Input: an issue number.
    tests; read only the relevant ADR sections.
 3. Create a branch =<type>/<N>-<short-description>= from the issue, so the PR
    is attached to it: =gh issue develop N --base <base> --name <branch>
-   --checkout=.  The base is =main= unless the issue names another, such as
-   =design= for =examples/design=.
+   --checkout=.  The base is =main= unless the issue names another.
 4. Post or keep a plan using =docs/workflows/implementation-checklist.org=.
 5. Implement the smallest change that meets the criteria, with tests and docs.
    Write Go tests per /Go testing/ below.
@@ -147,9 +146,9 @@ regressions, not merely increase a coverage number.
 - During iteration run targeted =go test ./<package>=; before finishing run
   =go test ./...=, =go vet ./...=, and =go test -race ./...= when feasible.  Report
   any check not run or failures observed.
-- For =examples/design=, run =make check && make run= from that directory after
-  every change.  Keep the synthetic example executable throughout the design
-  phase.
+- Run =make check= after every change, and check that the EMAX backtest summaries
+  are unchanged (=go run ./cmd/trader 2>/dev/null | md5sum= prints
+  =195e457a21def1223e7181c86cb824a4=).
 - Inspect coverage with =go test -cover ./...= or focused =-coverprofile= when
   useful; explain meaningful untested paths instead of concealing them.
 - Keep scope tight: tests should support the approved API and TODO, not motivate
