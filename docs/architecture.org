@@ -1,6 +1,10 @@
 #+TITLE: Trader — Architecture North Star
 #+SUBTITLE: Simple, understandable Go, validated by working examples
 #+STARTUP: overview
+#+begin_quote
+Note (2026-11-15): written while the design prototype lived in =examples/design=. That code is now the root package (=broker.go=, =order.go=, =scanner.go= and the rest) and =examples/design= no longer exists; read paths and commands here with that in mind. See =docs/README.md= for what is current.
+#+end_quote
+
 
 * First-Order Goal: Clarity and Simplicity
 

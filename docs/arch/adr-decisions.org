@@ -28,6 +28,17 @@ Guidance for contributors:
 - When a decision is not yet settled, keep the ADR in =Proposed= status
   rather than promoting it to =Accepted=.
 
+* Which ADRs describe the live tree
+
+The repository was restarted from a smaller design, and the earlier, larger code
+is under =_archive/=. ADRs written for that code (the earlier backtest services,
+the MCP server, the Alpaca and Stooq providers, account activity, the strategy
+protocol and process manager, the public SDK surface, and similar) may name
+packages, commands or paths that exist only in the archive. Their reasoning still
+informs the design; where an ADR names a path, check the tree. ADR-004, ADR-078 and
+ADR-086 to ADR-092 describe the live tree. Whether an archived-code ADR is
+superseded when its code is ported is decided when it is ported.
+
 * Status Definitions
 
 Every ADR carries exactly one status.
@@ -197,8 +208,9 @@ the original decided, use full supersession instead.
 | 087 | Formula and rounding table for adopting num in the root engine (in adr-087-num-adoption-formula-table.org) | Accepted |
 | 088 | Per-run instrument catalog replaces the root's global instrument map (in adr-088-root-instrument-catalog.org) | Accepted |
 | 089 | Market-data layout resolver, OANDA raw store and package boundary (in adr-089-market-data-store-and-package-boundary.org) | Accepted |
-| 090 | Raw to canonical bars (in adr-090-raw-to-canonical-bars.org) | Proposed |
-| 091 | Domain-owned services and shared market-data model (in adr-091-domain-services-and-shared-marketdata.org) | Proposed |
+| 090 | Raw to canonical bars (in adr-090-raw-to-canonical-bars.org) | Proposed; implemented (download-to-canonical, #639) |
+| 091 | Domain-owned services and shared market-data model (in adr-091-domain-services-and-shared-marketdata.org) | Proposed; implemented through #657 |
+| 092 | Provider packages, the store and root-less data APIs (in adr-092-provider-packages-and-store.org) | Proposed; amends parts of 089 |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

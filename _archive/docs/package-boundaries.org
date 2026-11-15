@@ -1,0 +1,134 @@
+#+TITLE: Trader Package Boundaries
+#+SUBTITLE: Supported external API and private runtime (ADR-065)
+#+STARTUP: overview indent
+
+* Supported External Surface
+
+Top-level library packages are deliberate compatibility commitments. Trader's
+runtime is under =internal/=; external strategies interact with it through
+Strategy Protocol v1 and =sdk=. This replaces the earlier broad public
+composition model (ADR-065, issue #400). There is no =pkg/= directory or
+compatibility facade for removed import paths.
+
+| Current package | Previous location | External? | Responsibility and dependency constraints |
+|-----------------+-------------------+-----------+--------------------------------------------|
+| sdk | sdk | Yes | Guest lifecycle and transport; depends on public values and protocol v1 |
+| indicator | indicator | Yes | Pure calculations; no runtime, I/O, or account access |
+| analysis | analysis | Yes | Deterministic research over indicator, marketdata, instrument, num |
+| instrument | instrument | Yes | Instrument identity, listing and resolution values |
+| num | num | Yes | Exact numeric values; package-private fixed-point implementation |
+| marketdata | marketdata (split) | Yes | Bars, calendars, intervals, ranges, dataset metadata/validation |
+| order | order (split) | Yes | Side, PositionSide, IntentKind and constants/validation/display |
+| version | version | Yes | Build identity |
+| protocol/strategy/v1 | protocol/strategy/v1 | Yes | Versioned wire contract |
+| internal/marketdata | marketdata (split) | No | Manager, queries/readers, coverage/plans, acquisition, storage, normalization; depends on public marketdata values |
+| internal/marketdata/internal/provider/* | marketdata/internal/provider/* | No | Provider adapters owned only by the internal data subsystem |
+| internal/order | order (split) | No | Canonical intents/proposals/requests/orders/fills/positions, lifecycle; depends on public order vocabulary and internal IDs |
+| internal/account | account | No | Runtime accounting snapshots |
+| internal/account/margin | account/margin | No | Pure gross-notional and initial-margin arithmetic shared by risk and the simulator (ADR-066) |
+| internal/service/accountactivity | service/accountactivity | No | Provider-neutral account-activity import loop (fetch page, stamp, Apply, repeat); depends on the Source and Store ports only (ADR-081) |
+| internal/service/accountreport | service/accountreport | No | Application service behind the account CLI's trade views: reconstructs the whole stream, then filters by close time; optional per-fill execution quality (ADR-084). Depends on the Store port, tradehistory and executionquality only |
+| cmd/internal/accountactivitycfg | cmd/internal/accountactivitycfg | No | Composition root for the account CLI: TRADER_ACCOUNTACTIVITY_* configuration, env-only OANDA token, default ledger root, and the broker registry, the only place provider names appear (ADR-084) |
+| internal/tradejournal | tradejournal | No | Pure Org-mode renderer of completed trades with optional execution quality: facts only, unknown never zero, empty Review scaffold, deterministic (ADR-085). Unrelated to internal/journal, the run journal. Imports only num, instrument, order, internal/accountactivity, tradehistory, executionquality |
+| internal/tradehistory | tradehistory | No | Derived, broker-neutral completed-trade view over account activities: position cycles, traceable to source activities, no storage or I/O (ADR-082). Imports only num, instrument, order, internal/accountactivity |
+| internal/executionquality | executionquality | No | Pure slippage and execution-quality derivation over a fill and an explicit benchmark; writes nothing back to the ledger (ADR-083). Imports only num, instrument, order, internal/accountactivity |
+| internal/accountactivity | accountactivity | No | Provider-neutral broker account activity model: fills, costs, cash events, with per-value provenance (ADR-079). Imports only num, instrument, order, internal/account |
+| internal/portfolio | portfolio | No | Cross-account projections |
+| internal/backtest | backtest | No | Deterministic runner and scheduler |
+| internal/broker | broker | No | Broker ports |
+| internal/execution | execution | No | Execution planning, no broker calls |
+| internal/risk | risk | No | Pure risk evaluation, no broker calls |
+| internal/pipeline | pipeline | No | Execution/risk/broker orchestration |
+| internal/strategy/* | strategy/* | No | In-process strategies and their runtime contract |
+| internal/service/* | service/* | No | Transport-neutral application services |
+| internal/adapters/* | adapters/* | No | Broker/journal/protocol implementations |
+| internal/journal | journal | No | Runtime records and recording contracts |
+| internal/report | report | No | Runtime result rendering |
+| internal/chart | chart | No | Research/result visualization |
+| internal/config | config | No | Composition-root configuration plumbing |
+| internal/mcpserver | mcpserver | No | MCP transport adapter over application services (ADR-022/ADR-068); defines the MarketData capability interface it consumes, implemented by service/marketdata.Service (ADR-070); dependencies injected by cmd/trader-mcp; no resolver, provider/archive, or storage orchestration in handlers |
+| internal/logging | logging | No | Logging configuration; SDK uses slog directly |
+| internal/clock | clock | No | Runtime clock/timer implementations |
+| internal/id | id | No | Canonical typed IDs and generation |
+| internal/tradertest | tradertest | No | Runtime test fixtures/builders |
+
+Known external-contract consumers in this repository are =examples/sdk-minimal=
+and =examples/sma-long-hold=, plus the separate-module acceptance fixture in
+=test/architecture=. Other examples compose private runtime packages inside
+Trader's module and are contributor examples, not supported external APIs.
+Independent external repositories were not inventoried by this change.
+
+* Dependency Direction
+
+#+BEGIN_EXAMPLE
+external guest executable
+    -> sdk -> protocol/strategy/v1
+           -> public order, marketdata, instrument, num
+    -> indicator
+    -> analysis -> indicator, public marketdata/instrument
+
+cmd/trader -> internal/service -> internal/backtest / internal/pipeline
+cmd/trader, cmd/trader-mcp -> cmd/internal/marketdatacfg -> internal/service/marketdata
+cmd/trader -> cmd/trader/account -> cmd/internal/accountactivitycfg, internal/service/accountactivity, internal/service/accountreport, internal/tradejournal
+cmd/internal/accountactivitycfg -> internal/adapters/accountactivity/*, internal/clock, internal/config, cmd/internal/marketdatacfg
+internal/service/accountreport -> internal/accountactivity, internal/tradehistory, internal/executionquality
+cmd/trader, cmd/trader-mcp -> cmd/internal/backtestcfg -> internal/service/backtest, cmd/internal/marketdatacfg
+cmd/trader-mcp -> internal/mcpserver -> internal/service/*
+internal/backtest -> internal/strategy, broker, journal, public values
+internal/pipeline -> internal/execution, risk, broker
+internal/accountactivity -> num, instrument, order, internal/account
+internal/tradehistory -> internal/accountactivity, num, instrument, order
+internal/executionquality -> internal/accountactivity, num, instrument, order
+internal/tradejournal -> internal/accountactivity, internal/tradehistory, internal/executionquality, num, instrument, order
+internal/marketdata -> public marketdata, instrument, num
+                    -> internal/marketdata/internal/provider/*
+internal/order -> public order, instrument, num, internal/id
+#+END_EXAMPLE
+
+Arrows mean imports. Public packages never depend on =internal/= runtime
+packages. The package-private =num/internal/fixed= arithmetic implementation
+is allowed, but its types must not appear in public signatures. No public
+alias, constructor, method, field, or interface exposes runtime objects.
+
+=sdk.Clock= contains only =Now() time.Time=. Protocol v1 carries host time,
+not host-driven guest timers. SDK run/order/correlation IDs are opaque strings;
+guest code does not generate canonical runtime IDs. Any future public SDK
+fixture package must depend only on public contracts.
+
+* Runtime Rules
+
+1. Strategies emit intents and never submit broker orders.
+2. Risk evaluates snapshots without calling brokers.
+3. Execution and risk remain separate; pipeline owns their composition with broker submission.
+4. Broker adapters translate external APIs without trading policy.
+5. Service wrappers depend on their domain packages, never the reverse.
+6. Concrete adapters are constructed at composition roots, not in services.
+7. Reports consume results; trading behavior never depends on rendering.
+8. Exact prices, quantities, money, and accounting values use =num=.
+9. Time and identity are injected; no hidden global configuration or unmanaged goroutines.
+10. Live-money operation requires explicit enablement and is never the default.
+11. Dependencies remain acyclic. Move shared values to their semantic owner rather than adding interfaces to hide a cycle.
+12. New public packages require a concrete consumer and an explicit compatibility decision.
+
+* Enforcement
+
+Go enforces external runtime import restrictions. =test/architecture=
+builds a real guest in a temporary module with an unrelated import path, and
+checks that direct imports of runtime packages fail specifically with Go's
+internal visibility error. It checks the supported package inventory, each
+public package's transitive dependencies, and exported type graphs for
+internal types, including methods and aliases.
+
+Existing package-level dependency checks continue to constrain runtime
+layering. Configuration/logging/time checks retain their narrow composition
+exemptions at the new paths. Normal verification is =make check= and
+=make build=; optional data-dependent test suites are also compiled with their
+build tags when moving their packages.
+
+* Architectural References
+
+ADR-065 owns this public boundary and its amendments to earlier public
+composition promises. ADR-062/063 own protocol/process behavior; ADR-064 owns
+the later Git-tag release process. The canonical architecture retains the
+runtime responsibilities and invariants; CONTRIBUTING.org owns workflow and
+review requirements.
