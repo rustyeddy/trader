@@ -470,7 +470,7 @@ func TestWritePartition_PathMatchesArchiveLayout(t *testing.T) {
 // nthCancelContext reports context.Canceled from Err() once its
 // remaining count is exhausted, mirroring marketdata/store_csv_test.go's
 // own helper (unexported per-package, so duplicated here rather than
-// shared across the marketdata/oanda boundary).
+// shared across the provider/oanda boundary).
 type nthCancelContext struct {
 	context.Context
 	remaining int

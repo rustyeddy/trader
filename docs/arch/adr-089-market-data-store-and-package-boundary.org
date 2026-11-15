@@ -47,7 +47,8 @@ What exists, checked on the owner's machine:
 
 - =internal/marketdata/layout= is the one path resolver (below). It imports only
   the standard library.
-- =internal/marketdata/oanda= holds OANDA's raw record, scope, reader, writer and
+- =provider/oanda= (moved there in
+  #634) holds OANDA's raw record, scope, reader, writer and
   inventory now, and its HTTP client in a later stage. It imports =num=,
   =instrument=, =layout= and the standard library. It never imports another
   provider package, the root package, or =cmd=.

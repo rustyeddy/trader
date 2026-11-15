@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/internal/marketdata/oanda"
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/provider/oanda"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
