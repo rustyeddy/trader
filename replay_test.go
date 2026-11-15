@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,10 +21,10 @@ func barSet(instrument string, lasts time.Duration, opens ...time.Duration) *mar
 	md := &marketData{instrument: instrument}
 	for i, offset := range opens {
 		open := mergeStart.Add(offset)
-		md.data = append(md.data, bar{
+		md.data = append(md.data, marketdata.Bar{
 			Instrument:  instrument,
 			Time:        open,
-			Mid:         ohlc{Close: px(int64(100000 + i))},
+			Mid:         marketdata.OHLC{Close: px(int64(100000 + i))},
 			AvailableAt: open.Add(lasts),
 		})
 	}
@@ -31,7 +32,7 @@ func barSet(instrument string, lasts time.Duration, opens ...time.Duration) *mar
 }
 
 // label names a bar by instrument and opening time, for readable expectations.
-func label(b bar) string {
+func label(b marketdata.Bar) string {
 	return b.Instrument + " " + b.Time.Format("15:04")
 }
 
@@ -221,13 +222,13 @@ func TestFrames_ReportsAvailability(t *testing.T) {
 func TestFrames_AnErrorDropsTheFrameBeingBuilt(t *testing.T) {
 	boom := errors.New("bad row")
 	sets := barSet("EURUSD", time.Hour, 0, time.Hour)
-	seq := func(yield func(bar, error) bool) {
+	seq := func(yield func(marketdata.Bar, error) bool) {
 		for _, b := range sets.data {
 			if !yield(b, nil) {
 				return
 			}
 		}
-		yield(bar{}, boom)
+		yield(marketdata.Bar{}, boom)
 	}
 
 	var got []frame

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -213,9 +214,9 @@ func TestReadBars_ParsesExactPointsInOrder(t *testing.T) {
 	assert.Equal(t, "d1", md.interval)
 	first := time.Date(2010, time.January, 4, 0, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
-	assert.Equal(t, []bar{
-		{Instrument: "EURUSD", Time: first, Volume: 1000, Mid: ohlc{Open: px(110323), High: px(110650), Low: px(109197), Close: px(110001)}, AvailableAt: second},
-		{Instrument: "EURUSD", Time: second, Mid: ohlc{Open: px(110015), High: px(110130), Low: px(110005), Close: px(110100)}, AvailableAt: second.AddDate(0, 0, 1)},
+	assert.Equal(t, []marketdata.Bar{
+		{Instrument: "EURUSD", Time: first, Volume: 1000, Mid: marketdata.OHLC{Open: px(110323), High: px(110650), Low: px(109197), Close: px(110001)}, AvailableAt: second},
+		{Instrument: "EURUSD", Time: second, Mid: marketdata.OHLC{Open: px(110015), High: px(110130), Low: px(110005), Close: px(110100)}, AvailableAt: second.AddDate(0, 0, 1)},
 	}, md.data)
 }
 

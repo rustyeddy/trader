@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,31 +25,31 @@ func hour(h int) time.Time { return pairStart.Add(time.Duration(h) * time.Hour) 
 
 // hbar is an hourly bar opening at the given time: complete, and available, an
 // hour later.
-func hbar(instrument string, opened time.Time, oN int64, cN int64) bar {
+func hbar(instrument string, opened time.Time, oN int64, cN int64) marketdata.Bar {
 	o, c := px(oN), px(cN)
-	return bar{
+	return marketdata.Bar{
 		Instrument:  instrument,
 		Time:        opened,
-		Mid:         ohlc{Open: o, High: num.Max(o, c), Low: num.Min(o, c), Close: c},
+		Mid:         marketdata.OHLC{Open: o, High: num.Max(o, c), Low: num.Min(o, c), Close: c},
 		AvailableAt: opened.Add(time.Hour),
 	}
 }
 
 // pairFrame is the frame of the given bars, which share an availability.
-func pairFrame(bars ...bar) frame {
+func pairFrame(bars ...marketdata.Bar) frame {
 	return frame{availableAt: bars[0].AvailableAt, bars: bars}
 }
 
 // reactStrategy answers each bar with whatever react returns and keeps the
 // orders it made.
 type reactStrategy struct {
-	react func(b bar) *order
+	react func(b marketdata.Bar) *order
 	made  []*order
 }
 
 func (s *reactStrategy) name() string { return "react" }
 func (s *reactStrategy) init() error  { return nil }
-func (s *reactStrategy) onBar(_ context.Context, b bar) *order {
+func (s *reactStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	o := s.react(b)
 	if o != nil {
 		s.made = append(s.made, o)
@@ -61,7 +62,7 @@ func (s *reactStrategy) onBar(_ context.Context, b bar) *order {
 func openOn(on string, instrument string, pN int64, stopN int64) *reactStrategy {
 	p, stop := px(pN), px(stopN)
 	done := false
-	return &reactStrategy{react: func(b bar) *order {
+	return &reactStrategy{react: func(b marketdata.Bar) *order {
 		if done || b.Instrument != on {
 			return nil
 		}
@@ -102,11 +103,11 @@ func TestCheckFrame_RefusesFramesItCannotOrder(t *testing.T) {
 		want string
 	}{
 		{"no bars", frame{availableAt: eur.AvailableAt}, "no bars"},
-		{"no availability", frame{bars: []bar{unknown}}, "no availability"},
-		{"a bar from another moment", frame{availableAt: eur.AvailableAt, bars: []bar{eur, late}}, "is available at"},
-		{"instruments out of order", frame{availableAt: eur.AvailableAt, bars: []bar{gbp, eur}}, "in order"},
-		{"an instrument twice", frame{availableAt: eur.AvailableAt, bars: []bar{eur, eur}}, "in order"},
-		{"mixed opening times", frame{availableAt: eur.AvailableAt, bars: []bar{eur, offset}}, "mixed opening times"},
+		{"no availability", frame{bars: []marketdata.Bar{unknown}}, "no availability"},
+		{"a bar from another moment", frame{availableAt: eur.AvailableAt, bars: []marketdata.Bar{eur, late}}, "is available at"},
+		{"instruments out of order", frame{availableAt: eur.AvailableAt, bars: []marketdata.Bar{gbp, eur}}, "in order"},
+		{"an instrument twice", frame{availableAt: eur.AvailableAt, bars: []marketdata.Bar{eur, eur}}, "in order"},
+		{"mixed opening times", frame{availableAt: eur.AvailableAt, bars: []marketdata.Bar{eur, offset}}, "mixed opening times"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -347,7 +348,7 @@ func pairBars() (*marketData, *marketData) {
 		}
 		eur.data = append(eur.data, hbar("EURUSD", hour(h), points(o), points(c)))
 	}
-	gbp := &marketData{instrument: "GBPUSD", data: []bar{
+	gbp := &marketData{instrument: "GBPUSD", data: []marketdata.Bar{
 		hbar("GBPUSD", hour(0), 200000, 200000),
 		hbar("GBPUSD", hour(1), 200000, 200600),
 		hbar("GBPUSD", hour(2), 200600, 201200),
@@ -454,7 +455,7 @@ func TestEMAXEach_TwoInstrumentsShareOneAccount(t *testing.T) {
 func TestEMAXEach_StaggeredSignalsSizeAgainstTheEarlierPosition(t *testing.T) {
 	captureLogs(t)
 	eur, _ := pairBars()
-	gbp := &marketData{instrument: "GBPUSD", data: []bar{
+	gbp := &marketData{instrument: "GBPUSD", data: []marketdata.Bar{
 		hbar("GBPUSD", hour(1), 200000, 200000),
 		hbar("GBPUSD", hour(2), 200000, 200600),
 		hbar("GBPUSD", hour(3), 200600, 201200),
@@ -507,10 +508,10 @@ func TestEMAXEach_KeepsStatePerInstrument(t *testing.T) {
 
 func TestTrader_OnFrame_ReportsABrokerFailureWithTheFrame(t *testing.T) {
 	captureLogs(t)
-	tr, _ := pairTrader(usd(10000), &reactStrategy{react: func(bar) *order { return nil }})
+	tr, _ := pairTrader(usd(10000), &reactStrategy{react: func(marketdata.Bar) *order { return nil }})
 	eur, gbp := hbar("EURUSD", hour(1), 110000, 110000), hbar("GBPUSD", hour(1), 130000, 130000)
 
-	err := tr.onFrame(context.Background(), frame{availableAt: eur.AvailableAt, bars: []bar{gbp, eur}})
+	err := tr.onFrame(context.Background(), frame{availableAt: eur.AvailableAt, bars: []marketdata.Bar{gbp, eur}})
 
 	require.Error(t, err)
 	assert.True(t, strings.HasPrefix(err.Error(), "broker on frame at "), err.Error())
@@ -518,7 +519,7 @@ func TestTrader_OnFrame_ReportsABrokerFailureWithTheFrame(t *testing.T) {
 
 func TestTrader_OnBar_ReportsABrokerFailureWithTheBar(t *testing.T) {
 	captureLogs(t)
-	tr, _ := pairTrader(usd(10000), &reactStrategy{react: func(bar) *order { return nil }})
+	tr, _ := pairTrader(usd(10000), &reactStrategy{react: func(marketdata.Bar) *order { return nil }})
 	b := hbar("EURUSD", hour(1), 110000, 110000)
 	b.AvailableAt = time.Time{}
 

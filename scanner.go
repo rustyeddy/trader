@@ -5,6 +5,8 @@ import (
 	"iter"
 	"math"
 	"time"
+
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // trend is how a scanner classifies an instrument. It is a market reading, not
@@ -64,7 +66,7 @@ type emaPair struct {
 // is seeded. A bar that is missing gives no reading and does not advance the
 // EMAs. It needs no trader, broker or account. Cancellation arrives through
 // bars, as an error. On any error it returns no readings, never a partial list.
-func runEMAScan(bars iter.Seq2[bar, error], short, long int) ([]trendReading, error) {
+func runEMAScan(bars iter.Seq2[marketdata.Bar, error], short, long int) ([]trendReading, error) {
 	if short <= 0 || short >= long {
 		return nil, fmt.Errorf("ema scan: need 0 < short < long (short=%d long=%d)", short, long)
 	}

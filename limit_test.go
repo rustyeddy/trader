@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -72,7 +73,7 @@ func TestBroker_OnBar_ShortLimitFillsAtTheLimitOrTheBetterOpen(t *testing.T) {
 	captureLogs(t)
 	tests := []struct {
 		name string
-		b    bar
+		b    marketdata.Bar
 		want price
 	}{
 		{"touched", stopBar(110000, 111000, 109500, 110500), px(111000)},

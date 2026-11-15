@@ -1,6 +1,9 @@
 package trader
 
-import "github.com/rustyeddy/trader/num"
+import (
+	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
+)
 
 // ema is an exponential moving average of the close, seeded with the SMA
 // of the first window closes.
@@ -21,7 +24,7 @@ func newEMA(window int) *ema {
 
 // onBar returns the current EMA, and false until a full window has been
 // seen to seed it.
-func (e *ema) onBar(b bar) (float64, bool) {
+func (e *ema) onBar(b marketdata.Bar) (float64, bool) {
 	val := b.OHLC().Close.Float64()
 	if e.count < e.window {
 		e.count++
@@ -65,7 +68,7 @@ func newATR(window int) *atr {
 // onBar returns the current ATR, in price units, and false until window+1 bars
 // have been seen: a true range needs a previous close, so the first bar only
 // supplies one.
-func (a *atr) onBar(b bar) (float64, bool) {
+func (a *atr) onBar(b marketdata.Bar) (float64, bool) {
 	prev, px := a.prev, b.OHLC()
 	a.prev = px.Close
 	if a.bars == 0 {

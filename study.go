@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"iter"
 	"time"
+
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // atrObservation is one ATR measurement. opened is the opening time of the bar
@@ -18,7 +20,7 @@ type atrObservation struct {
 // a measurement for every bar from the first one that has a full window. It
 // needs no trader, broker or account. Cancellation arrives through bars, as an
 // error. On any error it returns no measurements, never a partial series.
-func runATRStudy(bars iter.Seq2[bar, error], window int) ([]atrObservation, error) {
+func runATRStudy(bars iter.Seq2[marketdata.Bar, error], window int) ([]atrObservation, error) {
 	indicator := newATR(window)
 	var observations []atrObservation
 	for b, err := range bars {

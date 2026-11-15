@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ func TestOrder_Execution(t *testing.T) {
 		act  action
 		dir  direction
 		p    int64
-		b    bar
+		b    marketdata.Bar
 		want int64
 		hit  bool
 	}
@@ -108,17 +109,17 @@ func TestOrder_Execution_StateInstrumentAndTime(t *testing.T) {
 // The engine reads a bar's price through OHLC(): mid first, so a bar that also
 // carries bid and ask fills on the mid, and a bar with only a bid fills on that.
 func TestOrder_Execution_ReadsThePriceSeriesThroughOHLC(t *testing.T) {
-	mid := ohlc{Open: px(110000), High: px(110400), Low: px(109500), Close: px(110200)}
-	bid := ohlc{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}
-	ask := ohlc{Open: px(110010), High: px(110410), Low: px(109510), Close: px(110210)}
+	mid := marketdata.OHLC{Open: px(110000), High: px(110400), Low: px(109500), Close: px(110200)}
+	bid := marketdata.OHLC{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}
+	ask := marketdata.OHLC{Open: px(110010), High: px(110410), Low: px(109510), Close: px(110210)}
 	mk := func() *order {
 		return &order{instrument: "EURUSD", orderType: marketOrder, action: open, direction: long,
 			state: stateSubmitted, Time: testStart}
 	}
 
 	next := testStart.Add(24 * time.Hour) // a strategy's order fills on a later bar
-	withAll, hit1 := mk().execution(bar{Instrument: "EURUSD", Time: next, Bid: bid, Ask: ask, Mid: mid})
-	bidOnly, hit2 := mk().execution(bar{Instrument: "EURUSD", Time: next, Bid: bid})
+	withAll, hit1 := mk().execution(marketdata.Bar{Instrument: "EURUSD", Time: next, Bid: bid, Ask: ask, Mid: mid})
+	bidOnly, hit2 := mk().execution(marketdata.Bar{Instrument: "EURUSD", Time: next, Bid: bid})
 
 	require.True(t, hit1 && hit2)
 	assert.Equal(t, px(110000), withAll, "mid wins when it is there")

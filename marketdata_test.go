@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,10 +106,10 @@ func TestPrice_Float64(t *testing.T) {
 }
 
 // testBars builds bars whose closes are the given integer points.
-func testBars(closes ...price) []bar {
-	bars := make([]bar, len(closes))
+func testBars(closes ...price) []marketdata.Bar {
+	bars := make([]marketdata.Bar, len(closes))
 	for i, c := range closes {
-		bars[i] = bar{Instrument: "TEST", Time: testStart.AddDate(0, 0, i), Mid: ohlc{Close: c}}
+		bars[i] = marketdata.Bar{Instrument: "TEST", Time: testStart.AddDate(0, 0, i), Mid: marketdata.OHLC{Close: c}}
 	}
 	return bars
 }

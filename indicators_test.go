@@ -3,6 +3,7 @@ package trader
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,7 +39,7 @@ func TestEMA_ConstantSeries(t *testing.T) {
 	e := newEMA(5)
 	var v float64
 	for i := 0; i < 50; i++ {
-		v, _ = e.onBar(bar{Mid: ohlc{Close: px(110000)}})
+		v, _ = e.onBar(marketdata.Bar{Mid: marketdata.OHLC{Close: px(110000)}})
 	}
 	assert.InDelta(t, 1.1, v, 1e-12)
 }
@@ -57,15 +58,15 @@ func TestEMA_InvalidWindowPanics(t *testing.T) {
 	assert.Panics(t, func() { newEMA(-1) })
 }
 
-func hlc(hN int64, lN int64, cN int64) bar {
+func hlc(hN int64, lN int64, cN int64) marketdata.Bar {
 	h, l, c := px(hN), px(lN), px(cN)
-	return bar{Mid: ohlc{Open: l, High: h, Low: l, Close: c}}
+	return marketdata.Bar{Mid: marketdata.OHLC{Open: l, High: h, Low: l, Close: c}}
 }
 
 func TestATR_TrueRangeUsesThePreviousClose(t *testing.T) {
 	tests := []struct {
 		name    string
-		bar     bar
+		bar     marketdata.Bar
 		wantATR float64
 	}{
 		{"own range is largest", hlc(1100, 800, 1000), 0.003},  // 300 > 100, 200

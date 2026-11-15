@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	instr "github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -148,7 +149,7 @@ func (c *catalog) keyFor(symbol string) (string, error) {
 
 // checkPrices reports an error unless every price of b is a whole number of
 // m's ticks.
-func (m *market) checkPrices(b ohlc) error {
+func (m *market) checkPrices(b marketdata.OHLC) error {
 	for _, p := range []num.Price{b.Open, b.High, b.Low, b.Close} {
 		if ok, err := p.DivisibleBy(m.tick); err != nil || !ok {
 			return fmt.Errorf("%s price %s is not a multiple of the tick %s", m.key, p, m.tick)

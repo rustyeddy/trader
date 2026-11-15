@@ -7,14 +7,11 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 )
 
-type ohlc = marketdata.OHLC
-type bar = marketdata.Bar
-
 type marketData struct {
 	instrument string
 	interval   string
 
-	data []bar
+	data []marketdata.Bar
 }
 
 // bars returns an iterator over the bars in order. If ctx is cancelled the
@@ -22,11 +19,11 @@ type marketData struct {
 // consumer that reads ahead (frames) still learns of it before publishing what
 // it holds. No goroutine is involved, so breaking out of the loop early leaks
 // nothing.
-func (md *marketData) bars(ctx context.Context) iter.Seq2[bar, error] {
-	return func(yield func(bar, error) bool) {
+func (md *marketData) bars(ctx context.Context) iter.Seq2[marketdata.Bar, error] {
+	return func(yield func(marketdata.Bar, error) bool) {
 		for _, b := range md.data {
 			if err := ctx.Err(); err != nil {
-				yield(bar{}, err)
+				yield(marketdata.Bar{}, err)
 				return
 			}
 			if !yield(b, nil) {
@@ -34,7 +31,7 @@ func (md *marketData) bars(ctx context.Context) iter.Seq2[bar, error] {
 			}
 		}
 		if err := ctx.Err(); err != nil {
-			yield(bar{}, err)
+			yield(marketdata.Bar{}, err)
 		}
 	}
 }

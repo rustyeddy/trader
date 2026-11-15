@@ -6,6 +6,7 @@ import (
 	"time"
 
 	instr "github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -185,8 +186,8 @@ func TestCatalog_LookupIsExactAndKeyForTranslatesProviderSymbols(t *testing.T) {
 func barsOf(instrument string, closes ...int64) *marketData {
 	md := &marketData{instrument: instrument, interval: "d1"}
 	for i, p := range closes {
-		md.data = append(md.data, bar{Instrument: instrument, Time: testStart.AddDate(0, 0, i),
-			Mid: ohlc{Open: px(p), High: px(p), Low: px(p), Close: px(p)}, AvailableAt: testStart.AddDate(0, 0, i+1)})
+		md.data = append(md.data, marketdata.Bar{Instrument: instrument, Time: testStart.AddDate(0, 0, i),
+			Mid: marketdata.OHLC{Open: px(p), High: px(p), Low: px(p), Close: px(p)}, AvailableAt: testStart.AddDate(0, 0, i+1)})
 	}
 	return md
 }

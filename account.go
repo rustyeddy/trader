@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -331,7 +332,7 @@ func (act *account) overBudget(o *order, m *market, units num.Quantity, riskBudg
 // mark values the open position in b's instrument at the bar's close. The
 // broker calls it after the bar's fills, so a position opened at the bar's open
 // is valued at its close.
-func (a *account) mark(b bar) {
+func (a *account) mark(b marketdata.Bar) {
 	if pos := a.positions[b.Instrument]; pos != nil {
 		pos.markPrice = b.OHLC().Close
 	}

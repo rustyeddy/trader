@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -705,7 +706,7 @@ func TestAccount_Mark_ValuesThePositionAtTheBarClose(t *testing.T) {
 	act.mark(other)
 	assert.Equal(t, px(111600), pos.markPrice, "another instrument's bar does not move the mark")
 
-	act.mark(bar{Instrument: "AUDUSD"}) // no position: nothing to value
+	act.mark(marketdata.Bar{Instrument: "AUDUSD"}) // no position: nothing to value
 }
 
 func TestAccount_ApplyFill_OpenIsMarkedAtTheFillPrice(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,13 +43,13 @@ func scenarioPrices(t *testing.T, scenario string) *marketData {
 	return prices
 }
 
-func scenarioBars(t *testing.T, scenario string) iter.Seq2[bar, error] {
+func scenarioBars(t *testing.T, scenario string) iter.Seq2[marketdata.Bar, error] {
 	t.Helper()
 	return scenarioPrices(t, scenario).bars(context.Background())
 }
 
 // run takes the bars through the real backtest.
-func (r emaxRun) run(t *testing.T, bars iter.Seq2[bar, error]) {
+func (r emaxRun) run(t *testing.T, bars iter.Seq2[marketdata.Bar, error]) {
 	t.Helper()
 	require.NoError(t, (&backtest{}).run(context.Background(), bars, r.trader))
 }
@@ -178,10 +179,10 @@ func orderIDs(orders []*order) []string {
 // watchEMAX takes the bars through the run and returns its state after each one.
 // yield returns only once the backtest has processed the bar, so no production
 // callback is needed to see between bars.
-func watchEMAX(t *testing.T, r emaxRun, bars iter.Seq2[bar, error]) []barState {
+func watchEMAX(t *testing.T, r emaxRun, bars iter.Seq2[marketdata.Bar, error]) []barState {
 	t.Helper()
 	var states []barState
-	r.run(t, func(yield func(bar, error) bool) {
+	r.run(t, func(yield func(marketdata.Bar, error) bool) {
 		for b, err := range bars {
 			if !yield(b, err) {
 				return
@@ -475,7 +476,7 @@ func assertEMAs(t *testing.T, scenario string, exact []struct{ short, long float
 	bars := scenarioBars(t, scenario)
 
 	i := 0
-	r.run(t, func(yield func(bar, error) bool) {
+	r.run(t, func(yield func(marketdata.Bar, error) bool) {
 		for b, err := range bars {
 			if !yield(b, err) {
 				return
@@ -635,7 +636,7 @@ type positionWatcher struct {
 	sides   []direction
 }
 
-func (w *positionWatcher) onBar(ctx context.Context, b bar) *order {
+func (w *positionWatcher) onBar(ctx context.Context, b marketdata.Bar) *order {
 	side := noDirection
 	if p := w.account.positions[b.Instrument]; p != nil {
 		side = p.direction
@@ -844,9 +845,9 @@ func TestEMAXBacktest_ScenarioCOrderHistories(t *testing.T) {
 func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 	r := newEMAXRun(t, usd(10000))
 	prices := scenarioPrices(t, "c-reversal")
-	next := func(day int, oN int64, hN int64, lN int64, cN int64) bar {
+	next := func(day int, oN int64, hN int64, lN int64, cN int64) marketdata.Bar {
 		o, h, l, c := px(oN), px(hN), px(lN), px(cN)
-		return daily(bar{Instrument: "EURUSD", Time: jan(day), Volume: 1000, Mid: ohlc{Open: o, High: h, Low: l, Close: c}})
+		return daily(marketdata.Bar{Instrument: "EURUSD", Time: jan(day), Volume: 1000, Mid: marketdata.OHLC{Open: o, High: h, Low: l, Close: c}})
 	}
 	prices.data = append(slices.Clone(prices.data[:9]),
 		next(15, 110687, 112050, 110650, 112000),
@@ -855,7 +856,7 @@ func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 		next(20, 112120, 112200, 112100, 112180),
 	)
 
-	bars := func(yield func(bar, error) bool) {
+	bars := func(yield func(marketdata.Bar, error) bool) {
 		for b, err := range prices.bars(context.Background()) {
 			if !yield(b, err) {
 				return

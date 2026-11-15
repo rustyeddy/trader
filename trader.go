@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // errInsufficientMargin is an expected trading outcome, not a runtime
@@ -79,8 +81,8 @@ type trader struct {
 }
 
 // onBar handles one bar: onFrame with a frame of that bar alone.
-func (tr *trader) onBar(ctx context.Context, b bar) error {
-	return tr.onFrame(ctx, frame{availableAt: b.AvailableAt, bars: []bar{b}})
+func (tr *trader) onBar(ctx context.Context, b marketdata.Bar) error {
+	return tr.onFrame(ctx, frame{availableAt: b.AvailableAt, bars: []marketdata.Bar{b}})
 }
 
 // onFrame advances the broker (fills and marks) through the whole frame once,

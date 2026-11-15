@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,12 +18,12 @@ const atrInstrument = "STUDYONLY"
 
 var atrStart = time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
 
-func atrBar(day int, hN int64, lN int64, cN int64) bar {
+func atrBar(day int, hN int64, lN int64, cN int64) marketdata.Bar {
 	h, l, c := px(hN), px(lN), px(cN)
-	return bar{
+	return marketdata.Bar{
 		Instrument: atrInstrument,
 		Time:       atrStart.AddDate(0, 0, day),
-		Mid:        ohlc{Open: l, High: h, Low: l, Close: c},
+		Mid:        marketdata.OHLC{Open: l, High: h, Low: l, Close: c},
 	}
 }
 
@@ -35,8 +36,8 @@ func atrBar(day int, hN int64, lN int64, cN int64) bar {
 //	3    110200  109980  110100  110450  220  -250    470     470  gap down
 //	4    110210  110030  110100  110100  180  110     70      180  range
 //	5    110220  110000  110150  110100  220  120     100     220  range
-func atrFixture() []bar {
-	return []bar{
+func atrFixture() []marketdata.Bar {
+	return []marketdata.Bar{
 		atrBar(0, 110100, 109900, 110050),
 		atrBar(1, 110150, 110000, 110100),
 		atrBar(2, 110500, 110400, 110450),
@@ -46,7 +47,7 @@ func atrFixture() []bar {
 	}
 }
 
-func studyBars(bars []bar) iter.Seq2[bar, error] {
+func studyBars(bars []marketdata.Bar) iter.Seq2[marketdata.Bar, error] {
 	md := &marketData{data: bars}
 	return md.bars(context.Background())
 }
@@ -115,13 +116,13 @@ func TestRunATRStudy_RepeatedRunsAreIdentical(t *testing.T) {
 
 func TestRunATRStudy_ReturnsNoPartialResultsOnADataError(t *testing.T) {
 	boom := errors.New("bad row")
-	bars := func(yield func(bar, error) bool) {
+	bars := func(yield func(marketdata.Bar, error) bool) {
 		for _, b := range atrFixture() {
 			if !yield(b, nil) {
 				return
 			}
 		}
-		yield(bar{}, boom)
+		yield(marketdata.Bar{}, boom)
 	}
 
 	got, err := runATRStudy(bars, 3)
@@ -145,7 +146,7 @@ func TestRunATRStudy_CancelledPartWayThrough(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md := &marketData{data: atrFixture()}
-	bars := func(yield func(bar, error) bool) {
+	bars := func(yield func(marketdata.Bar, error) bool) {
 		seen := 0
 		for b, err := range md.bars(ctx) {
 			if !yield(b, err) {

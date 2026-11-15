@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -157,9 +158,9 @@ func brokerOpen(accountID string) *order {
 }
 
 // fillBar is a EURUSD bar on day d (0 = testStart) opening at o.
-func fillBar(d int, oN int64) bar {
+func fillBar(d int, oN int64) marketdata.Bar {
 	o := px(oN)
-	return daily(bar{Instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), Mid: ohlc{Open: o, High: px(oN + 100), Low: o, Close: px(oN + 100)}})
+	return daily(marketdata.Bar{Instrument: "EURUSD", Time: testStart.AddDate(0, 0, d), Mid: marketdata.OHLC{Open: o, High: px(oN + 100), Low: o, Close: px(oN + 100)}})
 }
 
 // submitted is an order the broker has accepted on day 0.
@@ -313,7 +314,7 @@ func TestBroker_OnFrame_CancelledContextWithNothingQueued(t *testing.T) {
 	cancel()
 	clock := br.clock
 
-	err := br.onFrame(ctx, frame{availableAt: b.AvailableAt, bars: []bar{b}})
+	err := br.onFrame(ctx, frame{availableAt: b.AvailableAt, bars: []marketdata.Bar{b}})
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, clock, br.clock, "no state moved")
@@ -573,14 +574,14 @@ func TestBroker_OnBar_MarginCloseoutRecordsATrade(t *testing.T) {
 }
 
 func TestOpenOnly_CollapsesTheSeriesTheEngineReadsToItsOpen(t *testing.T) {
-	full := bar{Instrument: "EURUSD", Time: testStart, Mid: ohlc{Open: px(110000), High: px(110400), Low: px(109500), Close: px(110200)}}
-	bidOnly := bar{Instrument: "EURUSD", Time: testStart, Bid: ohlc{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}}
+	full := marketdata.Bar{Instrument: "EURUSD", Time: testStart, Mid: marketdata.OHLC{Open: px(110000), High: px(110400), Low: px(109500), Close: px(110200)}}
+	bidOnly := marketdata.Bar{Instrument: "EURUSD", Time: testStart, Bid: marketdata.OHLC{Open: px(109990), High: px(110390), Low: px(109490), Close: px(110190)}}
 
 	got := openOnly(full)
 	gotBid := openOnly(bidOnly)
 
-	assert.Equal(t, ohlc{Open: px(110000), High: px(110000), Low: px(110000), Close: px(110000)}, got.OHLC())
-	assert.Equal(t, ohlc{Open: px(109990), High: px(109990), Low: px(109990), Close: px(109990)}, gotBid.OHLC())
+	assert.Equal(t, marketdata.OHLC{Open: px(110000), High: px(110000), Low: px(110000), Close: px(110000)}, got.OHLC())
+	assert.Equal(t, marketdata.OHLC{Open: px(109990), High: px(109990), Low: px(109990), Close: px(109990)}, gotBid.OHLC())
 	assert.Equal(t, "EURUSD", got.Instrument)
 	assert.Equal(t, testStart, got.Time)
 	assert.Equal(t, px(110400), full.OHLC().High, "the original bar is not changed")

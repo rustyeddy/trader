@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,19 +15,19 @@ var testStart = time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)
 
 // daily gives a hand-built bar the availability of a daily bar: complete a day
 // after it opened. The trading path refuses a bar without one.
-func daily(b bar) bar {
+func daily(b marketdata.Bar) marketdata.Bar {
 	b.AvailableAt = b.Time.AddDate(0, 0, 1)
 	return b
 }
 
 // closes builds consecutive daily test bars for "TEST" with the given closes.
-func closes(vals ...float64) []bar {
-	bars := make([]bar, len(vals))
+func closes(vals ...float64) []marketdata.Bar {
+	bars := make([]marketdata.Bar, len(vals))
 	for i, v := range vals {
-		bars[i] = bar{
+		bars[i] = marketdata.Bar{
 			Instrument: "TEST",
 			Time:       testStart.AddDate(0, 0, i),
-			Mid:        ohlc{Open: px(int64(v * 100_000)), High: px(int64(v * 100_000)), Low: px(int64(v * 100_000)), Close: px(int64(v * 100_000))},
+			Mid:        marketdata.OHLC{Open: px(int64(v * 100_000)), High: px(int64(v * 100_000)), Low: px(int64(v * 100_000)), Close: px(int64(v * 100_000))},
 		}
 		bars[i] = daily(bars[i])
 	}
@@ -67,7 +68,7 @@ func TestEmax_LongWarmsOnSameBars(t *testing.T) {
 	}
 	// Regression: the long EMA must be seeded from bars 1-4 (value 2.5). If it
 	// were only fed after the short EMA warmed, the next value would differ.
-	v, ok := e.emaLong.onBar(bar{Mid: ohlc{Close: px(4 * 100_000)}})
+	v, ok := e.emaLong.onBar(marketdata.Bar{Mid: marketdata.OHLC{Close: px(4 * 100_000)}})
 	require.True(t, ok)
 	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
@@ -356,7 +357,7 @@ func TestEmax_OpenRequiresAStopWithinPriceBounds(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newTestEmax(t, 2, 4)
-			o := e.openOrder(bar{Instrument: "EURUSD", Time: testStart, Mid: ohlc{Close: tt.entry}}, tt.dir)
+			o := e.openOrder(marketdata.Bar{Instrument: "EURUSD", Time: testStart, Mid: marketdata.OHLC{Close: tt.entry}}, tt.dir)
 			if tt.stop.IsZero() {
 				assert.Nil(t, o, "skip rather than clamp the configured stop")
 				return

@@ -7,6 +7,8 @@ import (
 	"iter"
 	"slices"
 	"time"
+
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // mergedBars delivers the bars of several instruments as one sequence, each bar
@@ -17,17 +19,17 @@ import (
 // A missing bar is simply not delivered: nothing is synthesized or carried
 // forward. Sets must have different instruments and strictly increasing
 // availability; anything else is reported as the sequence's only item.
-func mergedBars(ctx context.Context, sets ...*marketData) iter.Seq2[bar, error] {
+func mergedBars(ctx context.Context, sets ...*marketData) iter.Seq2[marketdata.Bar, error] {
 	merged, err := mergeSets(sets)
 	if err != nil {
-		return func(yield func(bar, error) bool) { yield(bar{}, err) }
+		return func(yield func(marketdata.Bar, error) bool) { yield(marketdata.Bar{}, err) }
 	}
 	return (&marketData{data: merged}).bars(ctx)
 }
 
-func mergeSets(sets []*marketData) ([]bar, error) {
+func mergeSets(sets []*marketData) ([]marketdata.Bar, error) {
 	seen := make(map[string]bool, len(sets))
-	var merged []bar
+	var merged []marketdata.Bar
 	for _, md := range sets {
 		if seen[md.instrument] {
 			return nil, fmt.Errorf("merge bars: instrument %q given twice", md.instrument)
@@ -44,7 +46,7 @@ func mergeSets(sets []*marketData) ([]bar, error) {
 		}
 		merged = append(merged, md.data...)
 	}
-	slices.SortFunc(merged, func(a, b bar) int {
+	slices.SortFunc(merged, func(a, b marketdata.Bar) int {
 		return cmp.Or(a.AvailableAt.Compare(b.AvailableAt), cmp.Compare(a.Instrument, b.Instrument))
 	})
 	return merged, nil
@@ -55,14 +57,14 @@ func mergeSets(sets []*marketData) ([]bar, error) {
 // moment is absent, never represented by an older value.
 type frame struct {
 	availableAt time.Time
-	bars        []bar
+	bars        []marketdata.Bar
 }
 
 // frames groups the sequence from mergedBars by availableAt. In a replay a frame
 // is complete when the next bar is later, so it is delivered then, or when the
 // sequence ends. On an error the frame still being built is dropped, since it
 // may be incomplete.
-func frames(bars iter.Seq2[bar, error]) iter.Seq2[frame, error] {
+func frames(bars iter.Seq2[marketdata.Bar, error]) iter.Seq2[frame, error] {
 	return func(yield func(frame, error) bool) {
 		var pending frame
 		for b, err := range bars {
