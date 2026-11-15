@@ -38,6 +38,9 @@ var (
 	ErrInvalidPath = errors.New("store: invalid path")
 	// ErrInvalidRoot reports an empty root.
 	ErrInvalidRoot = errors.New("store: invalid root")
+	// ErrUnchanged is what an Update callback returns to say the file should be
+	// left exactly as it is. Update then writes nothing and returns nil.
+	ErrUnchanged = errors.New("store: unchanged")
 )
 
 var current = struct {
@@ -105,11 +108,12 @@ func Create(ctx context.Context, path string, data []byte) error {
 
 // Update is the safe read-modify-write: it holds the path's lock across reading
 // the file (exists is false and old is nil when there is none), calling fn, and
-// replacing the file with the result. fn's error leaves the file untouched. fn
+// replacing the file with the result. fn's error leaves the file untouched; the
+// error ErrUnchanged does so too, and Update then returns nil. fn
 // runs under the lock, so it must not call Write, Create or Update on the same
 // path. The lock is process-local; two processes are not coordinated.
 func Update(ctx context.Context, path string, fn func(old []byte, exists bool) ([]byte, error)) error {
-	return commit(ctx, path, func(abs string) ([]byte, error) {
+	err := commit(ctx, path, func(abs string) ([]byte, error) {
 		old, err := os.ReadFile(abs)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
@@ -119,6 +123,10 @@ func Update(ctx context.Context, path string, fn func(old []byte, exists bool) (
 		}
 		return fn(old, true)
 	}, false)
+	if errors.Is(err, ErrUnchanged) {
+		return nil
+	}
+	return err
 }
 
 // commit is the shared body of Write, Create and Update: lock, produce the

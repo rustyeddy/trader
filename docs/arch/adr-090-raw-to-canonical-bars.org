@@ -185,22 +185,57 @@ per-partition lock, and the report says it was replaced. A build never touches r
 
 ** 5. Packages and the command
 
-- =marketdata= (public): =OHLC=, =Bar=, =MidOf= and bar validation (#633). It
-  imports =num= and the standard library only.
+The flow (owner-approved on #639, 2026-11-15): =cmd/trader= supplies configuration
+to the application service =service/marketdata.go= (package =service=, one file);
+the service reads a raw partition through =provider/oanda=, which parses and maps
+it to a =marketdata.SourcePartition=; the service hands that to the domain service
+=marketdata/service=, which applies every domain rule and publishes the canonical
+file through =marketdata/internal/canonical= and the =store= package.
+
+- =marketdata= (public): =OHLC=, =Bar=, =MidOf= and bar validation (#633), and
+  =SourcePartition= / =SourceRow=: one provider raw partition with its names, the
+  fingerprint of its bytes and, per row, the raw row number, the provider's
+  complete flag and an *unvalidated* =Bar= (provider prices, no mid, no
+  =AvailableAt=). A bare =[]Bar= cannot carry the bad records, row numbers or
+  fingerprint this ADR needs, so the hand-off is the partition. It imports =num=
+  and the standard library only.
+- =provider/oanda=: =ReadSourcePartition= reads the raw partition through the
+  store and maps it. It parses and maps only: it derives no mid, sets no
+  availability, rejects nothing (a crossed or oddly shaped row is passed through),
+  and a row it cannot parse is an error. It never imports =marketdata/service=.
+- =marketdata/service= (domain service): =Build=. It classifies every row (the
+  reasons of section 3, first match wins: incomplete, misaligned, invalid, crossed,
+  then duplicate and out-of-order against the neighbours), sets each good bar's
+  mid and =available_at=, fails the build for a row outside the partition's month,
+  and publishes. =BuilderVersion= and =ValidatorVersion= live here. It imports
+  =marketdata=, =marketdata/internal/canonical=, =num=, =layout=, =store= and the
+  standard library; never a provider and never another domain service.
 - =marketdata/internal/canonical= (moved there in #635, ADR-091): the
-  =canonical-v2= reader and writer, the bad-record type, file validation and the
-  alignment and availability rule. It imports =marketdata=, =num=, =layout=, =store=
-  and the standard library; never a provider.
-- The mapping from a raw record to a canonical bar or a bad record. Its
-  location is undecided and is settled in Stage 4b. OANDA is now
-  =provider/oanda= (#634), and =canonical= is =marketdata/internal=, which a
-  provider cannot import, so the mapping's placement must respect that boundary.
+  =canonical-v2= reader and writer, the bad-record type, file validation, the
+  alignment and availability rule, and =Publish=, which under the file's lock
+  compares the build on disk (=SameBuild=) and writes nothing, builds or replaces.
+  It imports =marketdata=, =num=, =layout=, =store= and the standard library; never
+  a provider.
+- =service/marketdata.go= (application service, package =service=):
+  =BuildCanonical= walks the instruments and UTC months of a request, reads each
+  raw partition through =provider/oanda=, calls =marketdata/service.Build= and
+  reports each partition as built, unchanged, replaced, missing (no raw file for
+  the month: reported, not an error) or failed (reported, and the run carries on;
+  =ErrPartitionsFailed= at the end). It imports only =marketdata/service= and
+  =provider/oanda= and reads no environment. A package per service waits until the
+  services are not this small.
 - =cmd/trader=: =trader data build=, flags as =download= (=--data-root=,
   =--instrument=, =--interval=, =--from=, =--to=; the same root precedence and
   config file). It needs no token and makes no network call. It prints, per
-  partition, built, unchanged, replaced or failed, with the good and bad counts.
+  partition, built, unchanged, replaced, missing or failed with the good and bad
+  counts, then a total. It imports only the application service, the store (for
+  =SetRoot=) and logging. =download= keeps calling the provider directly until it
+  moves behind the same service (#641).
 - Scope: =h1= and =d1=. =m1= and =h4= wait until a strategy needs them.
-- No Manager, plan, registry or service layer.
+- No Manager, plan, registry or provider interface.
+- Architecture tests: only =service/= imports =marketdata/service=; the provider
+  never does; the application service imports only the domain service and a
+  provider; =cmd/trader/build.go= imports only the service, the store and logging.
 
 ** 6. Tests and the owner's check
 

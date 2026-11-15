@@ -173,3 +173,29 @@ func TestMarketdataInternal_IsImportedOnlyFromMarketdata(t *testing.T) {
 	}
 	assert.Positive(t, checked, "the walk found the rest of the module")
 }
+
+// TestMarketdataService_IsImportedOnlyByTheApplicationService enforces ADR-091's
+// flow: the market-data domain service is reached through the module's
+// application service package (service/), never directly by a transport, a
+// provider, the root engine or another domain package. Test files are exempt.
+func TestMarketdataService_IsImportedOnlyByTheApplicationService(t *testing.T) {
+	domain := modulePath + "/marketdata/service"
+	checked, importers := 0, 0
+	for _, file := range goFiles(t, "..") {
+		rel, err := filepath.Rel("..", file)
+		require.NoError(t, err)
+		if strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, "marketdata"+string(filepath.Separator)) {
+			continue
+		}
+		checked++
+		for _, path := range importsOf(t, file) {
+			if path != domain {
+				continue
+			}
+			importers++
+			assert.Equal(t, "service", filepath.Dir(rel), "%s imports %s: only the application service package may", rel, path)
+		}
+	}
+	assert.Positive(t, checked, "the walk found the rest of the module")
+	assert.Positive(t, importers, "the application service imports the domain service")
+}
