@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -320,4 +323,35 @@ func TestParseRange(t *testing.T) {
 	assert.True(t, to.Equal(utc(2024, 1, 2, 10)), "an offset is converted to UTC")
 	_, _, err = parseRange("2024-01-01", "")
 	assert.Error(t, err)
+}
+
+// TestDownloadCommand_UsesTheProviderOnlyForWiring keeps data processing out of
+// the transport: no cmd/trader file may use anything from provider/oanda except
+// building the client (NewClient, ClientConfig) and the credential type the
+// client takes. Fetching, validation, merging and persistence are the
+// application service's and the provider's.
+func TestDownloadCommand_UsesTheProviderOnlyForWiring(t *testing.T) {
+	wiring := map[string]bool{"NewClient": true, "ClientConfig": true}
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	used := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+		require.NoError(t, perr)
+		ast.Inspect(f, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "oanda" {
+				used++
+				assert.True(t, wiring[sel.Sel.Name], "%s uses oanda.%s", file, sel.Sel.Name)
+			}
+			return true
+		})
+	}
+	assert.Positive(t, used, "the guard sees the wiring it allows")
 }
