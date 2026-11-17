@@ -41,6 +41,7 @@ trader                           # backtest the EMAX scenarios and print a summa
 trader data download ...         # download OANDA candles into the raw store
 trader data build ...            # build canonical-v2 bars from the raw store
 trader data status ...           # show which canonical months a range can load
+trader backtest ...              # backtest canonical bars from the data store
 ```
 
 `trader data download` fetches bid/ask candles for a UTC range into month

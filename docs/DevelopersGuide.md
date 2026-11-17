@@ -109,11 +109,20 @@ account and broker (`replay.go`, `backtest.go`):
   made one bar at a time (`emax`, `emaxEach`). A single-instrument run is the same
   path with one-bar groups. `backtest.run` keeps the per-bar access the research
   tests and studies use.
-- `mergedBars` trusts its input: the caller validates the series
-  (`marketdata.Series.Validate`; `runScenario` does, where the scenario enters).
-- A run configuration (which instruments, source, range) and wiring a `Series`
-  loaded from `/srv/data` into the command line are not built yet; `runScenario`
-  is the only caller of `runSeries` outside tests.
+- `backtest.runSeries` validates every series (`marketdata.Series.Validate`) before
+  replaying; `mergedBars` trusts its input and checks only what the merge needs.
+- `trader.RunSeries(ctx, name, series...)` is the engine's entry for series a reader
+  loaded: it works on copies, normalizes instrument keys, refuses an instrument it
+  has no market for, runs EMAX on each instrument with the scenarios' fixed
+  settings and returns a `Result` (`Write` prints the summary). The engine opens no
+  file. `service.RunBacktest` is the application service that joins the two:
+  `LoadSeries` (the market-data service's policy for missing, bad and stale
+  months), then `RunSeries`; `trader backtest` only parses flags and prints.
+- Known limit: the engine requires every bar price to be a whole tick of the
+  market (0.00001 for EURUSD and GBPUSD), but a mid price is the midpoint of bid and
+  ask, so a bar whose spread is an odd number of ticks has a half-tick mid and is
+  refused. Backtests on real OANDA data hit this until the owner decides how the
+  engine should treat mid prices finer than the tick.
 
 ## Tests
 

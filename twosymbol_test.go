@@ -344,7 +344,7 @@ func TestBroker_OnFrame_DefersALiquidationWithoutACurrentPrice(t *testing.T) {
 //	3     1.00600-1.00900  -
 //	4     1.00900-1.01200  2.01200-2.01800
 func pairBars() (marketdata.Series, marketdata.Series) {
-	eur := &marketdata.Series{Instrument: "EURUSD"}
+	eur := &marketdata.Series{Source: "test", Instrument: "EURUSD", Interval: "h1"}
 	for h, c := range []price{px(100000), px(100300), px(100600), px(100900), px(101200)} {
 		o := c
 		if h > 0 {
@@ -352,7 +352,7 @@ func pairBars() (marketdata.Series, marketdata.Series) {
 		}
 		eur.Bars = append(eur.Bars, hbar("EURUSD", hour(h), points(o), points(c)))
 	}
-	gbp := &marketdata.Series{Instrument: "GBPUSD", Bars: []marketdata.Bar{
+	gbp := &marketdata.Series{Source: "test", Instrument: "GBPUSD", Interval: "h1", Bars: []marketdata.Bar{
 		hbar("GBPUSD", hour(0), 200000, 200000),
 		hbar("GBPUSD", hour(1), 200000, 200600),
 		hbar("GBPUSD", hour(2), 200600, 201200),
@@ -456,7 +456,7 @@ func TestEMAXEach_TwoInstrumentsShareOneAccount(t *testing.T) {
 func TestEMAXEach_StaggeredSignalsSizeAgainstTheEarlierPosition(t *testing.T) {
 	captureLogs(t)
 	eur, _ := pairBars()
-	gbp := &marketdata.Series{Instrument: "GBPUSD", Bars: []marketdata.Bar{
+	gbp := &marketdata.Series{Source: "test", Instrument: "GBPUSD", Interval: "h1", Bars: []marketdata.Bar{
 		hbar("GBPUSD", hour(1), 200000, 200000),
 		hbar("GBPUSD", hour(2), 200000, 200600),
 		hbar("GBPUSD", hour(3), 200600, 201200),

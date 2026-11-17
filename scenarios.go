@@ -61,10 +61,6 @@ func runScenario(scenario string) (*result, error) {
 	if err := tr.broker.markets.normalize(prices); err != nil {
 		return nil, fmt.Errorf("%s: %w", scenarioPath(scenario), err)
 	}
-	// The replay trusts what it is given; the series is checked here, where it enters.
-	if err := prices.Validate(); err != nil {
-		return nil, fmt.Errorf("%s: %w", scenarioPath(scenario), err)
-	}
 
 	slog.Info("backtest starting",
 		"scenario", scenario,

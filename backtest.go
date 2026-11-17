@@ -40,7 +40,16 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[marketdata.Bar, erro
 // strategy sees each bar in instrument order. A group holds only fresh bars, so
 // an instrument with no bar at that instant is absent, never carried forward. A
 // single-instrument run is the same path with one-bar groups.
+//
+// runSeries owns the validation of what it replays: every series must pass
+// marketdata.Series.Validate (named, valid bars of its instrument, strictly
+// ascending opening times and availability), so no caller can skip it.
 func (bt *backtest) runSeries(ctx context.Context, tr *trader, series ...marketdata.Series) error {
+	for _, s := range series {
+		if err := s.Validate(); err != nil {
+			return fmt.Errorf("replay %s: %w", s.Instrument, err)
+		}
+	}
 	var last marketdata.Bar
 	for f, err := range frames(mergedBars(ctx, series...)) {
 		if err != nil {
