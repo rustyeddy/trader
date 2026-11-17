@@ -582,3 +582,33 @@ func TestLoadSeries_AnUnexplainedGapFailsTheInstrumentAndIsInItsResult(t *testin
 	assert.Equal(t, strict[0].Gaps, allowed[0].Gaps)
 	assert.Len(t, allowed[0].Series.Bars, 3)
 }
+
+type fixedToken string
+
+func (f fixedToken) Token(context.Context) (string, error) { return string(f), nil }
+
+func TestDownload_RefusesAProviderItCannotBuildBeforeAnyFetch(t *testing.T) {
+	storetest.Root(t)
+	req := DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)}
+	for name, cfg := range map[string]ProviderConfig{
+		"no credential": {BaseURL: "https://api-fxpractice.oanda.com"},
+		"no base URL":   {Credential: fixedToken("secret-token-value")},
+		"not https":     {BaseURL: "http://api-fxpractice.oanda.com", Credential: fixedToken("secret-token-value")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := Download(context.Background(), nil, cfg, req, func(DownloadResult) { t.Fatal("nothing is downloaded") })
+
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "secret-token-value", "the token is never in an error")
+		})
+	}
+}
+
+func TestDownload_StillValidatesTheRequestAfterBuildingTheClient(t *testing.T) {
+	storetest.Root(t)
+	cfg := ProviderConfig{BaseURL: "https://api-fxpractice.oanda.com", Credential: fixedToken("t")}
+
+	err := Download(context.Background(), nil, cfg, DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 2, 1, 0), To: utc(2024, 1, 1, 0)}, nil)
+
+	assert.ErrorContains(t, err, "--to must be after --from")
+}

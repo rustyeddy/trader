@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/internal/logging"
-	"github.com/rustyeddy/trader/provider/oanda"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/store"
 )
@@ -128,18 +127,6 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 		return errors.New(envOANDAToken + " is not set (the token is read only from the environment)")
 	}
 
-	log := slog.Default()
-	client, err := oanda.NewClient(oanda.ClientConfig{
-		BaseURL:    baseURL,
-		Credential: tokenFromEnv{getenv: a.getenv},
-		Logger:     log,
-
-		MinRequestInterval: a.requestGap,
-	})
-	if err != nil {
-		return err
-	}
-
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
 
@@ -152,7 +139,8 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 		}
 	}
 	req := service.DownloadRequest{Instruments: symbols, Interval: strings.ToLower(token), From: from, To: to}
-	err = service.DownloadRaw(ctx, logging.WithComponent(log, logging.ComponentMarketData), client, req, func(r service.DownloadResult) {
+	provider := service.ProviderConfig{BaseURL: baseURL, Credential: tokenFromEnv{getenv: a.getenv}, RequestGap: a.requestGap}
+	err = service.Download(ctx, logging.WithComponent(slog.Default(), logging.ComponentMarketData), provider, req, func(r service.DownloadResult) {
 		total.Fetched += r.Fetched
 		total.Added += r.Added
 		total.Kept += r.Kept

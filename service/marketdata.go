@@ -67,6 +67,47 @@ type DownloadResult struct {
 	Differing  int // of Kept, rows whose provider values differ from the file's
 }
 
+// Credential supplies the provider's bearer token for each request. The transport
+// implements it over wherever it reads the token from (the environment), so the
+// service and the client never hold the token and no value of this type is ever
+// printed.
+type Credential interface {
+	Token(ctx context.Context) (string, error)
+}
+
+// ProviderConfig is what the transport decides about reaching the provider: the
+// service builds the OANDA client from it, so no transport imports a provider.
+type ProviderConfig struct {
+	// BaseURL is the provider's API host (absolute, https); the transport chooses
+	// practice or live.
+	BaseURL string
+	// Credential supplies the token. Required.
+	Credential Credential
+	// RequestGap spaces the provider's requests; zero disables pacing.
+	RequestGap time.Duration
+}
+
+// Download is DownloadRaw over the OANDA client that cfg describes: the use case
+// the transport calls. It builds the client (refusing a bad base URL or a missing
+// credential before any fetch) and then downloads as DownloadRaw does. log, which
+// may be nil, also receives the client's request records; the token is never in
+// them.
+func Download(ctx context.Context, log *slog.Logger, cfg ProviderConfig, req DownloadRequest, report func(DownloadResult)) error {
+	if cfg.Credential == nil {
+		return errors.New("download: no credential")
+	}
+	client, err := oanda.NewClient(oanda.ClientConfig{
+		BaseURL:            cfg.BaseURL,
+		Credential:         cfg.Credential,
+		Logger:             log,
+		MinRequestInterval: cfg.RequestGap,
+	})
+	if err != nil {
+		return err
+	}
+	return DownloadRaw(ctx, log, client, req, report)
+}
+
 // CandleFetcher is what DownloadRaw needs from a provider client.
 type CandleFetcher interface {
 	FetchCandles(ctx context.Context, req oanda.CandleRequest) ([]oanda.Record, error)

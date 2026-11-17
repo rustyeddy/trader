@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
@@ -325,33 +324,22 @@ func TestParseRange(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestDownloadCommand_UsesTheProviderOnlyForWiring keeps data processing out of
-// the transport: no cmd/trader file may use anything from provider/oanda except
-// building the client (NewClient, ClientConfig) and the credential type the
-// client takes. Fetching, validation, merging and persistence are the
-// application service's and the provider's.
-func TestDownloadCommand_UsesTheProviderOnlyForWiring(t *testing.T) {
-	wiring := map[string]bool{"NewClient": true, "ClientConfig": true}
+// TestCommands_ImportNoProvider keeps the transport free of providers (ADR-091,
+// #641): no cmd/trader file imports anything under provider/. The service builds
+// the client from the plain values and the credential the command hands it.
+func TestCommands_ImportNoProvider(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
-	used := 0
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
 			continue
 		}
-		f, perr := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+		f, perr := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
 		require.NoError(t, perr)
-		ast.Inspect(f, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "oanda" {
-				used++
-				assert.True(t, wiring[sel.Sel.Name], "%s uses oanda.%s", file, sel.Sel.Name)
-			}
-			return true
-		})
+		for _, imp := range f.Imports {
+			path, uerr := strconv.Unquote(imp.Path.Value)
+			require.NoError(t, uerr)
+			assert.NotContains(t, path, "/provider/", "%s imports %s", file, path)
+		}
 	}
-	assert.Positive(t, used, "the guard sees the wiring it allows")
 }

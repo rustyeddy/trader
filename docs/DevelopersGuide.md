@@ -33,7 +33,10 @@ cmd/trader  ->  service  ->  marketdata/service  ->  marketdata/internal/canonic
 ```
 
 - **Transport** (`cmd/trader`) parses flags, reads the environment and the config
-  file, sets the store's root and calls an application service. It contains no
+  file, sets the store's root and calls an application service. It imports no
+  provider: for a download it hands `service.Download` the base URL, the request
+  gap and a `service.Credential` that reads the token from the environment on each
+  request, and the service builds the client (a test enforces the import rule). It contains no
   domain logic and is the only place that reads the environment (ADR-078).
 - **Application service** (`service`) carries out one use case by coordinating a
   provider and a domain service. It reads no environment. Today there is one,
