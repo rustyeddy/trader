@@ -16,6 +16,11 @@ resolution.
 
 Amended by ADR-065: service and runtime composition packages are internal; marketdata.Manager is no longer an external API.
 
+Amended by ADR-091 (placement only): in the live tree the application package is
+=service= with the market-data use cases in =service/marketdata.go=, not a
+subpackage =service/marketdata=; domain rules live in =marketdata/service=. The
+thin-transport rule stands and is enforced by import tests.
+
 * Context
 
 Trader now has a completed Milestone 2 historical market-data

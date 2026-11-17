@@ -31,11 +31,11 @@ the issue until it is approved, then implement it.
 
 ## Layering (ADR-091, implemented)
 
-This is the structure the code has and the tests enforce; preserve it. ADR-091 and
-ADR-092, which record it, are still *Proposed* until the owner accepts them (#643),
-and ADR-089 is accepted and was amended in part. So the layering is current
-practice, not yet a closed decision: a change to a boundary, or a new layer,
-needs the owner's approval, and do not treat a Proposed ADR as Accepted.
+This is the structure the code has and the tests enforce; preserve it. ADR-091
+records it and is Accepted; ADR-092, which records the package moves against
+ADR-089, is still *Proposed* until the owner accepts it (#643), and ADR-089 is
+accepted and amended in part. A change to a boundary, or a new layer, needs the
+owner's approval, and do not treat a Proposed ADR as Accepted.
 
 ```
 cmd/trader            transport: flags, environment, config file; no domain logic

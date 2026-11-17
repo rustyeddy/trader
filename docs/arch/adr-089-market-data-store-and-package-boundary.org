@@ -9,6 +9,11 @@ accepted storage convention in =docs/arch/market-data-storage.md= and builds on
 ADR-020 (historic data), ADR-023 (structured logging), ADR-078 (security, S-1)
 and ADR-088 (the per-run instrument catalog).
 
+Amended in part by ADR-091 (Accepted): =cmd/trader= still alone reads the
+environment and the config file, but it is no longer the composition root for
+providers; it hands plain values and a credential to =service=, which builds the
+client (#641).
+
 Amended in part by ADR-092 (Proposed): the package paths (OANDA is
 =provider/oanda=), the =store= package that owns data-file I/O and the data root,
 and APIs that take no root. The text below carries that implementation state; the

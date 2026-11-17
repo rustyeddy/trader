@@ -5,6 +5,10 @@
 
 Accepted. Issue #441.
 
+Note (ADR-091): this registry belongs to the earlier runtime, which is archived
+(=_archive/=); the live tree has no provider registry. ADR-091 says how a provider
+client is built today and when a registry would be added.
+
 * Context
 
 Facts about each market-data provider were spread across composition,
