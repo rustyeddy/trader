@@ -19,18 +19,18 @@ const (
 )
 
 // scanSet builds hourly bars from their opening hours and closes.
-func scanSet(instrument string, hours []int, closes []price) *marketData {
-	md := &marketData{instrument: instrument}
+func scanSet(instrument string, hours []int, closes []price) marketdata.Series {
+	md := &marketdata.Series{Instrument: instrument}
 	for i, hour := range hours {
 		open := mergeStart.Add(time.Duration(hour) * time.Hour)
-		md.data = append(md.data, marketdata.Bar{
+		md.Bars = append(md.Bars, marketdata.Bar{
 			Instrument:  instrument,
 			Time:        open,
 			Mid:         marketdata.OHLC{Close: closes[i]},
 			AvailableAt: open.Add(time.Hour),
 		})
 	}
-	return md
+	return *md
 }
 
 // available is when the bar opening at the given hour is complete.
@@ -47,7 +47,7 @@ func available(hour int) time.Time {
 //	3     100900  100750           100600  up
 //	4     100000  100250           100300  down
 //	5     99000   99416.67         99650   down
-func scanASet() *marketData {
+func scanASet() marketdata.Series {
 	return scanSet(scanA, []int{0, 1, 2, 3, 4, 5}, []price{px(100000), px(100300), px(100600), px(100900), px(100000), px(99000)})
 }
 
@@ -61,7 +61,7 @@ func scanASet() *marketData {
 //
 // Carrying the 199400 close through hour 3 would give short 199450 and long
 // 199550 there, then 199750 and 199725 at hour 4: up, not down.
-func scanBSet() *marketData {
+func scanBSet() marketdata.Series {
 	return scanSet(scanB, []int{0, 1, 2, 4}, []price{px(200000), px(199700), px(199400), px(199900)})
 }
 
@@ -94,17 +94,17 @@ func TestRunEMAScan_NoStateLeaksBetweenInstruments(t *testing.T) {
 	together, err := runEMAScan(mergedBars(context.Background(), scanASet(), scanBSet()), 2, 3)
 	require.NoError(t, err)
 
-	for _, set := range []*marketData{scanASet(), scanBSet()} {
+	for _, set := range []marketdata.Series{scanASet(), scanBSet()} {
 		alone, err := runEMAScan(mergedBars(context.Background(), set), 2, 3)
 		require.NoError(t, err)
 
 		var picked []trendReading
 		for _, r := range together {
-			if r.instrument == set.instrument {
+			if r.instrument == set.Instrument {
 				picked = append(picked, r)
 			}
 		}
-		assert.Equal(t, alone, picked, set.instrument)
+		assert.Equal(t, alone, picked, set.Instrument)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestRunEMAScan_AConstantPriceIsFlat(t *testing.T) {
 func TestRunEMAScan_ReturnsNoPartialResultsOnADataError(t *testing.T) {
 	boom := errors.New("bad row")
 	bars := func(yield func(marketdata.Bar, error) bool) {
-		for _, b := range scanASet().data {
+		for _, b := range scanASet().Bars {
 			if !yield(b, nil) {
 				return
 			}

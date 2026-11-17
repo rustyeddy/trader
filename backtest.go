@@ -15,14 +15,14 @@ import (
 type backtest struct {
 }
 
+// run replays bars through the trader one bar at a time: each bar is a group of
+// its own. It is the single-bar access the research tests and studies use;
+// runSeries is the path that groups bars by availability.
 func (bt *backtest) run(ctx context.Context, bars iter.Seq2[marketdata.Bar, error], tr *trader) error {
 	var last marketdata.Bar // most recent bar processed, for error context
 	for b, err := range bars {
 		if err != nil {
-			if last.Instrument == "" {
-				return fmt.Errorf("reading bars: %w", err)
-			}
-			return fmt.Errorf("reading bars after %s %s: %w", last.Instrument, last.Time.Format(time.DateOnly), err)
+			return readError(last, err)
 		}
 		last = b
 
@@ -31,6 +31,36 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[marketdata.Bar, erro
 		}
 	}
 	return nil
+}
+
+// runSeries replays already loaded series on one trader, with one shared account
+// and broker: the bars merged by availability (mergedBars), delivered as groups.
+// Every bar that becomes available at the same instant is delivered together,
+// once: the trader advances the broker through the whole group, then the
+// strategy sees each bar in instrument order. A group holds only fresh bars, so
+// an instrument with no bar at that instant is absent, never carried forward. A
+// single-instrument run is the same path with one-bar groups.
+func (bt *backtest) runSeries(ctx context.Context, tr *trader, series ...marketdata.Series) error {
+	var last marketdata.Bar
+	for f, err := range frames(mergedBars(ctx, series...)) {
+		if err != nil {
+			return readError(last, err)
+		}
+		last = f.bars[len(f.bars)-1]
+
+		if err := tr.onFrame(ctx, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readError says a read failed, and after which bar (none: before the first).
+func readError(last marketdata.Bar, err error) error {
+	if last.Instrument == "" {
+		return fmt.Errorf("reading bars: %w", err)
+	}
+	return fmt.Errorf("reading bars after %s %s: %w", last.Instrument, last.Time.Format(time.DateOnly), err)
 }
 
 // result is what one finished run reports. A trade is a position that closed:

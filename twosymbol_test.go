@@ -339,33 +339,30 @@ func TestBroker_OnFrame_DefersALiquidationWithoutACurrentPrice(t *testing.T) {
 //	2     1.00300-1.00600  2.00600-2.01200
 //	3     1.00600-1.00900  -
 //	4     1.00900-1.01200  2.01200-2.01800
-func pairBars() (*marketData, *marketData) {
-	eur := &marketData{instrument: "EURUSD"}
+func pairBars() (marketdata.Series, marketdata.Series) {
+	eur := &marketdata.Series{Instrument: "EURUSD"}
 	for h, c := range []price{px(100000), px(100300), px(100600), px(100900), px(101200)} {
 		o := c
 		if h > 0 {
-			o = eur.data[h-1].OHLC().Close
+			o = eur.Bars[h-1].OHLC().Close
 		}
-		eur.data = append(eur.data, hbar("EURUSD", hour(h), points(o), points(c)))
+		eur.Bars = append(eur.Bars, hbar("EURUSD", hour(h), points(o), points(c)))
 	}
-	gbp := &marketData{instrument: "GBPUSD", data: []marketdata.Bar{
+	gbp := &marketdata.Series{Instrument: "GBPUSD", Bars: []marketdata.Bar{
 		hbar("GBPUSD", hour(0), 200000, 200000),
 		hbar("GBPUSD", hour(1), 200000, 200600),
 		hbar("GBPUSD", hour(2), 200600, 201200),
 		hbar("GBPUSD", hour(4), 201200, 201800),
 	}}
-	return eur, gbp
+	return *eur, *gbp
 }
 
-func runPair(t *testing.T, eur, gbp *marketData) (*trader, *account) {
+func runPair(t *testing.T, eur, gbp marketdata.Series) (*trader, *account) {
 	t.Helper()
 	strat := &emaxEach{markets: testMarkets(), id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
 	require.NoError(t, strat.init())
 	tr, act := pairTrader(usd(10000), strat)
-	for f, err := range frames(mergedBars(context.Background(), eur, gbp)) {
-		require.NoError(t, err)
-		require.NoError(t, tr.onFrame(context.Background(), f))
-	}
+	require.NoError(t, (&backtest{}).runSeries(context.Background(), tr, eur, gbp))
 	return tr, act
 }
 
@@ -455,13 +452,13 @@ func TestEMAXEach_TwoInstrumentsShareOneAccount(t *testing.T) {
 func TestEMAXEach_StaggeredSignalsSizeAgainstTheEarlierPosition(t *testing.T) {
 	captureLogs(t)
 	eur, _ := pairBars()
-	gbp := &marketData{instrument: "GBPUSD", data: []marketdata.Bar{
+	gbp := &marketdata.Series{Instrument: "GBPUSD", Bars: []marketdata.Bar{
 		hbar("GBPUSD", hour(1), 200000, 200000),
 		hbar("GBPUSD", hour(2), 200000, 200600),
 		hbar("GBPUSD", hour(3), 200600, 201200),
 		hbar("GBPUSD", hour(4), 201200, 201800),
 	}}
-	tr, act := runPair(t, eur, gbp)
+	tr, act := runPair(t, eur, *gbp)
 
 	e, g := filledOpen(t, tr.broker, "EURUSD"), filledOpen(t, tr.broker, "GBPUSD")
 	assert.Equal(t, hour(3), e.decidedAt)
@@ -495,7 +492,7 @@ func TestEMAXEach_KeepsStatePerInstrument(t *testing.T) {
 	require.NoError(t, s.init())
 	eur, _ := pairBars()
 
-	for _, b := range eur.data[:3] {
+	for _, b := range eur.Bars[:3] {
 		s.onBar(context.Background(), b)
 	}
 

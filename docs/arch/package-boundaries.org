@@ -19,7 +19,7 @@ the rule is broken.
 | =internal/marketdata/layout= | the one data path resolver | standard library only |
 | =internal/logging= | structured logging on =log/slog= | standard library; =slog='s global logger is used only by the root engine and =cmd= (test) |
 | =num=, =instrument= | exact numbers; instrument identity | =num= has a private fixed-point package (test); =instrument= imports =num= |
-| =trader= (module root) | the engine | =marketdata=, =num=, =instrument=; reads no files itself except the scenario loader |
+| =trader= (module root) | the engine | =marketdata=, =num=, =instrument=; replays =marketdata.Series= values it is given; reads no files itself except the scenario loader |
 
 Rules that hold across the table:
 

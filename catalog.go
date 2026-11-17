@@ -198,13 +198,13 @@ func (c *catalog) checkFrame(f frame) error {
 // market's ticks. A provider spelling therefore never reaches the engine as a
 // second instrument. Every bar is checked before any is changed, so a refused
 // set is left exactly as it was.
-func (c *catalog) normalize(md *marketData) error {
-	key, err := c.keyFor(md.instrument)
+func (c *catalog) normalize(md *marketdata.Series) error {
+	key, err := c.keyFor(md.Instrument)
 	if err != nil {
 		return fmt.Errorf("bars: %w", err)
 	}
 	m := c.byKey[key]
-	for _, b := range md.data {
+	for _, b := range md.Bars {
 		if b.Instrument != "" {
 			if bk, err := c.keyFor(b.Instrument); err != nil || bk != key {
 				return fmt.Errorf("bars: a %q bar is in the %q set", b.Instrument, key)
@@ -214,9 +214,9 @@ func (c *catalog) normalize(md *marketData) error {
 			return fmt.Errorf("bars: %w", err)
 		}
 	}
-	md.instrument = key
-	for i := range md.data {
-		md.data[i].Instrument = key
+	md.Instrument = key
+	for i := range md.Bars {
+		md.Bars[i].Instrument = key
 	}
 	return nil
 }
