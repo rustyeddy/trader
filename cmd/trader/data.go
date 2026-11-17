@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/rustyeddy/trader/internal/logging"
 	"github.com/rustyeddy/trader/provider/oanda"
+	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/store"
 )
 
@@ -126,13 +128,6 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 		return errors.New(envOANDAToken + " is not set (the token is read only from the environment)")
 	}
 
-	req := downloadRequest{Symbols: symbols, Interval: oanda.RawInterval(strings.ToLower(token)), From: from, To: to}
-	for _, s := range req.Symbols {
-		if err := (oanda.PartitionKey{Symbol: s, Interval: req.Interval, Year: from.Year(), Month: from.Month()}).Validate(); err != nil {
-			return fmt.Errorf("--instrument %q / --interval %q: %w", s, token, err)
-		}
-	}
-
 	log := slog.Default()
 	client, err := oanda.NewClient(oanda.ClientConfig{
 		BaseURL:    baseURL,
@@ -149,21 +144,22 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 	defer stop()
 
 	out := cmd.OutOrStdout()
-	var total partitionResult
+	var total service.DownloadResult
 	var writeErr error // the first failure to write the summary
 	say := func(format string, args ...any) {
 		if _, werr := fmt.Fprintf(out, format, args...); werr != nil && writeErr == nil {
 			writeErr = fmt.Errorf("write summary: %w", werr)
 		}
 	}
-	err = downloadMonths(ctx, logging.WithComponent(log, logging.ComponentMarketData), client, req, func(r partitionResult) {
+	req := service.DownloadRequest{Instruments: symbols, Interval: strings.ToLower(token), From: from, To: to}
+	err = service.DownloadRaw(ctx, logging.WithComponent(log, logging.ComponentMarketData), client, req, func(r service.DownloadResult) {
 		total.Fetched += r.Fetched
 		total.Added += r.Added
 		total.Kept += r.Kept
 		total.Incomplete += r.Incomplete
 		total.Differing += r.Differing
 		say("%s: fetched %d, added %d, kept %d, not stored (incomplete) %d\n",
-			r.Path, r.Fetched, r.Added, r.Kept, r.Incomplete)
+			filepath.Join(store.Root(), r.Path), r.Fetched, r.Added, r.Kept, r.Incomplete)
 	})
 	say("total: fetched %d, added %d, kept %d, not stored (incomplete) %d, stored rows that differ from the provider %d\n",
 		total.Fetched, total.Added, total.Kept, total.Incomplete, total.Differing)

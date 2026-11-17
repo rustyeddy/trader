@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"go/parser"
 	"go/token"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -366,4 +368,181 @@ func TestLoadSeries_RefusesARequestItCannotRun(t *testing.T) {
 	assert.ErrorIs(t, errCtx, context.Canceled)
 	require.ErrorIs(t, errInterval, ErrNotLoadable, "the domain's refusal is the instrument's, reported in its result")
 	assert.ErrorIs(t, got[0].Err, mdservice.ErrUnsupportedInterval)
+}
+
+// dlFetcher serves records from a fixed series for a [From, To) window, as the
+// provider would, and remembers every request.
+type dlFetcher struct {
+	mu     sync.Mutex
+	series []oanda.Record
+	reqs   []oanda.CandleRequest
+	err    error
+}
+
+func (f *dlFetcher) FetchCandles(_ context.Context, req oanda.CandleRequest) ([]oanda.Record, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqs = append(f.reqs, req)
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []oanda.Record
+	for _, r := range f.series {
+		if !r.Time.Before(req.From) && r.Time.Before(req.To) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func dlHourly(from time.Time, n int) []oanda.Record {
+	var out []oanda.Record
+	for i := range n {
+		out = append(out, rec(from.Add(time.Duration(i)*time.Hour), true))
+	}
+	return out
+}
+
+func download(t *testing.T, f CandleFetcher, req DownloadRequest) []DownloadResult {
+	t.Helper()
+	var got []DownloadResult
+	require.NoError(t, DownloadRaw(context.Background(), nil, f, req, func(r DownloadResult) { got = append(got, r) }))
+	return got
+}
+
+func TestDownloadRaw_OneBoundedRequestAndOneFilePerMonth(t *testing.T) {
+	storetest.Root(t)
+	f := &dlFetcher{series: dlHourly(utc(2024, 1, 30, 0), 72)} // Jan 30 .. Feb 1, 23:00
+
+	got := download(t, f, DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 30, 0), To: utc(2024, 2, 2, 0)})
+
+	require.Len(t, got, 2)
+	assert.Equal(t, 48, got[0].Added, "January holds Jan 30 and Jan 31")
+	assert.Equal(t, 24, got[1].Added, "February holds Feb 1")
+	assert.Equal(t, filepath.Join("oanda", "raw", "EURUSD", "2024", "01", "EURUSD-2024-01-h1.csv"), got[0].Path)
+	assert.Equal(t, "EURUSD", got[0].Instrument)
+	assert.Equal(t, 2024, got[1].Year)
+	assert.Equal(t, time.February, got[1].Month)
+	assert.Equal(t, []oanda.CandleRequest{
+		{Symbol: "EURUSD", Interval: oanda.RawH1, From: utc(2024, 1, 30, 0), To: utc(2024, 2, 1, 0)},
+		{Symbol: "EURUSD", Interval: oanda.RawH1, From: utc(2024, 2, 1, 0), To: utc(2024, 2, 2, 0)},
+	}, f.reqs, "the first and last months are clamped to the requested range")
+}
+
+func TestDownloadRaw_ARerunAddsNothing(t *testing.T) {
+	storetest.Root(t)
+	f := &dlFetcher{series: dlHourly(utc(2024, 1, 1, 0), 24)}
+	req := DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)}
+	download(t, f, req)
+
+	second := download(t, f, req)
+
+	assert.Equal(t, 0, second[0].Added)
+	assert.Equal(t, 24, second[0].Kept)
+}
+
+// Daily bars open at 21:00 or 22:00 UTC, so the last bar of a month opens on its
+// last evening and belongs to that month's file (ADR-089).
+func TestDownloadRaw_DailyBarsLandInTheirUTCOpeningMonth(t *testing.T) {
+	storetest.Root(t)
+	f := &dlFetcher{series: []oanda.Record{
+		rec(utc(2020, 4, 29, 21), true),
+		rec(utc(2020, 4, 30, 21), true), // opens in April, trades into May
+		rec(utc(2020, 5, 3, 21), true),
+	}}
+
+	got := download(t, f, DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "d1", From: utc(2020, 4, 1, 0), To: utc(2020, 5, 10, 0)})
+
+	require.Len(t, got, 2)
+	assert.Equal(t, 2, got[0].Added)
+	assert.Equal(t, 1, got[1].Added)
+	april, err := oanda.ReadPartitionRecords(context.Background(), oanda.PartitionKey{Symbol: "EURUSD", Interval: oanda.RawD1, Year: 2020, Month: time.April})
+	require.NoError(t, err)
+	require.Len(t, april, 2)
+	assert.True(t, april[1].Time.Equal(utc(2020, 4, 30, 21)))
+}
+
+func TestDownloadRaw_SeveralInstrumentsInOrder(t *testing.T) {
+	storetest.Root(t)
+	f := &dlFetcher{series: dlHourly(utc(2024, 1, 1, 0), 2)}
+
+	got := download(t, f, DownloadRequest{Instruments: []string{"GBPUSD", "EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)})
+
+	require.Len(t, got, 2)
+	assert.Equal(t, "GBPUSD", got[0].Instrument)
+	assert.Equal(t, "EURUSD", got[1].Instrument)
+}
+
+func TestDownloadRaw_RefusesBadRequestsBeforeAnyFetch(t *testing.T) {
+	day := func(d int) time.Time { return utc(2024, 1, d, 0) }
+	for name, tc := range map[string]struct {
+		req  DownloadRequest
+		want string
+	}{
+		"not in scope":  {DownloadRequest{Instruments: []string{"EURUSD", "XAUUSD"}, Interval: "h1", From: day(1), To: day(2)}, "XAUUSD"},
+		"bad interval":  {DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "w1", From: day(1), To: day(2)}, "w1"},
+		"empty range":   {DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: day(2), To: day(2)}, "--to must be after --from"},
+		"reversed span": {DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: day(3), To: day(2)}, "--to must be after --from"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &dlFetcher{series: dlHourly(day(1), 2)}
+
+			err := DownloadRaw(context.Background(), nil, f, tc.req, nil)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Empty(t, f.reqs, "no request is made")
+		})
+	}
+}
+
+func TestDownloadRaw_AFailureStopsAndNamesThePartition(t *testing.T) {
+	storetest.Root(t)
+	boom := errors.New("provider down")
+	f := &dlFetcher{err: boom}
+	var reported int
+
+	err := DownloadRaw(context.Background(), nil, f, DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 3, 1, 0)},
+		func(DownloadResult) { reported++ })
+
+	require.ErrorIs(t, err, boom)
+	assert.Contains(t, err.Error(), "EURUSD 2024-01")
+	assert.Zero(t, reported)
+	assert.Len(t, f.reqs, 1, "the run stops at the first failure")
+}
+
+func TestDownloadRaw_ACancelledContextFetchesAndWritesNothing(t *testing.T) {
+	root := storetest.Root(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := &dlFetcher{series: dlHourly(utc(2024, 1, 1, 0), 2)}
+
+	err := DownloadRaw(ctx, nil, f, DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 1, 2, 0)}, nil)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, f.reqs)
+	entries, rerr := os.ReadDir(root)
+	require.NoError(t, rerr)
+	assert.Empty(t, entries)
+}
+
+// TestService_ReadsNoFlagsEnvironmentOrCredentials keeps the application service
+// free of transport concerns: it imports neither os, flag nor a command library,
+// so configuration and the credential reach it only as plain values and as the
+// fetcher the transport builds.
+func TestService_ReadsNoFlagsEnvironmentOrCredentials(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
+		require.NoError(t, perr)
+		for _, imp := range f.Imports {
+			path, uerr := strconv.Unquote(imp.Path.Value)
+			require.NoError(t, uerr)
+			assert.NotContains(t, []string{"os", "flag", "github.com/spf13/cobra"}, path, "%s imports %s", file, path)
+		}
+	}
 }

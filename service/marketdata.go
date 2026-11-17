@@ -3,7 +3,8 @@
 // plain configuration values; a service coordinates providers and domain services
 // to carry out one use case. It reads no environment and holds no secret.
 //
-// marketdata.go is the market-data use case so far: BuildCanonical reads a raw
+// marketdata.go is the market-data use case so far: DownloadRaw fetches provider
+// candles month by month into the raw store; BuildCanonical reads a raw
 // provider partition, hands it to the market-data domain service as a
 // marketdata.SourcePartition, and reports what each partition came to; LoadSeries
 // asks the domain service for canonical bars as series and reports every month's
@@ -41,6 +42,86 @@ const (
 	Missing   Action = "missing"
 	Failed    Action = "failed"
 )
+
+// DownloadRequest is what one download asks for: every instrument over the UTC
+// months that [From, To) touches, at one interval. The values come from the
+// transport.
+type DownloadRequest struct {
+	Instruments []string
+	// Interval is the lower-case token: m1, h1, h4 or d1.
+	Interval string
+	From, To time.Time
+}
+
+// DownloadResult is what one month partition's download came to.
+type DownloadResult struct {
+	Instrument string
+	Year       int
+	Month      time.Month
+	// Path is the raw file's path relative to the data root.
+	Path       string
+	Fetched    int // candles the provider returned for the month's window
+	Incomplete int // candles still forming, never stored
+	Added      int // rows written that the file did not have
+	Kept       int // rows already on file, left exactly as they were
+	Differing  int // of Kept, rows whose provider values differ from the file's
+}
+
+// CandleFetcher is what DownloadRaw needs from a provider client.
+type CandleFetcher interface {
+	FetchCandles(ctx context.Context, req oanda.CandleRequest) ([]oanda.Record, error)
+}
+
+// DownloadRaw fetches req one UTC month partition at a time, instrument by
+// instrument, merging each into the raw store (oanda.DownloadPartition owns the
+// archive rules: nothing stored is changed, forming candles are not stored), and
+// calls report (when not nil) after each partition, in order. A request that is
+// invalid fails before any fetch. The first partition that fails stops the run
+// with an error that names it; the partitions already done stay done.
+// Cancellation stops the run at once. log may be nil.
+func DownloadRaw(ctx context.Context, log *slog.Logger, f CandleFetcher, req DownloadRequest, report func(DownloadResult)) error {
+	if !req.To.After(req.From) {
+		return errors.New("download: --to must be after --from")
+	}
+	interval := oanda.RawInterval(req.Interval)
+	for _, symbol := range req.Instruments {
+		if err := (oanda.PartitionKey{Symbol: symbol, Interval: interval, Year: req.From.UTC().Year(), Month: req.From.UTC().Month()}).Validate(); err != nil {
+			return fmt.Errorf("--instrument %q / --interval %q: %w", symbol, req.Interval, err)
+		}
+	}
+	for _, symbol := range req.Instruments {
+		for ms := monthStart(req.From); ms.Before(req.To); ms = ms.AddDate(0, 1, 0) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			key := oanda.PartitionKey{Symbol: symbol, Interval: interval, Year: ms.Year(), Month: ms.Month()}
+			from, to := laterOf(req.From.UTC(), ms), earlierOf(req.To.UTC(), ms.AddDate(0, 1, 0))
+			r, err := oanda.DownloadPartition(ctx, log, f, key, from, to)
+			if err != nil {
+				return fmt.Errorf("%s %04d-%02d: %w", symbol, ms.Year(), int(ms.Month()), err)
+			}
+			if report != nil {
+				report(DownloadResult{Instrument: symbol, Year: ms.Year(), Month: ms.Month(), Path: r.Path,
+					Fetched: r.Fetched, Incomplete: r.Incomplete, Added: r.Added, Kept: r.Kept, Differing: r.Differing})
+			}
+		}
+	}
+	return nil
+}
+
+func laterOf(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+func earlierOf(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
+}
 
 // BuildRequest is what one build asks for: every instrument over the UTC months
 // that [From, To) touches, at one interval. The values come from the transport.
