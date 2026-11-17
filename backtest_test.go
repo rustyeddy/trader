@@ -6,10 +6,14 @@ import (
 	"errors"
 	"iter"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
+	mdservice "github.com/rustyeddy/trader/marketdata/service"
+	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -520,4 +524,123 @@ func first(orders []*order) *order {
 		return nil
 	}
 	return orders[0]
+}
+
+// canonicalMonth builds one UTC month of raw hourly rows for the instrument into the
+// canonical store (the market-data service's Build) and reads it back (its Load):
+// the series a backtest gets from disk. A row is opened at each given hour of
+// 2024-01-02, at the given bid close with a two-tick spread, so every mid is a
+// whole tick. The partition is built from rows by hand, not read from a provider.
+func canonicalMonth(t *testing.T, instrument string, bid int64, hours ...int) marketdata.Series {
+	t.Helper()
+	two := px(2)
+	p := marketdata.SourcePartition{Source: "oanda", Instrument: instrument, Interval: "h1", Year: 2024, Month: time.January,
+		Fingerprint: "sha256:" + instrument}
+	for i, h := range hours {
+		b := px(bid + int64(i))
+		a, err := b.Add(two)
+		require.NoError(t, err)
+		ohlc := func(p num.Price) marketdata.OHLC { return marketdata.OHLC{Open: p, High: p, Low: p, Close: p} }
+		p.Rows = append(p.Rows, marketdata.SourceRow{Row: i + 1, Complete: true, Bar: marketdata.Bar{
+			Time: time.Date(2024, time.January, 2, h, 0, 0, 0, time.UTC), Volume: 10, Bid: ohlc(b), Ask: ohlc(a)}})
+	}
+	_, err := mdservice.Build(context.Background(), p, time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	got, err := mdservice.Load(context.Background(), mdservice.LoadRequest{Source: "oanda", Instrument: instrument, Interval: "h1",
+		From: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)})
+	require.NoError(t, err)
+	return got.Series
+}
+
+// The grouped replay on series that came through canonical storage: EURUSD has a
+// bar every hour, GBPUSD none for the hours opening at 03:00 and 07:00. A group
+// holds exactly the bars available at its instant, GBPUSD is absent where it has
+// none (nothing carried forward), and a bar is never shown before its stored
+// availability.
+func TestBacktestRunSeries_OnSeriesLoadedFromCanonicalStorage(t *testing.T) {
+	storetest.Root(t)
+	captureLogs(t)
+	eur := canonicalMonth(t, "EURUSD", 100000, 0, 1, 2, 3, 4, 5, 6, 7, 8)
+	gbp := canonicalMonth(t, "GBPUSD", 200000, 0, 1, 2, 4, 5, 6, 8)
+	require.Len(t, eur.Bars, 9)
+	require.Len(t, gbp.Bars, 7)
+
+	spy := &seenStrategy{}
+	tr, _ := pairTrader(usd(10000), spy)
+	require.NoError(t, (&backtest{}).runSeries(context.Background(), tr, gbp, eur))
+
+	// Expected: every instant any bar is available, EURUSD then GBPUSD, from the
+	// loaded series' own stored availability.
+	has := map[string]map[time.Time]bool{"EURUSD": {}, "GBPUSD": {}}
+	var instants []time.Time
+	for _, s := range []marketdata.Series{eur, gbp} {
+		for _, b := range s.Bars {
+			has[s.Instrument][b.AvailableAt] = true
+			instants = append(instants, b.AvailableAt)
+		}
+	}
+	slices.SortFunc(instants, time.Time.Compare)
+	instants = slices.Compact(instants)
+	var want []string
+	for _, at := range instants {
+		for _, inst := range []string{"EURUSD", "GBPUSD"} {
+			if has[inst][at] {
+				want = append(want, inst+"@"+at.Format("Mon 15:04"))
+			}
+		}
+	}
+	assert.Equal(t, want, spy.seen, "one fresh group per stored availability instant, in instrument order")
+	assert.Len(t, instants, 9)
+	assert.Len(t, spy.seen, 16, "9 + 7 bars: nothing added, nothing carried forward")
+	for _, b := range gbp.Bars {
+		assert.False(t, b.AvailableAt.Equal(eur.Bars[3].AvailableAt) || b.AvailableAt.Equal(eur.Bars[7].AvailableAt),
+			"GBPUSD has no bar at the instants EURUSD is alone")
+	}
+}
+
+// warmSpy is a strategy that can be warmed: it records the bars it was warmed
+// with and the groups it was asked about, and places no order.
+type warmSpy struct {
+	seenStrategy
+	warmed []string
+}
+
+func (s *warmSpy) warm(_ context.Context, bars []marketdata.Bar) {
+	for _, b := range bars {
+		s.warmed = append(s.warmed, b.Instrument+"@"+b.AvailableAt.Format("Mon 15:04"))
+	}
+}
+
+func TestBacktestRunSeriesFrom_WarmBarsPrefillTheStrategyAndAreNeverTraded(t *testing.T) {
+	spy := &warmSpy{}
+	tr, _ := pairTrader(usd(1000), spy)
+	// EURUSD opens at hours 0..4, GBPUSD at 1 and 3; trading starts at hour 2.
+	err := (&backtest{}).runSeriesFrom(context.Background(), tr, hour(2), hSeries("EURUSD", 0, 1, 2, 3, 4), hSeries("GBPUSD", 1, 3))
+
+	require.NoError(t, err)
+	at := func(h int) string { return hour(h).Format("Mon 15:04") }
+	assert.Equal(t, []string{"EURUSD@" + at(1), "EURUSD@" + at(2), "GBPUSD@" + at(2)}, spy.warmed,
+		"the bars that opened before hour 2, in availability order")
+	assert.Equal(t, []string{"EURUSD@" + at(3), "EURUSD@" + at(4), "GBPUSD@" + at(4), "EURUSD@" + at(5)}, spy.seen,
+		"the strategy decides only on bars that opened at or after hour 2")
+}
+
+func TestBacktestRunSeriesFrom_AStrategyThatCannotBeWarmedIsJustNotWarmed(t *testing.T) {
+	spy := &seenStrategy{}
+	tr, _ := pairTrader(usd(1000), spy)
+
+	err := (&backtest{}).runSeriesFrom(context.Background(), tr, hour(2), hSeries("EURUSD", 0, 1, 2, 3))
+
+	require.NoError(t, err)
+	assert.Len(t, spy.seen, 2, "only the traded bars reach it")
+}
+
+func TestBacktestRunSeriesFrom_ZeroTradeFromTradesEverything(t *testing.T) {
+	spy := &warmSpy{}
+	tr, _ := pairTrader(usd(1000), spy)
+
+	require.NoError(t, (&backtest{}).runSeriesFrom(context.Background(), tr, time.Time{}, hSeries("EURUSD", 0, 1, 2)))
+
+	assert.Empty(t, spy.warmed)
+	assert.Len(t, spy.seen, 3)
 }

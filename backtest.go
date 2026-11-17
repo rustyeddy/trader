@@ -33,14 +33,34 @@ func (bt *backtest) run(ctx context.Context, bars iter.Seq2[marketdata.Bar, erro
 	return nil
 }
 
-// runSeries replays already loaded series on one trader, with one shared account
+// runSeries replays already loaded series on one trader: runSeriesFrom with no
+// warm-up.
+func (bt *backtest) runSeries(ctx context.Context, tr *trader, series ...marketdata.Series) error {
+	return bt.runSeriesFrom(ctx, tr, time.Time{}, series...)
+}
+
+// runSeriesFrom replays already loaded series on one trader, with one shared account
 // and broker: the bars merged by availability (mergedBars), delivered as groups.
 // Every bar that becomes available at the same instant is delivered together,
 // once: the trader advances the broker through the whole group, then the
-// strategy sees each bar in instrument order. A group holds only fresh bars, so
-// an instrument with no bar at that instant is absent, never carried forward. A
+// strategy sees the whole group in one call. A group holds only fresh bars, so an
+// instrument with no bar at that instant is absent, never carried forward. A
 // single-instrument run is the same path with one-bar groups.
-func (bt *backtest) runSeries(ctx context.Context, tr *trader, series ...marketdata.Series) error {
+//
+// A bar that opens before tradeFrom (when it is not zero) is a warm-up bar: the
+// strategy is shown it only to prefill its indicators (warmer), the broker never
+// sees it, and nothing is traded on it. The warm-up bars come first in each series.
+//
+// runSeriesFrom owns the validation of what it replays: every series must pass
+// marketdata.Series.Validate (named, valid bars of its instrument, strictly
+// ascending opening times and availability), so no caller can skip it.
+func (bt *backtest) runSeriesFrom(ctx context.Context, tr *trader, tradeFrom time.Time, series ...marketdata.Series) error {
+	for _, s := range series {
+		if err := s.Validate(); err != nil {
+			return fmt.Errorf("replay %s: %w", s.Instrument, err)
+		}
+	}
+	w, _ := tr.strategy.(warmer)
 	var last marketdata.Bar
 	for f, err := range frames(mergedBars(ctx, series...)) {
 		if err != nil {
@@ -48,6 +68,24 @@ func (bt *backtest) runSeries(ctx context.Context, tr *trader, series ...marketd
 		}
 		last = f.bars[len(f.bars)-1]
 
+		if !tradeFrom.IsZero() {
+			var warm []marketdata.Bar
+			live := make([]marketdata.Bar, 0, len(f.bars))
+			for _, b := range f.bars {
+				if b.Time.Before(tradeFrom) {
+					warm = append(warm, b)
+				} else {
+					live = append(live, b)
+				}
+			}
+			if len(warm) > 0 && w != nil {
+				w.warm(ctx, warm)
+			}
+			if len(live) == 0 {
+				continue
+			}
+			f.bars = live
+		}
 		if err := tr.onFrame(ctx, f); err != nil {
 			return err
 		}

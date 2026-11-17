@@ -22,6 +22,7 @@ go run ./cmd/trader   # or run without building
 | `trader data download` | Downloads OANDA bid/ask candles into the raw store. Needs a token and the network. |
 | `trader data build` | Builds canonical bars from the raw store. Needs no token and makes no network call. |
 | `trader data status` | Shows which canonical months a range can load (loaded, bad, missing, stale) without changing anything. Needs no token and makes no network call. |
+| `trader backtest` | Backtests canonical bars from the data store: EMAX on each instrument, one shared account. Needs no token and makes no network call. |
 
 Global flags, accepted by every command: `--log-level` (DEBUG, INFO, WARN, ERROR;
 default INFO), `--log-format` (text or json) and `--log-output` (stderr, stdout or a
@@ -157,6 +158,35 @@ the raw it was built from.
 temporary directory using your token from the environment, verifies what landed on
 disk and prints only PASS or FAIL (details in `bin/smoke.log`). It is not part of
 `make check`.
+
+## trader backtest
+
+```sh
+trader backtest --instrument EURUSD,GBPUSD --interval h1 --from 2024-01-01 --to 2024-04-01
+```
+
+Backtests the canonical bars of one or more instruments over a UTC range on one
+shared account. A run has one source (`--source`, only `oanda`) and one interval.
+Bars are loaded as `trader data status` describes, with the same options and the same
+`--allow-bad` and `--allow-missing`; by default a stale, missing or bad month fails
+the run, and nothing is replayed unless every instrument loaded. Every bar available
+at the same instant reaches the strategy together; an instrument with no bar at that
+instant is absent, never carried forward.
+
+The strategy and account are fixed, the ones the EMAX scenarios use: EMAX (windows 2
+and 4, a 1% stop) on each instrument and a 10,000 USD account. The engine trades the
+instruments it has a market for (EURUSD and GBPUSD today); another instrument is
+refused with an error naming it.
+
+Indicators are prefilled: the bars of the UTC month before `--from`, when they can be
+loaded, only warm the strategy up (they are not traded and not counted). A missing
+month is simply not there; if the earlier months are stale, or bad and `--allow-bad`
+is not given, the run goes without a warm-up (the log says so). The engine rounds
+prices to the nearest tick of the market (a mid between two ticks rounds up); the
+stored data is not changed.
+
+Output: the engine's summary for the run (bars, orders, trades, money, open
+positions).
 
 ## Backtests
 

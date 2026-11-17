@@ -109,11 +109,34 @@ account and broker (`replay.go`, `backtest.go`):
   made one bar at a time (`emax`, `emaxEach`). A single-instrument run is the same
   path with one-bar groups. `backtest.run` keeps the per-bar access the research
   tests and studies use.
-- `mergedBars` trusts its input: the caller validates the series
-  (`marketdata.Series.Validate`; `runScenario` does, where the scenario enters).
-- A run configuration (which instruments, source, range) and wiring a `Series`
-  loaded from `/srv/data` into the command line are not built yet; `runScenario`
-  is the only caller of `runSeries` outside tests.
+- `backtest.runSeries` validates every series (`marketdata.Series.Validate`) before
+  replaying; `mergedBars` trusts its input and checks only what the merge needs.
+- `trader.RunSeries(ctx, name, series...)` is the engine's entry for series a reader
+  loaded: it works on copies, normalizes instrument keys, refuses an instrument it
+  has no market for, runs EMAX on each instrument with the scenarios' fixed
+  settings and returns a `Result` (`Write` prints the summary). The engine opens no
+  file. `service.RunBacktest` is the application service that joins the two:
+  `LoadSeries` (the market-data service's policy for missing, bad and stale
+  months), then `RunSeries`; `trader backtest` only parses flags and prints.
+- Mid prices and ticks (#667). A canonical mid is the exact midpoint of bid and
+  ask, so it can sit half a tick from a whole tick (1.100005 for ticks of 0.00001).
+  `trader.RunSeries` rounds every bar price to the nearest tick of the market (a
+  tie goes up) as the bars enter the engine (`catalog.roundToTicks`), on its own
+  copy: the canonical data and the series passed in are unchanged. The series is
+  validated as it was given first; the engine's bar then carries only the price
+  series it trades (`Bar.OHLC`, as `Mid`), since a rounded mid is no longer the
+  midpoint of the stored bid and ask. The engine and its strategies only see whole
+  ticks. The scenario path does not round: it
+  still refuses a bar that is off the tick.
+- Warm-up. `trader.RunSeries` takes `tradeFrom`: a bar that opens before it is a
+  warm-up bar, shown to a strategy that implements `warmer` only to prefill its
+  indicators (EMAX feeds its EMAs, takes no position, places no order), never
+  replayed on the broker and not counted. After the warm-up EMAX finds its EMAs
+  seeded, so it trades the trend as it stands. `service.RunBacktest` supplies the
+  bars of the UTC month before `From` when they can be loaded: it uses the loader
+  and the run's `AllowBad`, treats a missing month as simply absent, and runs an
+  instrument without warm-up (logged) when its earlier months are stale or bad.
+  Only the traded range is strict.
 
 ## Tests
 

@@ -394,3 +394,43 @@ func TestEmax_StopsPassAccountSizing(t *testing.T) {
 		assert.False(t, o.units.IsZero())
 	}
 }
+
+func TestEmax_Warm_PrefillsTheEMAsAndTakesNoPosition(t *testing.T) {
+	ctx := context.Background()
+	rising := closes(1, 2, 3, 4)
+
+	cold := newTestEmax(t, 2, 4)
+	warm := newTestEmax(t, 2, 4)
+	warm.warm(ctx, rising)
+
+	next := closes(1, 2, 3, 4, 5)[4]
+	assert.Nil(t, cold.onBar(ctx, next), "a cold EMAX has no signal on its first bar")
+	require.NotNil(t, warm.onBar(ctx, next), "a warmed one already has its EMAs, and trades the trend")
+	assert.Equal(t, noDirection, newTestEmax(t, 2, 4).pos)
+	again := newTestEmax(t, 2, 4)
+	again.warm(ctx, rising)
+	assert.Equal(t, noDirection, again.pos, "warming takes no position")
+	assert.Equal(t, noDirection, again.pending)
+}
+
+func TestEmaxEach_Warm_RoutesBarsToTheirInstrumentAndIgnoresOthers(t *testing.T) {
+	ctx := context.Background()
+	s := &emaxEach{id: "e", instruments: []string{"EURUSD"}, short: 2, long: 4, stopPct: rateOnePercent, markets: testMarkets()}
+	require.NoError(t, s.init())
+	eur := closes(1, 2, 3, 4)
+	for i := range eur {
+		eur[i].Instrument = "EURUSD"
+	}
+	other := closes(1, 2, 3, 4)
+	for i := range other {
+		other[i].Instrument = "GBPUSD"
+	}
+
+	s.warm(ctx, append(eur, other...))
+
+	next := closes(1, 2, 3, 4, 5)[4]
+	next.Instrument = "EURUSD"
+	next.Time = eur[3].Time.AddDate(0, 0, 1)
+	require.NotNil(t, s.onBar(ctx, next), "EURUSD was warmed")
+	assert.Nil(t, s.onBar(ctx, marketdata.Bar{Instrument: "GBPUSD"}), "GBPUSD is not traded")
+}

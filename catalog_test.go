@@ -460,3 +460,60 @@ func TestCatalog_NormalizeChangesNothingWhenAnyBarIsRefused(t *testing.T) {
 		assert.Equal(t, "EUR_USD", b.Instrument)
 	}
 }
+
+func TestNearestTick(t *testing.T) {
+	tick := num.MustParsePrice("0.00001")
+	for _, tt := range []struct{ in, want string }{
+		{"1.10000", "1.10000"},   // on a tick
+		{"1.100004", "1.10000"},  // below the middle
+		{"1.100006", "1.10001"},  // above the middle
+		{"1.100005", "1.10001"},  // exactly between: a tie rounds up
+		{"1.1000049", "1.10000"}, // just below a tie
+		{"0.000004", "0.00000"},  // rounds to zero
+		{"0.000005", "0.00001"},  // tie at the bottom
+		{"0.00000", "0.00000"},   // zero stays zero
+		{"1.100014", "1.10001"},  // a different tick
+		{"1.1000149", "1.10001"}, // just below the next tie
+		{"1.100015", "1.10002"},  // the next tie
+	} {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := nearestTick(num.MustParsePrice(tt.in), tick)
+
+			require.NoError(t, err)
+			assert.Equal(t, num.MustParsePrice(tt.want), got)
+		})
+	}
+	_, err := nearestTick(num.MustParsePrice("1.1"), num.Price{})
+	assert.Error(t, err, "a zero tick")
+}
+
+func TestCatalog_RoundToTicks_LeavesTheBarWithItsRoundedPriceSeriesOnly(t *testing.T) {
+	c := testMarkets()
+	p := num.MustParsePrice
+	s := marketdata.Series{Source: "t", Instrument: "EURUSD", Interval: "h1", Bars: []marketdata.Bar{{
+		Instrument: "EURUSD", Time: testStart, AvailableAt: testStart.Add(time.Hour), Volume: 7,
+		Bid: marketdata.OHLC{Open: p("1.10000"), High: p("1.10010"), Low: p("1.09990"), Close: p("1.10000")},
+		Ask: marketdata.OHLC{Open: p("1.10001"), High: p("1.10011"), Low: p("1.09991"), Close: p("1.10001")},
+		Mid: marketdata.OHLC{Open: p("1.100005"), High: p("1.100105"), Low: p("1.099905"), Close: p("1.100005")},
+	}}}
+
+	require.NoError(t, c.roundToTicks(&s))
+
+	b := s.Bars[0]
+	assert.Equal(t, marketdata.OHLC{Open: p("1.10001"), High: p("1.10011"), Low: p("1.09991"), Close: p("1.10001")}, b.Mid, "mid ties go up")
+	assert.True(t, b.Bid.IsZero() && b.Ask.IsZero() && b.Trade.IsZero(), "the engine's bar carries the one series it trades")
+	assert.Equal(t, int64(7), b.Volume)
+	assert.Equal(t, testStart.Add(time.Hour), b.AvailableAt, "availability is not touched")
+	require.NoError(t, c.byKey["EURUSD"].checkPrices(b.Mid), "what comes out passes the engine's tick check")
+	require.NoError(t, s.Validate(), "and the series is still a valid series")
+
+	only := marketdata.Series{Source: "t", Instrument: "EURUSD", Interval: "h1", Bars: []marketdata.Bar{{
+		Instrument: "EURUSD", Time: testStart, AvailableAt: testStart.Add(time.Hour),
+		Bid: marketdata.OHLC{Open: p("1.100006"), High: p("1.100006"), Low: p("1.100006"), Close: p("1.100006")},
+	}}}
+	require.NoError(t, c.roundToTicks(&only))
+	assert.Equal(t, p("1.10001"), only.Bars[0].Mid.Close, "a bar with only a bid trades that, rounded")
+
+	err := c.roundToTicks(&marketdata.Series{Instrument: "AUDUSD"})
+	assert.ErrorIs(t, err, errUnknownInstrument)
+}

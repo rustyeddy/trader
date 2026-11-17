@@ -214,12 +214,13 @@ func TestBuildCanonical_BuiltAtDefaultsToNow(t *testing.T) {
 }
 
 // TestService_ImportsOnlyTheDomainServiceAndProviders keeps the application
-// service in its place (ADR-091): within the module it may import the public
-// market-data model, the market-data domain service and a provider, never a transport, the root engine, the store or
-// the layout directly. File data goes through the domain service and the provider.
+// service in its place (ADR-091): within the module it may import the engine (the
+// root package), the public market-data model, the market-data domain service and a
+// provider, never a transport, the store or the layout directly. File data goes
+// through the domain service and the provider.
 func TestService_ImportsOnlyTheDomainServiceAndProviders(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod + "/marketdata": true, mod + "/marketdata/service": true, mod + "/provider/oanda": true}
+	allowed := map[string]bool{mod: true, mod + "/marketdata": true, mod + "/marketdata/service": true, mod + "/provider/oanda": true}
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
 	checked := 0
