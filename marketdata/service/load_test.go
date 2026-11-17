@@ -28,6 +28,32 @@ func buildMonth(t *testing.T, year int, month time.Month, days ...int) {
 	require.NoError(t, err)
 }
 
+// buildHours builds the canonical h1 months that hold n consecutive hourly bars
+// from start, one month per UTC month the run touches, so the bars have no gap.
+func buildHours(t *testing.T, start time.Time, n int) {
+	t.Helper()
+	var rows []marketdata.SourceRow
+	flush := func() {
+		if len(rows) == 0 {
+			return
+		}
+		first := rows[0].Bar.Time
+		p := h1Source(rows...)
+		p.Year, p.Month = first.Year(), first.Month()
+		_, err := Build(context.Background(), p, builtAt)
+		require.NoError(t, err)
+		rows = nil
+	}
+	for i := range n {
+		at := start.Add(time.Duration(i) * time.Hour)
+		if len(rows) > 0 && rows[0].Bar.Time.Month() != at.Month() {
+			flush()
+		}
+		rows = append(rows, row(len(rows)+1, at))
+	}
+	flush()
+}
+
 func janToMarch(mutate ...func(*LoadRequest)) LoadRequest {
 	req := LoadRequest{Source: "oanda", Instrument: "EURUSD", Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 3, 1, 0)}
 	for _, m := range mutate {
@@ -57,9 +83,8 @@ func rewriteMeta(t *testing.T, year int, month time.Month, mutate func(*canonica
 
 func TestLoad_ReturnsTheMonthsBarsInOrderCutToTheRange(t *testing.T) {
 	storetest.Root(t)
-	buildMonth(t, 2024, time.January, 2, 15, 31)
-	buildMonth(t, 2024, time.February, 1, 10)
-	req := janToMarch(func(r *LoadRequest) { r.From, r.To = utc(2024, 1, 15, 0), utc(2024, 2, 10, 0) })
+	buildHours(t, utc(2024, 1, 31, 20), 9) // Jan 31 20:00 to Feb 1 04:00, across two months
+	req := janToMarch(func(r *LoadRequest) { r.From, r.To = utc(2024, 1, 31, 22), utc(2024, 2, 1, 2) })
 
 	got, err := Load(context.Background(), req)
 
@@ -68,15 +93,15 @@ func TestLoad_ReturnsTheMonthsBarsInOrderCutToTheRange(t *testing.T) {
 	for _, b := range got.Series.Bars {
 		opens = append(opens, b.Time)
 	}
-	assert.Equal(t, []time.Time{utc(2024, 1, 15, 0), utc(2024, 1, 31, 0), utc(2024, 2, 1, 0)}, opens,
-		"[From, To) by opening time: the 10th is the end and not included, the 2nd is before the start")
+	assert.Equal(t, []time.Time{utc(2024, 1, 31, 22), utc(2024, 1, 31, 23), utc(2024, 2, 1, 0), utc(2024, 2, 1, 1)}, opens,
+		"[From, To) by opening time: 02:00 is the end and not included, 20:00 and 21:00 are before the start")
 	assert.Equal(t, []MonthState{Loaded, Loaded}, states(got), "only the months the range touches")
 	assert.Equal(t, "oanda", got.Series.Source)
 	assert.Equal(t, "EURUSD", got.Series.Instrument)
 	assert.Equal(t, "h1", got.Series.Interval)
-	require.NoError(t, got.Series.Validate())
+	require.NoError(t, got.Series.Validate(), "Load returns a valid series across months without validating it again")
 	assert.Equal(t, "EURUSD", got.Series.Bars[0].Instrument, "named from the file's key")
-	assert.Equal(t, utc(2024, 1, 15, 1), got.Series.Bars[0].AvailableAt, "the stored availability")
+	assert.Equal(t, utc(2024, 1, 31, 23), got.Series.Bars[0].AvailableAt, "the stored availability")
 }
 
 func TestLoad_ReportsEveryMonthWithItsCounts(t *testing.T) {
@@ -216,4 +241,106 @@ func TestIncompleteError_NamesTheInstrumentAndMonths(t *testing.T) {
 	assert.Contains(t, err.Error(), "2024-02 missing")
 	assert.Contains(t, err.Error(), "2024-03 stale")
 	assert.ErrorIs(t, err, ErrIncomplete)
+}
+
+// gapped builds bars on Tuesday January 9 2024 at the given hours (UTC), one
+// build, so what lies between them is a gap. Not January 2: the year-end holiday
+// window runs to then.
+func gapped(t *testing.T, hours ...int) {
+	t.Helper()
+	var rows []marketdata.SourceRow
+	for i, h := range hours {
+		rows = append(rows, row(i+1, utc(2024, 1, 9, h)))
+	}
+	p := h1Source(rows...)
+	p.Year, p.Month = 2024, time.January
+	_, err := Build(context.Background(), p, builtAt)
+	require.NoError(t, err)
+}
+
+func TestLoad_AnInteriorGapTheCalendarDoesNotExplainFailsUnlessAllowed(t *testing.T) {
+	storetest.Root(t)
+	gapped(t, 0, 1, 5, 6) // 02:00 to 04:00 are missing
+	req := janToMarch(func(r *LoadRequest) { r.To = utc(2024, 2, 1, 0) })
+
+	strict, err := Load(context.Background(), req)
+	req.AllowMissing = true
+	allowed, aerr := Load(context.Background(), req)
+
+	require.ErrorIs(t, err, ErrIncomplete)
+	var inc *IncompleteError
+	require.True(t, errors.As(err, &inc))
+	assert.Empty(t, inc.Months, "every month loaded; the gap is what stopped it")
+	assert.Equal(t, []Gap{{Kind: Unexplained, Start: utc(2024, 1, 9, 2), End: utc(2024, 1, 9, 5), Bars: 3}}, inc.Gaps)
+	assert.Contains(t, err.Error(), "gap unexplained 2024-01-09T02:00Z 2024-01-09T05:00Z, 3 bars")
+	assert.Empty(t, strict.Series.Bars, "nothing is returned for a refused load")
+	assert.Equal(t, []MonthState{Loaded}, states(strict), "but the months are reported")
+	assert.Equal(t, inc.Gaps, strict.Gaps)
+	require.NoError(t, aerr)
+	assert.Len(t, allowed.Series.Bars, 4)
+	assert.Equal(t, inc.Gaps, allowed.Gaps, "an allowed gap is still reported")
+}
+
+func TestLoad_AGapAcrossAMissingMonthIsAnInteriorGap(t *testing.T) {
+	storetest.Root(t)
+	buildHours(t, utc(2024, 1, 31, 22), 2)
+	buildHours(t, utc(2024, 3, 1, 0), 2)
+	req := janToMarch(func(r *LoadRequest) { r.To = utc(2024, 3, 2, 0); r.AllowMissing = true })
+
+	got, err := Load(context.Background(), req)
+
+	require.NoError(t, err)
+	// February 2024 has 29*24 hours, 4 weekends of 48 closed hours among them; the
+	// weekends split it into five gaps and are not themselves gaps.
+	require.Len(t, got.Gaps, 5)
+	bars := 0
+	for _, g := range got.Gaps {
+		assert.Equal(t, Unexplained, g.Kind)
+		bars += g.Bars
+	}
+	assert.Equal(t, utc(2024, 2, 1, 0), got.Gaps[0].Start)
+	assert.Equal(t, utc(2024, 3, 1, 0), got.Gaps[4].End)
+	assert.Equal(t, 29*24-4*48, bars)
+}
+
+func TestLoad_TheWeeklyCloseIsNotAGapAndTheEndsOfTheRangeAreNotJudged(t *testing.T) {
+	storetest.Root(t)
+	// Friday Jan 5 2024 21:00 UTC is 16:00 in New York, the last hour before the
+	// close; the market reopens Sunday 17:00 New York, 22:00 UTC.
+	var rows []marketdata.SourceRow
+	for i, at := range []time.Time{utc(2024, 1, 5, 20), utc(2024, 1, 5, 21), utc(2024, 1, 7, 22), utc(2024, 1, 7, 23)} {
+		rows = append(rows, row(i+1, at))
+	}
+	jan := h1Source(rows...)
+	jan.Year, jan.Month = 2024, time.January
+	_, err := Build(context.Background(), jan, builtAt)
+	require.NoError(t, err)
+	req := janToMarch(func(r *LoadRequest) { r.From, r.To = utc(2024, 1, 1, 0), utc(2024, 1, 31, 0) })
+
+	got, err := Load(context.Background(), req)
+
+	require.NoError(t, err, "the bars before the first and after the last are not judged, and the weekend is not a gap")
+	assert.Len(t, got.Series.Bars, 4)
+	assert.Empty(t, got.Gaps, "a weekend is not reported")
+}
+
+func TestLoad_AYearEndHolidayIsReportedAsAKnownClosure(t *testing.T) {
+	storetest.Root(t)
+	// Christmas 2024: the market closed after Tuesday December 24 16:00 New York
+	// (21:00 UTC) and reopened Wednesday 17:00 (22:00 UTC).
+	var rows []marketdata.SourceRow
+	for i, at := range []time.Time{utc(2024, 12, 24, 20), utc(2024, 12, 24, 21), utc(2024, 12, 25, 22), utc(2024, 12, 25, 23)} {
+		rows = append(rows, row(i+1, at))
+	}
+	dec := h1Source(rows...)
+	dec.Year, dec.Month = 2024, time.December
+	_, err := Build(context.Background(), dec, builtAt)
+	require.NoError(t, err)
+	req := LoadRequest{Source: "oanda", Instrument: "EURUSD", Interval: "h1", From: utc(2024, 12, 1, 0), To: utc(2025, 1, 1, 0)}
+
+	got, err := Load(context.Background(), req)
+
+	require.NoError(t, err, "a holiday closure is never an error")
+	assert.Len(t, got.Series.Bars, 4)
+	assert.Equal(t, []Gap{{Kind: KnownClosure, Start: utc(2024, 12, 24, 22), End: utc(2024, 12, 25, 22), Bars: 24}}, got.Gaps)
 }

@@ -79,6 +79,14 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   missing or bad one fails it unless the request allows it. `AvailableAt` is the
   stored one, never recomputed. `service.LoadSeries` is the application-service
   path; `trader data status` is its first consumer.
+- `Load` also checks the interior of the series with the market calendar
+  (`canonical.ClosureAt` and `Gaps`, ADR-090 section 7): the weekly close is not a
+  gap, a year-end holiday is a reported `KnownClosure`, any other missing bar is
+  `Unexplained` and fails the load unless `AllowMissing`. The ends of the range are
+  not judged (a forming candle is never stored). `Load` does not call
+  `Series.Validate`: every file is validated as it is read and months are read in
+  order, so the series is already valid; a consumer that needs the guarantee
+  (`runSeries`) validates it itself.
 - `Bar.Instrument` names a bar. Readers set it from the file's key; it is never a
   column of a row.
 

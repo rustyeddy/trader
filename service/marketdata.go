@@ -240,6 +240,18 @@ type (
 	MonthState = mdservice.MonthState
 	// MonthStatus is the state of one UTC month of a load.
 	MonthStatus = mdservice.MonthStatus
+	// Gap is a run of missing bars inside a loaded series.
+	Gap = mdservice.Gap
+	// GapKind says whether the market calendar explains a gap.
+	GapKind = mdservice.GapKind
+)
+
+// The gap kinds: a year-end holiday closure (reported, never an error) and bars
+// missing that the calendar says should be there (an error unless missing data is
+// allowed). The weekly close is never reported.
+const (
+	GapKnownClosure = mdservice.KnownClosure
+	GapUnexplained  = mdservice.Unexplained
 )
 
 // The month states.
@@ -275,8 +287,12 @@ type SeriesResult struct {
 	// Months is the status of every month the range touches, in order, even when
 	// the load failed.
 	Months []MonthStatus
-	// Err is why the instrument could not be loaded: an incomplete range, or a
-	// failure to read.
+	// Gaps are the interior gaps of the series: holiday closures and unexplained
+	// gaps, never the weekly close. Present when the months loaded, whether or not
+	// the gaps failed the load.
+	Gaps []Gap
+	// Err is why the instrument could not be loaded: an incomplete range, a gap
+	// the calendar does not explain, or a failure to read.
 	Err error
 }
 
@@ -308,12 +324,12 @@ func LoadSeries(ctx context.Context, log *slog.Logger, req LoadRequest) ([]Serie
 		if cerr := ctx.Err(); cerr != nil {
 			return results, cerr
 		}
-		res := SeriesResult{Instrument: symbol, Series: got.Series, Months: got.Months, Err: err}
+		res := SeriesResult{Instrument: symbol, Series: got.Series, Months: got.Months, Gaps: got.Gaps, Err: err}
 		if err != nil {
 			failed++
 			log.Warn("series not loaded", "symbol", symbol, "error", err)
 		} else {
-			log.Info("series loaded", "symbol", symbol, "bars", len(got.Series.Bars), "months", len(got.Months))
+			log.Info("series loaded", "symbol", symbol, "bars", len(got.Series.Bars), "months", len(got.Months), "gaps", len(got.Gaps))
 		}
 		results = append(results, res)
 	}

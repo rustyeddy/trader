@@ -12,9 +12,11 @@ import (
 )
 
 // ErrIncomplete reports that a range cannot be loaded as asked: a month is stale,
-// or missing or bad and not allowed. The error is an *IncompleteError, which
-// carries the offending months; the LoadResult returned with it still has every
-// month's status, so a caller can show the whole picture.
+// or missing or bad and not allowed, or bars are missing inside the range that the
+// market calendar does not explain and the request does not allow. The error is
+// an *IncompleteError, which carries the offending months or gaps; the LoadResult
+// returned with it still has every month's status, so a caller can show the whole
+// picture.
 var ErrIncomplete = errors.New("service: series not loadable")
 
 // ErrInvalidRequest reports a LoadRequest that cannot be run.
@@ -48,7 +50,9 @@ type LoadRequest struct {
 	From, To time.Time
 	// AllowBad accepts months that have bad records: their good bars are returned
 	// and the month is still reported as Bad. AllowMissing accepts months with no
-	// file: the series has a gap there. Stale months are never accepted.
+	// file: the series has a gap there. AllowMissing also accepts interior gaps
+	// the calendar does not explain, whether a missing month or bars missing from
+	// a month that loaded. Stale months are never accepted.
 	AllowBad, AllowMissing bool
 }
 
@@ -65,24 +69,69 @@ type MonthStatus struct {
 	Reason string
 }
 
-// LoadResult is the loaded series and the status of every month the range touches,
-// in order. When Load fails with ErrIncomplete the Series is empty and Months is
-// still complete.
+// GapKind says whether the market calendar explains a gap in a series.
+type GapKind string
+
+// The gap kinds. A weekend gap is neither: every week has one, so it is not
+// reported.
+const (
+	// KnownClosure: the gap lies inside a year-end holiday window. Reported,
+	// never an error.
+	KnownClosure GapKind = "closure"
+	// Unexplained: bars are missing that the calendar says should be there. An
+	// error unless the request allows missing data.
+	Unexplained GapKind = "unexplained"
+)
+
+// Gap is a run of missing bars between two bars of a series. A series is only
+// judged between its first and last bar: a last bar that is absent may be a candle
+// still forming, which a download never stores (ADR-090).
+type Gap struct {
+	Kind GapKind
+	// Start is when the first missing bar opens; End is when the bar after the last
+	// missing one would open, so the gap is [Start, End), UTC.
+	Start, End time.Time
+	// Bars counts the missing bars.
+	Bars int
+}
+
+func (g Gap) String() string {
+	return fmt.Sprintf("%s %s %s, %d bars", g.Kind, g.Start.UTC().Format("2006-01-02T15:04Z"), g.End.UTC().Format("2006-01-02T15:04Z"), g.Bars)
+}
+
+// LoadResult is the loaded series, the status of every month the range touches, in
+// order, and the interior gaps of the series: holiday closures and unexplained
+// ones, never the weekly close. When Load fails with ErrIncomplete the Series is
+// empty and Months is still complete; Gaps is complete when the months were
+// loadable and the gaps are what failed it.
 type LoadResult struct {
 	Series marketdata.Series
 	Months []MonthStatus
+	Gaps   []Gap
 }
 
-// IncompleteError is the ErrIncomplete error: the months that stopped the load.
+// IncompleteError is the ErrIncomplete error: the months or the gaps that stopped
+// the load.
 type IncompleteError struct {
 	Instrument string
 	Months     []MonthStatus
+	Gaps       []Gap
 }
 
+// maxGapsShown bounds how many gaps an error message lists.
+const maxGapsShown = 5
+
 func (e *IncompleteError) Error() string {
-	parts := make([]string, 0, len(e.Months))
+	parts := make([]string, 0, len(e.Months)+len(e.Gaps))
 	for _, m := range e.Months {
 		parts = append(parts, fmt.Sprintf("%04d-%02d %s", m.Year, int(m.Month), m.State))
+	}
+	for i, g := range e.Gaps {
+		if i == maxGapsShown {
+			parts = append(parts, fmt.Sprintf("and %d more gaps", len(e.Gaps)-maxGapsShown))
+			break
+		}
+		parts = append(parts, "gap "+g.String())
 	}
 	return fmt.Sprintf("%s: %s: %s", ErrIncomplete, e.Instrument, strings.Join(parts, ", "))
 }
@@ -98,6 +147,15 @@ func (e *IncompleteError) Is(target error) bool { return target == ErrIncomplete
 // the result still carries every month's status. A bar's AvailableAt is the one
 // stored in its file, never recomputed. Only a Loaded month, and a Bad month when
 // allowed, contribute bars.
+//
+// Between its first and last bar the series must have every bar the market calendar
+// expects (canonical.ClosureAt): a missing interior bar is a gap, and an
+// Unexplained one fails the load like a missing month unless the request allows
+// missing data. Weekends are not reported and year-end holidays are reported as
+// KnownClosure. The ends of the range are not judged. Each month's file is
+// validated as it is read (canonical.File.Validate), and months are read in order
+// and hold only bars of their own month, so the series is in ascending order by
+// time and availability without a second pass over every bar.
 func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 	if err := ctx.Err(); err != nil {
 		return LoadResult{}, err
@@ -142,10 +200,26 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 	if len(stopped) > 0 {
 		return result, &IncompleteError{Instrument: req.Instrument, Months: stopped}
 	}
-	result.Series.Bars = bars
-	if err := result.Series.Validate(); err != nil {
+	gaps, err := canonical.Gaps(interval, bars)
+	if err != nil {
 		return LoadResult{Months: result.Months}, err
 	}
+	var unexplained []Gap
+	for _, g := range gaps {
+		kind := KnownClosure
+		if g.Closure == canonical.Open {
+			kind = Unexplained
+		}
+		gap := Gap{Kind: kind, Start: g.Start.UTC(), End: g.End.UTC(), Bars: g.Bars}
+		result.Gaps = append(result.Gaps, gap)
+		if kind == Unexplained && !req.AllowMissing {
+			unexplained = append(unexplained, gap)
+		}
+	}
+	if len(unexplained) > 0 {
+		return result, &IncompleteError{Instrument: req.Instrument, Gaps: unexplained}
+	}
+	result.Series.Bars = bars
 	return result, nil
 }
 

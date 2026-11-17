@@ -283,3 +283,24 @@ func TestRunBacktest_TheMonthBeforeTheRangePrefillsTheIndicators(t *testing.T) {
 		assert.Contains(t, out, "submitted 0,", "the bad month is skipped, not trusted")
 	})
 }
+
+func TestRunBacktest_AnInteriorGapTheCalendarDoesNotExplainFailsUnlessAllowed(t *testing.T) {
+	storetest.Root(t)
+	var rows []oanda.Record
+	for _, h := range []int{0, 1, 2, 3, 8, 9} { // 04:00 to 07:00 are missing
+		rows = append(rows, quote(utc(2024, time.January, 9, h), "1.10000", 2))
+	}
+	putRaw(t, "EURUSD", 2024, time.January, rows...)
+	buildCanonical(t, janToMar("EURUSD"))
+
+	res, err := RunBacktest(context.Background(), nil, backtestReq("EURUSD"))
+
+	require.ErrorIs(t, err, ErrNotLoadable)
+	assert.Nil(t, res, "nothing is replayed over a hole")
+	assert.Contains(t, err.Error(), "gap unexplained 2024-01-09T04:00Z 2024-01-09T08:00Z, 4 bars")
+	req := backtestReq("EURUSD")
+	req.AllowMissing = true
+	res, err = RunBacktest(context.Background(), nil, req)
+	require.NoError(t, err)
+	assert.NotNil(t, res)
+}
