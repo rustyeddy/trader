@@ -176,8 +176,14 @@ instant is absent, never carried forward.
 The strategy and account are fixed, the ones the EMAX scenarios use: EMAX (windows 2
 and 4, a 1% stop) on each instrument and a 10,000 USD account. The engine trades the
 instruments it has a market for (EURUSD and GBPUSD today); another instrument is
-refused with an error naming it. Prices must be whole ticks of the market: the engine
-refuses a bar whose mid price is off the tick (see the Developer's Guide).
+refused with an error naming it.
+
+Indicators are prefilled: the bars of the UTC month before `--from`, when they can be
+loaded, only warm the strategy up (they are not traded and not counted). A missing
+month is simply not there; if the earlier months are stale, or bad and `--allow-bad`
+is not given, the run goes without a warm-up (the log says so). Mid prices that sit
+half a tick from a whole tick (an odd bid/ask spread) are run as they are; the
+orders name whole ticks (see the Developer's Guide).
 
 Output: the engine's summary for the run (bars, orders, trades, money, open
 positions).

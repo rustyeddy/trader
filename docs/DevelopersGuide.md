@@ -118,11 +118,24 @@ account and broker (`replay.go`, `backtest.go`):
   file. `service.RunBacktest` is the application service that joins the two:
   `LoadSeries` (the market-data service's policy for missing, bad and stale
   months), then `RunSeries`; `trader backtest` only parses flags and prints.
-- Known limit: the engine requires every bar price to be a whole tick of the
-  market (0.00001 for EURUSD and GBPUSD), but a mid price is the midpoint of bid and
-  ask, so a bar whose spread is an odd number of ticks has a half-tick mid and is
-  refused. Backtests on real OANDA data hit this until the owner decides how the
-  engine should treat mid prices finer than the tick.
+- Mid prices and ticks (#667). A canonical mid is the exact midpoint of bid and
+  ask, so it can sit half a tick from a whole tick (1.100005 for ticks of 0.00001).
+  The engine accepts bar prices on the half-tick grid (`market.checkPrices`) and
+  never rounds a bar. What it rounds is the price an order names: EMAX moves the
+  close it trades on to the tick that is worse for it (`emax.executable`): a buy
+  rounds up and a sell rounds down (closing a long sells, closing a short buys); the
+  stop is then placed a whole number of ticks away. A price finer than half a tick
+  is not a price the market could produce and is refused. Another strategy must
+  quantize its own order prices the same way.
+- Warm-up. `trader.RunSeries` takes `tradeFrom`: a bar that opens before it is a
+  warm-up bar, shown to a strategy that implements `warmer` only to prefill its
+  indicators (EMAX feeds its EMAs, takes no position, places no order), never
+  replayed on the broker and not counted. After the warm-up EMAX finds its EMAs
+  seeded, so it trades the trend as it stands. `service.RunBacktest` supplies the
+  bars of the UTC month before `From` when they can be loaded: it uses the loader
+  and the run's `AllowBad`, treats a missing month as simply absent, and runs an
+  instrument without warm-up (logged) when its earlier months are stale or bad.
+  Only the traded range is strict.
 
 ## Tests
 

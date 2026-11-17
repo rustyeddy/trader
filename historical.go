@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -30,7 +31,13 @@ const (
 
 // RunSeries backtests the series, which a reader has already loaded, on one
 // shared account and broker: EMAX on each instrument, one strategy callback per
-// distinct availability instant (see backtest.runSeries). name labels the summary.
+// distinct availability instant (see backtest.runSeriesFrom). name labels the
+// summary.
+//
+// tradeFrom, when not zero, is the first instant that is traded: a bar that opens
+// before it only prefills the indicators (the strategy's warm-up) and is neither
+// replayed on the broker nor counted in the summary. The warm-up bars come first in
+// each series. With a zero tradeFrom every bar is traded.
 //
 // The engine opens no file and knows no provider. It validates every series
 // (marketdata.Series.Validate) before replaying, so a caller cannot skip that; a
@@ -38,7 +45,7 @@ const (
 // market's tick, or of another interval than the rest, is refused with an error
 // that names it. The series are not changed. Series are of different
 // instruments; an empty series contributes nothing.
-func RunSeries(ctx context.Context, name string, series ...marketdata.Series) (*Result, error) {
+func RunSeries(ctx context.Context, name string, tradeFrom time.Time, series ...marketdata.Series) (*Result, error) {
 	if len(series) == 0 {
 		return nil, errors.New("run: no series")
 	}
@@ -57,7 +64,11 @@ func RunSeries(ctx context.Context, name string, series ...marketdata.Series) (*
 		}
 		run[i] = s
 		instruments = append(instruments, s.Instrument)
-		bars += len(s.Bars)
+		for _, b := range s.Bars {
+			if tradeFrom.IsZero() || !b.Time.Before(tradeFrom) {
+				bars++
+			}
+		}
 	}
 	slices.Sort(instruments)
 
@@ -72,7 +83,7 @@ func RunSeries(ctx context.Context, name string, series ...marketdata.Series) (*
 		account:  br.addAccount("sim123", num.MustParseMoney(runBalance, usdCurrency)),
 		strategy: strat,
 	}
-	if err := (&backtest{}).runSeries(ctx, tr, run...); err != nil {
+	if err := (&backtest{}).runSeriesFrom(ctx, tr, tradeFrom, run...); err != nil {
 		return nil, err
 	}
 	res, err := newResult(name, bars, tr)

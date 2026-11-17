@@ -597,3 +597,50 @@ func TestBacktestRunSeries_OnSeriesLoadedFromCanonicalStorage(t *testing.T) {
 			"GBPUSD has no bar at the instants EURUSD is alone")
 	}
 }
+
+// warmSpy is a strategy that can be warmed: it records the bars it was warmed
+// with and the groups it was asked about, and places no order.
+type warmSpy struct {
+	seenStrategy
+	warmed []string
+}
+
+func (s *warmSpy) warm(_ context.Context, bars []marketdata.Bar) {
+	for _, b := range bars {
+		s.warmed = append(s.warmed, b.Instrument+"@"+b.AvailableAt.Format("Mon 15:04"))
+	}
+}
+
+func TestBacktestRunSeriesFrom_WarmBarsPrefillTheStrategyAndAreNeverTraded(t *testing.T) {
+	spy := &warmSpy{}
+	tr, _ := pairTrader(usd(1000), spy)
+	// EURUSD opens at hours 0..4, GBPUSD at 1 and 3; trading starts at hour 2.
+	err := (&backtest{}).runSeriesFrom(context.Background(), tr, hour(2), hSeries("EURUSD", 0, 1, 2, 3, 4), hSeries("GBPUSD", 1, 3))
+
+	require.NoError(t, err)
+	at := func(h int) string { return hour(h).Format("Mon 15:04") }
+	assert.Equal(t, []string{"EURUSD@" + at(1), "EURUSD@" + at(2), "GBPUSD@" + at(2)}, spy.warmed,
+		"the bars that opened before hour 2, in availability order")
+	assert.Equal(t, []string{"EURUSD@" + at(3), "EURUSD@" + at(4), "GBPUSD@" + at(4), "EURUSD@" + at(5)}, spy.seen,
+		"the strategy decides only on bars that opened at or after hour 2")
+}
+
+func TestBacktestRunSeriesFrom_AStrategyThatCannotBeWarmedIsJustNotWarmed(t *testing.T) {
+	spy := &seenStrategy{}
+	tr, _ := pairTrader(usd(1000), spy)
+
+	err := (&backtest{}).runSeriesFrom(context.Background(), tr, hour(2), hSeries("EURUSD", 0, 1, 2, 3))
+
+	require.NoError(t, err)
+	assert.Len(t, spy.seen, 2, "only the traded bars reach it")
+}
+
+func TestBacktestRunSeriesFrom_ZeroTradeFromTradesEverything(t *testing.T) {
+	spy := &warmSpy{}
+	tr, _ := pairTrader(usd(1000), spy)
+
+	require.NoError(t, (&backtest{}).runSeriesFrom(context.Background(), tr, time.Time{}, hSeries("EURUSD", 0, 1, 2)))
+
+	assert.Empty(t, spy.warmed)
+	assert.Len(t, spy.seen, 3)
+}

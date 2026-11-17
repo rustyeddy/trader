@@ -460,3 +460,17 @@ func TestCatalog_NormalizeChangesNothingWhenAnyBarIsRefused(t *testing.T) {
 		assert.Equal(t, "EUR_USD", b.Instrument)
 	}
 }
+
+func TestMarket_CheckPrices_AcceptsWholeAndHalfTicksOnly(t *testing.T) {
+	m, ok := testMarkets().lookup("EURUSD")
+	require.True(t, ok)
+	at := func(p string) marketdata.OHLC {
+		v := num.MustParsePrice(p)
+		return marketdata.OHLC{Open: v, High: v, Low: v, Close: v}
+	}
+
+	assert.NoError(t, m.checkPrices(at("1.10000")), "a whole tick")
+	assert.NoError(t, m.checkPrices(at("1.100005")), "a mid between two ticks")
+	assert.ErrorContains(t, m.checkPrices(at("1.100001")), "half the tick", "a tenth of a tick is no price this market has")
+	assert.ErrorContains(t, m.checkPrices(at("1.1000025")), "half the tick")
+}

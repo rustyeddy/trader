@@ -148,11 +148,19 @@ func (c *catalog) keyFor(symbol string) (string, error) {
 }
 
 // checkPrices reports an error unless every price of b is a whole number of
-// m's ticks.
+// half ticks of m. A bar's price is an observation, not an order: a mid price is
+// the midpoint of a bid and an ask that are whole ticks, so it can sit exactly
+// half a tick between two (1.100005 for ticks of 0.00001). Anything finer than that
+// is not a price this market could have produced and is refused. The bar is never
+// rounded: what the engine rounds is the price of an order (see emax.executable).
 func (m *market) checkPrices(b marketdata.OHLC) error {
+	half, err := m.tick.MulRate(num.Half)
+	if err != nil {
+		return fmt.Errorf("%s tick %s: %w", m.key, m.tick, err)
+	}
 	for _, p := range []num.Price{b.Open, b.High, b.Low, b.Close} {
-		if ok, err := p.DivisibleBy(m.tick); err != nil || !ok {
-			return fmt.Errorf("%s price %s is not a multiple of the tick %s", m.key, p, m.tick)
+		if ok, err := p.DivisibleBy(half); err != nil || !ok {
+			return fmt.Errorf("%s price %s is not a multiple of half the tick %s", m.key, p, m.tick)
 		}
 	}
 	return nil
@@ -195,7 +203,7 @@ func (c *catalog) checkFrame(f frame) error {
 
 // normalize rewrites loaded bars to the engine key of their instrument, before
 // the engine sees them, and checks every price is a whole number of the
-// market's ticks. A provider spelling therefore never reaches the engine as a
+// market's half ticks (checkPrices). A provider spelling therefore never reaches the engine as a
 // second instrument. Every bar is checked before any is changed, so a refused
 // set is left exactly as it was.
 func (c *catalog) normalize(md *marketdata.Series) error {

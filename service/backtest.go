@@ -38,7 +38,9 @@ type BacktestRequest struct {
 // is an error that names the source, instrument, interval and range (and, for a
 // load, the months and their states); a load failure is also ErrNotLoadable, and
 // nothing is replayed unless every instrument loaded. A range with no bars at all
-// is an error: there is nothing to backtest. Cancellation stops the run and
+// is an error: there is nothing to backtest. The bars of the month before From, when
+// they can be loaded, prefill the strategy's indicators and are not traded
+// (warmupBars). Cancellation stops the run and
 // returns the context's error. Nothing is written. log may be nil.
 func RunBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest) (*trader.Result, error) {
 	source := req.Source
@@ -66,18 +68,64 @@ func RunBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest) (*t
 		return nil, fmt.Errorf("backtest %s: %w: %w", what, err, errors.Join(causes...))
 	}
 
-	series := make([]marketdata.Series, 0, len(results))
 	bars := 0
 	for _, r := range results {
-		series = append(series, r.Series)
 		bars += len(r.Series.Bars)
 	}
 	if bars == 0 {
 		return nil, fmt.Errorf("backtest %s: no bars in the range", what)
 	}
-	res, err := trader.RunSeries(ctx, what, series...)
+	warm, err := warmupBars(ctx, log, req)
+	if err != nil {
+		return nil, err
+	}
+	series := make([]marketdata.Series, 0, len(results))
+	for _, r := range results {
+		s := r.Series
+		if w := warm[r.Instrument]; len(w) > 0 {
+			s.Bars = append(append(make([]marketdata.Bar, 0, len(w)+len(s.Bars)), w...), s.Bars...)
+		}
+		series = append(series, s)
+	}
+	res, err := trader.RunSeries(ctx, what, req.From, series...)
 	if err != nil {
 		return nil, fmt.Errorf("backtest %s: %w", what, err)
 	}
 	return res, nil
+}
+
+// warmupLookback is how far before From the warm-up looks for bars.
+const warmupLookback = 1 // months
+
+// warmupBars returns, per instrument, the bars that opened in the month before From,
+// for the strategy to prefill its indicators with: the run then starts with them
+// ready instead of cold. They are not traded.
+//
+// Warm-up is best effort, "when it is available". It uses the same loader and the
+// same policy as the run, except that a missing month is simply not there; an
+// instrument whose earlier months cannot be loaded (stale, or bad when bad is not
+// allowed) is run without a warm-up, and the log says so. Only cancellation is an
+// error.
+func warmupBars(ctx context.Context, log *slog.Logger, req BacktestRequest) (map[string][]marketdata.Bar, error) {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	results, err := LoadSeries(ctx, log, LoadRequest{Instruments: req.Instruments, Interval: req.Interval,
+		From: req.From.AddDate(0, -warmupLookback, 0), To: req.From, AllowBad: req.AllowBad, AllowMissing: true})
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, cerr
+	}
+	if err != nil && !errors.Is(err, ErrNotLoadable) {
+		return nil, err
+	}
+	warm := make(map[string][]marketdata.Bar, len(results))
+	for _, r := range results {
+		if r.Err != nil {
+			log.Warn("no warm-up: the months before the range cannot be loaded", "symbol", r.Instrument, "error", r.Err)
+			continue
+		}
+		warm[r.Instrument] = r.Series.Bars
+		log.Info("warm-up bars", "symbol", r.Instrument, "bars", len(r.Series.Bars))
+	}
+	return warm, nil
 }
