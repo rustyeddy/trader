@@ -3,20 +3,21 @@
 
 * Status
 
-Proposed (owner discussion 2026-11-14). This records an agreed architectural
-direction for review before acceptance and code migration. It refines the
-service boundaries in accepted ADR-022, the current market-data boundary in
-ADR-089, and the canonical Bar location in proposed ADR-090. It does not
-silently amend those records: their existing accepted requirements remain in
-force until an explicit amendment/supersession is approved.
+Accepted. The owner accepts it by merging the pull request for #643 that changes
+this status; the direction was agreed in the owner discussion of 2026-11-14 and
+has been built and tested since. It refines the service boundaries in ADR-022, the
+market-data boundary in ADR-089 and the canonical Bar location in ADR-090. The
+explicit amendments to ADR-022, ADR-071 and ADR-089 it needs are listed under
+"Amendments to earlier records" below and noted in those records.
 
-Implementation (2026-11-15): the service boundaries are built for market data:
-the public =marketdata= package (#636), =marketdata/internal/canonical= (#637),
+Implementation (2026-11-17): the service boundaries are built for market data: the
+public =marketdata= package (#636), =marketdata/internal/canonical= (#637),
 =provider/oanda= (#638), =store= (#645), the domain and application services
 (#646) and =Bar.Instrument= (#651); the engine runs on =marketdata.Bar= (#653,
-#657). ADR-092 records the package changes against ADR-089. The amendments to
-ADR-022 and ADR-071 this record promises are still to be made when it is
-accepted (#643).
+#657) and replays loaded =marketdata.Series= (#665, #667). The application service
+carries the download (#663), the build, the load and the backtest, and
+=cmd/trader= imports no provider (#641). ADR-092 records the package changes
+against ADR-089 (still Proposed; its acceptance is separate).
 
 * Context
 
@@ -33,7 +34,7 @@ ADR-089 currently makes =cmd/trader= a composition root for the market-data
 milestone. This proposal replaces those particular placement/composition
 decisions while retaining their transport-neutral intent.
 
-* Decision (proposed)
+* Decision
 
 ** Unidirectional service hierarchy
 
@@ -97,7 +98,7 @@ num/                              shared fixed-point numbers
 from =service/= or =cmd/trader=. In particular, =marketdata= itself must not
 import =marketdata/service= or =marketdata/internal=, avoiding an import cycle.
 
-** Shared Bar and OHLC (next implementation task)
+** Shared Bar and OHLC (done: #653, #657)
 
 - One public =marketdata.Bar= and =marketdata.OHLC= replaces the duplicate
   canonical and root-engine definitions at their appropriate integration
@@ -130,14 +131,40 @@ import =marketdata/service= or =marketdata/internal=, avoiding an import cycle.
 - Provider integrations may benefit from being grouped by external vendor,
   e.g. =provider/oanda/{data,broker,account}=, =provider/alpaca/...=,
   =provider/stooq/data=, with shared authenticated HTTP client, rate limiting
-  and retry behavior. This is an *open proposal*, not a package-placement
-  decision. Before relocating adapters, resolve how import visibility is
-  enforced and how domain services obtain provider capabilities without
-  calling other domain services.
+  and retry behavior. This stays an *open proposal*: only =provider/oanda= exists
+  (#634), and grouping by capability waits for a second capability or vendor.
+  How domain services obtain provider capabilities is settled: they do not; the
+  application service reads from the provider and hands the domain service
+  plain values (=marketdata.SourcePartition=), so domain services never call
+  providers or each other.
 - Do not introduce a cross-domain provider service solely to share a
   connection. Shared clients are infrastructure and must not force upward
   dependencies.
 
+** Who builds a provider client (#641)
+
+The transport imports no provider. =cmd/trader= reads the environment and the
+config file (ADR-078) and passes the application service plain values: the base
+URL, the request gap and a credential that asks the environment for the token on
+each request (=service.ProviderConfig=, =service.Credential=). The application
+service builds the client (=service.Download=) and coordinates it with the
+provider's download and the domain service. A test fails if any =cmd/trader=
+file imports a package under =provider/=.
+
+There is no provider registry or factory. With one provider a direct constructor
+call in the application service is the whole wiring. When a second source is wired
+into a use case the first step is an explicit choice by source name in =service=;
+a registry package imported only by =service= is considered only if that grows,
+and never by =init()= self-registration, which would put a provider import back in
+the transport and hide the wiring.
+
+** Package names as built
+
+The application layer is the single package =service= (market-data use cases in
+=service/marketdata.go=, the backtest in =service/backtest.go=), not one subpackage
+per domain area; a package per area waits until these files are not small. The
+backtest use case imports the root engine =trader= because it composes the
+market-data service and the engine, which is what an application service is for.
 * Consequences
 
 - Compiler-enforced domain internals protect implementation details from
@@ -148,9 +175,28 @@ import =marketdata/service= or =marketdata/internal=, avoiding an import cycle.
   workflows in CLI commands.
 - Domain-services-not-calling-domain-services is a convention checked by
   architecture tests in addition to Go's =internal= rule.
-- Existing accepted ADR-022 and ADR-089 placement rules need explicit
-  amendment once this proposal is accepted. Do not imply implementation is
-  already migrated.
+- The placement rules of ADR-022 and ADR-089 are amended, below. Nothing else in
+  those records changes.
+
+* Amendments to earlier records
+
+- *ADR-022* (CLI and application service layer, Accepted). Its intent stands:
+  thin transports and transport-neutral application services. Its placement is
+  amended: the application package is =service= with the market-data use cases
+  in =service/marketdata.go=, not a subpackage =service/marketdata=; the domain
+  rules live in =marketdata/service=, which the application service calls. The
+  =Manager=, plan/sync/build orchestration and the formatter registry it
+  describes belong to the earlier runtime in =_archive/=.
+- *ADR-071* (market-data provider registry, Accepted). It describes the registry
+  of the earlier runtime (=internal/marketdata=, =Manager=, =marketdatacfg=),
+  which is archived and not in this tree. The live tree has no provider registry;
+  "Who builds a provider client" above is the rule for it and says when a registry
+  would be added.
+- *ADR-089* (layout, OANDA raw store and package boundary, Accepted). =cmd/trader=
+  remains the only reader of the environment and the config file, but it is no
+  longer the composition root for providers: it hands plain values and a
+  credential to =service=, which builds the client. ADR-092 (Proposed) records
+  the rest of the package changes.
 
 * Implementation sequence
 

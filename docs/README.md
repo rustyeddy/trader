@@ -2,7 +2,7 @@
 
 ## Current
 
-"Current" means implemented in the code; it is not the same as an accepted decision. ADR-090, ADR-091 and ADR-092 are Proposed until the owner accepts them (#643).
+"Current" means implemented in the code; it is not the same as an accepted decision. ADR-090 and ADR-092 are Proposed until the owner accepts them (#643); ADR-091 is Accepted.
 
 | Document | What it is |
 |---|---|
