@@ -7,6 +7,7 @@ import (
 	"iter"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
@@ -32,6 +33,10 @@ func (s *scriptStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 		return s.orders[i]
 	}
 	return nil
+}
+
+func (s *scriptStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
 }
 
 // openOrder is a valid open-long order for EURUSD.
@@ -195,13 +200,17 @@ func (s *cancelStrategy) onBar(ctx context.Context, b marketdata.Bar) *order {
 	return s.scriptStrategy.onBar(ctx, b)
 }
 
+func (s *cancelStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
+}
+
 func TestBacktestRun_ContextCancelled(t *testing.T) {
-	md := &marketData{data: eurBars(1, 2, 3, 4)}
+	md := marketdata.Series{Bars: eurBars(1, 2, 3, 4)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	strat := &cancelStrategy{cancel: cancel}
 
-	err := runTrader(ctx, newTestTrader(), strat, md.bars(ctx))
+	err := runTrader(ctx, newTestTrader(), strat, seriesBars(ctx, md))
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Len(t, strat.seen, 1)
@@ -301,13 +310,17 @@ func (s *rejectFirstOpen) onBar(ctx context.Context, b marketdata.Bar) *order {
 	if len(s.got) > 0 {
 		s.act.balance = s.cash // margin becomes available on the bar after the open
 	}
-	o := s.strategy.onBar(ctx, b)
+	o := first(s.strategy.onBars(ctx, []marketdata.Bar{b}))
 	if o != nil {
 		s.got = append(s.got, o)
 		s.at = append(s.at, s.bars)
 	}
 	s.bars++
 	return o
+}
+
+func (s *rejectFirstOpen) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
 }
 
 func actions(orders []*order) (as []action) {
@@ -367,4 +380,144 @@ func TestMissedEntry_FreshSignalAfterRejectionIsAllowed(t *testing.T) {
 	assert.Equal(t, stateFilled, s.got[4].state)
 	require.Contains(t, tr.account.positions, "EURUSD")
 	assert.Equal(t, long, tr.account.positions["EURUSD"].direction)
+}
+
+// seenStrategy records every bar it is shown as instrument@availability, in the
+// order it was shown, and places no order.
+type seenStrategy struct{ seen []string }
+
+func (s *seenStrategy) name() string { return "seen" }
+func (s *seenStrategy) init() error  { return nil }
+func (s *seenStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
+	s.seen = append(s.seen, b.Instrument+"@"+b.AvailableAt.Format("Mon 15:04"))
+	return nil
+}
+
+func (s *seenStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
+}
+
+// hSeries is an hourly series of the instrument with a bar opening at each given
+// hour (hour(h) = pairStart + h), available an hour later.
+func hSeries(instrument string, hours ...int) marketdata.Series {
+	s := marketdata.Series{Source: "test", Instrument: instrument, Interval: "h1"}
+	for _, h := range hours {
+		s.Bars = append(s.Bars, hbar(instrument, hour(h), 100000, 100000))
+	}
+	return s
+}
+
+func runSeriesSeen(t *testing.T, series ...marketdata.Series) ([]string, error) {
+	t.Helper()
+	spy := &seenStrategy{}
+	tr, _ := pairTrader(usd(1000), spy)
+	tr.broker.markets = withMarket(t, testMarkets(), testInstrument("USDCHF"))
+	err := (&backtest{}).runSeries(context.Background(), tr, series...)
+	return spy.seen, err
+}
+
+func TestBacktestRunSeries_ThreeInstrumentsStaggeredAndSparse(t *testing.T) {
+	// EURUSD opens at hours 0, 1, 2; GBPUSD at 0 and 2 (none at 1); USDCHF at 1 and 2.
+	got, err := runSeriesSeen(t, hSeries("USDCHF", 1, 2), hSeries("EURUSD", 0, 1, 2), hSeries("GBPUSD", 0, 2))
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"EURUSD@" + hour(1).Format("Mon 15:04"), "GBPUSD@" + hour(1).Format("Mon 15:04"), // group 1: USDCHF has no bar yet
+		"EURUSD@" + hour(2).Format("Mon 15:04"), "USDCHF@" + hour(2).Format("Mon 15:04"), // group 2: GBPUSD absent, not carried forward
+		"EURUSD@" + hour(3).Format("Mon 15:04"), "GBPUSD@" + hour(3).Format("Mon 15:04"), "USDCHF@" + hour(3).Format("Mon 15:04"),
+	}, got, "by availability, then instrument name; the argument order does not matter")
+}
+
+func TestBacktestRunSeries_AGroupSpansTheUTCDayBoundary(t *testing.T) {
+	// Bars opening at 22:00 and 23:00 UTC: the 23:00 bar is available at 00:00 of the next day.
+	late := func(instrument string, hours ...int) marketdata.Series {
+		s := marketdata.Series{Source: "test", Instrument: instrument, Interval: "h1"}
+		for _, h := range hours {
+			s.Bars = append(s.Bars, hbar(instrument, time.Date(2010, time.January, 8, h, 0, 0, 0, time.UTC), 100000, 100000))
+		}
+		return s
+	}
+
+	got, err := runSeriesSeen(t, late("EURUSD", 22, 23), late("GBPUSD", 23))
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"EURUSD@Fri 23:00", "EURUSD@Sat 00:00", "GBPUSD@Sat 00:00"}, got)
+}
+
+func TestBacktestRunSeries_AnEmptySeriesContributesNothing(t *testing.T) {
+	got, err := runSeriesSeen(t, hSeries("EURUSD"), hSeries("GBPUSD", 0))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"GBPUSD@" + hour(1).Format("Mon 15:04")}, got)
+
+	got, err = runSeriesSeen(t, hSeries("EURUSD"), hSeries("GBPUSD"))
+	require.NoError(t, err)
+	assert.Empty(t, got, "all empty: no group, no error")
+
+	got, err = runSeriesSeen(t)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+// An opening time never authorises delivery: a bar is delivered at its stored
+// availability, and the broker refuses a group whose bars opened before an earlier
+// group was available, which is what mixing bar lengths would do.
+func TestBacktestRunSeries_RefusesABarThatOpenedBeforeAnEarlierGroupWasAvailable(t *testing.T) {
+	long := hSeries("EURUSD", 0)
+	long.Bars[0].AvailableAt = hour(24) // opens first, lasts a day
+	short := hSeries("GBPUSD", 1, 2, 3)
+
+	got, err := runSeriesSeen(t, long, short)
+
+	require.ErrorContains(t, err, "overlaps the previous one")
+	assert.Len(t, got, 3, "the day-long bar was never delivered before it was available")
+}
+
+func TestBacktestRunSeries_RefusesMixedIntervalsBeforeDeliveringAnything(t *testing.T) {
+	daily := hSeries("GBPUSD", 0)
+	daily.Interval = "d1"
+
+	got, err := runSeriesSeen(t, hSeries("EURUSD", 0), daily)
+
+	require.ErrorContains(t, err, "one interval")
+	assert.Empty(t, got)
+}
+
+func TestBacktestRunSeries_ACancelledContextStopsTheRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	spy := &seenStrategy{}
+	tr, _ := pairTrader(usd(1000), spy)
+
+	err := (&backtest{}).runSeries(ctx, tr, hSeries("EURUSD", 0, 1))
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, spy.seen)
+}
+
+// A single-instrument run through runSeries is the same run as the per-bar one.
+func TestBacktestRunSeries_SingleInstrumentMatchesThePerBarRun(t *testing.T) {
+	for _, scenario := range []string{"a-reversal-exit", "b2-stop-cross", "c-reversal"} {
+		t.Run(scenario, func(t *testing.T) {
+			perBar := runEMAX(t, scenario)
+			grouped := newEMAXRun(t, usd(10000))
+			require.NoError(t, (&backtest{}).runSeries(context.Background(), grouped.trader, scenarioPrices(t, scenario)))
+
+			want, err := newResult(scenario, 0, perBar.trader)
+			require.NoError(t, err)
+			got, err := newResult(scenario, 0, grouped.trader)
+			require.NoError(t, err)
+			var wantOut, gotOut bytes.Buffer
+			require.NoError(t, want.write(&wantOut))
+			require.NoError(t, got.write(&gotOut))
+			assert.Equal(t, wantOut.String(), gotOut.String())
+		})
+	}
+}
+
+// first is the first of orders, or nil.
+func first(orders []*order) *order {
+	if len(orders) == 0 {
+		return nil
+	}
+	return orders[0]
 }

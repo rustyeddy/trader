@@ -36,16 +36,16 @@ func newEMAXRun(t *testing.T, balance money) emaxRun {
 }
 
 // scenarioPrices reads a scenario's reviewed CSV.
-func scenarioPrices(t *testing.T, scenario string) *marketData {
+func scenarioPrices(t *testing.T, scenario string) marketdata.Series {
 	t.Helper()
 	prices, err := loadBars(scenarioPath(scenario))
 	require.NoError(t, err)
-	return prices
+	return *prices
 }
 
 func scenarioBars(t *testing.T, scenario string) iter.Seq2[marketdata.Bar, error] {
 	t.Helper()
-	return scenarioPrices(t, scenario).bars(context.Background())
+	return seriesBars(context.Background(), scenarioPrices(t, scenario))
 }
 
 // run takes the bars through the real backtest.
@@ -86,7 +86,7 @@ func TestEMAX_SkipsUnrepresentableStopsWithoutRetrying(t *testing.T) {
 			prices, err := readBars(strings.NewReader(csv.String()))
 			require.NoError(t, err)
 			r := newEMAXRun(t, usd(10000))
-			states := watchEMAX(t, r, prices.bars(context.Background()))
+			states := watchEMAX(t, r, seriesBars(context.Background(), *prices))
 			require.Len(t, states, len(tt.closes), "the backtest processes every valid bar")
 			for _, i := range []int{tt.skippedBar, tt.skippedBar + 1} {
 				assert.Empty(t, states[i].waiting, "bar %d: no invalid entry or retry", i)
@@ -471,7 +471,7 @@ func TestEMAXBacktest_ScenarioAOrderHistories(t *testing.T) {
 // within far less than the fixture rule's 5 points between them.
 func assertEMAs(t *testing.T, scenario string, exact []struct{ short, long float64 }) {
 	t.Helper()
-	require.Len(t, scenarioPrices(t, scenario).data, len(exact)+3)
+	require.Len(t, scenarioPrices(t, scenario).Bars, len(exact)+3)
 	r := newEMAXRun(t, usd(10000))
 	bars := scenarioBars(t, scenario)
 
@@ -535,12 +535,12 @@ func TestEMAXBacktest_ScenarioATradeAgreesWithOrdersAndAccount(t *testing.T) {
 // from the signal close, and a low exactly one point above the stop.
 func TestEMAXBacktest_ScenarioAFixtureHoldsItsBoundaries(t *testing.T) {
 	prices := scenarioPrices(t, "a-reversal-exit")
-	require.Len(t, prices.data, 10)
+	require.Len(t, prices.Bars, 10)
 
-	assert.Equal(t, px(110300), prices.data[3].OHLC().Close, "signal close")
-	assert.Equal(t, px(110323), prices.data[4].OHLC().Open, "entry open")
-	assert.Equal(t, px(109197+1), prices.data[5].OHLC().Low, "one point above the stop")
-	for i, b := range prices.data[4:] {
+	assert.Equal(t, px(110300), prices.Bars[3].OHLC().Close, "signal close")
+	assert.Equal(t, px(110323), prices.Bars[4].OHLC().Open, "entry open")
+	assert.Equal(t, px(109197+1), prices.Bars[5].OHLC().Low, "one point above the stop")
+	for i, b := range prices.Bars[4:] {
 		priceGreater(t, b.OHLC().Low, px(109197), "bar %d stays above the stop", i+4)
 	}
 }
@@ -642,7 +642,11 @@ func (w *positionWatcher) onBar(ctx context.Context, b marketdata.Bar) *order {
 		side = p.direction
 	}
 	w.sides = append(w.sides, side)
-	return w.strategy.onBar(ctx, b)
+	return first(w.strategy.onBars(ctx, []marketdata.Bar{b}))
+}
+
+func (w *positionWatcher) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, w.onBar)
 }
 
 // Snapshots taken after a bar cannot show the order within it. Here the broker's stop
@@ -780,17 +784,17 @@ func TestEMAXBacktest_StopOutEMAs(t *testing.T) {
 func TestEMAXBacktest_StopOutFixturesHoldTheirBoundaries(t *testing.T) {
 	stop := px(109197)
 
-	b1 := scenarioPrices(t, "b1-stop-wick").data[5]
+	b1 := scenarioPrices(t, "b1-stop-wick").Bars[5]
 	assert.Equal(t, stop, b1.OHLC().Low, "B1's low touches the stop exactly")
 	priceGreater(t, b1.OHLC().Open, stop)
 	priceGreater(t, b1.OHLC().Close, stop)
 
-	b2 := scenarioPrices(t, "b2-stop-cross").data[5]
+	b2 := scenarioPrices(t, "b2-stop-cross").Bars[5]
 	priceGreater(t, b2.OHLC().Open, stop)
 	priceLess(t, b2.OHLC().Low, stop, "B2's low goes past the stop")
 	priceLess(t, b2.OHLC().Close, stop)
 
-	b3 := scenarioPrices(t, "b3-stop-gap").data[5]
+	b3 := scenarioPrices(t, "b3-stop-gap").Bars[5]
 	priceLess(t, b3.OHLC().Open, stop, "B3's open is already past the stop")
 	priceGreater(t, b3.OHLC().Close, stop, "and the bar recovers")
 }
@@ -849,7 +853,7 @@ func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 		o, h, l, c := px(oN), px(hN), px(lN), px(cN)
 		return daily(marketdata.Bar{Instrument: "EURUSD", Time: jan(day), Volume: 1000, Mid: marketdata.OHLC{Open: o, High: h, Low: l, Close: c}})
 	}
-	prices.data = append(slices.Clone(prices.data[:9]),
+	prices.Bars = append(slices.Clone(prices.Bars[:9]),
 		next(15, 110687, 112050, 110650, 112000),
 		next(18, 112010, 112100, 111950, 112050),
 		next(19, 112060, 112150, 112000, 112100),
@@ -857,7 +861,7 @@ func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 	)
 
 	bars := func(yield func(marketdata.Bar, error) bool) {
-		for b, err := range prices.bars(context.Background()) {
+		for b, err := range seriesBars(context.Background(), prices) {
 			if !yield(b, err) {
 				return
 			}
@@ -938,15 +942,15 @@ func TestEMAXBacktest_ReversalAndShortStopEMAs(t *testing.T) {
 // C extends A, and its short's stop is never reached, so the data ends with it live.
 // D's high goes past its stop and comes back, so the bar's close cannot be what fired it.
 func TestEMAXBacktest_ReversalAndShortStopFixturesHoldTheirBoundaries(t *testing.T) {
-	c := scenarioPrices(t, "c-reversal").data
-	assert.Equal(t, scenarioPrices(t, "a-reversal-exit").data, c[:10], "C is A with more bars")
+	c := scenarioPrices(t, "c-reversal").Bars
+	assert.Equal(t, scenarioPrices(t, "a-reversal-exit").Bars, c[:10], "C is A with more bars")
 	assert.NotEqual(t, c[9].OHLC().Close, c[10].OHLC().Open, "the short fills away from its signal close")
 	for i, b := range c[10:] {
 		priceLess(t, b.OHLC().High, px(111554), "bar %d stays below the short's stop", i+10)
 	}
 
 	stop := px(110797)
-	d := scenarioPrices(t, "d-short-stop").data
+	d := scenarioPrices(t, "d-short-stop").Bars
 	priceLess(t, d[4].OHLC().High, stop, "the entry bar stays below the stop")
 	priceLess(t, d[5].OHLC().Open, stop)
 	assert.Equal(t, must1(stop.Add(px(3))), d[5].OHLC().High, "the high goes past the stop")
@@ -1027,7 +1031,7 @@ func TestEMAXBacktest_OpenPositionReconcilesAtTheLastMark(t *testing.T) {
 	for _, want := range emaxScenarios {
 		t.Run(want.name, func(t *testing.T) {
 			r := runEMAX(t, want.name)
-			data := scenarioPrices(t, want.name).data
+			data := scenarioPrices(t, want.name).Bars
 			last := data[len(data)-1]
 			st := snapshotState(t, r)
 

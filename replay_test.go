@@ -13,9 +13,9 @@ import (
 )
 
 func TestBars_YieldsAllInOrder(t *testing.T) {
-	md := &marketData{data: testBars(px(1), px(2), px(3))}
+	md := marketdata.Series{Bars: testBars(px(1), px(2), px(3))}
 	var got []price
-	for b, err := range md.bars(context.Background()) {
+	for b, err := range seriesBars(context.Background(), md) {
 		require.NoError(t, err)
 		got = append(got, b.OHLC().Close)
 	}
@@ -23,9 +23,9 @@ func TestBars_YieldsAllInOrder(t *testing.T) {
 }
 
 func TestBars_EarlyBreak(t *testing.T) {
-	md := &marketData{data: testBars(px(1), px(2), px(3))}
+	md := marketdata.Series{Bars: testBars(px(1), px(2), px(3))}
 	n := 0
-	for range md.bars(context.Background()) {
+	for range seriesBars(context.Background(), md) {
 		n++
 		break
 	}
@@ -33,12 +33,12 @@ func TestBars_EarlyBreak(t *testing.T) {
 }
 
 func TestBars_ContextCancelled(t *testing.T) {
-	md := &marketData{data: testBars(px(1), px(2), px(3))}
+	md := marketdata.Series{Bars: testBars(px(1), px(2), px(3))}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var bars int
 	var gotErr error
-	for _, err := range md.bars(ctx) {
+	for _, err := range seriesBars(ctx, md) {
 		if err != nil {
 			gotErr = err
 			break
@@ -53,11 +53,11 @@ func TestBars_ContextCancelled(t *testing.T) {
 func TestBars_CancelledAfterTheLastBar(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	md := &marketData{data: testBars(px(1))}
+	md := marketdata.Series{Bars: testBars(px(1))}
 
 	var bars, errs int
 	var gotErr error
-	for _, err := range md.bars(ctx) {
+	for _, err := range seriesBars(ctx, md) {
 		if err != nil {
 			errs++
 			gotErr = err
@@ -75,10 +75,10 @@ func TestBars_CancelledAfterTheLastBar(t *testing.T) {
 func TestBars_EarlyBreakOnTheLastBarAfterCancelYieldsNothingMore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	md := &marketData{data: testBars(px(1))}
+	md := marketdata.Series{Bars: testBars(px(1))}
 
 	var items int
-	for range md.bars(ctx) {
+	for range seriesBars(ctx, md) {
 		items++
 		cancel()
 		break
@@ -88,8 +88,8 @@ func TestBars_EarlyBreakOnTheLastBarAfterCancelYieldsNothingMore(t *testing.T) {
 }
 
 func TestBars_Empty(t *testing.T) {
-	md := &marketData{}
-	for range md.bars(context.Background()) {
+	md := marketdata.Series{}
+	for range seriesBars(context.Background(), md) {
 		t.Fatal("no bars expected")
 	}
 }
@@ -104,12 +104,12 @@ func testBars(closes ...price) []marketdata.Bar {
 }
 
 func TestBars_YieldsInstrumentAndTime(t *testing.T) {
-	md := &marketData{data: testBars(px(110000), px(110100), px(110200))}
+	md := marketdata.Series{Bars: testBars(px(110000), px(110100), px(110200))}
 
 	var n int
-	for b, err := range md.bars(context.Background()) {
+	for b, err := range seriesBars(context.Background(), md) {
 		require.NoError(t, err)
-		assert.Equal(t, md.data[n], b)
+		assert.Equal(t, md.Bars[n], b)
 		assert.Equal(t, "TEST", b.Instrument)
 		assert.Equal(t, testStart.AddDate(0, 0, n), b.Time)
 		n++
@@ -122,18 +122,18 @@ var mergeStart = time.Date(2010, time.January, 4, 0, 0, 0, 0, time.UTC)
 
 // barSet builds one instrument's bars, each opening the given offset after
 // mergeStart and lasting the given duration. Its closes count up from 100000.
-func barSet(instrument string, lasts time.Duration, opens ...time.Duration) *marketData {
-	md := &marketData{instrument: instrument}
+func barSet(instrument string, lasts time.Duration, opens ...time.Duration) marketdata.Series {
+	md := &marketdata.Series{Instrument: instrument}
 	for i, offset := range opens {
 		open := mergeStart.Add(offset)
-		md.data = append(md.data, marketdata.Bar{
+		md.Bars = append(md.Bars, marketdata.Bar{
 			Instrument:  instrument,
 			Time:        open,
 			Mid:         marketdata.OHLC{Close: px(int64(100000 + i))},
 			AvailableAt: open.Add(lasts),
 		})
 	}
-	return md
+	return *md
 }
 
 // label names a bar by instrument and opening time, for readable expectations.
@@ -141,7 +141,7 @@ func label(b marketdata.Bar) string {
 	return b.Instrument + " " + b.Time.Format("15:04")
 }
 
-func delivered(t *testing.T, sets ...*marketData) []string {
+func delivered(t *testing.T, sets ...marketdata.Series) []string {
 	t.Helper()
 	var got []string
 	for b, err := range mergedBars(context.Background(), sets...) {
@@ -152,7 +152,7 @@ func delivered(t *testing.T, sets ...*marketData) []string {
 }
 
 // frameLabels gives each frame as its bars' labels.
-func frameLabels(t *testing.T, sets ...*marketData) [][]string {
+func frameLabels(t *testing.T, sets ...marketdata.Series) [][]string {
 	t.Helper()
 	var got [][]string
 	for f, err := range frames(mergedBars(context.Background(), sets...)) {
@@ -203,17 +203,26 @@ func TestMergedBars_SingleSetIsUnchanged(t *testing.T) {
 
 func TestMergedBars_RefusesBadInput(t *testing.T) {
 	noAvailability := barSet("EURUSD", time.Hour, 0)
-	noAvailability.data[0].AvailableAt = time.Time{}
+	noAvailability.Bars[0].AvailableAt = time.Time{}
+
+	daily := barSet("GBPUSD", time.Hour, 0)
+	daily.Interval = "d1"
+	hourly := barSet("EURUSD", time.Hour, 0)
+	hourly.Interval = "h1"
+	stray := barSet("EURUSD", time.Hour, 0)
+	stray.Bars[0].Instrument = "GBPUSD"
 
 	tests := []struct {
 		name string
-		sets []*marketData
+		sets []marketdata.Series
 		want string
 	}{
-		{"same instrument twice", []*marketData{barSet("EURUSD", time.Hour, 0), barSet("EURUSD", time.Hour, time.Hour)}, "given twice"},
-		{"times out of order", []*marketData{barSet("EURUSD", time.Hour, time.Hour, 0)}, "not available after"},
-		{"repeated time", []*marketData{barSet("EURUSD", time.Hour, 0, 0)}, "not available after"},
-		{"no availability", []*marketData{noAvailability}, "no availability"},
+		{"mixed intervals", []marketdata.Series{hourly, daily}, "one interval"},
+		{"a bar of another instrument", []marketdata.Series{stray}, "in the \"EURUSD\" series"},
+		{"same instrument twice", []marketdata.Series{barSet("EURUSD", time.Hour, 0), barSet("EURUSD", time.Hour, time.Hour)}, "given twice"},
+		{"times out of order", []marketdata.Series{barSet("EURUSD", time.Hour, time.Hour, 0)}, "not available after"},
+		{"repeated time", []marketdata.Series{barSet("EURUSD", time.Hour, 0, 0)}, "not available after"},
+		{"no availability", []marketdata.Series{noAvailability}, "no availability"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -233,12 +242,12 @@ func TestMergedBars_RefusesBadInput(t *testing.T) {
 func TestMergedBars_LeavesTheSetsUnchanged(t *testing.T) {
 	gbp := barSet("GBPUSD", time.Hour, 0, time.Hour)
 	eur := barSet("EURUSD", time.Hour, 0, time.Hour)
-	gbp.data = slices.Grow(gbp.data, len(eur.data)) // room to merge in place, if it wrongly tried
-	want := slices.Clone(gbp.data)
+	gbp.Bars = slices.Grow(gbp.Bars, len(eur.Bars)) // room to merge in place, if it wrongly tried
+	want := slices.Clone(gbp.Bars)
 
 	delivered(t, gbp, eur)
 
-	assert.Equal(t, want, gbp.data)
+	assert.Equal(t, want, gbp.Bars)
 }
 
 func TestMergedBars_Cancelled(t *testing.T) {
@@ -328,7 +337,7 @@ func TestFrames_AnErrorDropsTheFrameBeingBuilt(t *testing.T) {
 	boom := errors.New("bad row")
 	sets := barSet("EURUSD", time.Hour, 0, time.Hour)
 	seq := func(yield func(marketdata.Bar, error) bool) {
-		for _, b := range sets.data {
+		for _, b := range sets.Bars {
 			if !yield(b, nil) {
 				return
 			}
@@ -401,8 +410,8 @@ func TestFrames_EarlyBreak(t *testing.T) {
 // never does. This is why trading needs frames and a per-instrument consumer
 // does not.
 func TestDelivery_BarsCanMixMomentsAndFramesCannot(t *testing.T) {
-	sets := func() []*marketData {
-		return []*marketData{barSet("EURUSD", time.Hour, 0, time.Hour), barSet("GBPUSD", time.Hour, 0, time.Hour)}
+	sets := func() []marketdata.Series {
+		return []marketdata.Series{barSet("EURUSD", time.Hour, 0, time.Hour), barSet("GBPUSD", time.Hour, 0, time.Hour)}
 	}
 	closeSum := func(latest map[string]price) price {
 		return must1(latest["EURUSD"].Add(latest["GBPUSD"]))

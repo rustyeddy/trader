@@ -57,6 +57,10 @@ func (s *reactStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	return o
 }
 
+func (s *reactStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
+}
+
 // openOn returns a strategy that opens instrument long, at price p with stop
 // stop, once, when it sees a bar of on.
 func openOn(on string, instrument string, pN int64, stopN int64) *reactStrategy {
@@ -339,33 +343,30 @@ func TestBroker_OnFrame_DefersALiquidationWithoutACurrentPrice(t *testing.T) {
 //	2     1.00300-1.00600  2.00600-2.01200
 //	3     1.00600-1.00900  -
 //	4     1.00900-1.01200  2.01200-2.01800
-func pairBars() (*marketData, *marketData) {
-	eur := &marketData{instrument: "EURUSD"}
+func pairBars() (marketdata.Series, marketdata.Series) {
+	eur := &marketdata.Series{Instrument: "EURUSD"}
 	for h, c := range []price{px(100000), px(100300), px(100600), px(100900), px(101200)} {
 		o := c
 		if h > 0 {
-			o = eur.data[h-1].OHLC().Close
+			o = eur.Bars[h-1].OHLC().Close
 		}
-		eur.data = append(eur.data, hbar("EURUSD", hour(h), points(o), points(c)))
+		eur.Bars = append(eur.Bars, hbar("EURUSD", hour(h), points(o), points(c)))
 	}
-	gbp := &marketData{instrument: "GBPUSD", data: []marketdata.Bar{
+	gbp := &marketdata.Series{Instrument: "GBPUSD", Bars: []marketdata.Bar{
 		hbar("GBPUSD", hour(0), 200000, 200000),
 		hbar("GBPUSD", hour(1), 200000, 200600),
 		hbar("GBPUSD", hour(2), 200600, 201200),
 		hbar("GBPUSD", hour(4), 201200, 201800),
 	}}
-	return eur, gbp
+	return *eur, *gbp
 }
 
-func runPair(t *testing.T, eur, gbp *marketData) (*trader, *account) {
+func runPair(t *testing.T, eur, gbp marketdata.Series) (*trader, *account) {
 	t.Helper()
 	strat := &emaxEach{markets: testMarkets(), id: "pair", instruments: []string{"EURUSD", "GBPUSD"}, short: 2, long: 3, stopPct: rt(400)}
 	require.NoError(t, strat.init())
 	tr, act := pairTrader(usd(10000), strat)
-	for f, err := range frames(mergedBars(context.Background(), eur, gbp)) {
-		require.NoError(t, err)
-		require.NoError(t, tr.onFrame(context.Background(), f))
-	}
+	require.NoError(t, (&backtest{}).runSeries(context.Background(), tr, eur, gbp))
 	return tr, act
 }
 
@@ -455,13 +456,13 @@ func TestEMAXEach_TwoInstrumentsShareOneAccount(t *testing.T) {
 func TestEMAXEach_StaggeredSignalsSizeAgainstTheEarlierPosition(t *testing.T) {
 	captureLogs(t)
 	eur, _ := pairBars()
-	gbp := &marketData{instrument: "GBPUSD", data: []marketdata.Bar{
+	gbp := &marketdata.Series{Instrument: "GBPUSD", Bars: []marketdata.Bar{
 		hbar("GBPUSD", hour(1), 200000, 200000),
 		hbar("GBPUSD", hour(2), 200000, 200600),
 		hbar("GBPUSD", hour(3), 200600, 201200),
 		hbar("GBPUSD", hour(4), 201200, 201800),
 	}}
-	tr, act := runPair(t, eur, gbp)
+	tr, act := runPair(t, eur, *gbp)
 
 	e, g := filledOpen(t, tr.broker, "EURUSD"), filledOpen(t, tr.broker, "GBPUSD")
 	assert.Equal(t, hour(3), e.decidedAt)
@@ -495,7 +496,7 @@ func TestEMAXEach_KeepsStatePerInstrument(t *testing.T) {
 	require.NoError(t, s.init())
 	eur, _ := pairBars()
 
-	for _, b := range eur.data[:3] {
+	for _, b := range eur.Bars[:3] {
 		s.onBar(context.Background(), b)
 	}
 
@@ -527,4 +528,65 @@ func TestTrader_OnBar_ReportsABrokerFailureWithTheBar(t *testing.T) {
 
 	require.ErrorContains(t, err, "no availability")
 	assert.True(t, strings.HasPrefix(err.Error(), "broker on bar EURUSD 2010-01-04: "), err.Error())
+}
+
+// groupSpy is a strategy that is called once per frame. It records each group it
+// is shown, with how many orders the broker held at that moment, and opens each
+// instrument long once, on its first bar.
+type groupSpy struct {
+	held    func() int
+	groups  [][]string
+	atCall  []int
+	opened  map[string]bool
+	ordered []string
+}
+
+func (s *groupSpy) name() string { return "groupspy" }
+func (s *groupSpy) init() error  { return nil }
+func (s *groupSpy) onBars(_ context.Context, bars []marketdata.Bar) []*order {
+	var labels []string
+	var orders []*order
+	for _, b := range bars {
+		labels = append(labels, b.Instrument+"@"+b.AvailableAt.Format("15:04"))
+		if s.opened[b.Instrument] {
+			continue
+		}
+		s.opened[b.Instrument] = true
+		orders = append(orders, &order{instrument: b.Instrument, direction: long, action: open, orderType: marketOrder,
+			price: px(100000), stopLoss: px(99000), Time: b.Time})
+		s.ordered = append(s.ordered, b.Instrument)
+	}
+	s.groups = append(s.groups, labels)
+	s.atCall = append(s.atCall, s.held())
+	return orders
+}
+
+// The strategy is called exactly once per distinct availability instant, with the
+// whole fresh group, and none of that call's orders is submitted before it has seen
+// every bar of the group.
+func TestTrader_OnFrame_TheStrategySeesTheWholeGroupInOneCallBeforeAnyOrderIsSubmitted(t *testing.T) {
+	captureLogs(t)
+	spy := &groupSpy{opened: map[string]bool{}}
+	tr, _ := pairTrader(usd(10000), spy)
+	spy.held = func() int {
+		n := 0
+		for _, waiting := range tr.broker.orders {
+			n += len(waiting)
+		}
+		return n + len(tr.broker.completed)
+	}
+
+	eur, gbp := pairBars() // GBPUSD has no bar at hour 3
+	require.NoError(t, (&backtest{}).runSeries(context.Background(), tr, eur, gbp))
+
+	assert.Equal(t, [][]string{
+		{"EURUSD@" + hour(1).Format("15:04"), "GBPUSD@" + hour(1).Format("15:04")},
+		{"EURUSD@" + hour(2).Format("15:04"), "GBPUSD@" + hour(2).Format("15:04")},
+		{"EURUSD@" + hour(3).Format("15:04"), "GBPUSD@" + hour(3).Format("15:04")},
+		{"EURUSD@" + hour(4).Format("15:04")},
+		{"EURUSD@" + hour(5).Format("15:04"), "GBPUSD@" + hour(5).Format("15:04")},
+	}, spy.groups, "one call per availability instant; hour 4 has only the fresh EURUSD bar")
+	assert.Equal(t, 0, spy.atCall[0], "no order is held while the first group is being decided")
+	assert.Equal(t, 4, spy.atCall[1], "the first group's two opens, each with its protective stop, came after the call")
+	assert.Equal(t, []string{"EURUSD", "GBPUSD"}, spy.ordered, "orders follow the group's instrument order")
 }

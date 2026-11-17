@@ -61,21 +61,25 @@ func runScenario(scenario string) (*result, error) {
 	if err := tr.broker.markets.normalize(prices); err != nil {
 		return nil, fmt.Errorf("%s: %w", scenarioPath(scenario), err)
 	}
+	// The replay trusts what it is given; the series is checked here, where it enters.
+	if err := prices.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", scenarioPath(scenario), err)
+	}
 
 	slog.Info("backtest starting",
 		"scenario", scenario,
 		"strategy", tr.strategy.name(),
-		"instrument", prices.instrument,
-		"interval", prices.interval,
-		"bars", len(prices.data))
+		"instrument", prices.Instrument,
+		"interval", prices.Interval,
+		"bars", len(prices.Bars))
 
 	ctx := context.Background()
-	if err := (&backtest{}).run(ctx, prices.bars(ctx), tr); err != nil {
+	if err := (&backtest{}).runSeries(ctx, tr, *prices); err != nil {
 		return nil, err
 	}
 
 	slog.Info("backtest complete", "scenario", scenario, "strategy", tr.strategy.name())
-	return newResult(scenario, len(prices.data), tr)
+	return newResult(scenario, len(prices.Bars), tr)
 }
 
 // scenarioPath is where a scenario's bars are, relative to examples/design.
@@ -129,8 +133,12 @@ var barDurations = map[string]time.Duration{
 	"d1": 24 * time.Hour,
 }
 
+// scenarioSource names where a design-bars-v1 file's bars come from: they are
+// hand-made, not a provider's.
+const scenarioSource = "synthetic"
+
 // loadBars reads the bars in the file at path; see readBars.
-func loadBars(path string) (*marketData, error) {
+func loadBars(path string) (*marketdata.Series, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -148,7 +156,7 @@ func loadBars(path string) (*marketData, error) {
 // instrument and interval, the column names, then one row per bar. It refuses
 // anything malformed rather than skipping it, including bars whose times do not
 // strictly increase, since the broker fills an order only on a later bar.
-func readBars(r io.Reader) (*marketData, error) {
+func readBars(r io.Reader) (*marketdata.Series, error) {
 	br := bufio.NewReader(r)
 	header, err := br.ReadString('\n')
 	if err != nil {
@@ -185,7 +193,7 @@ func readBars(r io.Reader) (*marketData, error) {
 		return nil, fmt.Errorf("bars columns %q: want %q", cols, barColumns)
 	}
 
-	md := &marketData{instrument: meta["instrument"], interval: meta["tf"]}
+	md := &marketdata.Series{Source: scenarioSource, Instrument: meta["instrument"], Interval: meta["tf"]}
 	for {
 		rec, err := cr.Read()
 		if err == io.EOF {
@@ -195,16 +203,16 @@ func readBars(r io.Reader) (*marketData, error) {
 			return nil, fmt.Errorf("bars: %w", err)
 		}
 		line, _ := cr.FieldPos(0)
-		b, err := parseBar(md.instrument, rec, lasts)
+		b, err := parseBar(md.Instrument, rec, lasts)
 		if err != nil {
 			return nil, fmt.Errorf("bars line %d: %w", line, err)
 		}
-		if n := len(md.data); n > 0 && !b.Time.After(md.data[n-1].Time) {
-			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.data[n-1].Time.Format(barTimeLayout))
+		if n := len(md.Bars); n > 0 && !b.Time.After(md.Bars[n-1].Time) {
+			return nil, fmt.Errorf("bars line %d: time %s is not after %s", line, rec[0], md.Bars[n-1].Time.Format(barTimeLayout))
 		}
-		md.data = append(md.data, b)
+		md.Bars = append(md.Bars, b)
 	}
-	if len(md.data) == 0 {
+	if len(md.Bars) == 0 {
 		return nil, errors.New("bars: no rows")
 	}
 	return md, nil

@@ -48,8 +48,8 @@ func atrFixture() []marketdata.Bar {
 }
 
 func studyBars(bars []marketdata.Bar) iter.Seq2[marketdata.Bar, error] {
-	md := &marketData{data: bars}
-	return md.bars(context.Background())
+	md := marketdata.Series{Bars: bars}
+	return seriesBars(context.Background(), md)
 }
 
 func TestRunATRStudy_ReportsEachCompletedWindow(t *testing.T) {
@@ -134,9 +134,9 @@ func TestRunATRStudy_ReturnsNoPartialResultsOnADataError(t *testing.T) {
 func TestRunATRStudy_CancelledBeforeTheFirstBar(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	md := &marketData{data: atrFixture()}
+	md := marketdata.Series{Bars: atrFixture()}
 
-	got, err := runATRStudy(md.bars(ctx), 3)
+	got, err := runATRStudy(seriesBars(ctx, md), 3)
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Nil(t, got)
@@ -145,10 +145,10 @@ func TestRunATRStudy_CancelledBeforeTheFirstBar(t *testing.T) {
 func TestRunATRStudy_CancelledPartWayThrough(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	md := &marketData{data: atrFixture()}
+	md := marketdata.Series{Bars: atrFixture()}
 	bars := func(yield func(marketdata.Bar, error) bool) {
 		seen := 0
-		for b, err := range md.bars(ctx) {
+		for b, err := range seriesBars(ctx, md) {
 			if !yield(b, err) {
 				return
 			}

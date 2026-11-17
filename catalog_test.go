@@ -183,10 +183,10 @@ func TestCatalog_LookupIsExactAndKeyForTranslatesProviderSymbols(t *testing.T) {
 	require.ErrorIs(t, err, errUnknownInstrument)
 }
 
-func barsOf(instrument string, closes ...int64) *marketData {
-	md := &marketData{instrument: instrument, interval: "d1"}
+func barsOf(instrument string, closes ...int64) *marketdata.Series {
+	md := &marketdata.Series{Instrument: instrument, Interval: "d1"}
 	for i, p := range closes {
-		md.data = append(md.data, marketdata.Bar{Instrument: instrument, Time: testStart.AddDate(0, 0, i),
+		md.Bars = append(md.Bars, marketdata.Bar{Instrument: instrument, Time: testStart.AddDate(0, 0, i),
 			Mid: marketdata.OHLC{Open: px(p), High: px(p), Low: px(p), Close: px(p)}, AvailableAt: testStart.AddDate(0, 0, i+1)})
 	}
 	return md
@@ -201,8 +201,8 @@ func TestCatalog_NormalizeGivesTheEngineOneKeyPerInstrument(t *testing.T) {
 	md := barsOf("EUR_USD", 110000, 110100)
 	require.NoError(t, c.normalize(md))
 
-	assert.Equal(t, "EURUSD", md.instrument)
-	for _, b := range md.data {
+	assert.Equal(t, "EURUSD", md.Instrument)
+	for _, b := range md.Bars {
 		assert.Equal(t, "EURUSD", b.Instrument)
 	}
 }
@@ -217,7 +217,7 @@ func TestCatalog_NormalizeRefusesWhatItCannotPlace(t *testing.T) {
 	require.ErrorIs(t, c.normalize(barsOf("AUDUSD", 110000)), errUnknownInstrument, "no permissive fallback")
 
 	mixed := barsOf("EURUSD", 110000)
-	mixed.data[0].Instrument = "AUDUSD"
+	mixed.Bars[0].Instrument = "AUDUSD"
 	require.Error(t, c.normalize(mixed), "a bar of another instrument in the set")
 
 	require.Error(t, c.normalize(barsOf("EUR_USD", 110003)), "110003 is not a whole number of 0.00005 ticks")
@@ -325,7 +325,7 @@ func TestBroker_OneInstrumentCannotHoldTwoPositionsUnderTwoSpellings(t *testing.
 	err = br.submit(context.Background(), short1)
 	require.ErrorIs(t, err, errUnknownInstrument)
 
-	require.NoError(t, br.onBar(context.Background(), feed.data[1]))
+	require.NoError(t, br.onBar(context.Background(), feed.Bars[1]))
 	assert.Len(t, act.positions, 1)
 	assert.Contains(t, act.positions, "EURUSD")
 	assert.NotContains(t, act.positions, "EUR_USD")
@@ -415,13 +415,13 @@ func TestBroker_OnFrame_RefusesABarThatIsNotUnderAnEngineKey(t *testing.T) {
 	pending := openOrderAt("EURUSD", long, px(110000))
 	pending.accountID = "a"
 	require.NoError(t, br.submit(ctx, pending))
-	require.NoError(t, br.onBar(ctx, barsOf("EURUSD", 110000, 110000).data[1]))
+	require.NoError(t, br.onBar(ctx, barsOf("EURUSD", 110000, 110000).Bars[1]))
 	require.Contains(t, act.positions, "EURUSD")
 	held := act.positions["EURUSD"].markPrice
 	clock := br.clock
 	queued := len(br.orders["EURUSD"])
 
-	unnormalized := barsOf("EUR_USD", 111000, 111000).data[1]
+	unnormalized := barsOf("EUR_USD", 111000, 111000).Bars[1]
 	err = br.onBar(ctx, unnormalized)
 
 	require.ErrorIs(t, err, errUnknownInstrument)
@@ -431,9 +431,9 @@ func TestBroker_OnFrame_RefusesABarThatIsNotUnderAnEngineKey(t *testing.T) {
 	assert.Len(t, br.orders["EURUSD"], queued, "the queues were not touched")
 
 	// An unknown instrument is refused the same way, and so is a price off the tick.
-	unknown := barsOf("AUDUSD", 100000, 100000).data[1]
+	unknown := barsOf("AUDUSD", 100000, 100000).Bars[1]
 	require.ErrorIs(t, br.onBar(ctx, unknown), errUnknownInstrument)
-	off := barsOf("EURUSD", 100000, 100000).data[1]
+	off := barsOf("EURUSD", 100000, 100000).Bars[1]
 	off.Mid.Close = num.MustParsePrice("1.000001")
 	require.Error(t, br.onBar(ctx, off))
 	assert.Equal(t, clock, br.clock)
@@ -441,7 +441,7 @@ func TestBroker_OnFrame_RefusesABarThatIsNotUnderAnEngineKey(t *testing.T) {
 	// The same bar, normalized, is processed.
 	md := barsOf("EUR_USD", 111000, 111000, 111000)
 	require.NoError(t, cat.normalize(md))
-	require.NoError(t, br.onBar(ctx, md.data[2]))
+	require.NoError(t, br.onBar(ctx, md.Bars[2]))
 	assert.Equal(t, px(111000), act.positions["EURUSD"].markPrice)
 }
 
@@ -451,12 +451,12 @@ func TestCatalog_NormalizeChangesNothingWhenAnyBarIsRefused(t *testing.T) {
 	c, err := newCatalog(r.config(t))
 	require.NoError(t, err)
 	md := barsOf("EUR_USD", 110000, 110000, 110000)
-	md.data[2].Mid.Close = num.MustParsePrice("1.100001") // the last bar is off the tick
+	md.Bars[2].Mid.Close = num.MustParsePrice("1.100001") // the last bar is off the tick
 
 	require.Error(t, c.normalize(md))
 
-	assert.Equal(t, "EUR_USD", md.instrument, "the set is left as it was")
-	for _, b := range md.data {
+	assert.Equal(t, "EUR_USD", md.Instrument, "the set is left as it was")
+	for _, b := range md.Bars {
 		assert.Equal(t, "EUR_USD", b.Instrument)
 	}
 }

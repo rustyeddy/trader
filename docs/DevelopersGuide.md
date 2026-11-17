@@ -84,12 +84,36 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
 
 ## The engine
 
-The root package runs on `marketdata.Bar`. Prices are read through `Bar.OHLC()`
-(mid first). The scenario files in `testdata/emax` use one synthetic price series,
-read as mid. Frames and merging (`replay.go`) deliver bars in availability order.
-The series type and the canonical reader exist (`marketdata.Series`, `Load`);
-running a backtest on a `Series` (a run configuration, and `marketData` as a view
-over it) is not built yet.
+The root package runs on `marketdata.Bar` and replays `marketdata.Series` values
+that a reader (`Load`) has already loaded; it has no series type of its own and
+opens no file, resolves no path and knows no provider. Prices are read through
+`Bar.OHLC()` (mid first). The scenario files in `testdata/emax` are read into a
+`Series` (source `synthetic`) as mid.
+
+`backtest.runSeries` replays one or more series on one trader with one shared
+account and broker (`replay.go`, `backtest.go`):
+
+- A run has one interval; series of different intervals are refused. Series are of
+  different instruments, and an empty series contributes nothing.
+- `mergedBars` orders bars by their stored `AvailableAt`, then by instrument name,
+  so the order does not depend on the order of the series. `AvailableAt` is never
+  recomputed from the opening time or the interval, and an opening time never
+  authorises early delivery.
+- `frames` groups the bars with the same `AvailableAt`: one group per distinct
+  instant, holding only fresh bars. An instrument with no bar at that instant is
+  absent; nothing is forward-filled or reused.
+- Per group the trader advances the broker through the whole group, then calls
+  `strategy.onBars(ctx, bars)` once with the whole fresh group (instrument order).
+  The strategy sees every bar of the group before any of its orders is submitted;
+  the trader then submits the returned orders in order. `eachBar` adapts a decision
+  made one bar at a time (`emax`, `emaxEach`). A single-instrument run is the same
+  path with one-bar groups. `backtest.run` keeps the per-bar access the research
+  tests and studies use.
+- `mergedBars` trusts its input: the caller validates the series
+  (`marketdata.Series.Validate`; `runScenario` does, where the scenario enters).
+- A run configuration (which instruments, source, range) and wiring a `Series`
+  loaded from `/srv/data` into the command line are not built yet; `runScenario`
+  is the only caller of `runSeries` outside tests.
 
 ## Tests
 

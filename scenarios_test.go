@@ -210,14 +210,14 @@ func TestReadBars_ParsesExactPointsInOrder(t *testing.T) {
 		"2010-01-05T00:00:00Z,1.10015,1.10130,1.10005,1.10100,0\n"))
 	require.NoError(t, err)
 
-	assert.Equal(t, "EURUSD", md.instrument)
-	assert.Equal(t, "d1", md.interval)
+	assert.Equal(t, "EURUSD", md.Instrument)
+	assert.Equal(t, "d1", md.Interval)
 	first := time.Date(2010, time.January, 4, 0, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
 	assert.Equal(t, []marketdata.Bar{
 		{Instrument: "EURUSD", Time: first, Volume: 1000, Mid: marketdata.OHLC{Open: px(110323), High: px(110650), Low: px(109197), Close: px(110001)}, AvailableAt: second},
 		{Instrument: "EURUSD", Time: second, Mid: marketdata.OHLC{Open: px(110015), High: px(110130), Low: px(110005), Close: px(110100)}, AvailableAt: second.AddDate(0, 0, 1)},
-	}, md.data)
+	}, md.Bars)
 }
 
 func TestReadBars_AvailableWhenTheIntervalEnds(t *testing.T) {
@@ -235,9 +235,9 @@ func TestReadBars_AvailableWhenTheIntervalEnds(t *testing.T) {
 				"time,open,high,low,close,volume\n" +
 				"2010-01-04T10:00:00Z,1.10000,1.10100,1.09900,1.10050,1000\n"))
 			require.NoError(t, err)
-			require.Len(t, md.data, 1)
-			assert.Equal(t, open, md.data[0].Time, "the opening time is unchanged")
-			assert.Equal(t, tt.want, md.data[0].AvailableAt)
+			require.Len(t, md.Bars, 1)
+			assert.Equal(t, open, md.Bars[0].Time, "the opening time is unchanged")
+			assert.Equal(t, tt.want, md.Bars[0].AvailableAt)
 		})
 	}
 }
