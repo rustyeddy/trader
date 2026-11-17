@@ -202,8 +202,8 @@ func TestRunBacktest_ACancelledContextStopsTheRun(t *testing.T) {
 }
 
 // The review of #668: realistic quotes, a one-tick spread and so a half-tick mid,
-// go from raw through BuildCanonical and LoadSeries to RunBacktest. The mid is kept
-// as the canonical file has it; only the orders name whole ticks.
+// go from raw through BuildCanonical and LoadSeries to RunBacktest. The canonical
+// mid stays as the file has it; the engine rounds to the nearest tick on its copy.
 func TestRunBacktest_ARealisticOneTickSpreadRunsAndKeepsTheHalfTickMid(t *testing.T) {
 	storetest.Root(t)
 	monthSpread(t, "EURUSD", time.January, 110000, 1, wave...)
@@ -224,6 +224,10 @@ func TestRunBacktest_ARealisticOneTickSpreadRunsAndKeepsTheHalfTickMid(t *testin
 	assert.Contains(t, out.String(), ": 24 bars")
 	assert.NotContains(t, out.String(), "submitted 0,", "orders were placed")
 	assert.NotContains(t, out.String(), "rejected 1", "none was refused for its price")
+	reloaded, err := LoadSeries(context.Background(), nil, LoadRequest{Instruments: []string{"EURUSD"}, Interval: "h1",
+		From: utc(2024, 1, 1, 0), To: utc(2024, 2, 1, 0)})
+	require.NoError(t, err)
+	assert.Equal(t, loaded[0].Series.Bars[0].Mid, reloaded[0].Series.Bars[0].Mid, "the canonical data is as it was")
 }
 
 // February is traded and has only two bars: too few for the long EMA. The bars of

@@ -69,11 +69,11 @@ func TestRunSeries_LeavesTheCallersSeriesAlone(t *testing.T) {
 func TestRunSeries_RefusesWhatItCannotRunWithAClearError(t *testing.T) {
 	noSource := wave("EURUSD", 1, upThenDown...)
 	noSource.Source = ""
+	crossed := wave("EURUSD", 1, upThenDown...)
+	crossed.Bars[2].Bid = marketdata.OHLC{Open: px(100100), High: px(100100), Low: px(100100), Close: px(100100)}
+	crossed.Bars[2].Ask = marketdata.OHLC{Open: px(100000), High: px(100000), Low: px(100000), Close: px(100000)}
 	daily := wave("GBPUSD", 2, upThenDown...)
 	daily.Interval = "d1"
-	offTick := wave("EURUSD", 1, upThenDown...)
-	off := num.MustParsePrice("1.000001") // a tenth of a tick: not a price this market quotes or mids
-	offTick.Bars[3].Mid = marketdata.OHLC{Open: off, High: off, Low: off, Close: off}
 	for name, tc := range map[string]struct {
 		series []marketdata.Series
 		want   string
@@ -82,8 +82,8 @@ func TestRunSeries_RefusesWhatItCannotRunWithAClearError(t *testing.T) {
 		"no series":           {nil, "no series", nil},
 		"no market":           {[]marketdata.Series{wave("AUDUSD", 1, upThenDown...)}, "AUDUSD", errUnknownInstrument},
 		"invalid series":      {[]marketdata.Series{noSource}, "EURUSD", marketdata.ErrInvalidSeries},
+		"crossed bid and ask": {[]marketdata.Series{crossed}, "EURUSD", marketdata.ErrCrossed},
 		"mixed intervals":     {[]marketdata.Series{wave("EURUSD", 1, upThenDown...), daily}, "one interval", nil},
-		"off the half tick":   {[]marketdata.Series{offTick}, "not a multiple of half the tick", nil},
 		"same instrument two": {[]marketdata.Series{wave("EURUSD", 1, upThenDown...), wave("EURUSD", 1, upThenDown...)}, "twice", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -134,9 +134,9 @@ func TestRunSeries_WarmBarsPrefillTheIndicatorsAndAreNotCounted(t *testing.T) {
 	assert.Contains(t, cold, "submitted 0,", "cold, two bars are too few for the long EMA")
 }
 
-// A mid price half a tick from a whole tick is a valid observation: the bar is
-// kept as it is and the orders name whole ticks (the engine/execution boundary of
-// #667).
+// A mid price half a tick from a whole tick, which an odd bid/ask spread gives,
+// trades like any other: the engine rounds on its own copy and the series passed in
+// is not changed.
 func TestRunSeries_RunsOnHalfTickMidsWithoutChangingThem(t *testing.T) {
 	captureLogs(t)
 	s := wave("EURUSD", 1, upThenDown...)

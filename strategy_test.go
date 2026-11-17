@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
-	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -394,107 +393,6 @@ func TestEmax_StopsPassAccountSizing(t *testing.T) {
 		require.NoError(t, acct.size(o, cents(0)), "bar %d", i)
 		assert.False(t, o.units.IsZero())
 	}
-}
-
-// halfTickBars are daily bars of "TEST" whose closes are given as decimal prices,
-// so a close can sit half a tick between two ticks (the tick of newTestEmax is
-// 0.00001).
-func halfTickBars(closes ...string) []marketdata.Bar {
-	bars := make([]marketdata.Bar, len(closes))
-	for i, c := range closes {
-		p := mustPrice(c)
-		bars[i] = daily(marketdata.Bar{Instrument: "TEST", Time: testStart.AddDate(0, 0, i),
-			Mid: marketdata.OHLC{Open: p, High: p, Low: p, Close: p}})
-	}
-	return bars
-}
-
-func mustPrice(s string) price { return num.MustParsePrice(s) }
-
-func TestEmax_Executable_MovesAPriceToTheTickThatIsWorseForTheStrategy(t *testing.T) {
-	e := newTestEmax(t, 2, 4)
-	for _, tt := range []struct {
-		name string
-		in   string
-		buy  bool
-		want string
-	}{
-		{"a buy rounds up", "1.100005", true, "1.10001"},
-		{"a sell rounds down", "1.100005", false, "1.10000"},
-		{"a whole tick stays (buy)", "1.10001", true, "1.10001"},
-		{"a whole tick stays (sell)", "1.10001", false, "1.10001"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := e.executable(mustPrice(tt.in), tt.buy)
-
-			require.NoError(t, err)
-			assert.Equal(t, mustPrice(tt.want), got)
-		})
-	}
-}
-
-func TestEmax_OrdersNameWholeTicksWhenTheBarsCloseOnAHalfTick(t *testing.T) {
-	ctx := context.Background()
-	onTick := func(t *testing.T, o *order) {
-		t.Helper()
-		for name, p := range map[string]price{"price": o.price, "stop loss": o.stopLoss} {
-			ok, err := p.DivisibleBy(px(1))
-			require.NoError(t, err)
-			assert.True(t, ok, "%s %s is a whole tick", name, p)
-		}
-	}
-
-	t.Run("a long entry rounds up", func(t *testing.T) {
-		e := newTestEmax(t, 2, 4)
-		var got *order
-		for _, b := range halfTickBars("1.10000", "1.10001", "1.10002", "1.100035") {
-			got = e.onBar(ctx, b)
-		}
-		require.NotNil(t, got)
-		assert.Equal(t, long, got.direction)
-		assert.Equal(t, mustPrice("1.10004"), got.price, "the mid close 1.100035 is bought at the tick above")
-		onTick(t, got)
-		assert.True(t, got.stopLoss.Cmp(got.price) < 0)
-	})
-
-	t.Run("a short entry rounds down", func(t *testing.T) {
-		e := newTestEmax(t, 2, 4)
-		var got *order
-		for _, b := range halfTickBars("1.10004", "1.10003", "1.10002", "1.100005") {
-			got = e.onBar(ctx, b)
-		}
-		require.NotNil(t, got)
-		assert.Equal(t, short, got.direction)
-		assert.Equal(t, mustPrice("1.10000"), got.price, "the mid close 1.100005 is sold at the tick below")
-		onTick(t, got)
-		assert.True(t, got.stopLoss.Cmp(got.price) > 0)
-	})
-
-	t.Run("closing a long sells and closing a short buys", func(t *testing.T) {
-		e := newTestEmax(t, 2, 4)
-		var all []*order
-		for _, b := range halfTickBars("1.10000", "1.10001", "1.10002", "1.10003", "1.10002", "1.100005", "1.100005") {
-			all = append(all, e.onBar(ctx, b))
-		}
-		var closeLong *order
-		for _, o := range all {
-			if o != nil && o.action == close {
-				closeLong = o
-			}
-		}
-		require.NotNil(t, closeLong, "the trend turned, so the long is closed")
-		assert.Equal(t, mustPrice("1.10000"), closeLong.price, "a sell at 1.100005 names the tick below")
-	})
-
-	t.Run("the bar itself is not changed", func(t *testing.T) {
-		e := newTestEmax(t, 2, 4)
-		bars := halfTickBars("1.10000", "1.10001", "1.10002", "1.100035")
-		want := mustPrice("1.100035")
-		for _, b := range bars {
-			e.onBar(ctx, b)
-		}
-		assert.Equal(t, want, bars[3].Mid.Close)
-	})
 }
 
 func TestEmax_Warm_PrefillsTheEMAsAndTakesNoPosition(t *testing.T) {

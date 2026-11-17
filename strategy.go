@@ -148,18 +148,12 @@ func (e *emax) onBar(ctx context.Context, b marketdata.Bar) *order {
 		return e.openOrder(b, trend)
 	default:
 		// in the opposite side: close now, open the new side next bar
-		closing := e.pos
 		e.pos = noDirection
 		e.pending = trend
-		// Closing a long sells and closing a short buys.
-		ref, err := e.executable(b.OHLC().Close, closing == short)
-		if err != nil {
-			ref = b.OHLC().Close
-		}
 		// close takes no direction: it acts on the existing position
 		return &order{
 			instrument: b.Instrument,
-			price:      ref,
+			price:      b.OHLC().Close,
 			action:     close,
 			orderType:  marketOrder,
 			Time:       b.Time,
@@ -168,35 +162,19 @@ func (e *emax) onBar(ctx context.Context, b marketdata.Bar) *order {
 }
 
 func (e *emax) openOrder(b marketdata.Bar, d direction) *order {
-	entry, err := e.executable(b.OHLC().Close, d == long)
-	if err != nil {
-		return nil
-	}
-	stop, err := e.stopFor(entry, d)
+	stop, err := e.stopFor(b.OHLC().Close, d)
 	if err != nil || stop.IsZero() || stop.Cmp(maxPrice) > 0 {
 		return nil // skip the entry; clamping would change the configured risk
 	}
 	return &order{
 		instrument: b.Instrument,
-		price:      entry,
+		price:      b.OHLC().Close,
 		stopLoss:   stop,
 		action:     open,
 		orderType:  marketOrder,
 		direction:  d,
 		Time:       b.Time,
 	}
-}
-
-// executable returns the price an order may name for a bar's close: a whole tick,
-// since the market quotes in ticks. A mid close can sit half a tick between two,
-// and the bar is never changed, so the order's reference price is moved to the
-// tick that is worse for the strategy: a buy rounds up and a sell rounds down.
-// A close that is already a whole tick is returned as it is.
-func (e *emax) executable(p num.Price, buy bool) (num.Price, error) {
-	if buy {
-		return p.RoundUp(e.tick)
-	}
-	return p.RoundDown(e.tick)
 }
 
 // stopFor places the stop stopPct of the entry price away on the losing side:

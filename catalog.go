@@ -148,19 +148,11 @@ func (c *catalog) keyFor(symbol string) (string, error) {
 }
 
 // checkPrices reports an error unless every price of b is a whole number of
-// half ticks of m. A bar's price is an observation, not an order: a mid price is
-// the midpoint of a bid and an ask that are whole ticks, so it can sit exactly
-// half a tick between two (1.100005 for ticks of 0.00001). Anything finer than that
-// is not a price this market could have produced and is refused. The bar is never
-// rounded: what the engine rounds is the price of an order (see emax.executable).
+// m's ticks.
 func (m *market) checkPrices(b marketdata.OHLC) error {
-	half, err := m.tick.MulRate(num.Half)
-	if err != nil {
-		return fmt.Errorf("%s tick %s: %w", m.key, m.tick, err)
-	}
 	for _, p := range []num.Price{b.Open, b.High, b.Low, b.Close} {
-		if ok, err := p.DivisibleBy(half); err != nil || !ok {
-			return fmt.Errorf("%s price %s is not a multiple of half the tick %s", m.key, p, m.tick)
+		if ok, err := p.DivisibleBy(m.tick); err != nil || !ok {
+			return fmt.Errorf("%s price %s is not a multiple of the tick %s", m.key, p, m.tick)
 		}
 	}
 	return nil
@@ -203,7 +195,7 @@ func (c *catalog) checkFrame(f frame) error {
 
 // normalize rewrites loaded bars to the engine key of their instrument, before
 // the engine sees them, and checks every price is a whole number of the
-// market's half ticks (checkPrices). A provider spelling therefore never reaches the engine as a
+// market's ticks. A provider spelling therefore never reaches the engine as a
 // second instrument. Every bar is checked before any is changed, so a refused
 // set is left exactly as it was.
 func (c *catalog) normalize(md *marketdata.Series) error {
@@ -227,6 +219,59 @@ func (c *catalog) normalize(md *marketdata.Series) error {
 		md.Bars[i].Instrument = key
 	}
 	return nil
+}
+
+// roundToTicks makes each bar of the series carry one price series, the one the
+// engine trades (Bar.OHLC: mid first), rounded to the nearest tick of the
+// instrument's market; a price exactly between two ticks rounds up. It is how a
+// series from a reader, whose mid price can sit between two ticks, enters an engine
+// that trades whole ticks. The other series (bid, ask, trade) are dropped from the
+// bar: a mid rounded on its own is no longer the midpoint of an unrounded bid and
+// ask, and the engine does not use them. It changes the bars it is given, so the
+// caller passes a copy; an instrument with no market is an error.
+func (c *catalog) roundToTicks(s *marketdata.Series) error {
+	key, err := c.keyFor(s.Instrument)
+	if err != nil {
+		return fmt.Errorf("bars: %w", err)
+	}
+	tick := c.byKey[key].tick
+	for i := range s.Bars {
+		b := &s.Bars[i]
+		o := b.OHLC()
+		for _, p := range []*num.Price{&o.Open, &o.High, &o.Low, &o.Close} {
+			r, err := nearestTick(*p, tick)
+			if err != nil {
+				return fmt.Errorf("bars: %s price %s: %w", key, *p, err)
+			}
+			*p = r
+		}
+		b.Bid, b.Ask, b.Trade, b.Mid = marketdata.OHLC{}, marketdata.OHLC{}, marketdata.OHLC{}, o
+	}
+	return nil
+}
+
+// nearestTick returns the multiple of tick nearest p; a tie rounds up.
+func nearestTick(p, tick num.Price) (num.Price, error) {
+	down, err := p.RoundDown(tick)
+	if err != nil {
+		return num.Price{}, err
+	}
+	up, err := p.RoundUp(tick)
+	if err != nil {
+		return num.Price{}, err
+	}
+	below, err := p.Sub(down)
+	if err != nil {
+		return num.Price{}, err
+	}
+	above, err := up.Sub(p)
+	if err != nil {
+		return num.Price{}, err
+	}
+	if above.Cmp(below) <= 0 {
+		return up, nil
+	}
+	return down, nil
 }
 
 // keys lists the engine keys in a fixed order.

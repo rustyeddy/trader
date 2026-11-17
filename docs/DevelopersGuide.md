@@ -120,13 +120,14 @@ account and broker (`replay.go`, `backtest.go`):
   months), then `RunSeries`; `trader backtest` only parses flags and prints.
 - Mid prices and ticks (#667). A canonical mid is the exact midpoint of bid and
   ask, so it can sit half a tick from a whole tick (1.100005 for ticks of 0.00001).
-  The engine accepts bar prices on the half-tick grid (`market.checkPrices`) and
-  never rounds a bar. What it rounds is the price an order names: EMAX moves the
-  close it trades on to the tick that is worse for it (`emax.executable`): a buy
-  rounds up and a sell rounds down (closing a long sells, closing a short buys); the
-  stop is then placed a whole number of ticks away. A price finer than half a tick
-  is not a price the market could produce and is refused. Another strategy must
-  quantize its own order prices the same way.
+  `trader.RunSeries` rounds every bar price to the nearest tick of the market (a
+  tie goes up) as the bars enter the engine (`catalog.roundToTicks`), on its own
+  copy: the canonical data and the series passed in are unchanged. The series is
+  validated as it was given first; the engine's bar then carries only the price
+  series it trades (`Bar.OHLC`, as `Mid`), since a rounded mid is no longer the
+  midpoint of the stored bid and ask. The engine and its strategies only see whole
+  ticks. The scenario path does not round: it
+  still refuses a bar that is off the tick.
 - Warm-up. `trader.RunSeries` takes `tradeFrom`: a bar that opens before it is a
   warm-up bar, shown to a strategy that implements `warmer` only to prefill its
   indicators (EMAX feeds its EMAs, takes no position, places no order), never

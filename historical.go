@@ -41,9 +41,14 @@ const (
 //
 // The engine opens no file and knows no provider. It validates every series
 // (marketdata.Series.Validate) before replaying, so a caller cannot skip that; a
-// series of an instrument the engine has no market for, with prices off the
-// market's tick, or of another interval than the rest, is refused with an error
-// that names it. The series are not changed. Series are of different
+// series of an instrument the engine has no market for, or of another interval
+// than the rest, is refused with an error that names it.
+//
+// Prices are rounded to the nearest tick of the market (a tie goes up) as the bars
+// enter the engine, so a mid price between two ticks, which an odd bid/ask spread
+// gives, trades like any other. The engine's copy of a bar carries just that one
+// price series (as Mid); the rounding is on the copy, so the series passed in, and
+// the canonical data it came from, are not changed. Series are of different
 // instruments; an empty series contributes nothing.
 func RunSeries(ctx context.Context, name string, tradeFrom time.Time, series ...marketdata.Series) (*Result, error) {
 	if len(series) == 0 {
@@ -57,8 +62,17 @@ func RunSeries(ctx context.Context, name string, tradeFrom time.Time, series ...
 	instruments := make([]string, 0, len(series))
 	bars := 0
 	for i, s := range series {
-		// Normalizing rewrites the bars, so work on a copy: the caller's are left alone.
+		// The series is checked as it was given, before the engine's copy drops the
+		// series it does not trade (a crossed bid and ask would not survive that).
+		if err := s.Validate(); err != nil {
+			return nil, fmt.Errorf("run: %s: %w", s.Instrument, err)
+		}
+		// Rounding and normalizing rewrite the bars, so work on a copy: the caller's
+		// are left alone.
 		s.Bars = slices.Clone(s.Bars)
+		if err := markets.roundToTicks(&s); err != nil {
+			return nil, fmt.Errorf("run: %s: %w", s.Instrument, err)
+		}
 		if err := markets.normalize(&s); err != nil {
 			return nil, fmt.Errorf("run: %s: %w", s.Instrument, err)
 		}

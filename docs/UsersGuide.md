@@ -181,9 +181,9 @@ refused with an error naming it.
 Indicators are prefilled: the bars of the UTC month before `--from`, when they can be
 loaded, only warm the strategy up (they are not traded and not counted). A missing
 month is simply not there; if the earlier months are stale, or bad and `--allow-bad`
-is not given, the run goes without a warm-up (the log says so). Mid prices that sit
-half a tick from a whole tick (an odd bid/ask spread) are run as they are; the
-orders name whole ticks (see the Developer's Guide).
+is not given, the run goes without a warm-up (the log says so). The engine rounds
+prices to the nearest tick of the market (a mid between two ticks rounds up); the
+stored data is not changed.
 
 Output: the engine's summary for the run (bars, orders, trades, money, open
 positions).
