@@ -297,14 +297,29 @@ func buildAll(t *testing.T, symbol string, months map[time.Month][]int) {
 	require.NoError(t, BuildCanonical(context.Background(), nil, janToMar(symbol), nil))
 }
 
+// buildHours writes n consecutive hourly raw bars from start (months split as the
+// run crosses them) and builds them, so the canonical bars have no gap.
+func buildHours(t *testing.T, symbol string, start time.Time, n int) {
+	t.Helper()
+	byMonth := map[time.Month][]oanda.Record{}
+	for i := range n {
+		at := start.Add(time.Duration(i) * time.Hour)
+		byMonth[at.Month()] = append(byMonth[at.Month()], rec(at, true))
+	}
+	for m, recs := range byMonth {
+		putRaw(t, symbol, start.Year(), m, recs...)
+	}
+	require.NoError(t, BuildCanonical(context.Background(), nil, janToMar(symbol), nil))
+}
+
 func loadReq(instruments ...string) LoadRequest {
 	return LoadRequest{Instruments: instruments, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 3, 1, 0)}
 }
 
 func TestLoadSeries_LoadsEachInstrumentInRequestOrder(t *testing.T) {
 	storetest.Root(t)
-	buildAll(t, "EURUSD", map[time.Month][]int{time.January: {2, 3}, time.February: {1}})
-	buildAll(t, "GBPUSD", map[time.Month][]int{time.January: {2}, time.February: {1}})
+	buildHours(t, "EURUSD", utc(2024, 1, 31, 22), 3) // Jan 31 22:00 to Feb 1 00:00
+	buildHours(t, "GBPUSD", utc(2024, 1, 31, 23), 2)
 
 	got, err := LoadSeries(context.Background(), nil, loadReq("GBPUSD", "EURUSD"))
 
@@ -322,7 +337,7 @@ func TestLoadSeries_LoadsEachInstrumentInRequestOrder(t *testing.T) {
 
 func TestLoadSeries_AnInstrumentThatCannotLoadDoesNotStopTheRest(t *testing.T) {
 	storetest.Root(t)
-	buildAll(t, "EURUSD", map[time.Month][]int{time.January: {2}, time.February: {1}})
+	buildHours(t, "EURUSD", utc(2024, 1, 31, 23), 2)
 	buildAll(t, "GBPUSD", map[time.Month][]int{time.January: {2}}) // February missing
 
 	got, err := LoadSeries(context.Background(), nil, loadReq("GBPUSD", "EURUSD"))
@@ -546,4 +561,24 @@ func TestService_ReadsNoFlagsEnvironmentOrCredentials(t *testing.T) {
 			assert.NotContains(t, []string{"os", "flag", "github.com/spf13/cobra"}, path, "%s imports %s", file, path)
 		}
 	}
+}
+
+func TestLoadSeries_AnUnexplainedGapFailsTheInstrumentAndIsInItsResult(t *testing.T) {
+	storetest.Root(t)
+	putRaw(t, "EURUSD", 2024, time.January, rec(utc(2024, 1, 9, 0), true), rec(utc(2024, 1, 9, 1), true), rec(utc(2024, 1, 9, 5), true))
+	require.NoError(t, BuildCanonical(context.Background(), nil, janToMar("EURUSD"), nil))
+	req := loadReq("EURUSD")
+	req.To = utc(2024, 2, 1, 0)
+
+	strict, err := LoadSeries(context.Background(), nil, req)
+	req.AllowMissing = true
+	allowed, aerr := LoadSeries(context.Background(), nil, req)
+
+	require.ErrorIs(t, err, ErrNotLoadable)
+	assert.ErrorIs(t, strict[0].Err, mdservice.ErrIncomplete)
+	assert.Equal(t, []Gap{{Kind: GapUnexplained, Start: utc(2024, 1, 9, 2), End: utc(2024, 1, 9, 5), Bars: 3}}, strict[0].Gaps)
+	assert.Empty(t, strict[0].Series.Bars)
+	require.NoError(t, aerr)
+	assert.Equal(t, strict[0].Gaps, allowed[0].Gaps)
+	assert.Len(t, allowed[0].Series.Bars, 3)
 }

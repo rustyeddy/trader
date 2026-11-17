@@ -141,16 +141,23 @@ UTC month the range touches and reports:
   builder or validator version) or is not canonical-v2. A stale month is **never
   used**: rebuild it with `trader data build`.
 
-By default the command fails if any month is stale, missing or bad. `--allow-bad`
-accepts months with bad records (their good bars load, and the month is still
-reported as bad); `--allow-missing` accepts a month with no file (a gap in the
-series). Output: one line per month (`<instrument> <year>-<month>: loaded, good N`,
-`bad, good N, bad N`, `missing`, `stale: <reason>`), one line per instrument (`N bars`
-or `not loadable`) and `total: loaded N, bad N, missing N, stale N; bars N`.
+It also checks the inside of the series: between its first and last bar every bar the
+FX calendar expects must be there. A weekend is not a gap and is not reported. A gap
+inside a year-end holiday (around December 25 and January 1) is reported as a
+`closure` and is fine. Any other missing bar, even one hour, is an `unexplained` gap.
+The ends of the range are not judged, since the newest candle may still be forming.
 
-`status` looks at the files' state and build, not inside a month: a bar missing from
-the middle of a loaded month is not reported yet, and it does not compare a file with
-the raw it was built from.
+By default the command fails if any month is stale, missing or bad, or if the series
+has an unexplained gap. `--allow-bad` accepts months with bad records (their good
+bars load, and the month is still reported as bad); `--allow-missing` accepts a month
+with no file and unexplained gaps (an allowed gap is still shown). Output: one line
+per month (`<instrument> <year>-<month>: loaded, good N`, `bad, good N, bad N`,
+`missing`, `stale: <reason>`), one line per gap (`<instrument>: gap closure|unexplained
+<start> <end>, N bars`, UTC, the end exclusive), one line per instrument (`N bars` or
+`not loadable`) and `total: loaded N, bad N, missing N, stale N; bars N; gaps: N
+unexplained, N known closures`.
+
+`status` does not compare a file with the raw it was built from.
 
 ### Checking a live account
 
@@ -168,8 +175,8 @@ trader backtest --instrument EURUSD,GBPUSD --interval h1 --from 2024-01-01 --to 
 Backtests the canonical bars of one or more instruments over a UTC range on one
 shared account. A run has one source (`--source`, only `oanda`) and one interval.
 Bars are loaded as `trader data status` describes, with the same options and the same
-`--allow-bad` and `--allow-missing`; by default a stale, missing or bad month fails
-the run, and nothing is replayed unless every instrument loaded. Every bar available
+`--allow-bad` and `--allow-missing`; by default a stale, missing or bad month, or an
+unexplained gap inside the series, fails the run, and nothing is replayed unless every instrument loaded. Every bar available
 at the same instant reaches the strategy together; an instrument with no bar at that
 instant is absent, never carried forward.
 

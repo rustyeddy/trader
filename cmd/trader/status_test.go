@@ -25,11 +25,21 @@ func statusArgs(t *testing.T, root, to string, extra ...string) []string {
 }
 
 // buildMonths puts raw months in the store and builds them, so there is canonical
-// data to look at.
+// data to look at. It takes one month or two adjacent ones: a single month has two
+// bars on the 2nd; two months have the last two hours of the first and the first
+// two of the second, so the bars run on without a gap.
 func buildMonths(t *testing.T, root string, months ...time.Month) {
 	t.Helper()
-	for _, m := range months {
-		putRawMonth(t, "EURUSD", oanda.RawH1, 2024, m, rawRec(utc(2024, m, 2, 0), true), rawRec(utc(2024, m, 2, 1), true))
+	require.LessOrEqual(t, len(months), 2)
+	for i, m := range months {
+		first := utc(2024, m, 2, 0)
+		switch {
+		case len(months) == 2 && i == 0:
+			first = utc(2024, m+1, 1, 0).Add(-2 * time.Hour)
+		case len(months) == 2:
+			first = utc(2024, m, 1, 0)
+		}
+		putRawMonth(t, "EURUSD", oanda.RawH1, 2024, m, rawRec(first, true), rawRec(first.Add(time.Hour), true))
 	}
 	_, _, err := runData(t, nil, buildArgs(t, root, "2024-04-01")...)
 	require.NoError(t, err)
@@ -45,7 +55,7 @@ func TestDataStatus_ReportsEachMonthAndATotalWithoutAToken(t *testing.T) {
 	assert.Contains(t, out, "EURUSD 2024-01: loaded, good 2")
 	assert.Contains(t, out, "EURUSD 2024-02: loaded, good 2")
 	assert.Contains(t, out, "EURUSD: 4 bars")
-	assert.Contains(t, out, "total: loaded 2, bad 0, missing 0, stale 0; bars 4")
+	assert.Contains(t, out, "total: loaded 2, bad 0, missing 0, stale 0; bars 4; gaps: 0 unexplained, 0 known closures")
 	assert.NotEmpty(t, logs)
 }
 
@@ -156,4 +166,23 @@ func TestStatusCommand_IsTransportOnly(t *testing.T) {
 			assert.True(t, allowed[path], "status.go imports %s: the command may import only the application service, the store and logging", path)
 		}
 	}
+}
+
+func TestDataStatus_ReportsAGapTheCalendarDoesNotExplainAndFailsUnlessAllowed(t *testing.T) {
+	root := storetest.Root(t)
+	putRawMonth(t, "EURUSD", oanda.RawH1, 2024, time.January,
+		rawRec(utc(2024, 1, 9, 0), true), rawRec(utc(2024, 1, 9, 1), true), rawRec(utc(2024, 1, 9, 5), true))
+	_, _, err := runData(t, nil, buildArgs(t, root, "2024-02-01")...)
+	require.NoError(t, err)
+
+	out, _, strictErr := runData(t, nil, statusArgs(t, root, "2024-02-01")...)
+	allowedOut, _, allowedErr := runData(t, nil, statusArgs(t, root, "2024-02-01", "--allow-missing")...)
+
+	require.ErrorIs(t, strictErr, service.ErrNotLoadable)
+	assert.Contains(t, out, "EURUSD: gap unexplained 2024-01-09T02:00Z 2024-01-09T05:00Z, 3 bars")
+	assert.Contains(t, out, "EURUSD: not loadable")
+	assert.Contains(t, out, "gaps: 1 unexplained, 0 known closures")
+	require.NoError(t, allowedErr)
+	assert.Contains(t, allowedOut, "EURUSD: gap unexplained 2024-01-09T02:00Z", "an allowed gap is still shown")
+	assert.Contains(t, allowedOut, "EURUSD: 3 bars")
 }

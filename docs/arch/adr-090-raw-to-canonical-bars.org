@@ -177,8 +177,8 @@ Alignment: =h1= on the hour; =d1= at 17:00 America/New_York, using America/New_Y
 zone bytes pinned in the repository (loaded from the bytes, never by name, so the
 host's zone data cannot change a stored time; changing them is a new policy name).
 One small function, tested at the DST and month boundaries; no
-=Calendar= interface. A weekend or holiday gap is not an error and nothing is
-filled.
+=Calendar= interface. Nothing is filled. Whether a gap is an error is decided when
+bars are read, by the calendar of section 7.
 
 ** 4. Rebuilds and fingerprints
 
@@ -262,9 +262,39 @@ equal the v1 file's =avg_spread= and =max_spread=. The owner's check: download a
 short range with =trader data download= into a temporary root, run =trader data
 build= over it, and read the output.
 
+** 7. Gaps and the market calendar (#534)
+
+The loader checks the interior of a series. Between its first and last bar every
+bar the FX calendar expects must be present (=canonical.ClosureAt=, =Gaps=; one
+pure function, still no =Calendar= interface):
+
+- The *weekly close* (Friday 17:00 to Sunday 17:00 New York; for =d1= the bars that
+  would open on a Friday or Saturday) is not a gap and is never reported.
+- A *year-end holiday* gap is reported as a known closure and is never an error.
+  The windows are deliberately loose, December 24 12:00 to December 26 17:59 and
+  December 31 12:00 to January 2 17:59 New York time, because the archive's closures
+  start as early as 14:00 on the 24th or 31st and end as late as 07:00 on the 26th
+  or 1st, and a Sunday holiday delays the reopening by a day. Checked against the
+  2005 to 2026 archive: every year-end gap lies in a window and nothing else from
+  2013 on is a holiday.
+- Any other missing bar is *unexplained*, however short. It fails the load, like a
+  missing month, unless the request allows missing data (=AllowMissing=); it is
+  still reported. =AllowBad= does not excuse a gap.
+- A missing bar before the first or after the last bar of the range is not judged: a
+  candle still forming is never stored (section 3), so an absent last bar is not
+  proof of a gap. The download logs how many forming candles it declined to store
+  and prints the count; nothing is written for them.
+- A calendar rule is not part of a canonical file, so changing it needs no rebuild.
+  Another provider gets its own rule.
+
+Real EURUSD h1, 2013 to 2025: 23 year-end closures and ten unexplained gaps of one or
+two hours (for example 2022-05-12 and 2024-05-20), so a strict load of that range
+fails until it is allowed.
+
 * Deferred
 
-Gap and coverage policy (stage 5); disk layout checks; the partition cache; loading
+Coverage of the ends of a range (a range that starts before the archive does, or
+ends after it); disk layout checks; the partition cache; loading
 canonical bars into the engine's =bar= and frames (a later stage, with the bar
 model); =m1=, =h4=, =W1=; other providers; the one-time migration of =raw/oanda= to
 =oanda/raw=, after which the existing raw archive is converted by this builder.
