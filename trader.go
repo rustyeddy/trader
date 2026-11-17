@@ -86,13 +86,13 @@ func (tr *trader) onBar(ctx context.Context, b marketdata.Bar) error {
 }
 
 // onFrame advances the broker (fills and marks) through the whole frame once,
-// then lets the strategy react to each of its bars, in instrument order. The
-// trader owns the order lifecycle from here: it stamps when each order was
-// decided (the frame's availability), validates it, records it as requested,
-// has the broker size and queue it, and records an expected rejection without
-// stopping the run. Orders are submitted as they come, so when two compete for
-// margin the first instrument's is sized first and the second sees the margin
-// it reserved.
+// then asks the strategy once, with the whole frame, what it wants. The trader
+// owns the order lifecycle from there: it stamps when each order was decided (the
+// frame's availability), validates it, records it as requested, has the broker
+// size and queue it, and records an expected rejection without stopping the run.
+// Orders are submitted in the order the strategy returned them, after it has seen
+// the whole frame, so when two compete for margin the first is sized first and the
+// second sees the margin it reserved.
 func (tr *trader) onFrame(ctx context.Context, f frame) error {
 	if err := tr.broker.onFrame(ctx, f); err != nil {
 		if len(f.bars) == 1 {
@@ -102,12 +102,11 @@ func (tr *trader) onFrame(ctx context.Context, f frame) error {
 		return fmt.Errorf("broker on frame at %s: %w", f.availableAt.Format(time.RFC3339), err)
 	}
 
-	for _, b := range f.bars {
-		o := tr.strategy.onBar(ctx, b)
+	for _, o := range tr.strategy.onBars(ctx, f.bars) {
 		if o == nil {
 			continue
 		}
-		o.decidedAt = b.AvailableAt
+		o.decidedAt = f.availableAt
 		if err := tr.handleOrder(ctx, o); err != nil {
 			return err
 		}

@@ -37,7 +37,10 @@ func seriesBars(ctx context.Context, s marketdata.Series) iter.Seq2[marketdata.B
 // it is available: by availableAt, then by instrument name, so the order does not
 // depend on the order of series. A bar that opened first can arrive later when
 // its interval is longer. The series are marketdata.Series values a reader has
-// already loaded and validated; the engine opens no file and knows no provider.
+// already loaded; the engine opens no file and knows no provider. The caller
+// validates them (marketdata.Series.Validate: every bar valid, strictly ascending
+// opening times); mergedBars does not repeat that and checks only what the replay
+// itself relies on, listed below.
 //
 // A missing bar is simply not delivered: nothing is synthesized or carried
 // forward, and an empty series contributes nothing (all empty: no bars). A run has

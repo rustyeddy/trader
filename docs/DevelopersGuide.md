@@ -102,10 +102,15 @@ account and broker (`replay.go`, `backtest.go`):
 - `frames` groups the bars with the same `AvailableAt`: one group per distinct
   instant, holding only fresh bars. An instrument with no bar at that instant is
   absent; nothing is forward-filled or reused.
-- Per group the trader advances the broker through the whole group, then the
-  strategy sees each bar in instrument order. A single-instrument run is the same
+- Per group the trader advances the broker through the whole group, then calls
+  `strategy.onBars(ctx, bars)` once with the whole fresh group (instrument order).
+  The strategy sees every bar of the group before any of its orders is submitted;
+  the trader then submits the returned orders in order. `eachBar` adapts a decision
+  made one bar at a time (`emax`, `emaxEach`). A single-instrument run is the same
   path with one-bar groups. `backtest.run` keeps the per-bar access the research
   tests and studies use.
+- `mergedBars` trusts its input: the caller validates the series
+  (`marketdata.Series.Validate`; `runScenario` does, where the scenario enters).
 - A run configuration (which instruments, source, range) and wiring a `Series`
   loaded from `/srv/data` into the command line are not built yet; `runScenario`
   is the only caller of `runSeries` outside tests.

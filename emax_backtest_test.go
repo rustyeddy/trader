@@ -642,7 +642,11 @@ func (w *positionWatcher) onBar(ctx context.Context, b marketdata.Bar) *order {
 		side = p.direction
 	}
 	w.sides = append(w.sides, side)
-	return w.strategy.onBar(ctx, b)
+	return first(w.strategy.onBars(ctx, []marketdata.Bar{b}))
+}
+
+func (w *positionWatcher) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, w.onBar)
 }
 
 // Snapshots taken after a bar cannot show the order within it. Here the broker's stop

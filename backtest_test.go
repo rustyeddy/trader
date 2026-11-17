@@ -35,6 +35,10 @@ func (s *scriptStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	return nil
 }
 
+func (s *scriptStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
+}
+
 // openOrder is a valid open-long order for EURUSD.
 func openOrder() *order {
 	return &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10, stopLoss: px(108900)}
@@ -196,6 +200,10 @@ func (s *cancelStrategy) onBar(ctx context.Context, b marketdata.Bar) *order {
 	return s.scriptStrategy.onBar(ctx, b)
 }
 
+func (s *cancelStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
+}
+
 func TestBacktestRun_ContextCancelled(t *testing.T) {
 	md := marketdata.Series{Bars: eurBars(1, 2, 3, 4)}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -302,13 +310,17 @@ func (s *rejectFirstOpen) onBar(ctx context.Context, b marketdata.Bar) *order {
 	if len(s.got) > 0 {
 		s.act.balance = s.cash // margin becomes available on the bar after the open
 	}
-	o := s.strategy.onBar(ctx, b)
+	o := first(s.strategy.onBars(ctx, []marketdata.Bar{b}))
 	if o != nil {
 		s.got = append(s.got, o)
 		s.at = append(s.at, s.bars)
 	}
 	s.bars++
 	return o
+}
+
+func (s *rejectFirstOpen) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
 }
 
 func actions(orders []*order) (as []action) {
@@ -379,6 +391,10 @@ func (s *seenStrategy) init() error  { return nil }
 func (s *seenStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	s.seen = append(s.seen, b.Instrument+"@"+b.AvailableAt.Format("Mon 15:04"))
 	return nil
+}
+
+func (s *seenStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
 }
 
 // hSeries is an hourly series of the instrument with a bar opening at each given
@@ -496,4 +512,12 @@ func TestBacktestRunSeries_SingleInstrumentMatchesThePerBarRun(t *testing.T) {
 			assert.Equal(t, wantOut.String(), gotOut.String())
 		})
 	}
+}
+
+// first is the first of orders, or nil.
+func first(orders []*order) *order {
+	if len(orders) == 0 {
+		return nil
+	}
+	return orders[0]
 }

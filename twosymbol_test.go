@@ -57,6 +57,10 @@ func (s *reactStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	return o
 }
 
+func (s *reactStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
+}
+
 // openOn returns a strategy that opens instrument long, at price p with stop
 // stop, once, when it sees a bar of on.
 func openOn(on string, instrument string, pN int64, stopN int64) *reactStrategy {
@@ -524,4 +528,65 @@ func TestTrader_OnBar_ReportsABrokerFailureWithTheBar(t *testing.T) {
 
 	require.ErrorContains(t, err, "no availability")
 	assert.True(t, strings.HasPrefix(err.Error(), "broker on bar EURUSD 2010-01-04: "), err.Error())
+}
+
+// groupSpy is a strategy that is called once per frame. It records each group it
+// is shown, with how many orders the broker held at that moment, and opens each
+// instrument long once, on its first bar.
+type groupSpy struct {
+	held    func() int
+	groups  [][]string
+	atCall  []int
+	opened  map[string]bool
+	ordered []string
+}
+
+func (s *groupSpy) name() string { return "groupspy" }
+func (s *groupSpy) init() error  { return nil }
+func (s *groupSpy) onBars(_ context.Context, bars []marketdata.Bar) []*order {
+	var labels []string
+	var orders []*order
+	for _, b := range bars {
+		labels = append(labels, b.Instrument+"@"+b.AvailableAt.Format("15:04"))
+		if s.opened[b.Instrument] {
+			continue
+		}
+		s.opened[b.Instrument] = true
+		orders = append(orders, &order{instrument: b.Instrument, direction: long, action: open, orderType: marketOrder,
+			price: px(100000), stopLoss: px(99000), Time: b.Time})
+		s.ordered = append(s.ordered, b.Instrument)
+	}
+	s.groups = append(s.groups, labels)
+	s.atCall = append(s.atCall, s.held())
+	return orders
+}
+
+// The strategy is called exactly once per distinct availability instant, with the
+// whole fresh group, and none of that call's orders is submitted before it has seen
+// every bar of the group.
+func TestTrader_OnFrame_TheStrategySeesTheWholeGroupInOneCallBeforeAnyOrderIsSubmitted(t *testing.T) {
+	captureLogs(t)
+	spy := &groupSpy{opened: map[string]bool{}}
+	tr, _ := pairTrader(usd(10000), spy)
+	spy.held = func() int {
+		n := 0
+		for _, waiting := range tr.broker.orders {
+			n += len(waiting)
+		}
+		return n + len(tr.broker.completed)
+	}
+
+	eur, gbp := pairBars() // GBPUSD has no bar at hour 3
+	require.NoError(t, (&backtest{}).runSeries(context.Background(), tr, eur, gbp))
+
+	assert.Equal(t, [][]string{
+		{"EURUSD@" + hour(1).Format("15:04"), "GBPUSD@" + hour(1).Format("15:04")},
+		{"EURUSD@" + hour(2).Format("15:04"), "GBPUSD@" + hour(2).Format("15:04")},
+		{"EURUSD@" + hour(3).Format("15:04"), "GBPUSD@" + hour(3).Format("15:04")},
+		{"EURUSD@" + hour(4).Format("15:04")},
+		{"EURUSD@" + hour(5).Format("15:04"), "GBPUSD@" + hour(5).Format("15:04")},
+	}, spy.groups, "one call per availability instant; hour 4 has only the fresh EURUSD bar")
+	assert.Equal(t, 0, spy.atCall[0], "no order is held while the first group is being decided")
+	assert.Equal(t, 4, spy.atCall[1], "the first group's two opens, each with its protective stop, came after the call")
+	assert.Equal(t, []string{"EURUSD", "GBPUSD"}, spy.ordered, "orders follow the group's instrument order")
 }

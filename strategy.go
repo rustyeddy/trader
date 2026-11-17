@@ -8,10 +8,28 @@ import (
 	"github.com/rustyeddy/trader/num"
 )
 
+// strategy decides what to trade. It is called once per availability instant with
+// every bar that became available then (the bars are fresh and in instrument
+// order; an instrument with no bar at that instant is absent) and returns the
+// orders it wants, in the order they should be submitted, or none. It sees the
+// whole group before any of its orders is submitted. A single-instrument run is
+// the same call with a one-bar group. bars is only valid for the call.
 type strategy interface {
 	name() string
 	init() error
-	onBar(ctx context.Context, b marketdata.Bar) *order
+	onBars(ctx context.Context, bars []marketdata.Bar) []*order
+}
+
+// eachBar adapts a decision made one bar at a time: it asks decide about every bar
+// of the group in order and returns the orders it gave, in that order.
+func eachBar(ctx context.Context, bars []marketdata.Bar, decide func(context.Context, marketdata.Bar) *order) []*order {
+	var orders []*order
+	for _, b := range bars {
+		if o := decide(ctx, b); o != nil {
+			orders = append(orders, o)
+		}
+	}
+	return orders
 }
 
 // emax is the EMA crossover strategy: long while the short EMA is above the long
@@ -36,6 +54,11 @@ type emax struct {
 
 func (e *emax) name() string {
 	return e.id
+}
+
+// onBars is onBar for each bar of the group.
+func (e *emax) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, e.onBar)
 }
 
 func (e *emax) init() error {
@@ -200,6 +223,12 @@ func (s *emaxEach) init() error {
 		s.byInstrument[inst] = e
 	}
 	return nil
+}
+
+// onBars hands each bar to its instrument's emax; the group's orders come back in
+// the group's instrument order.
+func (s *emaxEach) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+	return eachBar(ctx, bars, s.onBar)
 }
 
 func (s *emaxEach) onBar(ctx context.Context, b marketdata.Bar) *order {
