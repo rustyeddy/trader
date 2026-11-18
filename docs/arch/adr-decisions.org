@@ -141,7 +141,7 @@ the original decided, use full supersession instead.
 | 019 | Account and portfolio snapshot models (in adr-019-account-portfolio-snapshots.org) | Accepted |
 | 020 | Historic data subsystem (in adr-020-historic-data.org)            | Accepted   |
 | 021 | FX hour-bar alignment corrected to daily-rollover anchoring       | Accepted   |
-| 022 | CLI and application service layer (in adr-022-cli-app-service-layer.org) | Accepted |
+| 022 | CLI and application service layer (in adr-022-cli-app-service-layer.org) | Accepted   |
 | 023 | Structured logging (in adr-023-structured-logging.org)            | Accepted   |
 | 024 | Broker event model and deterministic ordering (in adr-024-broker-events.org) | Accepted |
 | 025 | Price-by-quantity notional multiplication (in adr-025-price-quantity-notional.org) | Accepted |

@@ -6,7 +6,8 @@
 Accepted. Discovered as an undocumented gap during the M4 completion
 review (issue #189, M4-14): issue #184's own PR #199 review established
 this principle during implementation, but it was never captured as a
-standalone ADR — only as inline doc comments on =MaxPositionLeverageRule=.
+standalone ADR — at that time only as inline doc comments on
+=MaxPositionLeverageRule= (the other rules gained theirs later).
 
 PR #206's own review corrected an inaccuracy in an earlier draft of
 this ADR, which claimed the exemption was already applied by

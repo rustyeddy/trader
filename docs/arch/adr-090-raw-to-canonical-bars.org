@@ -6,19 +6,28 @@
 Proposed, with the owner's answers of 2026-11-14 applied (below), for final
 approval. Issue #628; stage 4 of #584. Builds on ADR-020 (historic data: raw is
 immutable, canonical is rebuilt from it), ADR-088 (the instrument catalog) and
-ADR-089 (layout, OANDA raw store, package boundary). No code is written before this
-is approved.
+ADR-089 (layout, OANDA raw store, package boundary), as amended by ADR-091 and
+ADR-092. It was implemented while it was Proposed; what follows records what was
+built and run.
 
 The bar-availability design the owner recorded on #619 (a bar has an opening =Time=
 and an =AvailableAt=; no stored close time; zero means not established) is taken as
 given.
 
-Implementation (2026-11-15): the canonical package, the public =Bar=, the provider
+Implementation (2026-11-18): the canonical package, the public =Bar=, the provider
 mapping, the domain service and =trader data build= are built and merged (#631,
 #636, #639, #650), and so is the loader (#647): =marketdata/service.Load= and
 =trader data status= refuse a partition with bad records unless the caller allows
-it, and never use a stale one. The v1 spread cross-check of section 6 is not built.
-Acceptance is the owner's decision (#643).
+it, and never use a stale one. Since then: the download goes through the application
+service and =cmd/trader= imports no provider (#641, #663); the loader checks the
+interior of a series against the FX calendar (#534, section 7); =Verify= checks a
+file against its raw (#535, section 8); =trader data audit= reports a range in one
+answer (#536, section 9); and the raw archive was migrated to this layout (#642,
+ADR-092). On 2026-11-18 the owner's archive was migrated, rebuilt as canonical-v2 for
+the 26 OANDA FX instruments at =h1= and =d1= (0 failed partitions) and audited
+against raw with no findings. The v1 spread cross-check of section 6 is not built:
+section 8 is its replacement, checking against the raw itself, and the v1 files are
+to be deleted. Acceptance of this ADR is the owner's decision (#643).
 
 * Context
 
@@ -192,12 +201,14 @@ per-partition lock, and the report says it was replaced. A build never touches r
 
 ** 5. Packages and the command
 
-The flow (owner-approved on #639, 2026-11-15): =cmd/trader= supplies configuration
-to the application service =service/marketdata.go= (package =service=, one file);
-the service reads a raw partition through =provider/oanda=, which parses and maps
-it to a =marketdata.SourcePartition=; the service hands that to the domain service
-=marketdata/service=, which applies every domain rule and publishes the canonical
-file through =marketdata/internal/canonical= and the =store= package.
+The flow (owner-approved on #639, 2026-11-15; layering accepted as ADR-091):
+=cmd/trader= supplies configuration to the application service (package =service=,
+=service/marketdata.go=); the service reads a raw partition through =provider/oanda=,
+which parses and maps it to a =marketdata.SourcePartition=; the service hands that to
+the domain service =marketdata/service=, which applies every domain rule and
+publishes the canonical file through =marketdata/internal/canonical= and the =store=
+package. Where the mapping lives is settled: the provider maps raw rows to
+unvalidated =SourceRow= values and the domain service decides what each row is.
 
 - =marketdata= (public): =OHLC=, =Bar=, =MidOf= and bar validation (#633), and
   =SourcePartition= / =SourceRow=: one provider raw partition with its names, the
@@ -231,20 +242,26 @@ file through =marketdata/internal/canonical= and the =store= package.
   reports each partition as built, unchanged, replaced, missing (no raw file for
   the month: reported, not an error) or failed (reported, and the run carries on;
   =ErrPartitionsFailed= at the end). It imports only =marketdata/service= and
-  =provider/oanda= and reads no environment. A package per service waits until the
-  services are not this small.
+  =provider/oanda= and reads no environment. The same package holds the other use
+  cases (=Download= and =DownloadRaw=, =LoadSeries=, =VerifyCanonical=, =Audit=,
+  =RunBacktest=, =MigrateLayout=); the backtest imports the engine, and only
+  =migrate.go= imports =store= and =layout= directly, since a directory migration is
+  not market data. A package per use case waits until the files are not small.
 - =cmd/trader=: =trader data build=, flags as =download= (=--data-root=,
   =--instrument=, =--interval=, =--from=, =--to=; the same root precedence and
   config file). It needs no token and makes no network call. It prints, per
   partition, built, unchanged, replaced, missing or failed with the good and bad
   counts, then a total. It imports only the application service, the store (for
-  =SetRoot=) and logging. =download= keeps calling the provider directly until it
-  moves behind the same service (#641).
+  =SetRoot=) and logging; no file of =cmd/trader= imports a provider. =download= goes
+  through =service.Download=, which builds the OANDA client from a base URL, a request
+  gap and a credential the command hands it (#641).
 - Scope: =h1= and =d1=. =m1= and =h4= wait until a strategy needs them.
 - No Manager, plan, registry or provider interface.
 - Architecture tests: only =service/= imports =marketdata/service=; the provider
-  never does; the application service imports only the domain service and a
-  provider; =cmd/trader/build.go= imports only the service, the store and logging.
+  never does; the application service imports only the engine, the public model, the
+  domain service and a provider (=migrate.go= also the store and the layout); no
+  =cmd/trader= file imports a provider, and =build.go=, =status.go=, =verify.go=,
+  =audit.go= and =migrate.go= import only the service, the store and logging.
 
 ** 6. Tests and the owner's check
 
@@ -352,7 +369,9 @@ archive is converted by this builder.
   so the basis can be chosen by the consumer and single-price sources fit.
 - The existing =canonical-v1= archive is not reused; it is rebuilt from raw once raw
   is migrated. Raw is complete, so nothing is lost, but the rebuild is a step the
-  migration must schedule.
+  migration must schedule. (Done on 2026-11-18: the v1 files were not migrated, the
+  v2 files were built from raw and audited, and the v1 tree is left for the owner to
+  delete.)
 - A canonical partition can be partial; the invariant in 3 (no consumer treats
   =bad_count > 0= as complete) is part of this decision, not a later option.
 - A bad or incomplete record is visible in the file it affects and in the reader's
