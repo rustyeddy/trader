@@ -97,8 +97,9 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   rule. The command only chooses the format and exits non-zero on `ErrAuditFailed`.
 - `Load` also checks the interior of the series with the market calendar
   (`canonical.ClosureAt` and `Gaps`, ADR-090 section 7): the weekly close is not a
-  gap, a year-end holiday is a reported `KnownClosure`, any other missing bar is
-  `Unexplained` and fails the load unless `AllowMissing`. The ends of the range are
+  gap, a year-end holiday is a reported `KnownClosure`, a run on the reviewed list
+  `canonical/known_holes.csv` (bars the provider does not have) is a reported
+  `KnownHole`, any other missing bar is `Unexplained` and fails the load unless `AllowMissing`. The ends of the range are
   not judged (a forming candle is never stored). `Load` does not call
   `Series.Validate`: every file is validated as it is read and months are read in
   order, so the series is already valid; a consumer that needs the guarantee

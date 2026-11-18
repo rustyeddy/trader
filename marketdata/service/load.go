@@ -78,8 +78,11 @@ const (
 	// KnownClosure: the gap lies inside a year-end holiday window. Reported,
 	// never an error.
 	KnownClosure GapKind = "closure"
-	// Unexplained: bars are missing that the calendar says should be there. An
-	// error unless the request allows missing data.
+	// KnownHole: the provider does not have these bars and never will; the run is
+	// on the reviewed list of known provider holes. Reported, never an error.
+	KnownHole GapKind = "known_hole"
+	// Unexplained: bars are missing that neither the calendar nor the list of known
+	// provider holes explains. An error unless the request allows missing data.
 	Unexplained GapKind = "unexplained"
 )
 
@@ -151,8 +154,9 @@ func (e *IncompleteError) Is(target error) bool { return target == ErrIncomplete
 // Between its first and last bar the series must have every bar the market calendar
 // expects (canonical.ClosureAt): a missing interior bar is a gap, and an
 // Unexplained one fails the load like a missing month unless the request allows
-// missing data. Weekends are not reported and year-end holidays are reported as
-// KnownClosure. The ends of the range are not judged. Each month's file is
+// missing data. Weekends are not reported, year-end holidays are reported as
+// KnownClosure, and a run on the reviewed list of known provider holes (bars the
+// provider does not have) is reported as KnownHole and is not an error. The ends of the range are not judged. Each month's file is
 // validated as it is read (canonical.File.Validate), and months are read in order
 // and hold only bars of their own month, so the series is in ascending order by
 // time and availability without a second pass over every bar.
@@ -200,15 +204,20 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 	if len(stopped) > 0 {
 		return result, &IncompleteError{Instrument: req.Instrument, Months: stopped}
 	}
-	gaps, err := canonical.Gaps(interval, bars)
+	gaps, err := canonical.GapsWith(interval, bars, func(open time.Time) (bool, error) {
+		return canonical.InKnownHole(req.Source, req.Instrument, interval, open)
+	})
 	if err != nil {
 		return LoadResult{Months: result.Months}, err
 	}
 	var unexplained []Gap
 	for _, g := range gaps {
 		kind := KnownClosure
-		if g.Closure == canonical.Open {
+		switch g.Closure {
+		case canonical.Open:
 			kind = Unexplained
+		case canonical.KnownHole:
+			kind = KnownHole
 		}
 		gap := Gap{Kind: kind, Start: g.Start.UTC(), End: g.End.UTC(), Bars: g.Bars}
 		result.Gaps = append(result.Gaps, gap)

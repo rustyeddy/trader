@@ -41,7 +41,8 @@ type AuditMonth struct {
 }
 
 // AuditGap is a run of missing bars inside the series (see Gap): "closure" for a
-// year-end holiday, "unexplained" for anything else. Weekends are not reported.
+// year-end holiday, "known_hole" for a run on the reviewed list of bars the provider
+// does not have, "unexplained" for anything else. Weekends are not reported.
 type AuditGap struct {
 	Kind  string    `json:"kind"`
 	Start time.Time `json:"start"`
@@ -103,6 +104,7 @@ type AuditSummary struct {
 	Bars            int `json:"bars"`
 	GapsUnexplained int `json:"gaps_unexplained"`
 	GapsClosure     int `json:"gaps_known_closure"`
+	GapsKnownHole   int `json:"gaps_known_hole"`
 	RawVerified     int `json:"raw_verified"`
 	RawFailed       int `json:"raw_failed"`
 	RawNoRaw        int `json:"raw_no_raw"`
@@ -199,9 +201,12 @@ func Audit(ctx context.Context, log *slog.Logger, req AuditRequest) (AuditReport
 		}
 		for _, g := range r.Gaps {
 			ia.Gaps = append(ia.Gaps, AuditGap{Kind: string(g.Kind), Start: g.Start, End: g.End, Bars: g.Bars})
-			if g.Kind == GapUnexplained {
+			switch g.Kind {
+			case GapUnexplained:
 				report.Summary.GapsUnexplained++
-			} else {
+			case GapKnownHole:
+				report.Summary.GapsKnownHole++
+			default:
 				report.Summary.GapsClosure++
 			}
 		}

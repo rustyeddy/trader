@@ -159,8 +159,8 @@ func writeAuditText(say func(string, ...any), r service.AuditReport) {
 		say("  %s: %d bars\n", okText(ia.OK), ia.Bars)
 	}
 	s := r.Summary
-	say("total: months %d (loaded %d, bad %d, missing %d, stale %d); bars %d; gaps %d unexplained, %d known closures; raw verified %d, failed %d, unverifiable %d, no raw %d, no canonical %d, findings %d\n",
-		s.Months, s.MonthsLoaded, s.MonthsBad, s.MonthsMissing, s.MonthsStale, s.Bars, s.GapsUnexplained, s.GapsClosure,
+	say("total: months %d (loaded %d, bad %d, missing %d, stale %d); bars %d; gaps %d unexplained, %d known closures, %d known holes; raw verified %d, failed %d, unverifiable %d, no raw %d, no canonical %d, findings %d\n",
+		s.Months, s.MonthsLoaded, s.MonthsBad, s.MonthsMissing, s.MonthsStale, s.Bars, s.GapsUnexplained, s.GapsClosure, s.GapsKnownHole,
 		s.RawVerified, s.RawFailed, s.RawUnverifiable, s.RawNoRaw, s.RawNoCanonical, s.RawFindings)
 	if r.Sample > 0 {
 		// Months and gaps were checked over the whole range; the raw cross-check

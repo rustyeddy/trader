@@ -37,7 +37,7 @@ func TestDataAudit_SoundDataPrintsTextAndExitsZeroWithoutAToken(t *testing.T) {
 	assert.Contains(t, out, "  2024-01: loaded, good 2\n")
 	assert.Contains(t, out, "  raw 2024-01: verified, rows 2, bars 2, bad 0\n")
 	assert.Contains(t, out, "  OK: 2 bars\n")
-	assert.Contains(t, out, "total: months 1 (loaded 1, bad 0, missing 0, stale 0); bars 2; gaps 0 unexplained, 0 known closures; raw verified 1")
+	assert.Contains(t, out, "total: months 1 (loaded 1, bad 0, missing 0, stale 0); bars 2; gaps 0 unexplained, 0 known closures, 0 known holes; raw verified 1")
 	assert.True(t, strings.HasSuffix(out, "audit: OK\n"))
 }
 

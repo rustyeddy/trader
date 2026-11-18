@@ -80,7 +80,7 @@ func (a *app) runStatus(cmd *cobra.Command, f statusFlags) error {
 		AllowBad: f.allowBad, AllowMissing: f.allowMissing}
 	results, err := service.LoadSeries(ctx, logging.WithComponent(slog.Default(), logging.ComponentMarketData), req)
 
-	var loaded, bad, missing, stale, bars, closures, unexplained int
+	var loaded, bad, missing, stale, bars, closures, holes, unexplained int
 	for _, r := range results {
 		for _, m := range r.Months {
 			name := fmt.Sprintf("%s %04d-%02d", r.Instrument, m.Year, int(m.Month))
@@ -101,9 +101,12 @@ func (a *app) runStatus(cmd *cobra.Command, f statusFlags) error {
 		}
 		for _, g := range r.Gaps {
 			say("%s: gap %s\n", r.Instrument, g)
-			if g.Kind == service.GapUnexplained {
+			switch g.Kind {
+			case service.GapUnexplained:
 				unexplained++
-			} else {
+			case service.GapKnownHole:
+				holes++
+			default:
 				closures++
 			}
 		}
@@ -115,8 +118,8 @@ func (a *app) runStatus(cmd *cobra.Command, f statusFlags) error {
 		say("%s: %d bars\n", r.Instrument, len(r.Series.Bars))
 	}
 	if len(results) > 0 {
-		say("total: loaded %d, bad %d, missing %d, stale %d; bars %d; gaps: %d unexplained, %d known closures\n",
-			loaded, bad, missing, stale, bars, unexplained, closures)
+		say("total: loaded %d, bad %d, missing %d, stale %d; bars %d; gaps: %d unexplained, %d known closures, %d known holes\n",
+			loaded, bad, missing, stale, bars, unexplained, closures, holes)
 	}
 	return errors.Join(err, writeErr)
 }

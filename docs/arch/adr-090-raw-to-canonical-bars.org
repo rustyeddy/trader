@@ -300,9 +300,24 @@ pure function, still no =Calendar= interface):
   or 1st, and a Sunday holiday delays the reopening by a day. Checked against the
   2005 to 2026 archive: every year-end gap lies in a window and nothing else from
   2013 on is a holiday.
+- A missing bar that is on the *reviewed list of known provider holes*
+  (=marketdata/internal/canonical/known_holes.csv=, =known-provider-holes-v1=) is
+  reported as a known hole and is never an error. The list names exact runs
+  (source, instrument, interval, start inclusive, end exclusive) that OANDA does not
+  have: each was an unexplained gap in the 2026-11-18 audit and every month that
+  contained one was downloaded again, and the candles were still absent (280 runs:
+  276 =h1= and 4 =d1=, 12 of the 165 distinct missing hours are missing for every
+  pair, 64 for one pair only, so a rule based on "all pairs miss it" would not have
+  covered them). The list is embedded and parsed strictly (header, interval, UTC
+  times on the boundary, sorted, no overlap), and a test checks that no run overlaps
+  a weekend or holiday the calendar already explains. The calendar still wins.
+  Changing the list is a reviewed change, and a new list is a new version: add a run
+  only after checking the provider really has no candle, never to silence a gap a
+  download could fill.
 - Any other missing bar is *unexplained*, however short. It fails the load, like a
   missing month, unless the request allows missing data (=AllowMissing=); it is
-  still reported. =AllowBad= does not excuse a gap.
+  still reported. A gap that outgrows a listed run is split: the listed part is a
+  known hole and the rest is unexplained. =AllowBad= does not excuse a gap.
 - A missing bar before the first or after the last bar of the range is not judged: a
   candle still forming is never stored (section 3), so an absent last bar is not
   proof of a gap. The download logs how many forming candles it declined to store
