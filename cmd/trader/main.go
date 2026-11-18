@@ -70,6 +70,7 @@ func newApp() *app {
 	a.flags.register(a.cmd)
 	a.cmd.AddCommand(newDataCmd(a))
 	a.cmd.AddCommand(newBacktestCmd(a))
+	a.cmd.AddCommand(newServeCmd(a))
 	return a
 }
 

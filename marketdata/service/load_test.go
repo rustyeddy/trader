@@ -405,3 +405,21 @@ func TestLoad_AnotherInstrumentDoesNotInheritAListedRun(t *testing.T) {
 
 	assert.ErrorIs(t, lerr, ErrIncomplete, "the list names EURUSD, not GBPUSD")
 }
+
+func TestLoad_SkipStaleServesTheOtherMonthsAndStillReportsTheStaleOne(t *testing.T) {
+	storetest.Root(t)
+	buildHours(t, utc(2024, 1, 31, 22), 4) // Jan 31 22:00 to Feb 1 01:00: one bar pair in each month
+	rewriteMeta(t, 2024, time.February, func(m *canonical.Meta) { m.BuilderVersion = "builder-v0" })
+	req := janToMarch(func(r *LoadRequest) { r.To = utc(2024, 3, 1, 0); r.AllowMissing = true })
+
+	strict, err := Load(context.Background(), req)
+	req.SkipStale = true
+	skipped, serr := Load(context.Background(), req)
+
+	require.ErrorIs(t, err, ErrIncomplete, "a stale month fails the load unless it is skipped")
+	assert.Equal(t, []MonthState{Loaded, Stale}, states(strict))
+	require.NoError(t, serr)
+	assert.Equal(t, []MonthState{Loaded, Stale}, states(skipped), "still reported as stale")
+	assert.Len(t, skipped.Series.Bars, 2, "only the January bars: a stale month's bars are never used")
+	assert.Equal(t, utc(2024, 1, 31, 23), skipped.Series.Bars[1].Time)
+}

@@ -211,6 +211,19 @@ never touched, and rebuilt with `trader data build`. Delete them yourself once
 `trader data audit` passes on the rebuilt data. The old layout is not read after the
 move: there is no fallback.
 
+### Serving the bars over HTTP
+
+```sh
+trader serve                      # read-only REST API on 127.0.0.1:8080
+curl -s 'http://127.0.0.1:8080/v1/marketdata/bars?instrument=EURUSD&interval=h1&from=2024-05-20&to=2024-05-21'
+```
+
+`trader serve` exposes the canonical bars to other programs over `GET
+/v1/marketdata/bars`, paged, with the coverage of what is missing in every response. It
+reads only the canonical files and needs no provider credentials. It listens on
+loopback only unless `TRADER_API_TOKEN` is set. The full contract, errors,
+authentication and an integration example are in [the REST API guide](rest-api.md).
+
 ### Auditing a range
 
 ```sh
