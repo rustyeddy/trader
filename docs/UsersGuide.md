@@ -86,10 +86,14 @@ trader data download --data-root /srv/data --instrument EURUSD,GBPUSD \
 (`--to` is not included). Intervals: `m1`, `h1`, `h4`, `d1`. The scope is the 26
 audited currency pairs.
 
-- Rows already on file are never changed; only missing rows are added, and a file
-  that would gain nothing is left alone. If the provider now reports different
-  values for a stored row, the stored row is kept and the difference is counted and
-  logged.
+- A complete row already on file is never changed: missing rows are added, and a
+  file that would gain and change nothing is left alone. If the provider now reports
+  different values for a stored complete row, the stored row is kept and the
+  difference is counted and logged. A stored row that is still marked forming (an
+  older download stored a few) is not a fact yet: once the provider reports the
+  candle closed, the download replaces it with the closed candle, in place, and
+  counts and logs it (`replaced N`, with the old and new values). A candle still
+  forming at the provider is never stored.
 - A candle the provider still reports as forming is never stored.
 - Requests are paced, and a transient failure (429, 5xx, network) is retried with
   backoff. A rejected token (401) is retried only within the same attempt budget and

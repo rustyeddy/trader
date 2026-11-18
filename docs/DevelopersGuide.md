@@ -65,7 +65,9 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
 ```
 
 - A raw partition is the provider's own format (raw-v1). It stores only complete
-  candles and is never rewritten: rows are added, not changed.
+  candles. A complete row is never changed; a forming row stored by an older download
+  is replaced by the closed candle when the provider reports it (a forming candle is
+  not a fact), and nothing else is rewritten.
 - `SourcePartition` carries what a bare `[]Bar` would lose: the raw row numbers,
   the provider's complete flag and the fingerprint of the raw bytes. Its bars are
   unvalidated: the provider sets no mid and no `AvailableAt`.

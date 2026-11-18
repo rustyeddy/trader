@@ -196,3 +196,114 @@ func TestSameCandle_IgnoresTheLocationOfTheTime(t *testing.T) {
 	b.Volume++
 	assert.False(t, sameCandle(a, b))
 }
+
+// forming is a row as an older downloader stored it: a candle that was still
+// forming, with the values it had then.
+func forming(t time.Time) Record {
+	r := rec(t, "1.20000", false)
+	r.Volume = 7
+	return r
+}
+
+func TestDownloadPartition_ReplacesAStoredFormingRowWithTheClosedCandle(t *testing.T) {
+	storetest.Root(t)
+	stored := []Record{rec(at(2024, 1, 1, 0), "1.10000", true), forming(at(2024, 1, 1, 1)), rec(at(2024, 1, 1, 2), "1.10000", true)}
+	require.NoError(t, WritePartition(context.Background(), h1Jan, stored, true))
+	f := &fakeFetcher{series: hourly(at(2024, 1, 1, 0), 3)}
+
+	res, err := DownloadPartition(context.Background(), quiet(), f, h1Jan, at(2024, 1, 1, 0), at(2024, 1, 2, 0))
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Replaced)
+	assert.Equal(t, 0, res.Added)
+	assert.Equal(t, 2, res.Kept, "the two complete rows are kept, as they were")
+	assert.Equal(t, 0, res.Differing)
+	rows, err := ReadPartitionRecords(context.Background(), h1Jan)
+	require.NoError(t, err)
+	require.Len(t, rows, 3, "replaced in place: no row added or lost")
+	assert.True(t, rows[1].Complete, "the stored row is now the closed candle")
+	assert.Equal(t, "1.1", rows[1].BidOpen.String(), "with the provider's values")
+	assert.Equal(t, int64(100), rows[1].Volume)
+	assert.True(t, rows[1].Time.Equal(at(2024, 1, 1, 1)))
+}
+
+func TestDownloadPartition_AReplacementAloneRewritesTheFileAndARerunChangesNothing(t *testing.T) {
+	storetest.Root(t)
+	require.NoError(t, WritePartition(context.Background(), h1Jan, []Record{rec(at(2024, 1, 1, 0), "1.10000", true), forming(at(2024, 1, 1, 1))}, true))
+	f := &fakeFetcher{series: hourly(at(2024, 1, 1, 0), 2)}
+	first, err := DownloadPartition(context.Background(), quiet(), f, h1Jan, at(2024, 1, 1, 0), at(2024, 1, 2, 0))
+	require.NoError(t, err)
+	require.Equal(t, 1, first.Replaced)
+	path := filepath.Join(store.Root(), first.Path)
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+	stat, err := os.Stat(path)
+	require.NoError(t, err)
+
+	second, err := DownloadPartition(context.Background(), quiet(), f, h1Jan, at(2024, 1, 1, 0), at(2024, 1, 2, 0))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, second.Replaced)
+	assert.Equal(t, 2, second.Kept)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+	again, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, stat.ModTime(), again.ModTime(), "nothing left to do, so the file is not rewritten")
+}
+
+func TestDownloadPartition_AStoredFormingRowStaysWhileTheProviderStillReportsItForming(t *testing.T) {
+	storetest.Root(t)
+	require.NoError(t, WritePartition(context.Background(), h1Jan, []Record{rec(at(2024, 1, 1, 0), "1.10000", true), forming(at(2024, 1, 1, 1))}, true))
+	path := filepath.Join(store.Root(), "oanda", "raw", "EURUSD", "2024", "01", "EURUSD-2024-01-h1.csv")
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+	f := &fakeFetcher{series: []Record{rec(at(2024, 1, 1, 0), "1.10000", true), rec(at(2024, 1, 1, 1), "1.10000", false)}}
+
+	res, err := DownloadPartition(context.Background(), quiet(), f, h1Jan, at(2024, 1, 1, 0), at(2024, 1, 2, 0))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Replaced)
+	assert.Equal(t, 1, res.Incomplete)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "a forming candle replaces nothing: its values will still change")
+}
+
+func TestDownloadPartition_ReplacesAndAddsInOneDownloadAndLeavesOtherRowsAlone(t *testing.T) {
+	storetest.Root(t)
+	stored := []Record{rec(at(2024, 1, 1, 0), "1.30000", true), forming(at(2024, 1, 1, 1))} // row 0 differs and is complete
+	require.NoError(t, WritePartition(context.Background(), h1Jan, stored, true))
+	f := &fakeFetcher{series: hourly(at(2024, 1, 1, 0), 4)}
+
+	res, err := DownloadPartition(context.Background(), quiet(), f, h1Jan, at(2024, 1, 1, 0), at(2024, 1, 2, 0))
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Added)
+	assert.Equal(t, 1, res.Replaced)
+	assert.Equal(t, 1, res.Kept)
+	assert.Equal(t, 1, res.Differing, "a complete row that differs is reported, not replaced")
+	rows, err := ReadPartitionRecords(context.Background(), h1Jan)
+	require.NoError(t, err)
+	require.Len(t, rows, 4)
+	assert.Equal(t, "1.3", rows[0].BidOpen.String(), "the complete row keeps its own values")
+	assert.True(t, rows[1].Complete)
+	assert.Equal(t, "1.1", rows[1].BidOpen.String())
+}
+
+func TestDownloadPartition_AFormingRowOutsideTheWindowIsNotTouched(t *testing.T) {
+	storetest.Root(t)
+	require.NoError(t, WritePartition(context.Background(), h1Jan, []Record{forming(at(2024, 1, 3, 1))}, true))
+	f := &fakeFetcher{series: hourly(at(2024, 1, 1, 0), 3)}
+
+	res, err := DownloadPartition(context.Background(), quiet(), f, h1Jan, at(2024, 1, 1, 0), at(2024, 1, 2, 0))
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, res.Added)
+	assert.Equal(t, 0, res.Replaced)
+	rows, err := ReadPartitionRecords(context.Background(), h1Jan)
+	require.NoError(t, err)
+	require.Len(t, rows, 4)
+	assert.False(t, rows[3].Complete, "the row the window did not cover is as it was")
+}

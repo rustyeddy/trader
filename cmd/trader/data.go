@@ -146,14 +146,15 @@ func (a *app) runDownload(cmd *cobra.Command, f downloadFlags) error {
 	err = service.Download(ctx, logging.WithComponent(slog.Default(), logging.ComponentMarketData), provider, req, func(r service.DownloadResult) {
 		total.Fetched += r.Fetched
 		total.Added += r.Added
+		total.Replaced += r.Replaced
 		total.Kept += r.Kept
 		total.Incomplete += r.Incomplete
 		total.Differing += r.Differing
-		say("%s: fetched %d, added %d, kept %d, not stored (incomplete) %d\n",
-			filepath.Join(store.Root(), r.Path), r.Fetched, r.Added, r.Kept, r.Incomplete)
+		say("%s: fetched %d, added %d, replaced %d, kept %d, not stored (incomplete) %d\n",
+			filepath.Join(store.Root(), r.Path), r.Fetched, r.Added, r.Replaced, r.Kept, r.Incomplete)
 	})
-	say("total: fetched %d, added %d, kept %d, not stored (incomplete) %d, stored rows that differ from the provider %d\n",
-		total.Fetched, total.Added, total.Kept, total.Incomplete, total.Differing)
+	say("total: fetched %d, added %d, replaced %d, kept %d, not stored (incomplete) %d, stored rows that differ from the provider %d\n",
+		total.Fetched, total.Added, total.Replaced, total.Kept, total.Incomplete, total.Differing)
 	return errors.Join(err, writeErr)
 }
 

@@ -9,6 +9,11 @@ accepted storage convention in =docs/arch/market-data-storage.md= and builds on
 ADR-020 (historic data), ADR-023 (structured logging), ADR-078 (security, S-1)
 and ADR-088 (the per-run instrument catalog).
 
+Amended (2026-11-18) on immutability: a *complete* raw row is never changed, but a
+stored row whose =complete= flag is false is provisional, and a download replaces it
+with the closed candle (=oanda.DownloadPartition=, =Replaced=). The owner's rule:
+broken data that can be replaced with good data is replaced.
+
 Amended in part by ADR-091 (Accepted): =cmd/trader= still alone reads the
 environment and the config file, but it is no longer the composition root for
 providers; it hands plain values and a credential to =service=, which builds the
@@ -242,8 +247,10 @@ of the existing archive.
   before any rename, and preserves bytes and fingerprints.
 - *Incomplete candles are never stored (2026-11-14).* A candle the provider still
   reports as forming (=complete=false=) is not written to the raw archive: its
-  values will change and raw files are immutable. If a still-moving price is ever
-  needed, it is a tick feed, not a candle. The raw =complete= flag stays as the
+  values will change. If a still-moving price is ever needed, it is a tick feed, not a
+  candle. A forming row stored before this rule (38 of them, all September 2026, found
+  on 2026-11-18) is replaced by the closed candle the next time the download covers its
+  time; complete rows stay immutable. The raw =complete= flag stays as the
   provider's native fact; it does not say when a candle became available, so the
   download invents no availability time. How the normalized bar carries
   availability (=Time= plus =AvailableAt=, no stored close time) is decided with
