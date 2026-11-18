@@ -22,7 +22,8 @@ type DownloadResult struct {
 	Fetched    int // candles the provider returned for the window
 	Incomplete int // candles still forming, never stored
 	Added      int // rows written that the file did not have
-	Kept       int // rows already on file, left exactly as they were
+	Replaced   int // stored rows that were still forming, replaced by the closed candle
+	Kept       int // complete rows already on file, left exactly as they were
 	Differing  int // of Kept, rows whose provider values differ from the file's
 }
 
@@ -34,11 +35,14 @@ var errNothingToAdd = errors.New("nothing to add")
 // [from, to), which the caller keeps inside key's UTC month, and merges them into
 // the raw store through UpdatePartition.
 //
-// The raw archive is immutable (ADR-020): a row already on file is never changed
-// or removed, even when the provider now reports different values (that is
-// counted and logged, not applied), and a file that would gain nothing is left
-// untouched, and is not created. A candle the provider still reports as forming
-// (Record.Complete false) is not stored, since its values will change. A candle
+// A complete row already on file is never changed or removed (ADR-020), even when
+// the provider now reports different values (that is counted and logged, not
+// applied): a closed candle is a fact. A candle the provider still reports as
+// forming (Record.Complete false) is not stored, since its values will change; and
+// a forming row that is already on file (written before that rule) is not a fact
+// either, so when the provider reports its candle closed the stored row is replaced
+// by it, in place (counted as Replaced and logged with both values). A file that
+// would gain and change nothing is left untouched, and is not created. A candle
 // opening outside [from, to) fails the download before anything is written: the
 // fetcher is checked rather than trusted at the durable-storage boundary. On
 // error the file is untouched. log may be nil.
@@ -74,13 +78,23 @@ func DownloadPartition(ctx context.Context, log *slog.Logger, f CandleFetcher, k
 	}
 
 	err = UpdatePartition(ctx, key, func(existing []Record) ([]Record, error) {
-		have := make(map[int64]Record, len(existing))
-		for _, r := range existing {
-			have[r.Time.UnixNano()] = r
+		merged := append([]Record(nil), existing...)
+		at := make(map[int64]int, len(existing)) // where each time sits in merged
+		for i, r := range existing {
+			at[r.Time.UnixNano()] = i
 		}
-		merged := existing
 		for _, r := range fresh {
-			if old, ok := have[r.Time.UnixNano()]; ok {
+			if i, ok := at[r.Time.UnixNano()]; ok {
+				old := merged[i]
+				if !old.Complete {
+					res.Replaced++
+					merged[i] = r
+					log.Info("replaced a stored row that was still forming with the closed candle",
+						"symbol", key.Symbol, "time", r.Time.UTC().Format(time.RFC3339),
+						"was_bid_close", old.BidClose.String(), "now_bid_close", r.BidClose.String(),
+						"was_volume", old.Volume, "now_volume", r.Volume)
+					continue
+				}
 				res.Kept++
 				if !sameCandle(old, r) {
 					res.Differing++
@@ -91,8 +105,9 @@ func DownloadPartition(ctx context.Context, log *slog.Logger, f CandleFetcher, k
 			}
 			res.Added++
 			merged = append(merged, r)
+			at[r.Time.UnixNano()] = len(merged) - 1
 		}
-		if res.Added == 0 {
+		if res.Added == 0 && res.Replaced == 0 {
 			return nil, errNothingToAdd
 		}
 		return merged, nil
@@ -101,7 +116,7 @@ func DownloadPartition(ctx context.Context, log *slog.Logger, f CandleFetcher, k
 		return res, err
 	}
 	log.Info("partition done", "path", rel, "fetched", res.Fetched, "added", res.Added,
-		"kept", res.Kept, "incomplete", res.Incomplete)
+		"replaced", res.Replaced, "kept", res.Kept, "incomplete", res.Incomplete)
 	return res, nil
 }
 

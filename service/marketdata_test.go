@@ -620,3 +620,37 @@ func TestDownload_StillValidatesTheRequestAfterBuildingTheClient(t *testing.T) {
 
 	assert.ErrorContains(t, err, "--to must be after --from")
 }
+
+func TestDownloadRaw_AStoredFormingRowIsReplacedOnceItsCandleCloses(t *testing.T) {
+	storetest.Root(t)
+	key := oanda.PartitionKey{Symbol: "EURUSD", Interval: oanda.RawH1, Year: 2024, Month: time.January}
+	require.NoError(t, oanda.WritePartition(context.Background(), key,
+		[]oanda.Record{rec(utc(2024, 1, 2, 0), true), rec(utc(2024, 1, 2, 1), false)}, true))
+	f := &dlFetcher{series: dlHourly(utc(2024, 1, 2, 0), 2)}
+
+	got := download(t, f, DownloadRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 2, 1, 0)})
+
+	require.Len(t, got, 1)
+	assert.Equal(t, 1, got[0].Replaced)
+	assert.Equal(t, 0, got[0].Added)
+	assert.Equal(t, 1, got[0].Kept)
+	rows, err := oanda.ReadPartitionRecords(context.Background(), key)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.True(t, rows[1].Complete)
+	// And the canonical month built from it has no bad record.
+	require.NoError(t, BuildCanonical(context.Background(), nil, BuildRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 2, 1, 0)}, nil))
+	v, err := verifyOne(t, "EURUSD")
+	require.NoError(t, err)
+	assert.Equal(t, 0, v.Bad)
+}
+
+// verifyOne verifies the one January 2024 h1 month of a symbol.
+func verifyOne(t *testing.T, symbol string) (PartitionVerification, error) {
+	t.Helper()
+	var got []PartitionVerification
+	err := VerifyCanonical(context.Background(), nil, VerifyRequest{Instruments: []string{symbol}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 2, 1, 0)},
+		func(p PartitionVerification) { got = append(got, p) })
+	require.Len(t, got, 1)
+	return got[0], err
+}

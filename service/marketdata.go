@@ -63,7 +63,8 @@ type DownloadResult struct {
 	Fetched    int // candles the provider returned for the month's window
 	Incomplete int // candles still forming, never stored
 	Added      int // rows written that the file did not have
-	Kept       int // rows already on file, left exactly as they were
+	Replaced   int // stored rows that were still forming, replaced by the closed candle
+	Kept       int // complete rows already on file, left exactly as they were
 	Differing  int // of Kept, rows whose provider values differ from the file's
 }
 
@@ -115,7 +116,8 @@ type CandleFetcher interface {
 
 // DownloadRaw fetches req one UTC month partition at a time, instrument by
 // instrument, merging each into the raw store (oanda.DownloadPartition owns the
-// archive rules: nothing stored is changed, forming candles are not stored), and
+// archive rules: a complete stored row is never changed, forming candles are not
+// stored and a stored forming row is replaced once its candle closes), and
 // calls report (when not nil) after each partition, in order. A request that is
 // invalid fails before any fetch. The first partition that fails stops the run
 // with an error that names it; the partitions already done stay done.
@@ -143,7 +145,7 @@ func DownloadRaw(ctx context.Context, log *slog.Logger, f CandleFetcher, req Dow
 			}
 			if report != nil {
 				report(DownloadResult{Instrument: symbol, Year: ms.Year(), Month: ms.Month(), Path: r.Path,
-					Fetched: r.Fetched, Incomplete: r.Incomplete, Added: r.Added, Kept: r.Kept, Differing: r.Differing})
+					Fetched: r.Fetched, Incomplete: r.Incomplete, Added: r.Added, Replaced: r.Replaced, Kept: r.Kept, Differing: r.Differing})
 			}
 		}
 	}

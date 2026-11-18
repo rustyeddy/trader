@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/provider/oanda"
 	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,7 +117,7 @@ func TestDataDownload_WritesTheMonthFilesAndPrintsASummary(t *testing.T) {
 	feb := filepath.Join(root, "oanda", "raw", "EURUSD", "2024", "02", "EURUSD-2024-02-h1.csv")
 	assert.Contains(t, out, jan+": fetched 4, added 4")
 	assert.Contains(t, out, feb+": fetched 4, added 4")
-	assert.Contains(t, out, "total: fetched 8, added 8, kept 0")
+	assert.Contains(t, out, "total: fetched 8, added 8, replaced 0, kept 0")
 	head, rerr := os.ReadFile(jan)
 	require.NoError(t, rerr)
 	assert.True(t, strings.HasPrefix(string(head), "# schema=raw-v1 source=oanda instrument=EURUSD tf=h1 year=2024 month=01\n"))
@@ -152,7 +153,7 @@ func TestDataDownload_ARerunAddsNothing(t *testing.T) {
 	out, _, err := runData(t, env, args...)
 
 	require.NoError(t, err)
-	assert.Contains(t, out, "total: fetched 6, added 0, kept 6")
+	assert.Contains(t, out, "total: fetched 6, added 0, replaced 0, kept 6")
 }
 
 func TestDataDownload_FormingCandleIsNotStored(t *testing.T) {
@@ -164,7 +165,7 @@ func TestDataDownload_FormingCandleIsNotStored(t *testing.T) {
 		"--from", "2024-01-01", "--to", "2024-01-02", "--base-url", srv.URL)
 
 	require.NoError(t, err)
-	assert.Contains(t, out, "fetched 3, added 2, kept 0, not stored (incomplete) 1")
+	assert.Contains(t, out, "fetched 3, added 2, replaced 0, kept 0, not stored (incomplete) 1")
 }
 
 func TestDataDownload_OptionsComeFromTheFileAndTheFlagWins(t *testing.T) {
@@ -342,4 +343,22 @@ func TestCommands_ImportNoProvider(t *testing.T) {
 			assert.NotContains(t, path, "/provider/", "%s imports %s", file, path)
 		}
 	}
+}
+
+func TestDataDownload_ReplacesAStoredFormingRowAndTheMonthBuildsWithoutABadRecord(t *testing.T) {
+	root := storetest.Root(t)
+	srv := newFakeOANDA(t, utc(2024, 1, 1, 0), 3)
+	// An older downloader stored the second candle while it was still forming.
+	putRawMonth(t, "EURUSD", oanda.RawH1, 2024, time.January, rawRec(utc(2024, 1, 1, 0), true), rawRec(utc(2024, 1, 1, 1), false))
+
+	out, _, err := runData(t, map[string]string{envOANDAToken: testToken},
+		"data", "download", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD", "--interval", "h1",
+		"--from", "2024-01-01", "--to", "2024-01-02", "--base-url", srv.URL)
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "fetched 3, added 1, replaced 1, kept 1, not stored (incomplete) 0")
+	assert.Contains(t, out, "total: fetched 3, added 1, replaced 1, kept 1")
+	built, _, err := runData(t, nil, buildArgs(t, root, "2024-02-01")...)
+	require.NoError(t, err)
+	assert.Contains(t, built, "built, good 3, bad 0", "no bad record is left behind")
 }
