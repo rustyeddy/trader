@@ -41,6 +41,9 @@ trader                           # backtest the EMAX scenarios and print a summa
 trader data download ...         # download OANDA candles into the raw store
 trader data build ...            # build canonical-v2 bars from the raw store
 trader data status ...           # show which canonical months a range can load
+trader data verify ...           # check canonical bars against the raw they were built from
+trader data audit ...            # one integrity report for a range (text or JSON)
+trader data migrate ...          # move an old-layout raw archive to the current layout (dry run unless --apply)
 trader backtest ...              # backtest canonical bars from the data store
 ```
 
@@ -48,6 +51,19 @@ trader backtest ...              # backtest canonical bars from the data store
 partition files; `trader data build` converts them to canonical bars with a mid
 price and a modeled availability time, keeping every rejected row as a bad record.
 The commands, flags and configuration are in the [User's Guide](docs/UsersGuide.md).
+
+### Getting started
+
+1. `make build`, then `trader` to see the EMAX scenarios run (no data or token needed).
+2. Put your OANDA token in the environment as `TRADER_OANDA_TOKEN` (never in a file
+   or flag), choose a data root (`--data-root`, `TRADER_DATA_ROOT` or
+   `marketdata.root` in `etc/trader.yml`; the default is `/srv/data`).
+3. `trader data download --instrument EURUSD --interval h1 --from 2024-01-01 --to 2024-04-01`
+4. `trader data build` with the same flags, then `trader data audit` to check the
+   months, the gaps and the match with raw.
+5. `trader backtest --instrument EURUSD --interval h1 --from 2024-01-01 --to 2024-04-01`
+
+Details, every flag and what each report means are in the [User's Guide](docs/UsersGuide.md).
 
 ## Packages
 

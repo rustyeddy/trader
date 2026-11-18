@@ -213,7 +213,8 @@ the ADR-022 fold-back in section 2.
      =service/marketdata= remains presentation-free, confirmed
      directly: =service/marketdata= imports no =encoding/json=
      anywhere in the package, while =cmd/trader/format_json.go= is
-     the only file in the module that does.
+     the only file in =cmd/trader= and =service/= that does (other packages
+     import it for their own file formats).
   4. =--from=/=--to= are both required on every dataset command,
      =update= included; an omitted range is a validation error, not an
      inferred default (#109, =addDatasetArgFlags=/
