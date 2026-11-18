@@ -86,6 +86,9 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   against its raw partition independently of `Build`'s code; `service.VerifyCanonical`
   reads the raw (`oanda.ReadSourcePartition`), calls it per month, and `--sample`
   picks months evenly (`sampleMonths`).
+- `service.Audit` (`trader data audit`, ADR-090 section 9) composes `LoadSeries` (months,
+  gaps) and `VerifyCanonical` into one `AuditReport` that marshals to JSON; it adds no
+  rule. The command only chooses the format and exits non-zero on `ErrAuditFailed`.
 - `Load` also checks the interior of the series with the market calendar
   (`canonical.ClosureAt` and `Gaps`, ADR-090 section 7): the weekly close is not a
   gap, a year-end holiday is a reported `KnownClosure`, any other missing bar is
