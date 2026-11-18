@@ -45,6 +45,7 @@ trader data verify ...           # check canonical bars against the raw they wer
 trader data audit ...            # one integrity report for a range (text or JSON)
 trader data migrate ...          # move an old-layout raw archive to the current layout (dry run unless --apply)
 trader backtest ...              # backtest canonical bars from the data store
+trader serve                     # read-only REST API over the canonical bars (docs/rest-api.md)
 ```
 
 `trader data download` fetches bid/ask candles for a UTC range into month

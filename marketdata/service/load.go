@@ -54,6 +54,11 @@ type LoadRequest struct {
 	// the calendar does not explain, whether a missing month or bars missing from
 	// a month that loaded. Stale months are never accepted.
 	AllowBad, AllowMissing bool
+	// SkipStale lets a load carry on past a Stale month: its bars are never used (a
+	// stale file is not from the build in force) but it no longer fails the load; it
+	// is still reported as Stale in the months and its bars are a gap in the series.
+	// For a reader that must serve what it can and say what it could not.
+	SkipStale bool
 }
 
 // MonthStatus is what one UTC month of the range came to.
@@ -146,7 +151,8 @@ func (e *IncompleteError) Is(target error) bool { return target == ErrIncomplete
 // bars as one Series, in time order, cut to [From, To) by opening time. Each
 // month is classified (Loaded, Bad, Missing, Stale). The default is strict: a
 // Stale month always fails the load, and a Missing or Bad month fails it unless
-// the request allows it; the failure is an *IncompleteError naming the months, and
+// the request allows it (SkipStale lets the load carry on past a Stale month, whose
+// bars are still never used); the failure is an *IncompleteError naming the months, and
 // the result still carries every month's status. A bar's AvailableAt is the one
 // stored in its file, never recomputed. Only a Loaded month, and a Bad month when
 // allowed, contribute bars.
@@ -188,7 +194,7 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 		}
 		result.Months = append(result.Months, st)
 		usable := st.State == Loaded || (st.State == Bad && req.AllowBad)
-		gapAllowed := st.State == Missing && req.AllowMissing
+		gapAllowed := (st.State == Missing && req.AllowMissing) || (st.State == Stale && req.SkipStale)
 		if !usable && !gapAllowed {
 			stopped = append(stopped, st)
 		}

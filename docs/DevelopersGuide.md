@@ -88,6 +88,12 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   against its raw partition independently of `Build`'s code; `service.VerifyCanonical`
   reads the raw (`oanda.ReadSourcePartition`), calls it per month, and `--sample`
   picks months evenly (`sampleMonths`).
+- `rest` (`trader serve`, [REST API](rest-api.md)) is the HTTP transport: it normalizes
+  the query parameters, calls `service.ReadBars` and writes JSON; reading, paging, the
+  partial-by-default policy and the report of what is missing are `ReadBars`' (which
+  uses `Load` with `SkipStale`). `rest` imports only `service` and the public
+  `marketdata` model, and no provider (a test enforces it); `cmd/trader/serve.go` reads
+  the environment (`TRADER_API_TOKEN`) and refuses a non-loopback address without it.
 - `service.MigrateLayout` (`trader data migrate`, ADR-092) moves `raw/<source>` to
   `<source>/raw` with `store.Move` (one rename, never overwrites), the mapping in
   `layout.LegacyRawDir` and verification by `store.Inventory`; it is a dry run unless
