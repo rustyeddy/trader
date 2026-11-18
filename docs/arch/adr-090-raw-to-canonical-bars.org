@@ -291,6 +291,29 @@ Real EURUSD h1, 2013 to 2025: 23 year-end closures and ten unexplained gaps of o
 two hours (for example 2022-05-12 and 2024-05-20), so a strict load of that range
 fails until it is allowed.
 
+** 8. Verification against raw (#535)
+
+=marketdata/service.Verify= and =trader data verify= check a canonical file against
+the raw partition it should have been built from, without calling the build's own
+code. Every raw row must be the source of exactly one bar or the subject of a bad
+record, and every bar and bad record must have its raw row. A bar's bid, ask and
+volume must equal its row's /exactly/ (raw and canonical are exact fixed-point
+decimals, so no numeric tolerance exists), its mid must be their midpoint, and it
+must not come from a candle still forming. A bad record's reason must be true of
+its row. The expected differences between raw and canonical are therefore exactly
+these bad records (forming, misaligned, duplicate, out of order, crossed, invalid),
+and the result counts them by reason instead of failing on them. Also checked: the
+file's raw fingerprint is that of the raw bytes now on disk, the builder, validator
+and availability policy are in force, and the file is valid canonical-v2 (ascending
+times, so no duplicates; boundary alignment; valid OHLC; availability). A month with
+no raw or no canonical file is reported, not failed. =--sample N= checks N months
+per instrument evenly spaced from the first to the last of the range, each in full;
+the default is every month.
+
+Not covered: interval resampling (the tree has no derived bars; h1 and d1 are
+downloaded, not derived), providers other than OANDA, and the manifest and coverage
+audit of #536.
+
 * Deferred
 
 Coverage of the ends of a range (a range that starts before the archive does, or

@@ -47,6 +47,7 @@ func newDataCmd(a *app) *cobra.Command {
 	data.AddCommand(newDownloadCmd(a))
 	data.AddCommand(newBuildCmd(a))
 	data.AddCommand(newStatusCmd(a))
+	data.AddCommand(newVerifyCmd(a))
 	return data
 }
 

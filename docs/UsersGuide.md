@@ -159,6 +159,28 @@ unexplained, N known closures`.
 
 `status` does not compare a file with the raw it was built from.
 
+### Verifying canonical against raw
+
+```sh
+trader data verify --instrument EURUSD --interval h1 --from 2013-01-01 --to 2026-01-01
+trader data verify --instrument EURUSD --interval h1 --from 2013-01-01 --to 2026-01-01 --sample 6
+```
+
+Read-only. Checks each canonical month against the raw partition it was built from,
+row by row: every raw row is a bar or a bad record and every bar and bad record has
+its raw row; a bar's bid, ask and volume equal the raw row's exactly (there is no
+rounding to tolerate) and its mid is their midpoint; each bad record's reason is true
+of its row; the file was built from the raw bytes now on disk by the builder in
+force and is valid canonical-v2. Bad records the raw bears out (a forming candle, a
+crossed quote and so on) are the expected differences: they are counted by reason,
+not failed. A month with no raw, or raw but no canonical file, is reported, not
+failed. The command exits non-zero if any month disagrees, printing each finding
+(`fingerprint`, `unaccounted`, `unexpected`, `mismatch`, `unjustified`, `stale`,
+`unreadable`) with its time and raw row. `--sample N` checks N months per instrument
+spread from the first to the last of the range, each in full. A raw file edited or
+extended after a build shows as a fingerprint finding plus the rows it changed:
+rebuild with `trader data build`.
+
 ### Checking a live account
 
 `make smoke` runs the opt-in live check: it downloads a small bounded range into a

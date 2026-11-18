@@ -82,6 +82,10 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   missing or bad one fails it unless the request allows it. `AvailableAt` is the
   stored one, never recomputed. `service.LoadSeries` is the application-service
   path; `trader data status` is its first consumer.
+- `marketdata/service.Verify` (`trader data verify`, ADR-090 section 8) checks a file
+  against its raw partition independently of `Build`'s code; `service.VerifyCanonical`
+  reads the raw (`oanda.ReadSourcePartition`), calls it per month, and `--sample`
+  picks months evenly (`sampleMonths`).
 - `Load` also checks the interior of the series with the market calendar
   (`canonical.ClosureAt` and `Gaps`, ADR-090 section 7): the weekly close is not a
   gap, a year-end holiday is a reported `KnownClosure`, any other missing bar is

@@ -1,7 +1,9 @@
-// Package service is the market-data domain service (ADR-091). Its one
-// capability so far is Build: it turns a provider's raw partition, handed over as
+// Package service is the market-data domain service (ADR-091). Its capabilities
+// are Build, Load and Verify. Build turns a provider's raw partition, handed over as
 // a marketdata.SourcePartition, into a canonical-v2 file and publishes it under
-// the store's data root (ADR-090).
+// the store's data root (ADR-090); Load reads canonical files back as a series
+// and checks it against the market calendar; Verify checks a canonical file against
+// the raw partition it should have been built from.
 //
 // It owns every domain rule the provider must not: which rows are bad and why,
 // the alignment and availability of a bar, the mid price, the build versions, and
