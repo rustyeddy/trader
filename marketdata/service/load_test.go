@@ -344,3 +344,64 @@ func TestLoad_AYearEndHolidayIsReportedAsAKnownClosure(t *testing.T) {
 	assert.Len(t, got.Series.Bars, 4)
 	assert.Equal(t, []Gap{{Kind: KnownClosure, Start: utc(2024, 12, 24, 22), End: utc(2024, 12, 25, 22), Bars: 24}}, got.Gaps)
 }
+
+// holeMonth builds EURUSD h1 January 2007 with bars at the given times only. The
+// reviewed list of known provider holes has EURUSD h1 from 2007-01-08 23:00 to
+// 2007-01-09 21:00 (OANDA has no candles for it).
+func holeMonth(t *testing.T, opens ...time.Time) {
+	t.Helper()
+	var rows []marketdata.SourceRow
+	for i, at := range opens {
+		rows = append(rows, row(i+1, at))
+	}
+	p := h1Source(rows...)
+	p.Year, p.Month = 2007, time.January
+	_, err := Build(context.Background(), p, builtAt)
+	require.NoError(t, err)
+}
+
+func TestLoad_ARunOnTheKnownProviderHolesListIsReportedAndIsNotAnError(t *testing.T) {
+	storetest.Root(t)
+	holeMonth(t, utc(2007, 1, 8, 22), utc(2007, 1, 9, 21))
+	req := LoadRequest{Source: "oanda", Instrument: "EURUSD", Interval: "h1", From: utc(2007, 1, 1, 0), To: utc(2007, 2, 1, 0)}
+
+	got, err := Load(context.Background(), req)
+
+	require.NoError(t, err, "a known provider hole never fails a strict load")
+	assert.Len(t, got.Series.Bars, 2)
+	assert.Equal(t, []Gap{{Kind: KnownHole, Start: utc(2007, 1, 8, 23), End: utc(2007, 1, 9, 21), Bars: 22}}, got.Gaps)
+}
+
+func TestLoad_AGapThatOutgrowsTheListedRunStillFailsForTheRest(t *testing.T) {
+	storetest.Root(t)
+	holeMonth(t, utc(2007, 1, 8, 22), utc(2007, 1, 9, 22)) // 21:00 is missing too, and is not listed
+	req := LoadRequest{Source: "oanda", Instrument: "EURUSD", Interval: "h1", From: utc(2007, 1, 1, 0), To: utc(2007, 2, 1, 0)}
+
+	strict, err := Load(context.Background(), req)
+	req.AllowMissing = true
+	allowed, aerr := Load(context.Background(), req)
+
+	require.ErrorIs(t, err, ErrIncomplete)
+	var inc *IncompleteError
+	require.True(t, errors.As(err, &inc))
+	assert.Equal(t, []Gap{{Kind: Unexplained, Start: utc(2007, 1, 9, 21), End: utc(2007, 1, 9, 22), Bars: 1}}, inc.Gaps, "only the unlisted hour fails")
+	assert.Equal(t, KnownHole, strict.Gaps[0].Kind, "the listed part is still reported")
+	require.NoError(t, aerr)
+	assert.Len(t, allowed.Gaps, 2)
+}
+
+func TestLoad_AnotherInstrumentDoesNotInheritAListedRun(t *testing.T) {
+	storetest.Root(t)
+	var rows []marketdata.SourceRow
+	for i, at := range []time.Time{utc(2007, 1, 8, 22), utc(2007, 1, 9, 21)} {
+		rows = append(rows, row(i+1, at))
+	}
+	p := h1Source(rows...)
+	p.Instrument, p.Year, p.Month = "GBPUSD", 2007, time.January
+	_, err := Build(context.Background(), p, builtAt)
+	require.NoError(t, err)
+
+	_, lerr := Load(context.Background(), LoadRequest{Source: "oanda", Instrument: "GBPUSD", Interval: "h1", From: utc(2007, 1, 1, 0), To: utc(2007, 2, 1, 0)})
+
+	assert.ErrorIs(t, lerr, ErrIncomplete, "the list names EURUSD, not GBPUSD")
+}

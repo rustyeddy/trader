@@ -55,7 +55,7 @@ func TestDataStatus_ReportsEachMonthAndATotalWithoutAToken(t *testing.T) {
 	assert.Contains(t, out, "EURUSD 2024-01: loaded, good 2")
 	assert.Contains(t, out, "EURUSD 2024-02: loaded, good 2")
 	assert.Contains(t, out, "EURUSD: 4 bars")
-	assert.Contains(t, out, "total: loaded 2, bad 0, missing 0, stale 0; bars 4; gaps: 0 unexplained, 0 known closures")
+	assert.Contains(t, out, "total: loaded 2, bad 0, missing 0, stale 0; bars 4; gaps: 0 unexplained, 0 known closures, 0 known holes")
 	assert.NotEmpty(t, logs)
 }
 
@@ -181,8 +181,23 @@ func TestDataStatus_ReportsAGapTheCalendarDoesNotExplainAndFailsUnlessAllowed(t 
 	require.ErrorIs(t, strictErr, service.ErrNotLoadable)
 	assert.Contains(t, out, "EURUSD: gap unexplained 2024-01-09T02:00Z 2024-01-09T05:00Z, 3 bars")
 	assert.Contains(t, out, "EURUSD: not loadable")
-	assert.Contains(t, out, "gaps: 1 unexplained, 0 known closures")
+	assert.Contains(t, out, "gaps: 1 unexplained, 0 known closures, 0 known holes")
 	require.NoError(t, allowedErr)
 	assert.Contains(t, allowedOut, "EURUSD: gap unexplained 2024-01-09T02:00Z", "an allowed gap is still shown")
 	assert.Contains(t, allowedOut, "EURUSD: 3 bars")
+}
+
+func TestDataStatus_AKnownProviderHoleIsShownAndCountedAndDoesNotFail(t *testing.T) {
+	root := storetest.Root(t)
+	putRawMonth(t, "EURUSD", oanda.RawH1, 2007, time.January, rawRec(utc(2007, 1, 8, 22), true), rawRec(utc(2007, 1, 9, 21), true))
+	_, _, err := runData(t, nil, "data", "build", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD",
+		"--interval", "h1", "--from", "2007-01-01", "--to", "2007-02-01")
+	require.NoError(t, err)
+
+	out, _, err := runData(t, nil, "data", "status", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD",
+		"--interval", "h1", "--from", "2007-01-01", "--to", "2007-02-01")
+
+	require.NoError(t, err, "a listed hole is not an error")
+	assert.Contains(t, out, "EURUSD: gap known_hole 2007-01-08T23:00Z 2007-01-09T21:00Z, 22 bars")
+	assert.Contains(t, out, "gaps: 0 unexplained, 0 known closures, 1 known holes")
 }

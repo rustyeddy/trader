@@ -148,7 +148,10 @@ UTC month the range touches and reports:
 It also checks the inside of the series: between its first and last bar every bar the
 FX calendar expects must be there. A weekend is not a gap and is not reported. A gap
 inside a year-end holiday (around December 25 and January 1) is reported as a
-`closure` and is fine. Any other missing bar, even one hour, is an `unexplained` gap.
+`closure` and is fine. A run on the reviewed list of bars OANDA does not have (it was
+checked, and downloaded again, and the candles are not there) is reported as a
+`known_hole` and is fine too. Any other missing bar, even one hour, is an
+`unexplained` gap.
 The ends of the range are not judged, since the newest candle may still be forming.
 
 By default the command fails if any month is stale, missing or bad, or if the series
@@ -159,7 +162,7 @@ per month (`<instrument> <year>-<month>: loaded, good N`, `bad, good N, bad N`,
 `missing`, `stale: <reason>`), one line per gap (`<instrument>: gap closure|unexplained
 <start> <end>, N bars`, UTC, the end exclusive), one line per instrument (`N bars` or
 `not loadable`) and `total: loaded N, bad N, missing N, stale N; bars N; gaps: N
-unexplained, N known closures`.
+unexplained, N known closures, N known holes`.
 
 `status` does not compare a file with the raw it was built from.
 

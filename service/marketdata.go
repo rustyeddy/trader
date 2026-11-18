@@ -289,11 +289,12 @@ type (
 	GapKind = mdservice.GapKind
 )
 
-// The gap kinds: a year-end holiday closure (reported, never an error) and bars
-// missing that the calendar says should be there (an error unless missing data is
-// allowed). The weekly close is never reported.
+// The gap kinds: a year-end holiday closure and a run on the reviewed list of known
+// provider holes (both reported, never an error), and bars missing that neither
+// explains (an error unless missing data is allowed). The weekly close is never reported.
 const (
 	GapKnownClosure = mdservice.KnownClosure
+	GapKnownHole    = mdservice.KnownHole
 	GapUnexplained  = mdservice.Unexplained
 )
 

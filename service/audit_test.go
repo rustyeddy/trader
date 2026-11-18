@@ -228,3 +228,22 @@ func TestAudit_ASampleCountsTheMonthsItCheckedAgainstRaw(t *testing.T) {
 	assert.Equal(t, 3, got.Summary.Months)
 	assert.Equal(t, 1, got.Summary.RawChecked)
 }
+
+func TestAudit_AKnownProviderHoleIsCountedAndTheAuditPasses(t *testing.T) {
+	storetest.Root(t)
+	// EURUSD h1 2007-01-08 23:00 to 2007-01-09 21:00 is on the reviewed list of holes
+	// the provider does not have.
+	putRaw(t, "EURUSD", 2007, time.January, rec(utc(2007, 1, 8, 22), true), rec(utc(2007, 1, 9, 21), true))
+	require.NoError(t, BuildCanonical(context.Background(), nil,
+		BuildRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2007, 1, 1, 0), To: utc(2007, 2, 1, 0)}, nil))
+	req := auditReq("EURUSD")
+	req.From, req.To = utc(2007, 1, 1, 0), utc(2007, 2, 1, 0)
+
+	got, err := Audit(context.Background(), nil, req)
+
+	require.NoError(t, err)
+	assert.True(t, got.OK)
+	assert.Equal(t, 1, got.Summary.GapsKnownHole)
+	assert.Zero(t, got.Summary.GapsUnexplained)
+	assert.Equal(t, []AuditGap{{Kind: "known_hole", Start: utc(2007, 1, 8, 23), End: utc(2007, 1, 9, 21), Bars: 22}}, got.Instruments[0].Gaps)
+}
