@@ -314,6 +314,29 @@ Not covered: interval resampling (the tree has no derived bars; h1 and d1 are
 downloaded, not derived), providers other than OANDA, and the manifest and coverage
 audit of #536.
 
+** 9. The audit (#536)
+
+=service.Audit= and =trader data audit= give the operator one answer for a range by
+composing the checks above; they define no rule of their own. Per instrument: every
+month's state (loaded, bad, missing, stale; the canonical file's metadata, which is
+its manifest, is checked by the stale state and the fingerprint finding), the
+interior gaps against the calendar of section 7 (weekends not reported, year-end
+holidays as known closures, anything else unexplained) and the raw cross-check of
+section 8 (which includes duplicate and out-of-order times and invalid OHLC, since
+those make a file unreadable as canonical-v2). =--allow-bad= and =--allow-missing=
+mean what they do for =status=; =--sample= limits only the raw cross-check. The
+report is machine-readable (=--format json=, one object, also when the audit fails)
+or text, and the command exits non-zero when the data is not sound. A month that
+has a canonical file and no raw partition is /unverifiable/ and fails the audit
+(owner review of #673): the audit does not certify what it cannot check, even though
+=verify= reports a missing raw only as information; a month with neither file is the
+missing month above. With =--sample= the verdict certifies the raw cross-check only
+for the sampled months, and the report says so (=sample=, =raw_checked= and a note in
+the text output). There is no
+equity session calendar and no separate manifest file in this tree (OANDA is the
+only provider and the file metadata is the manifest), so neither has a test; an
+equity provider brings its own calendar rule.
+
 * Deferred
 
 Coverage of the ends of a range (a range that starts before the archive does, or

@@ -181,6 +181,33 @@ spread from the first to the last of the range, each in full. A raw file edited 
 extended after a build shows as a fingerprint finding plus the rows it changed:
 rebuild with `trader data build`.
 
+### Auditing a range
+
+```sh
+trader data audit --instrument EURUSD,GBPUSD --interval h1 --from 2013-01-01 --to 2026-01-01
+trader data audit --instrument EURUSD --interval h1 --from 2013-01-01 --to 2026-01-01 --allow-missing --format json
+```
+
+One report for the whole range, read-only, no token or network. For each instrument
+it shows every month (`loaded`, `bad`, `missing`, `stale`), the gaps inside the
+series (`unexplained`, or a year-end `closure`; weekends are not reported) and the
+cross-check of each canonical month against its raw (what `trader data verify`
+does). The command exits non-zero when the data is not sound: a stale month, a bad
+or missing month or an unexplained gap (unless `--allow-bad` / `--allow-missing`
+accept them, as for `status`), or a file that disagrees with its raw. `--sample N`
+limits the raw cross-check to N months per instrument; months and gaps always cover
+the whole range, and the output says so next to the verdict (`note: sampled: the raw
+cross-check covered N of M months`; JSON `sample`, `raw_checked`), because an OK then
+certifies the raw cross-check only for those months. A month that has a canonical
+file but no raw partition is `UNVERIFIABLE` and fails the audit: the audit does not
+certify what it cannot check (`trader data verify` only reports it). `--format json` prints the entire report as one JSON object (also
+when the audit fails, so a tool can read why); the text output ends with
+`audit: OK` or `audit: FAILED`.
+
+Real EURUSD h1 2013-2025 audits as: 156 months loaded, 23 known closures, 10
+unexplained gaps (one or two hours each), all 156 months verified against raw; it
+passes with `--allow-missing`.
+
 ### Checking a live account
 
 `make smoke` runs the opt-in live check: it downloads a small bounded range into a
