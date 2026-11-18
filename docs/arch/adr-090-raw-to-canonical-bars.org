@@ -7,7 +7,7 @@ Proposed, with the owner's answers of 2026-11-14 applied (below), for final
 approval. Issue #628; stage 4 of #584. Builds on ADR-020 (historic data: raw is
 immutable, canonical is rebuilt from it), ADR-088 (the instrument catalog) and
 ADR-089 (layout, OANDA raw store, package boundary), as amended by ADR-091 and
-ADR-092. It was implemented while it was Proposed; what follows records what was
+the proposed ADR-092. It was implemented while it was Proposed; what follows records what was
 built and run.
 
 The bar-availability design the owner recorded on #619 (a bar has an opening =Time=
@@ -23,7 +23,8 @@ service and =cmd/trader= imports no provider (#641, #663); the loader checks the
 interior of a series against the FX calendar (#534, section 7); =Verify= checks a
 file against its raw (#535, section 8); =trader data audit= reports a range in one
 answer (#536, section 9); and the raw archive was migrated to this layout (#642,
-ADR-092). On 2026-11-18 the owner's archive was migrated, rebuilt as canonical-v2 for
+ADR-092). On 2026-11-18 (an operator run on the owner's machine, which CI cannot establish) the
+owner's archive was migrated, rebuilt as canonical-v2 for
 the 26 OANDA FX instruments at =h1= and =d1= (0 failed partitions) and audited
 against raw with no findings. The v1 spread cross-check of section 6 is not built:
 section 8 is its replacement, checking against the raw itself, and the v1 files are
