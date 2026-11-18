@@ -208,7 +208,7 @@ func TestAudit_ACanonicalMonthWhoseRawIsGoneCannotBeCertified(t *testing.T) {
 	assert.Equal(t, AuditUnverifiable, got.Instruments[0].Raw[0].State)
 	assert.Equal(t, 1, got.Summary.RawUnverifiable)
 	assert.Zero(t, got.Summary.RawNoRaw, "it is not the harmless no-raw of a month with no canonical file either")
-	assert.True(t, got.Instruments[0].Gaps == nil || len(got.Instruments[0].Gaps) == 0)
+	assert.Empty(t, got.Instruments[0].Gaps)
 	assert.Equal(t, 3, got.Instruments[0].Bars, "the series itself loaded")
 }
 
