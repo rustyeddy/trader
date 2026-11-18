@@ -100,7 +100,9 @@ audit=.
 - *No fallback:* after the move the old place is not read (a test proves build does
   not see raw left in the old layout).
 
-Every =raw/<source>= is moved, whatever its provider (dukascopy and stooq included):
+Every =raw/<source>= is moved, whatever its provider (dukascopy and stooq included;
+the stooq-managed raw then became =stooq/unzipped=, the stage between stooq's
+downloaded zips in =stooq/raw= and =stooq/canonical=, #682):
 a directory rename costs the same, and no code needs to read their files for it. The
 migration is for the owner to run on =/srv/data=; tests use temporary directories
 only. A read-only dry run on the real archive (2026-11-18) found 5 sources, 814,675

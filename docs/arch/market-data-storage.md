@@ -11,7 +11,7 @@ All persisted instrument price data, including production, research, and synthet
 ```
 
 - `source` is the originating provider (e.g., `oanda`, `alpaca`, `stooq`, `dukascopy`), including for canonical data.
-- `stage` is `raw` or `canonical`.
+- `stage` is `raw`, `unzipped` or `canonical`. Only a source that ships archives has `unzipped` (see below).
 - `instrument` is a stable, filesystem-safe identifier; do not assume every instrument is a six-character FX pair.
 - `YYYY` and `MM` identify the partition; `MM` is zero-padded.
 - Canonical files **must** be named `<instrument>-<YYYY>-<MM>-<interval>.csv`. Interval tokens must be consistent with Trader's supported interval identifiers.
@@ -31,7 +31,17 @@ The prefix can change; the subtree under the data root must not. Code builds pat
 
 **Canonical** means Trader's normalized **schema/representation**, not provider-independent OHLC prices. The same EURUSD H1 period from OANDA and Dukascopy may have different valid OHLC values. Never merge or silently substitute providers on the assumption that canonical prices are identical.
 
-Intermediate forms produced during raw-to-canonical conversion are optional. Their retention, layout, and cleanup may be decided per ingestion pipeline; they are not part of the required `raw`/`canonical` contract.
+**Unzipped** is the one intermediate stage the layout knows, for a source that ships large archives holding many instruments and timeframes. stooq is one: its `.zip` files are downloaded, unzipped, then canonicalized, so it has three stages:
+
+```text
+/srv/data/stooq/raw/d_us_txt.zip, h_us_txt.zip     the downloaded archives, untouched
+/srv/data/stooq/unzipped/SPY/2017/05/SPY-2017-05-d1.csv   their contents split per instrument and month (raw-v1)
+/srv/data/stooq/canonical/SPY/2017/05/SPY-2017-05-d1.csv  canonical-v2, built from unzipped
+```
+
+A source that downloads straight into per-instrument partitions (oanda) has no `unzipped` stage. There is no separate `stooq-managed` source.
+
+Other intermediate forms produced during raw-to-canonical conversion are optional. Their retention, layout, and cleanup may be decided per ingestion pipeline; they are not part of the required `raw`/`canonical` contract.
 
 ## Metadata and assumptions
 

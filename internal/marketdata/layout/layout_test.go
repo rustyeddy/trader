@@ -132,8 +132,11 @@ func TestParseRejectsNonPartitionPaths(t *testing.T) {
 
 func TestStageValid(t *testing.T) {
 	assert.True(t, layout.Raw.Valid())
+	assert.True(t, layout.Unzipped.Valid())
 	assert.True(t, layout.Canonical.Valid())
 	assert.False(t, layout.Stage("raw ").Valid())
+	assert.False(t, layout.Stage("Unzipped").Valid())
+	assert.False(t, layout.Stage("").Valid())
 }
 
 func TestLegacyRawDir_MapsTheOldRawDirectoryToTheCurrentOne(t *testing.T) {
@@ -154,4 +157,21 @@ func TestLegacyRawDir_RefusesANameThatCannotBeASourceOrIsAStage(t *testing.T) {
 
 		assert.ErrorIs(t, err, layout.ErrInvalidComponent, "%q", source)
 	}
+}
+
+func TestUnzippedStage_ResolvesAndParsesLikeTheOthers(t *testing.T) {
+	p := layout.Partition{Source: "stooq", Stage: layout.Unzipped, Instrument: "SPY", Year: 2017, Month: time.May, Interval: "d1"}
+
+	path, err := p.Path()
+
+	require.NoError(t, err)
+	assert.Equal(t, "stooq/unzipped/SPY/2017/05/SPY-2017-05-d1.csv", filepath.ToSlash(path))
+	back, err := layout.Parse(path)
+	require.NoError(t, err)
+	assert.Equal(t, p, back)
+	dir, err := layout.StageDir("stooq", layout.Unzipped)
+	require.NoError(t, err)
+	assert.Equal(t, "stooq/unzipped", filepath.ToSlash(dir))
+	_, err = layout.StageDir("stooq", layout.Stage("unzip"))
+	assert.ErrorIs(t, err, layout.ErrInvalidComponent)
 }
