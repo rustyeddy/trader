@@ -135,3 +135,23 @@ func TestStageValid(t *testing.T) {
 	assert.True(t, layout.Canonical.Valid())
 	assert.False(t, layout.Stage("raw ").Valid())
 }
+
+func TestLegacyRawDir_MapsTheOldRawDirectoryToTheCurrentOne(t *testing.T) {
+	for _, source := range []string{"oanda", "dukascopy", "stooq-managed", "alpaca"} {
+		legacy, current, err := layout.LegacyRawDir(source)
+
+		require.NoError(t, err)
+		assert.Equal(t, "raw/"+source, filepath.ToSlash(legacy))
+		assert.Equal(t, source+"/raw", filepath.ToSlash(current))
+		want, _ := layout.StageDir(source, layout.Raw)
+		assert.Equal(t, want, current, "the current directory is the layout's own")
+	}
+}
+
+func TestLegacyRawDir_RefusesANameThatCannotBeASourceOrIsAStage(t *testing.T) {
+	for _, source := range []string{"", ".hidden", "../x", "a/b", "has space", "raw", "canonical"} {
+		_, _, err := layout.LegacyRawDir(source)
+
+		assert.ErrorIs(t, err, layout.ErrInvalidComponent, "%q", source)
+	}
+}

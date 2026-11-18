@@ -184,3 +184,31 @@ func allOf(s string, ok func(byte) bool) bool {
 func isLower(c byte) bool { return c >= 'a' && c <= 'z' }
 func isUpper(c byte) bool { return c >= 'A' && c <= 'Z' }
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// LegacyRawRoot is the top-level directory the raw archive had before ADR-089 and
+// ADR-092 put the source first: <root>/raw/<source>/... then, <root>/<source>/raw/...
+// now. LegacyCanonicalRoot is the same for canonical files; those were canonical-v1
+// and are rebuilt, never moved.
+const (
+	LegacyRawRoot       = "raw"
+	LegacyCanonicalRoot = "canonical"
+)
+
+// LegacyRawDir returns where a source's raw data was under the old layout
+// (raw/<source>) and where it is now (<source>/raw), both relative to the data root.
+// It reports ErrInvalidComponent for a source that cannot be a path component,
+// which includes every name that would collide with the old top-level directories
+// only by being spelled like a stage.
+func LegacyRawDir(source string) (legacy, current string, err error) {
+	if err := validComponent("source", source); err != nil {
+		return "", "", err
+	}
+	if source == LegacyRawRoot || source == LegacyCanonicalRoot {
+		return "", "", fmt.Errorf("%w: source %q is a stage name", ErrInvalidComponent, source)
+	}
+	current, err = StageDir(source, Raw)
+	if err != nil {
+		return "", "", err
+	}
+	return filepath.Join(LegacyRawRoot, source), current, nil
+}

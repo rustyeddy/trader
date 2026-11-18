@@ -181,6 +181,29 @@ spread from the first to the last of the range, each in full. A raw file edited 
 extended after a build shows as a fingerprint finding plus the rows it changed:
 rebuild with `trader data build`.
 
+### Migrating the raw archive
+
+```sh
+trader data migrate                       # dry run: plan and checks, nothing moves
+trader data migrate --apply --checksum    # move, then prove every file unchanged
+trader data migrate --apply --reverse     # move everything back
+```
+
+The raw archive used to live in `<data root>/raw/<source>/...`; trader now reads and
+writes `<data root>/<source>/raw/...`. `migrate` renames each source's directory whole
+(no copying: instant, and every file keeps its inode and bytes). It is a **dry run**
+unless you pass `--apply`. It refuses, and moves nothing at all, if a destination
+already exists, a source holds a symbolic link, or it finds a temporary file (a
+download or build is running or was interrupted: stop it first). After each move it
+checks the files are the files that were there; `--checksum` also compares the SHA-256
+of every file before and after (it reads all the data twice). If verification fails,
+nothing is moved back for you: use `--reverse`.
+
+Only raw moves. The old `canonical/<source>` files are canonical-v1; they are listed,
+never touched, and rebuilt with `trader data build`. Delete them yourself once
+`trader data audit` passes on the rebuilt data. The old layout is not read after the
+move: there is no fallback.
+
 ### Auditing a range
 
 ```sh
