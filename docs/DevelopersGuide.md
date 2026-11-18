@@ -86,6 +86,10 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   against its raw partition independently of `Build`'s code; `service.VerifyCanonical`
   reads the raw (`oanda.ReadSourcePartition`), calls it per month, and `--sample`
   picks months evenly (`sampleMonths`).
+- `service.MigrateLayout` (`trader data migrate`, ADR-092) moves `raw/<source>` to
+  `<source>/raw` with `store.Move` (one rename, never overwrites), the mapping in
+  `layout.LegacyRawDir` and verification by `store.Inventory`; it is a dry run unless
+  asked to apply, and file I/O stays in `store` (the architecture test covers `service`).
 - `service.Audit` (`trader data audit`, ADR-090 section 9) composes `LoadSeries` (months,
   gaps) and `VerifyCanonical` into one `AuditReport` that marshals to JSON; it adds no
   rule. The command only chooses the format and exits non-zero on `ErrAuditFailed`.

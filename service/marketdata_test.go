@@ -217,10 +217,15 @@ func TestBuildCanonical_BuiltAtDefaultsToNow(t *testing.T) {
 // service in its place (ADR-091): within the module it may import the engine (the
 // root package), the public market-data model, the market-data domain service and a
 // provider, never a transport, the store or the layout directly. File data goes
-// through the domain service and the provider.
+// through the domain service and the provider. The one exception is migrate.go: the
+// layout migration (#642) is an operation on the archive's directory structure, not
+// on market data, so it uses the foundational store and layout packages directly
+// (ADR-091 lets foundational packages be imported without a service wrapper); no
+// other file may.
 func TestService_ImportsOnlyTheDomainServiceAndProviders(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
 	allowed := map[string]bool{mod: true, mod + "/marketdata": true, mod + "/marketdata/service": true, mod + "/provider/oanda": true}
+	foundational := map[string]bool{"migrate.go": true}
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
 	checked := 0
@@ -234,6 +239,9 @@ func TestService_ImportsOnlyTheDomainServiceAndProviders(t *testing.T) {
 		for _, imp := range f.Imports {
 			path, uerr := strconv.Unquote(imp.Path.Value)
 			require.NoError(t, uerr)
+			if foundational[file] && (path == mod+"/store" || path == mod+"/internal/marketdata/layout") {
+				continue
+			}
 			if path == mod || strings.HasPrefix(path, mod+"/") {
 				assert.True(t, allowed[path], "%s imports %s", file, path)
 			}

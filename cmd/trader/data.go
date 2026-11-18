@@ -49,6 +49,7 @@ func newDataCmd(a *app) *cobra.Command {
 	data.AddCommand(newStatusCmd(a))
 	data.AddCommand(newVerifyCmd(a))
 	data.AddCommand(newAuditCmd(a))
+	data.AddCommand(newMigrateCmd(a))
 	return data
 }
 

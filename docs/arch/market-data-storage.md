@@ -56,6 +56,21 @@ OLD: data/raw/oanda/...        NEW: data/oanda/raw/...
 OLD: data/canonical/oanda/...  NEW: data/oanda/canonical/...
 ```
 
+`trader data migrate` does the move for raw (ADR-092): each `raw/<source>` directory is
+renamed to `<source>/raw`, as a dry run unless `--apply` is given, verified file by file
+(`--checksum` for the bytes) and reversible with `--reverse`. Old `canonical/` files
+are canonical-v1: they are not migrated but rebuilt with `trader data build`, then
+deleted by the owner once `trader data audit` passes. Operator steps:
+
+1. Stop every download and build.
+2. `trader data migrate` (dry run) and read the plan; it refuses if a destination
+   exists, a link or a temporary file is found.
+3. `trader data migrate --apply --checksum`.
+4. `trader data build` for the months wanted, then `trader data audit`.
+5. Delete the old `canonical/` tree and any stale `.part` files by hand.
+
+Original statement of the work:
+
 Implementation must inventory existing path assumptions, migrate existing data safely, and update config, ingestion, readers, tests, and documentation. Prefer a reversible migration plan with verification before removal of old paths. No implicit legacy fallback.
 
 This layout refines the storage organization described in historical-data ADR-020; its acquisition, provenance, and bar-normalization decisions remain applicable unless separately amended.

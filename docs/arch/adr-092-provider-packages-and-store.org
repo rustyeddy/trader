@@ -62,11 +62,49 @@ the same fixed-decimals price text rules.
   local) and secret rules stand.
 - =download= still calls the provider from =cmd/trader= until it moves behind an
   application service (#641).
-- The layout migration of an existing archive, and any storage manager beyond the
-  store, are separate (#642). The store's lock is process-local; two processes
-  writing one file are not coordinated.
+- The layout migration of an existing archive is =trader data migrate= (#642, below);
+  a storage manager beyond the store is not built. The store's lock is
+  process-local; two processes writing one file are not coordinated, which is why
+  the migration must run with no download or build running.
 - The canonical reader and the public series container (#647) will use the store
   through =marketdata/service=; nothing here constrains them.
+
+* The migration (#642)
+
+The archive on disk had =<root>/raw/<source>/...=; the code reads
+=<root>/<source>/raw/...=. =trader data migrate= moves raw between the two, and only
+raw: the old =canonical/= files are canonical-v1, which ADR-090 rebuilds from raw and
+never reuses (they even share file names with canonical-v2 files, so moving them
+would make every month read as stale and the first build overwrite them), so they are
+listed and left for the owner to delete after a rebuild has passed =trader data
+audit=.
+
+- *A rename of each source's directory, not a copy.* On one filesystem it is one
+  atomic =rename(2)=, as fast for 800,000 files as for one, and every file keeps its
+  inode and bytes, so "byte-identical" holds by construction and is verified, not
+  assumed. =store.Move= refuses to move onto anything that exists (rename would
+  silently replace an empty directory), =store.Inventory= records path, size, time and
+  inode, =layout.LegacyRawDir= owns the old-to-new mapping, and
+  =service.MigrateLayout= plans, checks, moves and verifies. All file operations are
+  the store's; the file-I/O architecture test now also covers =service= and
+  =internal/marketdata=.
+- *Dry run by default.* It moves nothing without =--apply=. It refuses, and moves
+  nothing at all, if any destination exists, a source holds a symbolic link, or a
+  store temporary file is found (a write in flight or interrupted); there is no
+  merge and no overwrite.
+- *Verified after every unit:* the same set of files with the same sizes,
+  modification times and inodes; =--checksum= adds SHA-256 of every file before and
+  after. A failure is reported and nothing is moved back automatically;
+  =--reverse= moves everything back under the same checks. A rerun after an
+  interruption moves what is left.
+- *No fallback:* after the move the old place is not read (a test proves build does
+  not see raw left in the old layout).
+
+Every =raw/<source>= is moved, whatever its provider (dukascopy and stooq included):
+a directory rename costs the same, and no code needs to read their files for it. The
+migration is for the owner to run on =/srv/data=; tests use temporary directories
+only. A read-only dry run on the real archive (2026-11-18) found 5 sources, 814,675
+files, 28.4 GiB, in under two seconds, with no problems.
 
 * Alternatives considered
 

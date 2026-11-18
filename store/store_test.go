@@ -356,13 +356,14 @@ var fileOps = map[string]map[string]bool{
 	"ioutil":   {"ReadFile": true, "WriteFile": true, "ReadDir": true, "TempFile": true, "TempDir": true},
 }
 
-// TestDataPackages_DoFileIOOnlyThroughStore enforces issue #644: the provider and
-// market-data packages (the code that reads and writes the data directory) call
-// no file function of the standard library; they go through store. Test files
+// TestDataPackages_DoFileIOOnlyThroughStore enforces issue #644: the provider,
+// market-data, application-service and layout packages (the code that reads and
+// writes the data directory) call no file function of the standard library; they
+// go through store. Test files
 // are exempt, since they lay out fixtures and inspect results directly.
 func TestDataPackages_DoFileIOOnlyThroughStore(t *testing.T) {
 	checked := 0
-	for _, dir := range []string{"../provider", "../marketdata"} {
+	for _, dir := range []string{"../provider", "../marketdata", "../service", "../internal/marketdata"} {
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err

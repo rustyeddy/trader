@@ -343,7 +343,8 @@ Coverage of the ends of a range (a range that starts before the archive does, or
 ends after it); disk layout checks; the partition cache; loading
 canonical bars into the engine's =bar= and frames (a later stage, with the bar
 model); =m1=, =h4=, =W1=; other providers; the one-time migration of =raw/oanda= to
-=oanda/raw=, after which the existing raw archive is converted by this builder.
+=oanda/raw= (now =trader data migrate=, #642, ADR-092), after which the existing raw
+archive is converted by this builder.
 
 * Consequences
 
