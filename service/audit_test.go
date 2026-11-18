@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -33,7 +35,7 @@ func TestAudit_SoundDataPassesAndIsCounted(t *testing.T) {
 	assert.Equal(t, "loaded", ia.Months[0].State)
 	require.Len(t, ia.Raw, 1)
 	assert.Equal(t, "verified", ia.Raw[0].State)
-	assert.Equal(t, AuditSummary{Months: 1, MonthsLoaded: 1, Bars: 5, RawVerified: 1}, got.Summary)
+	assert.Equal(t, AuditSummary{Months: 1, MonthsLoaded: 1, Bars: 5, RawVerified: 1, RawChecked: 1}, got.Summary)
 }
 
 func TestAudit_AnUnexplainedGapFailsUnlessAllowedAndIsStillReported(t *testing.T) {
@@ -189,4 +191,40 @@ func TestAudit_RefusesWhatItCannotRun(t *testing.T) {
 	assert.Error(t, errReversed)
 	assert.Error(t, errNegative)
 	assert.ErrorIs(t, errCancelled, context.Canceled)
+}
+
+func TestAudit_ACanonicalMonthWhoseRawIsGoneCannotBeCertified(t *testing.T) {
+	root := storetest.Root(t)
+	buildHours(t, "EURUSD", utc(2024, 1, 9, 0), 3)
+	key := oanda.PartitionKey{Symbol: "EURUSD", Interval: oanda.RawH1, Year: 2024, Month: time.January}
+	rawPath, err := key.Path()
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(root, rawPath)))
+
+	got, aerr := Audit(context.Background(), nil, auditReq("EURUSD"))
+
+	require.ErrorIs(t, aerr, ErrAuditFailed, "strict by default: a healthy-looking month is not certified without its raw")
+	assert.False(t, got.OK)
+	assert.Equal(t, AuditUnverifiable, got.Instruments[0].Raw[0].State)
+	assert.Equal(t, 1, got.Summary.RawUnverifiable)
+	assert.Zero(t, got.Summary.RawNoRaw, "it is not the harmless no-raw of a month with no canonical file either")
+	assert.True(t, got.Instruments[0].Gaps == nil || len(got.Instruments[0].Gaps) == 0)
+	assert.Equal(t, 3, got.Instruments[0].Bars, "the series itself loaded")
+}
+
+func TestAudit_ASampleCountsTheMonthsItCheckedAgainstRaw(t *testing.T) {
+	storetest.Root(t)
+	for _, m := range []time.Month{time.January, time.February, time.March} {
+		putRaw(t, "EURUSD", 2024, m, rec(utc(2024, m, 9, 0), true))
+	}
+	require.NoError(t, BuildCanonical(context.Background(), nil,
+		BuildRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 4, 1, 0)}, nil))
+	req := auditReq("EURUSD")
+	req.To, req.AllowMissing, req.Sample = utc(2024, 4, 1, 0), true, 1
+
+	got, err := Audit(context.Background(), nil, req)
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, got.Summary.Months)
+	assert.Equal(t, 1, got.Summary.RawChecked)
 }

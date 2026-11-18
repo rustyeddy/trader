@@ -196,7 +196,11 @@ does). The command exits non-zero when the data is not sound: a stale month, a b
 or missing month or an unexplained gap (unless `--allow-bad` / `--allow-missing`
 accept them, as for `status`), or a file that disagrees with its raw. `--sample N`
 limits the raw cross-check to N months per instrument; months and gaps always cover
-the whole range. `--format json` prints the entire report as one JSON object (also
+the whole range, and the output says so next to the verdict (`note: sampled: the raw
+cross-check covered N of M months`; JSON `sample`, `raw_checked`), because an OK then
+certifies the raw cross-check only for those months. A month that has a canonical
+file but no raw partition is `UNVERIFIABLE` and fails the audit: the audit does not
+certify what it cannot check (`trader data verify` only reports it). `--format json` prints the entire report as one JSON object (also
 when the audit fails, so a tool can read why); the text output ends with
 `audit: OK` or `audit: FAILED`.
 

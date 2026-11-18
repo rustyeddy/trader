@@ -57,6 +57,13 @@ type AuditFinding struct {
 	Detail string     `json:"detail"`
 }
 
+// The raw states of an audit, those of a verification plus AuditUnverifiable.
+const (
+	// AuditUnverifiable: there is a canonical file for the month and no raw
+	// partition to check it against. It fails the audit: it cannot be certified.
+	AuditUnverifiable = "unverifiable"
+)
+
 // AuditPartition is the raw cross-check of one month (see PartitionVerification).
 type AuditPartition struct {
 	Year      int            `json:"year"`
@@ -88,17 +95,23 @@ type InstrumentAudit struct {
 
 // AuditSummary counts what the audit found, over every instrument.
 type AuditSummary struct {
-	Months             int `json:"months"`
-	MonthsLoaded       int `json:"months_loaded"`
-	MonthsBad          int `json:"months_bad"`
-	MonthsMissing      int `json:"months_missing"`
-	MonthsStale        int `json:"months_stale"`
-	Bars               int `json:"bars"`
-	GapsUnexplained    int `json:"gaps_unexplained"`
-	GapsClosure        int `json:"gaps_known_closure"`
-	RawVerified        int `json:"raw_verified"`
-	RawFailed          int `json:"raw_failed"`
-	RawNoRaw           int `json:"raw_no_raw"`
+	Months          int `json:"months"`
+	MonthsLoaded    int `json:"months_loaded"`
+	MonthsBad       int `json:"months_bad"`
+	MonthsMissing   int `json:"months_missing"`
+	MonthsStale     int `json:"months_stale"`
+	Bars            int `json:"bars"`
+	GapsUnexplained int `json:"gaps_unexplained"`
+	GapsClosure     int `json:"gaps_known_closure"`
+	RawVerified     int `json:"raw_verified"`
+	RawFailed       int `json:"raw_failed"`
+	RawNoRaw        int `json:"raw_no_raw"`
+	// RawUnverifiable counts months that have a canonical file but no raw to check
+	// it against; each fails the audit.
+	RawUnverifiable int `json:"raw_unverifiable"`
+	// RawChecked counts the months cross-checked against raw (all of them, unless
+	// the audit was sampled).
+	RawChecked         int `json:"raw_checked"`
 	RawNoCanonical     int `json:"raw_no_canonical"`
 	RawFindings        int `json:"raw_findings"`
 	InstrumentsFailing int `json:"instruments_failing"`
@@ -129,7 +142,9 @@ type AuditReport struct {
 //   - the bars missing inside the series against the market calendar: weekends are
 //     not reported, year-end holidays are known closures, anything else is
 //     unexplained (see LoadSeries);
-//   - each canonical file against the raw partition it was built from: raw-row
+//   - each canonical file against the raw partition it was built from. A month
+//     with a canonical file and no raw cannot be certified and fails the audit
+//     ("unverifiable"); a month with neither is the missing month above. Raw-row
 //     accounting, exact prices and volume, bad-record reasons, fingerprint, and
 //     canonical validity such as duplicate or out-of-order times and invalid OHLC
 //     (see VerifyCanonical).
@@ -197,10 +212,21 @@ func Audit(ctx context.Context, log *slog.Logger, req AuditRequest) (AuditReport
 			report.Summary.Bars += ia.Bars
 		}
 
+		hasCanonical := map[[2]int]bool{}
+		for _, m := range r.Months {
+			hasCanonical[[2]int{m.Year, int(m.Month)}] = m.State != MonthMissing
+		}
 		verr := VerifyCanonical(ctx, log, VerifyRequest{Instruments: []string{symbol}, Interval: req.Interval,
 			From: req.From, To: req.To, Sample: req.Sample}, func(p PartitionVerification) {
-			ia.Raw = append(ia.Raw, auditPartition(p))
+			ap := auditPartition(p)
+			report.Summary.RawChecked++
 			report.Summary.RawFindings += len(p.Findings) + p.Omitted
+			if p.State == VerifyNoRaw && hasCanonical[[2]int{p.Year, int(p.Month)}] {
+				ap.State = AuditUnverifiable
+				report.Summary.RawUnverifiable++
+				ia.OK = false
+			}
+			ia.Raw = append(ia.Raw, ap)
 			switch p.State {
 			case VerifyOK:
 				report.Summary.RawVerified++
@@ -208,7 +234,9 @@ func Audit(ctx context.Context, log *slog.Logger, req AuditRequest) (AuditReport
 				report.Summary.RawFailed++
 				ia.OK = false
 			case VerifyNoRaw:
-				report.Summary.RawNoRaw++
+				if ap.State != AuditUnverifiable {
+					report.Summary.RawNoRaw++
+				}
 			case VerifyNoCanonical:
 				report.Summary.RawNoCanonical++
 			}

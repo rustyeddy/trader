@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -131,4 +133,33 @@ func TestAuditCommand_IsTransportOnly(t *testing.T) {
 			assert.True(t, allowed[path], "audit.go imports %s", path)
 		}
 	}
+}
+
+func TestDataAudit_ARawlessCanonicalMonthIsUnverifiableAndFails(t *testing.T) {
+	root := storetest.Root(t)
+	buildMonths(t, root, time.January)
+	key := oanda.PartitionKey{Symbol: "EURUSD", Interval: oanda.RawH1, Year: 2024, Month: time.January}
+	rawPath, err := key.Path()
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(root, rawPath)))
+
+	out, _, err := runData(t, nil, auditArgs(t, root, "2024-02-01")...)
+
+	require.ErrorIs(t, err, service.ErrAuditFailed)
+	assert.Contains(t, out, "  raw 2024-01: UNVERIFIABLE, a canonical file and no raw partition to check it against\n")
+	assert.Contains(t, out, "unverifiable 1")
+	assert.True(t, strings.HasSuffix(out, "audit: FAILED\n"))
+}
+
+func TestDataAudit_ASampleSaysSoNextToTheVerdict(t *testing.T) {
+	root := storetest.Root(t)
+	buildMonths(t, root, time.January, time.February)
+
+	out, _, err := runData(t, nil, auditArgs(t, root, "2024-03-01", "--sample", "1")...)
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "note: sampled: the raw cross-check covered 1 of 2 months\n")
+	assert.True(t, strings.HasSuffix(out, "audit: OK\n"))
+	full, _, _ := runData(t, nil, auditArgs(t, root, "2024-03-01")...)
+	assert.NotContains(t, full, "note: sampled")
 }

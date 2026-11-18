@@ -133,6 +133,8 @@ func writeAuditText(say func(string, ...any), r service.AuditReport) {
 			switch p.State {
 			case "verified":
 				say("%s: verified, rows %d, bars %d, bad %d%s\n", name, p.RawRows, p.Bars, p.Bad, explainedText(p.Explained))
+			case service.AuditUnverifiable:
+				say("%s: UNVERIFIABLE, a canonical file and no raw partition to check it against\n", name)
 			case "no raw":
 				say("%s: no raw partition\n", name)
 			case "no canonical":
@@ -157,9 +159,14 @@ func writeAuditText(say func(string, ...any), r service.AuditReport) {
 		say("  %s: %d bars\n", okText(ia.OK), ia.Bars)
 	}
 	s := r.Summary
-	say("total: months %d (loaded %d, bad %d, missing %d, stale %d); bars %d; gaps %d unexplained, %d known closures; raw verified %d, failed %d, no raw %d, no canonical %d, findings %d\n",
+	say("total: months %d (loaded %d, bad %d, missing %d, stale %d); bars %d; gaps %d unexplained, %d known closures; raw verified %d, failed %d, unverifiable %d, no raw %d, no canonical %d, findings %d\n",
 		s.Months, s.MonthsLoaded, s.MonthsBad, s.MonthsMissing, s.MonthsStale, s.Bars, s.GapsUnexplained, s.GapsClosure,
-		s.RawVerified, s.RawFailed, s.RawNoRaw, s.RawNoCanonical, s.RawFindings)
+		s.RawVerified, s.RawFailed, s.RawUnverifiable, s.RawNoRaw, s.RawNoCanonical, s.RawFindings)
+	if r.Sample > 0 {
+		// Months and gaps were checked over the whole range; the raw cross-check
+		// only over a sample, so an OK certifies only that part.
+		say("note: sampled: the raw cross-check covered %d of %d months\n", s.RawChecked, s.Months)
+	}
 	say("audit: %s\n", okText(r.OK))
 }
 
