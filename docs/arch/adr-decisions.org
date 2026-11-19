@@ -36,8 +36,8 @@ the MCP server, the Alpaca and Stooq providers, account activity, the strategy
 protocol and process manager, the public SDK surface, and similar) may name
 packages, commands or paths that exist only in the archive. Their reasoning still
 informs the design; where an ADR names a path, check the tree. ADR-004, ADR-078 and
-ADR-086 to ADR-092 describe the live tree (ADR-090 and ADR-092 are Proposed: implemented,
-not yet accepted; ADR-091 is Accepted). Whether an archived-code ADR is
+ADR-086 to ADR-093 describe the live tree (ADR-090, ADR-091 and ADR-092 are
+Accepted; ADR-093 is Accepted). Whether an archived-code ADR is
 superseded when its code is ported is decided when it is ported.
 
 * Status Definitions
@@ -209,9 +209,10 @@ the original decided, use full supersession instead.
 | 087 | Formula and rounding table for adopting num in the root engine (in adr-087-num-adoption-formula-table.org) | Accepted |
 | 088 | Per-run instrument catalog replaces the root's global instrument map (in adr-088-root-instrument-catalog.org) | Accepted |
 | 089 | Market-data layout resolver, OANDA raw store and package boundary (in adr-089-market-data-store-and-package-boundary.org) | Accepted |
-| 090 | Raw to canonical bars (in adr-090-raw-to-canonical-bars.org) | Proposed; implemented (download-to-canonical, #639) |
+| 090 | Raw to canonical bars (in adr-090-raw-to-canonical-bars.org) | Accepted (#687; canonical-v2) |
 | 091 | Domain-owned services and shared market-data model (in adr-091-domain-services-and-shared-marketdata.org) | Accepted; implemented (#657, #663, #667, #641) |
-| 092 | Provider packages, the store and root-less data APIs (in adr-092-provider-packages-and-store.org) | Proposed; amends parts of 089 |
+| 092 | Provider packages, the store and root-less data APIs (in adr-092-provider-packages-and-store.org) | Accepted (#687); amends parts of 089 |
+| 093 | Trader is the sole risk authority for all requested orders (in adr-093-trader-is-the-risk-authority.org) | Accepted (owner approval, #686) |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

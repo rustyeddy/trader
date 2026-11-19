@@ -1,0 +1,187 @@
+#+TITLE: ADR-093: Trader is the sole risk authority for all requested orders
+#+STARTUP: overview indent
+
+* Status
+
+Accepted (owner approval 2026-11-18, #686). It builds on accepted
+ADR-005, ADR-006 and ADR-066 and amends none of them: it says *who* may request
+an order and *where* sizing and risk admission happen, now that Trader has clients
+(Investor, Tulip) and external strategies that may be built in other repositories.
+
+* Context
+
+Trader's requirements (=trader-framework-requirements.org=, "Risk Manager") put
+gating trades on the account: maximum risk per trade and per account, maximum
+margin, position sizing and loss limits per day, week or month. ADR-005 keeps
+strategies away from brokers. ADR-006 makes risk admission a separate, auditable
+stage and rejects risk inside the strategy because risk is an account-level
+concern. In the live tree, =account.size= sizes every open against a risk budget
+(1% of equity by default) and available margin, and =marginLevelPolicy= handles
+closeout.
+
+Three things now put pressure on this:
+
+- *Investor* (rustyeddy/investor), the AI research layer, has a draft policy in
+  which Investor sizes trades, reserves capacity, enforces aggregate, correlated,
+  margin, halt and freshness limits, and then submits paper orders to Trader.
+- *External strategies* (ADR-062/063) are being brought back as gRPC processes
+  that may be built and released from a separate repository (rustyeddy/strategies).
+  Trader cannot review that code as part of its own changes.
+- *More transports* (REST, MCP, Tulip) mean that any check living in a client is
+  advisory, because the next client does not run it.
+
+Two risk engines would disagree, and the one that is skipped is whichever one a
+given order did not pass through. Backtests would also stop predicting paper
+results, because backtests would run Trader's sizing while paper orders ran
+Investor's.
+
+* Decision
+
+** Strategies emit requested Orders; Trader owns admission
+
+An in-process or external strategy (ADR-062) may originate an =order= in
+=stateRequested= for an account/run the owner has authorized. AI agents may
+originate /order intents/ (requested Orders) **through that same strategy
+interface**, as agent-discretion strategies. The owner's manual source also
+uses a strategy adapter, rather than a second order-admission path.
+
+The requested order expresses a desired trade (instrument, action, direction, reference price, stop and optional exits).
+This is sometimes called an /intent/, but it is *the requested stage of the
+same Order*, not a second domain type to be copied into one. The existing
+=orderState= lifecycle (=stateRequested=, =stateSized=, =stateSubmitted=,
+=stateFilled=, =stateRejected= and =stateCancelled=) remains authoritative.
+A request is something wanted, not an executed trade.
+
+The originator has no authority to choose its account-level quantity, approve
+risk, assert a later order state, set a broker/order identifier, or execute.
+Trader validates the origin and request, binds the authorized account, controls
+all state transitions, and routes the same Order through Account sizing/risk
+admission before Broker submission. Any untrusted transport representation is
+decoded and validated into a *requested* Order: supplied quantity, state,
+admission or execution fields are ignored/rejected, never trusted. A common
+Order type does not mean clients may write its internal lifecycle fields.
+
+Sources include:
+- *Rule-based strategies*, in-process or external (ADR-062).
+- *Agent-discretion strategies*: an authorized AI agent produces /order intents/
+  (requested Orders) through the strategy interface, even when its decisions
+  are discretionary rather than rule-based. The interface is bound to an
+  owner-authorized account/run, risk policy and operational limits. Agents do not
+  get a separate direct REST/MCP order-ingress or broker path.
+- *Owner discretionary requests* via a protected local mechanism (#693) that
+  feeds a manual strategy adapter. The origin and experiment are recorded. A broker's own interface can bypass Trader
+  and is therefore not represented as having passed Trader admission; external
+  fills require reconciliation (ADR-079, ADR-081).
+
+An agent's nondeterministic decisions are labeled as forward experiments;
+replaying *recorded requested Orders* avoids calling the model again and does
+not turn hindsight into a valid historical backtest. A late or unavailable
+agent response produces no request. An agent, like a strategy, cannot bypass
+the Account/Broker path.
+
+** The owner can halt any strategy or account from the host
+
+A misbehaving strategy is stopped by a halt, not by an opposing discretionary
+trade, which on a netting (FIFO) account would change the strategy's position
+behind its back. =trader halt= for a strategy or an account stops admitting its
+intents and cancels its pending orders. With =--flatten=, it also closes its
+positions. Trader performs the halt itself, so it works when a strategy process
+is hung. The halt persists across restarts until resumed, and every halt is
+journaled as an incident. It uses the same owner-only local channel (#692).
+
+** Trader sizes and admits every order, with one code path
+
+Sizing and risk admission happen in Trader's Account machinery, per account and
+across accounts, and only there. An originating strategy or agent supplies a
+requested Order (side, reference entry, stop and exits); it cannot specify an
+authoritative quantity or widen a limit. Broker submission is permitted only
+after Account admission, and the Broker cannot override a rejection. Trader
+owns transitions of the same Order through its entire =orderState= lifecycle;
+no separate =Intent= struct or order-copying workflow is introduced. The same
+admission code runs in backtest, paper and live; modes may require different
+configured limits, but cannot silently skip a required one.
+
+** Risk policy is versioned Trader configuration that only the owner changes
+
+Limits come from a versioned risk-policy configuration that names the accounts it
+covers. The owner changes it in configuration, not through any API operation. A
+missing *required* policy settings block new exposure; an unrecognized policy
+field invalidates the configuration rather than silently opening exposure.
+Controls that do not yet exist cannot be claimed as active or enforced. The
+owner-approved requirements are explicit by mode: simulated research and
+practice/demo trading may use the implemented minimum controls, with their
+limitations reported; real-money trading is disabled until the additional
+controls below and atomic admission are implemented, configured and verified.
+Any required control that is unavailable or disabled blocks exposure in that
+mode. No unspecified limit silently means unlimited. The policy covers, as
+implementation arrives:
+
+| Control | Live tree today |
+|---------+-----------------|
+| Per-trade planned loss as a fraction of equity | =account.size= (1% default) |
+| Initial margin admission (ADR-066) | =account.size= margin limit |
+| Margin closeout | =marginLevelPolicy= |
+| Aggregate planned loss across open positions and pending entries | not yet |
+| Correlated or shared-currency exposure groups, signed per currency | not yet |
+| Gross and per-instrument notional, leverage ceiling | not yet |
+| Loss halts per session, day, week or drawdown, with resume rules | not yet |
+| Maximum age of marks, quotes and conversion rates used for admission | not yet |
+
+Concurrent admission against one account **must** be serialized (#538), so two
+orders cannot both use the same capacity. This is a required implementation
+condition, not a claim that #538 is already complete.
+
+** Decisions are recorded and readable, not steerable
+
+The requested Order is the beginning of its own audit history. Trader records
+its originating strategy/agent/version or manual experiment, authorized
+account, requested fields, applicable policy version, input marks, computed
+quantity, individual rule results (including unavailable/deferred controls),
+admission outcome and subsequent =orderState= transitions. Orders, fills and
+positions link to that same identity. Durable persistence and read-only REST
+reporting are implementation follow-ups; this ADR defines their required
+information, not a claim that storage/endpoints exist today. Clients can read
+decisions but cannot alter them after admission.
+
+* Consequences
+
+- Investor removes its independent sizing, capacity reservation and account
+  eligibility enforcement (rustyeddy/investor#39, #40). It researches versions,
+  requests studies/backtests, reads Trader's decisions and recommends activation.
+  An authorized agent-discretion strategy may emit order intents (requested
+  Orders) **through the strategy interface**, never directly to Account/Broker,
+  and may not size, admit, execute or transition them.
+- A model may affect trading through an owner-activated rule strategy or
+  agent-discretion strategy. Both emit requested Orders through the strategy
+  interface and the same Account sizing and admission path. Model-discretion results
+  are evaluated forward, not treated as valid hindsight backtests.
+- The strategy interface, including its agent-discretion implementation, needs
+  an explicit deadline, identity, authorization and failure policy. Trader records requested Orders and lifecycle
+  decisions so a run can be audited and its requests replayed.
+- Simulated and broker demo/practice modes may use the documented implemented
+  minimum controls, with unavailable controls visibly reported; this is not
+  a statement that missing controls are enforced. Real-money accounts must
+  reject new exposure until the additional required controls, #538 and applicable
+  cross-account aggregation are implemented and configured.
+- No external strategy or agent may weaken risk. Its ingress accepts only a
+  requested Order and never trusts account quantity or lifecycle state.
+- Trader takes on read-only REST endpoints for risk decisions, orders, fills and
+  positions. Each needs its own issue.
+- This rules out client-side *admission or broker-order placement*, not the
+  submission of authorized requested Orders. No client may approve, veto or
+  change a risk decision; owner halts are separate authenticated controls.
+
+* Alternatives Considered
+
+- *Investor enforces risk and Trader executes* (the Investor draft). Rejected:
+  other clients bypass it, it duplicates =account.size=, and backtests would not
+  apply the paper limits.
+- *Both enforce, as defense in depth.* Rejected: two sources of truth, every policy
+  change lands twice, and when they disagree no one knows which is right. A client
+  may still display Trader's decision.
+- *A separate risk-service process.* Rejected for now: admission must be atomic
+  with account and order state (#538), and a network hop adds failure modes with
+  no present use.
+- *Strategies or agents size their own orders.* Rejected by the common
+  Account admission boundary (ADR-006). One Order type and its lifecycle do
+  not grant its originator control over sizing or state.
