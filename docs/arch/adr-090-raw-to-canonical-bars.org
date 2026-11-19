@@ -3,12 +3,12 @@
 
 * Status
 
-Proposed, with the owner's answers of 2026-11-14 applied (below), for final
-approval. Issue #628; stage 4 of #584. Builds on ADR-020 (historic data: raw is
+Accepted (owner approval 2026-11-18, #643). The owner's answers of
+2026-11-14 are applied below. Issue #628; stage 4 of #584. Builds on ADR-020 (historic data: raw is
 immutable, canonical is rebuilt from it), ADR-088 (the instrument catalog) and
 ADR-089 (layout, OANDA raw store, package boundary), as amended by ADR-091 and
-the proposed ADR-092. It was implemented while it was Proposed; what follows records what was
-built and run.
+ADR-092 (Accepted). The implementation preceded formal acceptance; what follows
+records what was built and run.
 
 The bar-availability design the owner recorded on #619 (a bar has an opening =Time=
 and an =AvailableAt=; no stored close time; zero means not established) is taken as
@@ -28,7 +28,8 @@ owner's archive was migrated, rebuilt as canonical-v2 for
 the 26 OANDA FX instruments at =h1= and =d1= (0 failed partitions) and audited
 against raw with no findings. The v1 spread cross-check of section 6 is not built:
 section 8 is its replacement, checking against the raw itself, and the v1 files are
-to be deleted. Acceptance of this ADR is the owner's decision (#643).
+to be deleted. The owner accepted this implementation and its documented
+integrity policies in #643.
 
 * Context
 
@@ -66,7 +67,10 @@ The =Bar= and =OHLC= types below are the public =marketdata.Bar= and
 =marketdata.OHLC= (#633, ADR-091), not types of the canonical package; they also
 carry an optional =Trade= series and an =OHLC()= method that picks the preferred
 series (mid, trade, bid, ask). canonical-v2 stores bid, ask and mid only and
-refuses a bar with a trade series; persisting trade needs its own schema decision.
+refuses a bar with a trade series. The owner explicitly deferred persisting
+=Trade= (#643, 2026-11-18): canonical-v2 remains BID/ASK/MID only. A concrete
+trade-price provider/use case requires a separate ADR and schema decision; this
+milestone makes no TRADE column or persistence change.
 The snippet shows the fields canonical-v2 stores.
 
 #+begin_src go

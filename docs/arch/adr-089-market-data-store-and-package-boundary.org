@@ -19,7 +19,7 @@ environment and the config file, but it is no longer the composition root for
 providers; it hands plain values and a credential to =service=, which builds the
 client (#641).
 
-Amended in part by ADR-092 (Proposed): the package paths (OANDA is
+Amended in part by ADR-092 (Accepted, owner approval 2026-11-18, #643): the package paths (OANDA is
 =provider/oanda=), the =store= package that owns data-file I/O and the data root,
 and APIs that take no root. The text below carries that implementation state; the
 layout, the raw format, immutability and the secret rule are unchanged.

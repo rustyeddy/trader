@@ -3,11 +3,11 @@
 
 * Status
 
-Proposed. Records what the implementation of ADR-089, ADR-090 and ADR-091
+Accepted (owner approval 2026-11-18, #643). Records what the implementation
+of ADR-089, ADR-090 and ADR-091
 (issues #634, #644, #639 and #647) changed in the package structure ADR-089
 fixed, so the change is a decision on the record and not only a series of
-edits. It amends parts of accepted ADR-089 and, once accepted, ADR-089 is to be
-marked amended by it. Acceptance is the owner's decision (#643).
+edits. It amends parts of accepted ADR-089; that record notes this amendment.
 
 An honest note on process: the registry says an accepted ADR is superseded, not
 edited. ADR-089's text was updated in place as the implementation landed
@@ -20,7 +20,7 @@ decisions about layout, the raw format or the S-1 secret rule.
 ADR-089 placed OANDA's raw store and client in =internal/marketdata/oanda=, had
 each package take the data root as an argument, and left file writing (atomic
 replace, the per-partition lock) inside the packages that needed it. ADR-091
-(Proposed) then set the direction: providers organized by external system, domain
+(Accepted) then set the direction: providers organized by external system, domain
 services owning their rules, an application service layer coordinating them, and
 the shared storage as its own concern. Three pieces of code wrote the same
 temporary-file, sync and rename sequence and two held the same lock; three held
