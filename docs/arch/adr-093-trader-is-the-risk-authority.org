@@ -3,7 +3,7 @@
 
 * Status
 
-Proposed (#686). Acceptance is the owner's decision. It builds on accepted
+Accepted (owner approval 2026-11-18, #686). It builds on accepted
 ADR-005, ADR-006 and ADR-066 and amends none of them: it says *who* may request
 an order and *where* sizing and risk admission happen, now that Trader has clients
 (Investor, Tulip) and external strategies that may be built in other repositories.
@@ -37,12 +37,15 @@ Investor's.
 
 * Decision
 
-** Strategies and authorized agents request orders; Trader owns admission
+** Strategies emit requested Orders; Trader owns admission
 
-A strategy (in-process or external under ADR-062), an authorized agent, or an
-owner-operated manual source may originate an =order= in =stateRequested= for an
-account/run the owner has authorized. The requested order expresses a desired
-trade (instrument, action, direction, reference price, stop and optional exits).
+An in-process or external strategy (ADR-062) may originate an =order= in
+=stateRequested= for an account/run the owner has authorized. AI agents may
+originate /order intents/ (requested Orders) **through that same strategy
+interface**, as agent-discretion strategies. The owner's manual source also
+uses a strategy adapter, rather than a second order-admission path.
+
+The requested order expresses a desired trade (instrument, action, direction, reference price, stop and optional exits).
 This is sometimes called an /intent/, but it is *the requested stage of the
 same Order*, not a second domain type to be copied into one. The existing
 =orderState= lifecycle (=stateRequested=, =stateSized=, =stateSubmitted=,
@@ -60,13 +63,13 @@ Order type does not mean clients may write its internal lifecycle fields.
 
 Sources include:
 - *Rule-based strategies*, in-process or external (ADR-062).
-- *Agent-discretion*, with or without a conventional strategy process. Agents
-  may propose requested Orders only through a deliberately authorized ingress,
-  bounded to an account/run, policy and operational limits. Exposing a network
-  ingress is a separate implementation/security decision, not approval for
-  arbitrary REST/MCP trade submission or client-controlled sizing.
-- *Owner discretionary requests* via a protected local mechanism (#693). The
-  origin and experiment are recorded. A broker's own interface can bypass Trader
+- *Agent-discretion strategies*: an authorized AI agent produces /order intents/
+  (requested Orders) through the strategy interface, even when its decisions
+  are discretionary rather than rule-based. The interface is bound to an
+  owner-authorized account/run, risk policy and operational limits. Agents do not
+  get a separate direct REST/MCP order-ingress or broker path.
+- *Owner discretionary requests* via a protected local mechanism (#693) that
+  feeds a manual strategy adapter. The origin and experiment are recorded. A broker's own interface can bypass Trader
   and is therefore not represented as having passed Trader admission; external
   fills require reconciliation (ADR-079, ADR-081).
 
@@ -145,14 +148,15 @@ decisions but cannot alter them after admission.
 - Investor removes its independent sizing, capacity reservation and account
   eligibility enforcement (rustyeddy/investor#39, #40). It researches versions,
   requests studies/backtests, reads Trader's decisions and recommends activation.
-  If explicitly authorized for agent-discretion experiments, it may originate
-  requested Orders but never size, admit, execute or transition them.
-- A model may affect trading through an owner-activated strategy version or
-  an explicitly authorized agent-discretion run. Both emit requested Orders
-  through the same Account sizing and admission path. Model-discretion results
+  An authorized agent-discretion strategy may emit order intents (requested
+  Orders) **through the strategy interface**, never directly to Account/Broker,
+  and may not size, admit, execute or transition them.
+- A model may affect trading through an owner-activated rule strategy or
+  agent-discretion strategy. Both emit requested Orders through the strategy
+  interface and the same Account sizing and admission path. Model-discretion results
   are evaluated forward, not treated as valid hindsight backtests.
-- An external strategy or agent ingress needs an explicit deadline, identity,
-  authorization and failure policy. Trader records requested Orders and lifecycle
+- The strategy interface, including its agent-discretion implementation, needs
+  an explicit deadline, identity, authorization and failure policy. Trader records requested Orders and lifecycle
   decisions so a run can be audited and its requests replayed.
 - Simulated and broker demo/practice modes may use the documented implemented
   minimum controls, with unavailable controls visibly reported; this is not
