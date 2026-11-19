@@ -43,8 +43,29 @@ An order that can reach a simulated, paper or live broker originates only from a
 strategy that Trader runs (in-process, or external under ADR-062), in a run that
 the owner configured for that account. No transport (REST, MCP, CLI, Tulip) and no
 client (Investor or any other) submits an order, a quantity, or an exposure change.
-A future manual-order transport is not ruled out, but it needs its own ADR and
-goes through the same admission path as a strategy's orders.
+There is no REST trade endpoint.
+
+** Every intent arrives through the strategy interface
+
+A strategy reads bars (and, where it wants them, indicators) and emits an
+intent: an order without an account quantity (in the live tree, an =order= that
+=account.size= sizes). The account and broker machinery sizes it, admits or
+rejects it, and executes it. This holds whatever produces the decision:
+
+- *Rule-based strategies*, in-process or external (ADR-062).
+- *Agent-discretion strategies*: an external strategy whose decision comes from a
+  model. It is useful for experimenting with ideas, but it cannot be honestly
+  backtested, because the model's training overlaps the history. Its results
+  count only forward and are labeled as experiments, not strategy evidence. Trader
+  records every intent the strategy sends, so a rerun replays the recorded
+  intents and does not call the model again. A model that does not answer before
+  the protocol's per-bar deadline produces no intent: it fails closed.
+- *The owner's manual trades*, if Trader takes them at all: an owner-only path
+  that no agent, client or token in an agent's environment can reach, which also
+  ends in the same admission stage. Its mechanism needs its own ADR. Trading in
+  the broker's own interface and reconciling through account activity (ADR-079,
+  ADR-081) needs no new Trader path. Those trades skip Trader's admission, so
+  Trader's limits see them only after reconciliation.
 
 ** Trader sizes and admits every order, with one code path
 
@@ -88,8 +109,12 @@ provenance of a result. Nothing a client sends changes a decision.
   submit orders (rustyeddy/investor#39, #40). It researches strategy versions,
   requests backtests and studies, reads outcomes and risk decisions, and
   recommends activation to the owner.
-- No model is in the signal path. An LLM affects trading only through strategy
-  versions the owner activates, each of which can be backtested.
+- A model affects trading only through strategy versions the owner activates:
+  a rule-based version it helped design, which can be backtested, or a labeled
+  agent-discretion experiment, which can be evaluated only forward. Either way,
+  its intents go through the same sizing and admission as everything else.
+- The strategy protocol (ADR-062, when ported) needs a per-bar deadline, and
+  Trader needs to record the intents a run received so the run can be replayed.
 - Broker-backed paper trading waits for the "not yet" rows above, for #538, and for
   cross-account aggregation once multi-account support lands. Simulated paper
   trading may start with the controls that exist, configured as the owner sets them.
