@@ -1,4 +1,4 @@
-#+TITLE: ADR-093: Trader alone sizes, admits and executes orders
+#+TITLE: ADR-093: Trader is the sole risk authority for all requested orders
 #+STARTUP: overview indent
 
 * Status
