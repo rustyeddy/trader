@@ -14,7 +14,7 @@ import (
 
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/internal/marketdata/layout"
-	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/internal/store"
 )
 
 // PartitionStatus classifies the outcome of inspecting one monthly raw

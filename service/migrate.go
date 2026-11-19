@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader/internal/marketdata/layout"
-	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/internal/store"
 )
 
 // ErrMigrationFailed reports that MigrateLayout found something that stops it, or

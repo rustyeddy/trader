@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/store/storetest"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/provider/oanda"
-	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/internal/logging"
+	"github.com/rustyeddy/trader/internal/store"
 	"github.com/rustyeddy/trader/service"
-	"github.com/rustyeddy/trader/store"
 )
 
 const (

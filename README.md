@@ -77,7 +77,7 @@ Details, every flag and what each report means are in the [User's Guide](docs/Us
 | `marketdata/service` | the market-data domain service: classification, availability, publishing |
 | `marketdata/internal/canonical` | the canonical-v2 file format (private to `marketdata`) |
 | `provider/oanda` | OANDA: raw store, REST client, raw-to-source mapping |
-| `store` | the one place data files are read and written |
+| `internal/store` | the one place data files are read and written; internal, so no other module can import it |
 | `num`, `instrument` | exact numeric values; instrument identity |
 | `internal/logging`, `internal/marketdata/layout` | structured logging; the data path resolver |
 

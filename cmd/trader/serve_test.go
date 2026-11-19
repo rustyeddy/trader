@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/store/storetest"
+	"github.com/rustyeddy/trader/internal/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -182,7 +182,7 @@ func TestLoopback(t *testing.T) {
 
 func TestServeCommand_IsTransportOnly(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod + "/service": true, mod + "/store": true, mod + "/internal/logging": true, mod + "/rest": true}
+	allowed := map[string]bool{mod + "/service": true, mod + "/internal/store": true, mod + "/internal/logging": true, mod + "/rest": true}
 	f, err := parser.ParseFile(token.NewFileSet(), "serve.go", nil, parser.ImportsOnly)
 	require.NoError(t, err)
 	for _, imp := range f.Imports {

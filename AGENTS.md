@@ -56,7 +56,7 @@ marketdata, num, instrument   public models and values
   root. Nothing outside `store` opens, renames or walks data files.
 - Each boundary is an architecture test (`marketdata/marketdata_test.go`,
   `provider/oanda/oanda_test.go`, `service/marketdata_test.go`,
-  `store/store_test.go`, `cmd/trader/build_test.go`, `cmd/trader/status_test.go`). When you add a boundary, add
+  `internal/store/store_test.go`, `cmd/trader/build_test.go`, `cmd/trader/status_test.go`). When you add a boundary, add
   its test and check that it fails when violated.
 - The root package (`trader`) is the engine: orders, broker, account, strategy,
   scanner, scenarios. It runs on `marketdata.Bar`.
