@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/store"
 	"github.com/rustyeddy/trader/num"
-	"github.com/rustyeddy/trader/store"
 )
 
 // rawV1Header is the exact raw-v1 column header. It is matched verbatim so a

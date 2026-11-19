@@ -1,6 +1,6 @@
 # Market data storage layout and source provenance
 
-**Status:** Accepted storage-layout convention (2026-10-18). Implemented for new data by `internal/marketdata/layout` (the one path resolver) and `store` (the only data-file I/O), ADR-089 and ADR-092; the existing archive on disk still uses the old order and is migrated separately (#642).
+**Status:** Accepted storage-layout convention (2026-10-18). Implemented for new data by `internal/marketdata/layout` (the one path resolver) and `internal/store` (the only data-file I/O), ADR-089 and ADR-092; the existing archive on disk still uses the old order and is migrated separately (#642).
 
 ## Invariant
 

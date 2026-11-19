@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/store"
+	"github.com/rustyeddy/trader/internal/store/storetest"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/provider/oanda"
 	"github.com/rustyeddy/trader/service"
-	"github.com/rustyeddy/trader/store"
-	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -184,7 +184,7 @@ func TestDataBuild_NeverChangesRaw(t *testing.T) {
 // service, provider holds (ADR-091).
 func TestBuildCommand_IsTransportOnly(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod + "/service": true, mod + "/store": true, mod + "/internal/logging": true}
+	allowed := map[string]bool{mod + "/service": true, mod + "/internal/store": true, mod + "/internal/logging": true}
 	f, err := parser.ParseFile(token.NewFileSet(), "build.go", nil, parser.ImportsOnly)
 	require.NoError(t, err)
 	for _, imp := range f.Imports {

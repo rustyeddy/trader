@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/internal/store/storetest"
 	"github.com/rustyeddy/trader/num"
-	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,7 +68,7 @@ func TestProviderOanda_ImportsOnlyFoundationalPackages(t *testing.T) {
 		mod + "/num":                        false,
 		mod + "/internal/logging":           false,
 		mod + "/internal/marketdata/layout": false,
-		mod + "/store":                      false,
+		mod + "/internal/store":             false,
 	}
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)

@@ -133,7 +133,7 @@ func TestMarketdataTree_DependsOnlyOnNumLayoutStoreAndItself(t *testing.T) {
 	allowed := func(path string) bool {
 		return path == modulePath+"/num" ||
 			path == modulePath+"/internal/marketdata/layout" ||
-			path == modulePath+"/store" ||
+			path == modulePath+"/internal/store" ||
 			path == modulePath+"/marketdata" || strings.HasPrefix(path, modulePath+"/marketdata/")
 	}
 	checked := 0

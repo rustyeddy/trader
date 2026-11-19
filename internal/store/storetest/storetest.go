@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/internal/store"
 )
 
 // Root makes a fresh temporary directory the store's root for the duration of

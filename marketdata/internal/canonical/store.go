@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 
-	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/internal/store"
 )
 
 // ErrNotFound reports a partition with no file; it wraps fs.ErrNotExist and

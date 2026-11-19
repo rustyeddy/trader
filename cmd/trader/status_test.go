@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/store"
+	"github.com/rustyeddy/trader/internal/store/storetest"
 	"github.com/rustyeddy/trader/provider/oanda"
 	"github.com/rustyeddy/trader/service"
-	"github.com/rustyeddy/trader/store"
-	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -156,7 +156,7 @@ func TestDataStatus_RejectsBadOptionsBeforeDoingAnything(t *testing.T) {
 // market-data package.
 func TestStatusCommand_IsTransportOnly(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod + "/service": true, mod + "/store": true, mod + "/internal/logging": true}
+	allowed := map[string]bool{mod + "/service": true, mod + "/internal/store": true, mod + "/internal/logging": true}
 	f, err := parser.ParseFile(token.NewFileSet(), "status.go", nil, parser.ImportsOnly)
 	require.NoError(t, err)
 	for _, imp := range f.Imports {

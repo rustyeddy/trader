@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/store"
+	"github.com/rustyeddy/trader/internal/store/storetest"
 	mdservice "github.com/rustyeddy/trader/marketdata/service"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/provider/oanda"
-	"github.com/rustyeddy/trader/store"
-	"github.com/rustyeddy/trader/store/storetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -239,7 +239,7 @@ func TestService_ImportsOnlyTheDomainServiceAndProviders(t *testing.T) {
 		for _, imp := range f.Imports {
 			path, uerr := strconv.Unquote(imp.Path.Value)
 			require.NoError(t, uerr)
-			if foundational[file] && (path == mod+"/store" || path == mod+"/internal/marketdata/layout") {
+			if foundational[file] && (path == mod+"/internal/store" || path == mod+"/internal/marketdata/layout") {
 				continue
 			}
 			if path == mod || strings.HasPrefix(path, mod+"/") {

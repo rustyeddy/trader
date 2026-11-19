@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/store/storetest"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
-	"github.com/rustyeddy/trader/store/storetest"
 )
 
 func px(s string) num.Price { return num.MustParsePrice(s) }

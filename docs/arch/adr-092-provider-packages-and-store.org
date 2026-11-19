@@ -33,7 +33,7 @@ the same fixed-decimals price text rules.
    the mapping of a raw partition to a =marketdata.SourcePartition=. A provider
    imports only public models and the foundational packages; it applies no domain
    rule. No package is created for a provider that does not exist.
-2. *One package owns data-file I/O: =store= (#644).* It owns the data root
+2. *One package owns data-file I/O: =store= (#644; =internal/store=, #684).* It owns the data root
    (its default is =/srv/data=; =cmd/trader= sets another when one is
    configured, and tests set a temporary directory) and offers byte-oriented =Read=, =Write=,
    =Create=, =Update= and =List= on root-relative paths. Writes are atomic and hold

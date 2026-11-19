@@ -13,8 +13,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/store"
 	"github.com/rustyeddy/trader/num"
-	"github.com/rustyeddy/trader/store"
 )
 
 // ErrPartitionAlreadyExists marks an attempt to write a brand-new raw

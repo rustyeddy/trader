@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/rustyeddy/trader/store"
+	"github.com/rustyeddy/trader/internal/store"
 	"gopkg.in/yaml.v3"
 )
 

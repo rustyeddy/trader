@@ -16,7 +16,7 @@ marketdata/                public model: Bar, OHLC, MidOf, SourcePartition
   service/                 domain service: Build (classify, availability, publish)
   internal/canonical/      canonical-v2 files, availability rule (private)
 provider/oanda/            OANDA: raw store, REST client, raw-to-source mapping
-store/                     the only data-file I/O; storetest for tests
+internal/store/              the only data-file I/O (internal: not importable from outside the module); storetest for tests
 internal/marketdata/layout/  the one data path resolver
 internal/logging/          structured logging on log/slog
 num/  instrument/          exact numbers; instrument identity

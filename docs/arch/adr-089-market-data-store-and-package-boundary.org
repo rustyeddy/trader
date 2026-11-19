@@ -67,7 +67,7 @@ What exists, checked on the owner's machine:
   inventory now, and its HTTP client in a later stage. It imports =num=,
   =instrument=, =layout=, =store= and the standard library. It never imports another
   provider package, the root package, or =cmd=.
-- =store= (#644, module root) owns the data root (default =/srv/data=, changed by
+- =store= (#644; =internal/store= since #684, so it cannot be imported from outside the module) owns the data root (default =/srv/data=, changed by
   =store.SetRoot=) and is the one place data files are read, written (atomically,
   under a per-path lock) and listed, as bytes at root-relative paths. It imports
   only the standard library; the provider and market-data packages go through it,
