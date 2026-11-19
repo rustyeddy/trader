@@ -1,0 +1,116 @@
+#+TITLE: ADR-093: Trader is the only risk authority; no client submits orders
+#+STARTUP: overview indent
+
+* Status
+
+Proposed (#686). Acceptance is the owner's decision. It builds on accepted
+ADR-005, ADR-006 and ADR-066 and amends none of them: it says *who* may originate
+an order and *where* sizing and risk admission happen, now that Trader has clients
+(Investor, Tulip) and external strategies that may be built in other repositories.
+
+* Context
+
+Trader's requirements (=trader-framework-requirements.org=, "Risk Manager") put
+gating trades on the account: maximum risk per trade and per account, maximum
+margin, position sizing and loss limits per day, week or month. ADR-005 keeps
+strategies away from brokers. ADR-006 makes risk admission a separate, auditable
+stage and rejects risk inside the strategy because risk is an account-level
+concern. In the live tree, =account.size= sizes every open against a risk budget
+(1% of equity by default) and available margin, and =marginLevelPolicy= handles
+closeout.
+
+Three things now put pressure on this:
+
+- *Investor* (rustyeddy/investor), the AI research layer, has a draft policy in
+  which Investor sizes trades, reserves capacity, enforces aggregate, correlated,
+  margin, halt and freshness limits, and then submits paper orders to Trader.
+- *External strategies* (ADR-062/063) are being brought back as gRPC processes
+  that may be built and released from a separate repository (rustyeddy/strategies).
+  Trader cannot review that code as part of its own changes.
+- *More transports* (REST, MCP, Tulip) mean that any check living in a client is
+  advisory, because the next client does not run it.
+
+Two risk engines would disagree, and the one that is skipped is whichever one a
+given order did not pass through. Backtests would also stop predicting paper
+results, because backtests would run Trader's sizing while paper orders ran
+Investor's.
+
+* Decision
+
+** Orders originate only from strategies that Trader runs
+
+An order that can reach a simulated, paper or live broker originates only from a
+strategy that Trader runs (in-process, or external under ADR-062), in a run that
+the owner configured for that account. No transport (REST, MCP, CLI, Tulip) and no
+client (Investor or any other) submits an order, a quantity, or an exposure change.
+A future manual-order transport is not ruled out, but it needs its own ADR and
+goes through the same admission path as a strategy's orders.
+
+** Trader sizes and admits every order, with one code path
+
+Sizing and risk admission happen in Trader, per account and across accounts, and
+only there. A strategy, internal or external, states its intent (side, reference
+entry, stop and exits) under ADR-005. It never chooses an account-level quantity
+and cannot widen a limit. The same admission code runs in backtest, paper and
+live, so a backtest applies the limits that paper trading will.
+
+** Risk policy is versioned Trader configuration that only the owner changes
+
+Limits come from a versioned risk-policy configuration that names the accounts it
+covers. The owner changes it in configuration, not through any API operation. A
+missing or unknown limit blocks new exposure; it never means unlimited. The policy
+covers, as implementation arrives:
+
+| Control | Live tree today |
+|---------+-----------------|
+| Per-trade planned loss as a fraction of equity | =account.size= (1% default) |
+| Initial margin admission (ADR-066) | =account.size= margin limit |
+| Margin closeout | =marginLevelPolicy= |
+| Aggregate planned loss across open positions and pending entries | not yet |
+| Correlated or shared-currency exposure groups, signed per currency | not yet |
+| Gross and per-instrument notional, leverage ceiling | not yet |
+| Loss halts per session, day, week or drawdown, with resume rules | not yet |
+| Maximum age of marks, quotes and conversion rates used for admission | not yet |
+
+Concurrent admission against one account is serialized (#538), so two orders
+cannot both use the same capacity.
+
+** Decisions are recorded and readable, not steerable
+
+Each admission records the intent, the policy version, the rule results and the
+inputs (ADR-006), and every resulting order, fill and position links back to it.
+Trader exposes these records read-only over REST, so a client can journal the
+provenance of a result. Nothing a client sends changes a decision.
+
+* Consequences
+
+- Investor removes its sizing, reservation and eligibility design and does not
+  submit orders (rustyeddy/investor#39, #40). It researches strategy versions,
+  requests backtests and studies, reads outcomes and risk decisions, and
+  recommends activation to the owner.
+- No model is in the signal path. An LLM affects trading only through strategy
+  versions the owner activates, each of which can be backtested.
+- Broker-backed paper trading waits for the "not yet" rows above, for #538, and for
+  cross-account aggregation once multi-account support lands. Simulated paper
+  trading may start with the controls that exist, configured as the owner sets them.
+- External strategy repositories cannot weaken risk. The protocol gives a
+  strategy no way to set an account quantity or a limit, and protocol review
+  keeps it that way.
+- Trader takes on read-only REST endpoints for risk decisions, orders, fills and
+  positions. Each needs its own issue.
+- This rules out client-side order entry, and per-trade approval or veto by a
+  client.
+
+* Alternatives Considered
+
+- *Investor enforces risk and Trader executes* (the Investor draft). Rejected:
+  other clients bypass it, it duplicates =account.size=, and backtests would not
+  apply the paper limits.
+- *Both enforce, as defense in depth.* Rejected: two sources of truth, every policy
+  change lands twice, and when they disagree no one knows which is right. A client
+  may still display Trader's decision.
+- *A separate risk-service process.* Rejected for now: admission must be atomic
+  with account and order state (#538), and a network hop adds failure modes with
+  no present use.
+- *Strategies size their own orders.* Already rejected by ADR-006. This record
+  repeats it for external strategies built outside the repository.
