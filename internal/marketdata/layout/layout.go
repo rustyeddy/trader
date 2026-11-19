@@ -14,12 +14,19 @@ type Stage string
 
 // The stages the layout knows.
 const (
-	Raw       Stage = "raw"
+	// Raw is what the provider gave: for most sources raw-v1 partitions, for a
+	// source that ships archives (stooq) the downloaded archive files.
+	Raw Stage = "raw"
+	// Unzipped is the intermediate stage of a source that ships archives holding many
+	// instruments and timeframes: the archives' contents split per instrument and
+	// month. Only such a source has it; the others go from Raw to Canonical.
+	Unzipped Stage = "unzipped"
+	// Canonical is the validated, source-independent form built from the stage before.
 	Canonical Stage = "canonical"
 )
 
-// Valid reports whether s is exactly Raw or Canonical.
-func (s Stage) Valid() bool { return s == Raw || s == Canonical }
+// Valid reports whether s is exactly Raw, Unzipped or Canonical.
+func (s Stage) Valid() bool { return s == Raw || s == Unzipped || s == Canonical }
 
 // Errors, classifiable with errors.Is.
 var (
@@ -54,7 +61,7 @@ func (p Partition) Validate() error {
 		return err
 	}
 	if !p.Stage.Valid() {
-		return fmt.Errorf("%w: stage %q is not raw or canonical", ErrInvalidComponent, p.Stage)
+		return fmt.Errorf("%w: stage %q is not raw, unzipped or canonical", ErrInvalidComponent, p.Stage)
 	}
 	if err := validComponent("instrument", p.Instrument); err != nil {
 		return err
@@ -112,7 +119,7 @@ func StageDir(source string, stage Stage) (string, error) {
 		return "", err
 	}
 	if !stage.Valid() {
-		return "", fmt.Errorf("%w: stage %q is not raw or canonical", ErrInvalidComponent, stage)
+		return "", fmt.Errorf("%w: stage %q is not raw, unzipped or canonical", ErrInvalidComponent, stage)
 	}
 	return filepath.Join(source, string(stage)), nil
 }
