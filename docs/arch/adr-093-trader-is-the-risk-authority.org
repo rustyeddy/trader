@@ -61,13 +61,25 @@ rejects it, and executes it. This holds whatever produces the decision:
   records every intent the strategy sends, so a rerun replays the recorded
   intents and does not call the model again. A model that does not answer before
   the protocol's per-bar deadline produces no intent: it fails closed.
-- *The owner's discretionary trades*: a manual-intent strategy, fed from the
-  host over a local channel only the owner's Unix user can write to (for example
-  a Unix-domain socket, as in ADR-063), not over any network transport. Agents
-  run as a different Unix user so they cannot use it. The command and channel
-  details are an implementation issue under this ADR. Trades placed in the
-  broker's own interface instead skip Trader's admission; Trader's limits see
-  them only after reconciliation through account activity (ADR-079, ADR-081).
+- *The owner's discretionary trades*: a manual-intent strategy driven by the
+  =trader= CLI on the host, over a local channel only the owner's Unix user can
+  write to (for example a Unix-domain socket, as in ADR-063), not over any
+  network transport. Agents run as a different Unix user so they cannot use it.
+  Each discretionary intent names an experiment with a thesis, and uses an
+  account no strategy uses, so each equity curve has one source (#693). Trades
+  placed in the broker's own interface instead skip Trader's admission; Trader's
+  limits see them only after reconciliation through account activity (ADR-079,
+  ADR-081).
+
+** The owner can halt any strategy or account from the host
+
+A misbehaving strategy is stopped by a halt, not by an opposing discretionary
+trade, which on a netting (FIFO) account would change the strategy's position
+behind its back. =trader halt= for a strategy or an account stops admitting its
+intents and cancels its pending orders. With =--flatten=, it also closes its
+positions. Trader performs the halt itself, so it works when a strategy process
+is hung. The halt persists across restarts until resumed, and every halt is
+journaled as an incident. It uses the same owner-only local channel (#692).
 
 ** Trader sizes and admits every order, with one code path
 
