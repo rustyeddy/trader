@@ -55,6 +55,14 @@ var errOpenPending = errors.New("an open is already pending")
 // this bar, so a strategy open on the same observation is refused.
 var errCloseoutGuard = errors.New("margin closeout on this bar")
 
+// errLoosensStop is an expected outcome: an amend would loosen the protection
+// the account sized the position from. Only tightening is allowed.
+var errLoosensStop = errors.New("amend does not tighten")
+
+// errStopWrongSide is an expected outcome: an amended stop or target is not on
+// its side of the latest price, so it would trigger at once or is meaningless.
+var errStopWrongSide = errors.New("amend is on the wrong side of the price")
+
 // errNoPosition is also an expected outcome: a close arrives when there is no
 // position, because its open was rejected or a stop has already closed it.
 var errNoPosition = errors.New("no position to close")

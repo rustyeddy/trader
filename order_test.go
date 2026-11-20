@@ -17,6 +17,7 @@ func TestAction_String(t *testing.T) {
 		add:        "add",
 		close:      "close",
 		reduce:     "reduce",
+		amend:      "amend",
 		action(99): "unknown",
 	}
 	for a, want := range tests {
@@ -129,6 +130,21 @@ func TestOrder_Validate(t *testing.T) {
 		{"close with short", order{instrument: "EUR/USD", direction: short, action: close, orderType: marketOrder}, true},
 		{"add with direction", order{instrument: "EUR/USD", direction: long, action: add, orderType: marketOrder}, true},
 		{"reduce with direction", order{instrument: "EUR/USD", direction: short, action: reduce, orderType: marketOrder}, true},
+
+		// amend: a new stop, target or trail for the open position
+		{"amend a stop", order{instrument: "EUR/USD", action: amend, orderType: marketOrder, stopLoss: px(109500)}, false},
+		{"amend a target", order{instrument: "EUR/USD", action: amend, orderType: marketOrder, takeProfit: px(112000)}, false},
+		{"amend a trail", order{instrument: "EUR/USD", action: amend, orderType: marketOrder, trail: px(1500)}, false},
+		{"amend all three", order{instrument: "EUR/USD", action: amend, orderType: marketOrder, stopLoss: px(109500), takeProfit: px(112000), trail: px(1500)}, false},
+		{"amend with nothing to change", order{instrument: "EUR/USD", action: amend, orderType: marketOrder}, true},
+		{"amend missing instrument", order{action: amend, orderType: marketOrder, stopLoss: px(109500)}, true},
+		{"amend with direction", order{instrument: "EUR/USD", direction: long, action: amend, orderType: marketOrder, stopLoss: px(109500)}, true},
+		{"amend with a price", order{instrument: "EUR/USD", action: amend, orderType: marketOrder, price: px(110000), stopLoss: px(109500)}, true},
+		{"amend with an expiry", order{instrument: "EUR/USD", action: amend, orderType: marketOrder, stopLoss: px(109500), expires: testStart.Add(48 * time.Hour)}, true},
+		{"amend as a limit order", order{instrument: "EUR/USD", action: amend, orderType: limitOrder, stopLoss: px(109500)}, true},
+		{"close with a stop", order{instrument: "EUR/USD", action: close, orderType: marketOrder, stopLoss: px(109500)}, true},
+		{"close with a trail", order{instrument: "EUR/USD", action: close, orderType: marketOrder, trail: px(1500)}, true},
+		{"close with a target", order{instrument: "EUR/USD", action: close, orderType: marketOrder, takeProfit: px(112000)}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -164,3 +164,54 @@ func TestTrader_HandleOrder_FailureIsReturnedNotKeptAsRejected(t *testing.T) {
 	require.ErrorIs(t, tr.handleOrder(context.Background(), o), errUnknownInstrument)
 	assert.Empty(t, tr.rejected)
 }
+
+func TestTrader_HandleOrder_Amend(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+	held := func(t *testing.T) (*trader, *order) {
+		tr := newTestTraderWithBalance(usd(10000))
+		stop := fixedEntry(t, tr.broker, tr.account, long)
+		return tr, stop
+	}
+
+	t.Run("a tightening amend is applied and is not a rejection", func(t *testing.T) {
+		tr, stop := held(t)
+		o := amendOrder(109500, 0, 0)
+
+		require.NoError(t, tr.handleOrder(ctx, o))
+
+		assert.Equal(t, px(109500), stop.price)
+		assert.Equal(t, stateFilled, o.state)
+		assert.Equal(t, "t-3", o.id, "the broker assigns the id")
+		assert.Empty(t, tr.rejected)
+	})
+
+	t.Run("a loosening amend is kept as rejected and the run goes on", func(t *testing.T) {
+		tr, stop := held(t)
+		o := amendOrder(108000, 0, 0)
+
+		require.NoError(t, tr.handleOrder(ctx, o), "an expected rejection does not stop the run")
+
+		assert.Equal(t, []*order{o}, tr.rejected)
+		assert.Equal(t, px(108900), stop.price)
+	})
+
+	t.Run("an amend with nothing to change is a strategy bug and stops the run", func(t *testing.T) {
+		tr, _ := held(t)
+
+		err := tr.handleOrder(ctx, amendOrder(0, 0, 0))
+
+		require.ErrorIs(t, err, errInvalidOrder)
+		assert.Empty(t, tr.rejected)
+	})
+
+	t.Run("the trader binds the account", func(t *testing.T) {
+		tr, _ := held(t)
+		o := amendOrder(109500, 0, 0)
+		o.accountID = ""
+
+		require.NoError(t, tr.handleOrder(ctx, o))
+
+		assert.Equal(t, "a", o.accountID)
+	})
+}
