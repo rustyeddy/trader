@@ -39,7 +39,7 @@ func (s *scriptStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	return nil
 }
 
-func (s *scriptStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (s *scriptStrategy) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, s.onBar)
 }
 
@@ -204,7 +204,7 @@ func (s *cancelStrategy) onBar(ctx context.Context, b marketdata.Bar) *order {
 	return s.scriptStrategy.onBar(ctx, b)
 }
 
-func (s *cancelStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (s *cancelStrategy) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, s.onBar)
 }
 
@@ -323,7 +323,7 @@ func (s *rejectFirstOpen) onBar(ctx context.Context, b marketdata.Bar) *order {
 	return o
 }
 
-func (s *rejectFirstOpen) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (s *rejectFirstOpen) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, s.onBar)
 }
 
@@ -397,7 +397,7 @@ func (s *seenStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	return nil
 }
 
-func (s *seenStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (s *seenStrategy) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, s.onBar)
 }
 
@@ -519,7 +519,12 @@ func TestBacktestRunSeries_SingleInstrumentMatchesThePerBarRun(t *testing.T) {
 }
 
 // first is the first of orders, or nil.
-func first(orders []*order) *order {
+// first is the first order a strategy's onBars returned, or nil. The strategies it
+// wraps cannot fail, so an error is a bug in the test.
+func first(orders []*order, err error) *order {
+	if err != nil {
+		panic(err)
+	}
 	if len(orders) == 0 {
 		return nil
 	}

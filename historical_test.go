@@ -406,7 +406,7 @@ type recordingStrategy struct{ calls [][]marketdata.Bar }
 
 func (*recordingStrategy) name() string { return "recording" }
 func (*recordingStrategy) init() error  { return nil }
-func (r *recordingStrategy) onBars(_ context.Context, bars []marketdata.Bar) []*order {
+func (r *recordingStrategy) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, error) {
 	r.calls = append(r.calls, slices.Clone(bars))
-	return nil
+	return nil, nil
 }

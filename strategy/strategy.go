@@ -13,11 +13,15 @@
 //
 // Orders are not carried yet: the answer must be empty.
 //
-// The trader side is Dial and Client; the worker side is Serve.
+// The trader side is Dial and Client; the worker side is ListenAndServe, or Serve
+// for a connection already in hand. Both sides are loopback-only: nothing here is
+// authenticated or encrypted.
 package strategy
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 
 	"github.com/rustyeddy/trader/marketdata"
 )
@@ -28,4 +32,18 @@ type barsMessage struct {
 
 type ordersMessage struct {
 	Orders []json.RawMessage `json:"orders"`
+}
+
+// requireLoopback refuses an address that is not on this machine's loopback
+// interface. A host name other than localhost is refused too, since it may
+// resolve anywhere.
+func requireLoopback(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("address %q: %w", addr, err)
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return fmt.Errorf("address %q is not loopback", addr)
+	}
+	return nil
 }

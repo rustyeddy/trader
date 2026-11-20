@@ -11,13 +11,14 @@ import (
 // strategy decides what to trade. It is called once per availability instant with
 // every bar that became available then (the bars are fresh and in instrument
 // order; an instrument with no bar at that instant is absent) and returns the
-// orders it wants, in the order they should be submitted, or none. It sees the
+// orders it wants, in the order they should be submitted, or none, or an error,
+// which stops the run before any order is used. It sees the
 // whole group before any of its orders is submitted. A single-instrument run is
 // the same call with a one-bar group. bars is only valid for the call.
 type strategy interface {
 	name() string
 	init() error
-	onBars(ctx context.Context, bars []marketdata.Bar) []*order
+	onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error)
 }
 
 // warmer is implemented by a strategy that can prefill its indicators. The bars
@@ -29,23 +30,17 @@ type warmer interface {
 	warm(ctx context.Context, bars []marketdata.Bar)
 }
 
-// failer is implemented by a strategy whose onBars cannot return an error, such
-// as one running in another process. The trader asks it after every onBars and
-// stops the run on a non-nil error, without using what that call returned.
-type failer interface {
-	err() error
-}
-
 // eachBar adapts a decision made one bar at a time: it asks decide about every bar
-// of the group in order and returns the orders it gave, in that order.
-func eachBar(ctx context.Context, bars []marketdata.Bar, decide func(context.Context, marketdata.Bar) *order) []*order {
+// of the group in order and returns the orders it gave, in that order. A decision
+// that is only a bar-by-bar rule cannot fail, so the error is always nil.
+func eachBar(ctx context.Context, bars []marketdata.Bar, decide func(context.Context, marketdata.Bar) *order) ([]*order, error) {
 	var orders []*order
 	for _, b := range bars {
 		if o := decide(ctx, b); o != nil {
 			orders = append(orders, o)
 		}
 	}
-	return orders
+	return orders, nil
 }
 
 // emax is the EMA crossover strategy: long while the short EMA is above the long
@@ -84,7 +79,7 @@ func (e *emax) warm(_ context.Context, bars []marketdata.Bar) {
 }
 
 // onBars is onBar for each bar of the group.
-func (e *emax) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (e *emax) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, e.onBar)
 }
 
@@ -264,7 +259,7 @@ func (s *emaxEach) warm(ctx context.Context, bars []marketdata.Bar) {
 
 // onBars hands each bar to its instrument's emax; the group's orders come back in
 // the group's instrument order.
-func (s *emaxEach) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (s *emaxEach) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, s.onBar)
 }
 

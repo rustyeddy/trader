@@ -645,7 +645,7 @@ func (w *positionWatcher) onBar(ctx context.Context, b marketdata.Bar) *order {
 	return first(w.strategy.onBars(ctx, []marketdata.Bar{b}))
 }
 
-func (w *positionWatcher) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (w *positionWatcher) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, w.onBar)
 }
 

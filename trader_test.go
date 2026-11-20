@@ -290,9 +290,9 @@ type recorder struct{ groups [][]marketdata.Bar }
 
 func (r *recorder) name() string { return "recorder" }
 func (r *recorder) init() error  { return nil }
-func (r *recorder) onBars(_ context.Context, bars []marketdata.Bar) []*order {
+func (r *recorder) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, error) {
 	r.groups = append(r.groups, slices.Clone(bars))
-	return nil
+	return nil, nil
 }
 
 func newRemoteTrader(t *testing.T, s strategy) *trader {
@@ -302,16 +302,14 @@ func newRemoteTrader(t *testing.T, s strategy) *trader {
 	return tr
 }
 
-// failingStrategy is a strategy that has failed: it returns an order, which must
-// not be used, and an error.
+// failingStrategy returns an order together with an error: the order must not be
+// used.
 type failingStrategy struct{}
 
 func (failingStrategy) name() string { return "failing" }
 func (failingStrategy) init() error  { return nil }
-
-func (failingStrategy) err() error { return errors.New("worker is gone") }
-func (failingStrategy) onBars(context.Context, []marketdata.Bar) []*order {
-	return []*order{{instrument: "EURUSD", action: open, direction: long, orderType: marketOrder}}
+func (failingStrategy) onBars(context.Context, []marketdata.Bar) ([]*order, error) {
+	return []*order{{instrument: "EURUSD", action: open, direction: long, orderType: marketOrder}}, errors.New("worker is gone")
 }
 
 func TestTrader_OnFrame_StopsWhenTheStrategyHasFailed(t *testing.T) {
@@ -360,7 +358,7 @@ func TestRemoteStrategy_BacktestFailsWhenTheWorkerDisconnects(t *testing.T) {
 
 	err = (&backtest{}).runSeries(ctx, newRemoteTrader(t, remote), prices)
 	require.Error(t, err, "a dead worker ends the run instead of hanging it")
-	assert.ErrorContains(t, err, "remote strategy")
+	assert.ErrorContains(t, err, "strategy remote")
 	assert.Len(t, w.finish(), 3, "the worker hung up on its third group, which the run never got an answer to")
 }
 

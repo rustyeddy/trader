@@ -25,23 +25,14 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:0", "loopback address to listen on")
 	flag.Parse()
 
-	ln, err := net.Listen("tcp", *addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("listening on", ln.Addr()) // the address, for whoever started us
-	conn, err := ln.Accept()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() { _ = conn.Close() }()
-
 	groups := 0
-	err = strategy.Serve(conn, func([]marketdata.Bar) error {
-		// A real strategy decides here. This one only counts.
-		groups++
-		return nil
-	})
+	err := strategy.ListenAndServe(*addr,
+		func(a net.Addr) { fmt.Println("listening on", a) }, // for whoever started us
+		func([]marketdata.Bar) error {
+			// A real strategy decides here. This one only counts.
+			groups++
+			return nil
+		})
 	if err != nil {
 		log.Fatal(err)
 	}

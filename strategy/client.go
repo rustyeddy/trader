@@ -25,12 +25,8 @@ type Client struct {
 // Dial connects to a worker listening at addr, which must be a loopback address:
 // nothing here is authenticated or encrypted.
 func Dial(addr string) (*Client, error) {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, fmt.Errorf("worker address %q: %w", addr, err)
-	}
-	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return nil, fmt.Errorf("worker address %q is not loopback", addr)
+	if err := requireLoopback(addr); err != nil {
+		return nil, err
 	}
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
