@@ -40,28 +40,28 @@ func golden() map[string]Message {
 				From: ts("2024-03-01T00:00:00Z"), To: ts("2024-04-01T00:00:00Z"), WarmBars: 100}},
 		"register-paper": &Register{Header: Header{Seq: 1}, Name: "emax-go", Capabilities: []string{"bars"},
 			Run: Run{Mode: ModePaper, Interval: "D1", Instruments: []string{"EURUSD"}, From: ts("2024-03-01T00:00:00Z")}},
-		"accepted": &Accepted{Header: Header{Seq: 1, RunID: "r-20241103-7f3a9c"}, Instruments: []string{"EURUSD", "GBPUSD"},
+		"accepted": &Accepted{Header: Header{Seq: 1, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, Instruments: []string{"EURUSD", "GBPUSD"},
 			Interval: "H1", WarmBars: 100, ReplyTimeoutMS: 30000},
-		"bars": &Bars{Header: Header{Seq: 2, RunID: "r-20241103-7f3a9c"}, FrameAt: ts("2024-03-01T11:00:00Z"), Bars: []marketdata.Bar{
+		"bars": &Bars{Header: Header{Seq: 2, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, FrameAt: ts("2024-03-01T11:00:00Z"), Bars: []marketdata.Bar{
 			{Instrument: "EURUSD", Time: ts("2024-03-01T10:00:00Z"), AvailableAt: ts("2024-03-01T11:00:00Z"), Volume: 2310,
 				Bid: ohlc("1.08725", "1.0879", "1.0869", "1.0876"), Ask: ohlc("1.08728", "1.08794", "1.08693", "1.08764"),
 				Mid: ohlc("1.087265", "1.08792", "1.086915", "1.08762")},
 			{Instrument: "GBPUSD", Time: ts("2024-03-01T10:00:00Z"), AvailableAt: ts("2024-03-01T11:00:00Z"), Volume: 1984,
 				Mid: ohlc("1.26412", "1.264825", "1.26372", "1.264575"), Trade: ohlc("1.2641", "1.2648", "1.2637", "1.26455")}}},
-		"bars-warm": &Bars{Header: Header{Seq: 2, RunID: "r-20241103-7f3a9c"}, FrameAt: ts("2024-02-29T11:00:00Z"), Warm: true,
+		"bars-warm": &Bars{Header: Header{Seq: 2, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, FrameAt: ts("2024-02-29T11:00:00Z"), Warm: true,
 			Bars: []marketdata.Bar{{Instrument: "EURUSD", Time: ts("2024-02-29T10:00:00Z"), AvailableAt: ts("2024-02-29T11:00:00Z"),
 				Mid: ohlc("1.08", "1.081", "1.079", "1.0805")}}},
-		"orders": &Orders{Header: Header{Seq: 2, RunID: "r-20241103-7f3a9c"}, InReplyTo: 2, Orders: []strategy.Order{
+		"orders": &Orders{Header: Header{Seq: 2, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, InReplyTo: 2, Orders: []strategy.Order{
 			{Instrument: "EURUSD", Action: strategy.Open, Direction: strategy.Long, Type: strategy.Market, Price: pr("1.08764"),
 				StopLoss: pr("1.085"), TakeProfit: pr("1.092"), Trail: pr("0.002"), Ref: "emax-entry-1"},
 			{Instrument: "GBPUSD", Action: strategy.Open, Direction: strategy.Short, Type: strategy.Limit, Price: pr("1.266"),
 				StopLoss: pr("1.269"), TakeProfit: pr("1.26"), Expires: ts("2024-03-01T20:00:00Z")},
 			{Instrument: "GBPUSD", Action: strategy.Close, Ref: "emax-exit-7"}}},
-		"orders-empty": &Orders{Header: Header{Seq: 3, RunID: "r-20241103-7f3a9c"}, InReplyTo: 3},
-		"orders-amend": &Orders{Header: Header{Seq: 5, RunID: "r-20241103-7f3a9c"}, InReplyTo: 5, Orders: []strategy.Order{
+		"orders-empty": &Orders{Header: Header{Seq: 3, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, InReplyTo: 3},
+		"orders-amend": &Orders{Header: Header{Seq: 5, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, InReplyTo: 5, Orders: []strategy.Order{
 			{Instrument: "EURUSD", Action: strategy.Amend, StopLoss: pr("1.08764"), Trail: pr("0.0015"), TakeProfit: pr("1.1"), Ref: "emax-breakeven-1"}}},
-		"done":                  &Done{Header: Header{Seq: 812, RunID: "r-20241103-7f3a9c"}, Status: StatusCompleted},
-		"error":                 &Failure{Header: Header{Seq: 3, RunID: "r-20241103-7f3a9c"}, Code: CodeInvalidOrder, Fatal: true, Message: "orders[0]: open requires stop_loss"},
+		"done":                  &Done{Header: Header{Seq: 812, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, Status: StatusCompleted},
+		"error":                 &Failure{Header: Header{Seq: 3, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, Code: CodeInvalidOrder, Fatal: true, Message: "orders[0]: open requires stop_loss"},
 		"error-before-accepted": &Failure{Header: Header{Seq: 1}, Code: CodeVersion, Fatal: true, Message: "protocol version 2 is not supported"},
 	}
 }

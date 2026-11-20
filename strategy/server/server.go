@@ -11,8 +11,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -69,7 +67,8 @@ type Config struct {
 	CloseGrace time.Duration
 	// MaxFrame is the largest frame accepted. Zero means proto.DefaultMaxFrame.
 	MaxFrame int
-	// NewRunID issues a RunID. Zero means RandomRunID. It must not repeat.
+	// NewRunID issues a RunID, a ULID string. Zero means RandomRunID. It must not
+	// repeat.
 	NewRunID func() (string, error)
 	// Logger receives the server's log lines. Nil discards them: a library does
 	// not choose the process's logger.
@@ -118,16 +117,6 @@ func New(cfg Config) (*Server, error) {
 	return &Server{cfg: cfg, log: log}, nil
 }
 
-// RandomRunID issues a RunID like r-20241103-7f3a9c: the UTC date and six random
-// hex digits. The date is a convenience for people; the digits make it unique.
-func RandomRunID() (string, error) {
-	var b [3]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("run id: %w", err)
-	}
-	return "r-" + time.Now().UTC().Format("20060102") + "-" + hex.EncodeToString(b[:]), nil
-}
-
 // IsLoopbackAddr reports whether a listen address (host:port) binds to the
 // loopback interface only. The host must be an IP literal or "localhost"; an empty
 // host or 0.0.0.0 listens on every interface and is not loopback.
@@ -165,12 +154,16 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		return fmt.Errorf("server: listener %s is not a loopback TCP address", ln.Addr())
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = ln.Close() })
-	defer stop()
-
 	var wg sync.WaitGroup
-	defer wg.Wait()
+	// On every exit, tell the runs to cancel and close the listener before waiting
+	// for them: a worker that never answers must not hold shutdown.
+	defer func() {
+		cancel()
+		stop()
+		_ = ln.Close()
+		wg.Wait()
+	}()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

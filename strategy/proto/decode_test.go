@@ -113,11 +113,11 @@ func TestDecode_RegisterRefusals(t *testing.T) {
 }
 
 func TestDecode_Accepted(t *testing.T) {
-	in := `{"v":1,"type":"accepted","seq":1,"run_id":"r-20241103-7f3a9c","instruments":["EURUSD","GBPUSD"],"interval":"H1","warm_bars":100,"reply_timeout_ms":30000}`
+	in := `{"v":1,"type":"accepted","seq":1,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F","instruments":["EURUSD","GBPUSD"],"interval":"H1","warm_bars":100,"reply_timeout_ms":30000}`
 
 	m := decode(t, in).(*Accepted)
 
-	assert.Equal(t, Header{V: 1, Type: TypeAccepted, Seq: 1, RunID: "r-20241103-7f3a9c"}, m.Header)
+	assert.Equal(t, Header{V: 1, Type: TypeAccepted, Seq: 1, RunID: "01JC8ZXQ5T3V9R0K4M7N2B6D8F"}, m.Header)
 	assert.Equal(t, []string{"EURUSD", "GBPUSD"}, m.Instruments)
 	assert.Equal(t, "H1", m.Interval)
 	assert.Equal(t, 100, m.WarmBars)

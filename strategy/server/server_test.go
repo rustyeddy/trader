@@ -179,7 +179,7 @@ func TestServer_AcceptsARegistrationAndIssuesARunID(t *testing.T) {
 	conn, accepted := r.register(validRegister())
 
 	assert.Equal(t, proto.Header{V: 1, Type: proto.TypeAccepted, Seq: 1, RunID: accepted.RunID}, accepted.Header)
-	assert.Regexp(t, regexp.MustCompile(`^r-\d{8}-[0-9a-f]{6}$`), accepted.RunID)
+	assert.Regexp(t, regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`), accepted.RunID)
 	assert.Equal(t, []string{"EURUSD", "GBPUSD"}, accepted.Instruments, "an empty grant means what the worker asked for")
 	assert.Equal(t, "H1", accepted.Interval)
 	assert.Zero(t, accepted.WarmBars, "the host grants warm-up; it is not echoed from the request")
@@ -402,19 +402,6 @@ func TestServer_AFailureToIssueARunIDIsInternal(t *testing.T) {
 	expectClosed(t, c)
 }
 
-func TestRandomRunID_IsDatedAndUnique(t *testing.T) {
-	seen := map[string]bool{}
-	for range 200 {
-		id, err := RandomRunID()
-		require.NoError(t, err)
-		assert.Regexp(t, regexp.MustCompile(`^r-\d{8}-[0-9a-f]{6}$`), id)
-		seen[id] = true
-	}
-	assert.Greater(t, len(seen), 190, "six random hex digits do not repeat in 200 draws, barring a freak")
-	id, _ := RandomRunID()
-	assert.True(t, strings.HasPrefix(id, "r-"+time.Now().UTC().Format("20060102")))
-}
-
 func TestServer_HandlerOutcomesBecomeDone(t *testing.T) {
 	for name, tc := range map[string]struct {
 		handle func(context.Context, *Session) error
@@ -602,4 +589,58 @@ func TestServer_NoGuestPackageImportsTheHost(t *testing.T) {
 		}
 	}
 	require.Positive(t, checked)
+}
+
+// failingListener accepts its first n connections from the real listener, then
+// fails Accept as a broken listener would.
+type failingListener struct {
+	net.Listener
+	mu sync.Mutex
+	n  int
+}
+
+func (f *failingListener) Accept() (net.Conn, error) {
+	f.mu.Lock()
+	ok := f.n > 0
+	f.n--
+	f.mu.Unlock()
+	if !ok {
+		return nil, errors.New("accept broke")
+	}
+	return f.Listener.Accept()
+}
+
+func TestServer_AListenerFailureDoesNotWaitForASilentWorker(t *testing.T) {
+	handling := make(chan struct{})
+	srv, err := New(Config{Admit: admitAll, Logger: quiet, ReplyTimeout: time.Minute, CloseGrace: 20 * time.Millisecond,
+		Handle: func(ctx context.Context, s *Session) error {
+			close(handling)
+			_, err := s.Exchange(ctx, sampleBars("2024-03-01T11:00:00Z", "EURUSD"))
+			return err
+		}})
+	require.NoError(t, err)
+	ln, err := Listen("127.0.0.1:0")
+	require.NoError(t, err)
+
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(context.Background(), &failingListener{Listener: ln, n: 1}) }()
+
+	c, err := net.Dial("tcp", ln.Addr().String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+	send(t, c, validRegister())
+	recv(t, c) // accepted
+	select {
+	case <-handling:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run never started")
+	}
+	recv(t, c) // bars; the worker now stays silent
+
+	select {
+	case err := <-served:
+		assert.ErrorContains(t, err, "accept")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve waited for the silent worker instead of cancelling it")
+	}
 }

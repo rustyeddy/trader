@@ -118,7 +118,13 @@ func TestSession_AReplyThatBreaksTheRulesEndsTheRun(t *testing.T) {
 		code proto.Code
 		raw  string
 	}{
-		"wrong run_id":              {func(id string) proto.Message { return reply("r-other", 2, 2) }, proto.CodeProtocol, ""},
+		"wrong run_id": {func(id string) proto.Message { return reply("r-other", 2, 2) }, proto.CodeProtocol, ""},
+		"a worker error with the wrong run_id": {func(id string) proto.Message {
+			return &proto.Failure{Header: proto.Header{Seq: 2, RunID: "r-other"}, Code: proto.CodeInternal, Message: "boom"}
+		}, proto.CodeProtocol, ""},
+		"a worker error with the wrong seq": {func(id string) proto.Message {
+			return &proto.Failure{Header: proto.Header{Seq: 5, RunID: id}, Code: proto.CodeInternal, Message: "boom"}
+		}, proto.CodeProtocol, ""},
 		"a seq gap":                 {func(id string) proto.Message { return reply(id, 3, 2) }, proto.CodeProtocol, ""},
 		"a repeated seq":            {func(id string) proto.Message { return reply(id, 1, 2) }, proto.CodeProtocol, ""},
 		"answering the wrong frame": {func(id string) proto.Message { return reply(id, 2, 1) }, proto.CodeProtocol, ""},

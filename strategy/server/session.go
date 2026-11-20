@@ -151,6 +151,11 @@ func (s *Session) checkReplyLocked(m proto.Message, sent *proto.Bars) (*proto.Or
 	}
 	switch m := m.(type) {
 	case *proto.Failure:
+		if h := m.Header; h.Seq != s.wkSeq {
+			return fail(proto.CodeProtocol, "error has seq %d, want %d", h.Seq, s.wkSeq)
+		} else if h.RunID != s.runID {
+			return fail(proto.CodeProtocol, "error has run_id %q, want %q", h.RunID, s.runID)
+		}
 		s.dropLocked("worker error")
 		return nil, &WorkerError{Failure: m}
 	case *proto.Orders:
