@@ -3,15 +3,20 @@
 
 * Status
 
-Proposed (#694, part of #690). The transport, scope and package decisions were
-made by the owner on #690 (2026-11-19 and 2026-11-20); this record freezes them
-as a wire contract for review. It becomes Accepted on owner approval.
+Accepted (owner approval 2026-11-20, #705). The transport, scope and package
+decisions were made by the owner on #690 (2026-11-19 and 2026-11-20); this record
+freezes them as the wire contract.
 
-On acceptance it supersedes the *transport and message* decisions of ADR-062
-(gRPC protocol v1) and ADR-063 (a process manager that launches guests) for the
-live tree: both describe archived code. It builds on ADR-093 (Trader owns sizing, admission and the order
-lifecycle; a request is the =stateRequested= stage of the one Order) and ADR-078
-(security). It does not amend ADR-093.
+It supersedes ADR-062 (gRPC protocol v1) and ADR-063 (a process manager that
+launches guests), which describe archived code. It builds on ADR-093 (Trader owns
+sizing, admission and the order lifecycle; a request is the =stateRequested=
+stage of the one Order) and ADR-078 (security). It does not amend ADR-093.
+
+Protocol v1 is a milestone, not a moment: until the "Strategy Protocol"
+milestone is evaluated the protocol is a pre-release, and the decisions this
+record defers (section "Deferred decisions") are made in their increments, each
+recorded in its own ADR that extends this one. A defect found in the text above
+is corrected by a superseding ADR, as for any accepted ADR.
 
 * Context
 
@@ -27,8 +32,7 @@ slower than gRPC or a binary encoding on loopback.
 first slice: the first complete protocol version with which real external
 strategy backtests can be run. It is reached through increments, each built,
 tested and evaluated on its own. Until the milestone is evaluated the protocol
-is a draft: messages may still change, and this record stays Proposed. When the
-milestone closes the wire format is frozen as =v=1= and this record is Accepted.
+is a pre-release; when it closes the wire format is declared =v=1=.
 
 Capabilities the owner has decided v1 contains: registration and RunID; lock-step
 =bars= and =orders=; the requested order with a mandatory stop for opens;
@@ -135,6 +139,10 @@ Every message is an object with these members:
   tie order within a frame). =run.from= is inclusive, =run.to= exclusive.
 - =run.warm_bars= (optional, default 0) asks for that many bars per instrument
   before =from=; it requires the =warm= capability.
+- The =run= object is strict: an unknown member of =run= (for example
+  =instrument=) is =error rejected=, naming the member, so a typo cannot silently
+  change the run. Elsewhere in =register= unknown members are ignored, and
+  =config= is opaque.
 - Registration does not bypass authorization or account risk (ADR-093). The host
   decides the account and risk policy; the worker cannot name or choose them.
 
@@ -464,6 +472,8 @@ change shown.
 | N28 | =register= with =v=2= | =version= |
 | N29 | =register= with an unknown instrument, capability or mode, or =mode= =live= | =rejected=, no run |
 | N30 | =register= without the =bars= capability | =rejected=, no run |
+| N30a | =register= whose =run= has an unknown member (for example =instrument=) or a =null= member | =rejected=, no run |
+| N30b | =register= with an unknown top-level member | accepted; the member is ignored |
 | N31 | no =register= within 10 s | =timeout= |
 | N32 | no =orders= within the reply timeout | =timeout=, run =failed= |
 | N33 | worker disconnects after a =bars= | run =failed=, partial results kept |
@@ -537,19 +547,13 @@ says otherwise. Each is one issue, built, tested and evaluated before the next.
 | #702 | durable RunID journal | a run can be rebuilt from it |
 | #700 | REST read/control of runs | completed and active runs |
 
-* Open questions, by increment
+* Deferred decisions
 
-Only the next blocking question is raised at a time, with a default.
+Each is decided in its increment and recorded in its own ADR that extends this
+one. Only the next blocking question is raised at a time, with a default.
 
-Decided (owner, 2026-11-20): order objects are strict, in structure and in values
-(section 6).
-
-*Next, for #699: strictness of =register=.* A typo in the =run= object (for
-example =instrument= for =instruments=) would silently change the run it asks
-for. Recommended: =run= is strict (an unknown member is =error rejected=), while
-the rest of =register= (and =config=, which is opaque) tolerates unknown members.
-
-Decided later, in their increment (not blocking now):
+Decided (owner, 2026-11-20): order objects are strict (section 6); the =run=
+object of =register= is strict (section 4).
 
 - Broker feedback shape and delivery (#698). Starting proposal: =fills=,
   =rejections= and =positions= carried on the =bars= frame, with the final ones on
@@ -557,5 +561,5 @@ Decided later, in their increment (not blocking now):
 - Paper authorization and frame source (#701 or its own issue): a =paper=
   registration matches an owner-configured entry naming the account and risk
   policy; the worker never chooses either.
-- Removal of a target (#695/#699): proposed not allowed, like a trail.
+- Removal of a target (#699): proposed not allowed, like a trail.
 - Timeout and frame-size defaults (#701): 10 s registration, 30 s reply, 1 MiB.
