@@ -155,6 +155,12 @@ func (br *broker) cancel(ctx context.Context, accountID, orderID string, at time
 // rejection, recorded on o. The change is in force from the next bar: bars the
 // broker has already processed are not replayed, so an amended stop cannot
 // trigger on a bar that opened before the order was decided.
+//
+// For an amend, stateFilled means applied: the order's single lifecycle
+// (ADR-093) ends there, but it is not an execution, so it is kept in amended and
+// never counted as a fill. The history of each exit it changed names the amend
+// that changed it and the value before and after, so a journal can rebuild the
+// stop at any bar from the order histories alone.
 func (br *broker) amend(ctx context.Context, act *account, o *order) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -213,16 +219,19 @@ func (br *broker) amend(ctx context.Context, act *account, o *order) error {
 		return reject(o, o.Time, "%w: target %s is not beyond the latest price %s", errStopWrongSide, o.takeProfit, mark)
 	}
 
+	if o.id == "" {
+		o.id = br.nextID()
+	}
 	var changes []string
 	if !o.stopLoss.IsZero() {
 		changes = append(changes, "stop "+stop.price.String()+" to "+o.stopLoss.String())
+		stop.record(stateSubmitted, o.Time, "stop amended from "+stop.price.String()+" to "+o.stopLoss.String()+" by "+o.id)
 		stop.price = o.stopLoss
-		stop.record(stateSubmitted, o.Time, "stop amended to "+o.stopLoss.String())
 	}
 	if !o.trail.IsZero() {
 		changes = append(changes, "trail "+stop.trail.String()+" to "+o.trail.String())
+		stop.record(stateSubmitted, o.Time, "trail amended from "+stop.trail.String()+" to "+o.trail.String()+" by "+o.id)
 		stop.trail = o.trail
-		stop.record(stateSubmitted, o.Time, "trail amended to "+o.trail.String())
 	}
 	if !o.takeProfit.IsZero() {
 		if target == nil {
@@ -231,12 +240,9 @@ func (br *broker) amend(ctx context.Context, act *account, o *order) error {
 			changes = append(changes, "target set to "+o.takeProfit.String())
 		} else {
 			changes = append(changes, "target "+target.price.String()+" to "+o.takeProfit.String())
+			target.record(stateSubmitted, o.Time, "target amended from "+target.price.String()+" to "+o.takeProfit.String()+" by "+o.id)
 			target.price = o.takeProfit
-			target.record(stateSubmitted, o.Time, "target amended to "+o.takeProfit.String())
 		}
-	}
-	if o.id == "" {
-		o.id = br.nextID()
 	}
 	o.record(stateSized, o.Time, "")
 	o.record(stateSubmitted, o.Time, "")

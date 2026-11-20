@@ -678,7 +678,7 @@ func TestBroker_Amend_MovesALongsStopUpAndKeepsTheHistory(t *testing.T) {
 
 	assert.Equal(t, px(109500), stop.price)
 	assert.Equal(t, stateSubmitted, stop.state, "the stop is still resting")
-	assert.Equal(t, "stop amended to 1.095", stop.history[len(stop.history)-1].reason)
+	assert.Equal(t, "stop amended from 1.089 to 1.095 by "+o.id, stop.history[len(stop.history)-1].reason)
 	assert.Equal(t, stateFilled, o.state)
 	assert.Equal(t, "stop 1.089 to 1.095", o.history[len(o.history)-1].reason)
 	assert.NotEmpty(t, o.id)
@@ -772,7 +772,7 @@ func TestBroker_Amend_TurnsAFixedStopIntoATrailingOne(t *testing.T) {
 
 	assert.Equal(t, px(108900), stop.price, "the stop keeps its level now")
 	assert.Equal(t, px(1500), stop.trail)
-	assert.Equal(t, "trail amended to 0.015", stop.history[len(stop.history)-1].reason)
+	assert.Equal(t, "trail amended from 0 to 0.015 by "+o.id, stop.history[len(stop.history)-1].reason)
 
 	// From the next bar it ratchets toward profit, and never back.
 	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110500, 112000, 110200, 111500)))
@@ -979,4 +979,27 @@ func TestBroker_Amend_ADecidedStopDoesNotTriggerOnABarThatOpenedBeforeIt(t *test
 
 	assert.False(t, ok, "the bar opened before the amend was decided")
 	assert.Equal(t, day(3), stop.Time)
+}
+
+func TestBroker_Amend_ExitHistoryRebuildsTheStopAtEveryChange(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	first, second := amendOrder(109500, 0, 0), amendOrder(109800, 0, 1000)
+	require.NoError(t, br.submit(context.Background(), first))
+	require.NoError(t, br.submit(context.Background(), second))
+
+	var reasons []string
+	for _, e := range stop.history {
+		if e.reason != "" {
+			reasons = append(reasons, e.reason)
+		}
+	}
+
+	assert.Equal(t, []string{
+		"stop amended from 1.089 to 1.095 by " + first.id,
+		"stop amended from 1.095 to 1.098 by " + second.id,
+		"trail amended from 0 to 0.01 by " + second.id,
+	}, reasons, "each change names the amend and both values")
+	assert.NotEqual(t, first.id, second.id)
 }
