@@ -149,13 +149,14 @@ Every message is an object with these members:
 *** =accepted= (Trader to worker)
 
 #+begin_src json
-{"v":1,"type":"accepted","seq":1,"run_id":"r-20241103-7f3a9c",
+{"v":1,"type":"accepted","seq":1,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F",
  "instruments":["EURUSD","GBPUSD"],"interval":"H1",
  "warm_bars":100,"reply_timeout_ms":30000}
 #+end_src
 
 Echoes what the host granted (it may grant fewer =warm_bars=) and the reply
-timeout that applies. The RunID is unique per run and is the key to everything
+timeout that applies. The RunID is a ULID (26 Crockford Base32 characters: a millisecond timestamp and
+80 random bits, so RunIDs sort by creation time; the host issues them monotonically). It is unique per run and is the key to everything
 Trader records about it.
 
 *** =bars= (Trader to worker)
@@ -163,7 +164,7 @@ Trader records about it.
 One message per availability instant, never more than one outstanding.
 
 #+begin_src json
-{"v":1,"type":"bars","seq":2,"run_id":"r-20241103-7f3a9c",
+{"v":1,"type":"bars","seq":2,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F",
  "frame_at":"2024-03-01T11:00:00Z","warm":false,
  "bars":[
   {"instrument":"EURUSD","time":"2024-03-01T10:00:00Z",
@@ -201,7 +202,7 @@ Exactly one per =bars=, possibly empty. The orders are submitted in array order,
 after the worker has seen the whole group.
 
 #+begin_src json
-{"v":1,"type":"orders","seq":2,"run_id":"r-20241103-7f3a9c",
+{"v":1,"type":"orders","seq":2,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F",
  "in_reply_to":2,
  "orders":[
   {"instrument":"EURUSD","action":"open","direction":"long","type":"market",
@@ -215,7 +216,7 @@ An empty reply is =[]=: nothing to do on that frame.
 *** =done= (Trader to worker)
 
 #+begin_src json
-{"v":1,"type":"done","seq":812,"run_id":"r-20241103-7f3a9c",
+{"v":1,"type":"done","seq":812,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F",
  "status":"completed","reason":""}
 #+end_src
 
@@ -226,7 +227,7 @@ closes after a short grace.
 *** =error= (either direction)
 
 #+begin_src json
-{"v":1,"type":"error","seq":3,"run_id":"r-20241103-7f3a9c",
+{"v":1,"type":"error","seq":3,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F",
  "code":"invalid_order","fatal":true,
  "message":"orders[0]: open requires stop_loss"}
 #+end_src
@@ -400,7 +401,7 @@ one element; no frame is sent for an instant at which no instrument has a bar.
 *** Opening a short with exits
 
 #+begin_src json
-{"v":1,"type":"orders","seq":3,"run_id":"r-20241103-7f3a9c","in_reply_to":3,
+{"v":1,"type":"orders","seq":3,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F","in_reply_to":3,
  "orders":[{"instrument":"GBPUSD","action":"open","direction":"short",
             "type":"limit","price":"1.26600","stop_loss":"1.26900",
             "take_profit":"1.26000","expires":"2024-03-01T20:00:00Z"}]}
@@ -409,13 +410,13 @@ one element; no frame is sent for an instant at which no instrument has a bar.
 *** Moving a stop, then turning it into a trail
 
 #+begin_src json
-{"v":1,"type":"orders","seq":5,"run_id":"r-20241103-7f3a9c","in_reply_to":5,
+{"v":1,"type":"orders","seq":5,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F","in_reply_to":5,
  "orders":[{"instrument":"EURUSD","action":"amend","stop_loss":"1.08764",
             "ref":"emax-breakeven-1"}]}
 #+end_src
 
 #+begin_src json
-{"v":1,"type":"orders","seq":6,"run_id":"r-20241103-7f3a9c","in_reply_to":6,
+{"v":1,"type":"orders","seq":6,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F","in_reply_to":6,
  "orders":[{"instrument":"EURUSD","action":"amend","trail":"0.00150",
             "ref":"emax-trail-1"}]}
 #+end_src
@@ -423,7 +424,7 @@ one element; no frame is sent for an instant at which no instrument has a bar.
 *** Tolerated unknown member (additive evolution)
 
 #+begin_src json
-{"v":1,"type":"orders","seq":4,"run_id":"r-20241103-7f3a9c","in_reply_to":4,
+{"v":1,"type":"orders","seq":4,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F","in_reply_to":4,
  "client_note":"ignored","orders":[]}
 #+end_src
 

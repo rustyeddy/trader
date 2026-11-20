@@ -7,9 +7,11 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"net"
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +19,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/internal/store/storetest"
+	"github.com/rustyeddy/trader/strategy/proto"
+	strategyserver "github.com/rustyeddy/trader/strategy/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,9 +47,21 @@ func (b *syncBuffer) String() string {
 // stop function that interrupts it and returns what Execute returned.
 func startServer(t *testing.T, env map[string]string, args ...string) (base string, stop func() error) {
 	t.Helper()
+	base, _, stop = startServerOut(t, env, args...)
+	return base, stop
+}
+
+// startServerOut is startServer that also returns what the command has printed so
+// far. Unless the arguments name --strategy-listen it turns the strategy service
+// off, so tests never fight over the default port.
+func startServerOut(t *testing.T, env map[string]string, args ...string) (base string, out *syncBuffer, stop func() error) {
+	t.Helper()
+	if !slices.Contains(args, "--strategy-listen") {
+		args = append(args, "--strategy-listen", strategyOff)
+	}
 	a := newApp()
 	a.getenv = func(k string) string { return env[k] }
-	out := &syncBuffer{}
+	out = &syncBuffer{}
 	a.cmd.SetOut(out)
 	a.cmd.SetErr(io.Discard)
 	a.cmd.SetArgs(append([]string{"--log-output", filepath.Join(t.TempDir(), "serve.log"), "serve"}, args...))
@@ -75,7 +91,7 @@ func startServer(t *testing.T, env map[string]string, args ...string) (base stri
 		}
 	}
 	t.Cleanup(func() { _ = stop() })
-	return base, stop
+	return base, out, stop
 }
 
 func httpGet(t *testing.T, target string, header ...string) (int, string) {
@@ -156,6 +172,10 @@ func TestServe_RefusesWhatItShouldNotStartWith(t *testing.T) {
 		"a LAN address without a token":   {nil, []string{"--listen", "192.168.1.5:0"}, envAPIToken},
 		"not an address":                  {nil, []string{"--listen", "nonsense"}, "--listen"},
 		"a zero timeout":                  {nil, []string{"--request-timeout", "0s"}, "--request-timeout"},
+		"strategy on every interface":     {nil, []string{"--listen", "127.0.0.1:0", "--strategy-listen", "0.0.0.0:0"}, "--strategy-listen"},
+		"strategy on a LAN address":       {nil, []string{"--listen", "127.0.0.1:0", "--strategy-listen", "192.168.1.5:0"}, "--strategy-listen"},
+		"strategy on an empty host":       {nil, []string{"--listen", "127.0.0.1:0", "--strategy-listen", ":0"}, "--strategy-listen"},
+		"strategy not an address":         {nil, []string{"--listen", "127.0.0.1:0", "--strategy-listen", "nonsense"}, "--strategy-listen"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -182,7 +202,8 @@ func TestLoopback(t *testing.T) {
 
 func TestServeCommand_IsTransportOnly(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod + "/service": true, mod + "/internal/store": true, mod + "/internal/logging": true, mod + "/rest": true}
+	allowed := map[string]bool{mod + "/service": true, mod + "/internal/store": true, mod + "/internal/logging": true, mod + "/rest": true,
+		mod + "/strategy/proto": true, mod + "/strategy/server": true}
 	f, err := parser.ParseFile(token.NewFileSet(), "serve.go", nil, parser.ImportsOnly)
 	require.NoError(t, err)
 	for _, imp := range f.Imports {
@@ -192,4 +213,72 @@ func TestServeCommand_IsTransportOnly(t *testing.T) {
 			assert.True(t, allowed[path], "serve.go imports %s", path)
 		}
 	}
+}
+
+func TestServe_TheStrategyServiceDefaultsToALoopbackPort(t *testing.T) {
+	f := newServeCmd(newApp()).Flags().Lookup("strategy-listen")
+
+	require.NotNil(t, f)
+	assert.Equal(t, defaultStrategyListen, f.DefValue)
+	local, err := loopback(defaultStrategyListen)
+	require.NoError(t, err)
+	assert.True(t, local, "the default is loopback")
+	assert.NotEqual(t, defaultListen, defaultStrategyListen, "it must not take the API's port")
+}
+
+func TestServe_TheStrategyServiceListensAndRefusesRegistrationsUntilTheEngineIsAttached(t *testing.T) {
+	root := storetest.Root(t)
+	_, out, stop := startServerOut(t, nil, "--config", writeConfig(t, ""), "--data-root", root, "--listen", "127.0.0.1:0", "--strategy-listen", "127.0.0.1:0")
+	re := regexp.MustCompile(`strategy protocol on tcp://(\S+)`)
+	require.Eventually(t, func() bool { return re.MatchString(out.String()) }, 5*time.Second, 10*time.Millisecond, "it announces its address")
+	addr := re.FindStringSubmatch(out.String())[1]
+
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	reg := &proto.Register{Header: proto.Header{Seq: 1}, Name: "emax", Capabilities: []string{"bars"},
+		Run: proto.Run{Mode: proto.ModeBacktest, Interval: "H1", Instruments: []string{"EURUSD"},
+			From: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)}}
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+	require.NoError(t, proto.Write(conn, reg, proto.DefaultMaxFrame))
+	m, err := proto.Read(conn, proto.DefaultMaxFrame)
+
+	require.NoError(t, err)
+	f, ok := m.(*proto.Failure)
+	require.True(t, ok, "expected an error message, got %T", m)
+	assert.Equal(t, proto.CodeRejected, f.Code)
+	assert.Contains(t, f.Message, "not available")
+	assert.Contains(t, f.Message, "#703")
+
+	require.NoError(t, stop(), "an interrupt stops both services cleanly")
+	_, derr := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	assert.Error(t, derr, "nothing listens on the strategy port any more")
+}
+
+func TestServe_TheStrategyServiceCanBeTurnedOff(t *testing.T) {
+	root := storetest.Root(t)
+	_, out, _ := startServerOut(t, nil, "--config", writeConfig(t, ""), "--data-root", root, "--listen", "127.0.0.1:0")
+
+	assert.Contains(t, out.String(), "strategy protocol off")
+	assert.NotContains(t, out.String(), "strategy protocol on")
+}
+
+func TestServe_AStrategyPortThatIsTakenIsAStartupError(t *testing.T) {
+	root := storetest.Root(t)
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = taken.Close() }()
+
+	_, _, err = runData(t, nil, "serve", "--config", writeConfig(t, ""), "--data-root", root,
+		"--listen", "127.0.0.1:0", "--strategy-listen", taken.Addr().String())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--strategy-listen")
+}
+
+func TestAdmitNoEngine_RefusesEveryRegistrationWithAnExplanation(t *testing.T) {
+	_, err := admitNoEngine(context.Background(), &proto.Register{})
+
+	require.ErrorIs(t, err, strategyserver.ErrRejected)
+	assert.Contains(t, err.Error(), "not available")
 }
