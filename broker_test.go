@@ -635,3 +635,348 @@ func TestOpenOnly_CollapsesEachPresentSeriesToItsOwnOpenAndInventsNone(t *testin
 		})
 	}
 }
+
+// fixedEntry fills a market open at 1.10000 on day 1 with the 1% stop of
+// openOrderAt (1.08900 for a long, 1.11100 for a short), no trail and no
+// target, and returns the account and the resting stop.
+func fixedEntry(t *testing.T, br *broker, act *account, d direction) *order {
+	t.Helper()
+	op := openOrderAt("EURUSD", d, eurusd1_10)
+	op.accountID = act.id
+	require.NoError(t, br.submit(context.Background(), op))
+	require.NoError(t, br.onBar(context.Background(), dayBar(1, 110000, 110000, 110000, 110000)))
+	require.Equal(t, stateFilled, op.state)
+	require.Len(t, br.orders["EURUSD"], 1)
+	stop := br.orders["EURUSD"][0]
+	require.Equal(t, reasonStopLoss, stop.reason)
+	require.True(t, stop.trail.IsZero())
+	return stop
+}
+
+// amendOrder is an amend of the account's EURUSD position, decided on day 1.
+func amendOrder(stopN, targetN, trailN int64) *order {
+	o := &order{Time: day(1), accountID: "a", instrument: "EURUSD", action: amend, orderType: marketOrder}
+	if stopN != 0 {
+		o.stopLoss = px(stopN)
+	}
+	if targetN != 0 {
+		o.takeProfit = px(targetN)
+	}
+	if trailN != 0 {
+		o.trail = px(trailN)
+	}
+	return o
+}
+
+func TestBroker_Amend_MovesALongsStopUpAndKeepsTheHistory(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	o := amendOrder(109500, 0, 0)
+
+	require.NoError(t, br.submit(context.Background(), o))
+
+	assert.Equal(t, px(109500), stop.price)
+	assert.Equal(t, stateSubmitted, stop.state, "the stop is still resting")
+	assert.Equal(t, "stop amended to 1.095", stop.history[len(stop.history)-1].reason)
+	assert.Equal(t, stateFilled, o.state)
+	assert.Equal(t, "stop 1.089 to 1.095", o.history[len(o.history)-1].reason)
+	assert.NotEmpty(t, o.id)
+	assert.Equal(t, []*order{o}, br.amended)
+	assert.NotContains(t, br.completed, o, "an amend is not an execution")
+}
+
+func TestBroker_Amend_MovesAShortsStopDown(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, short)
+	require.Equal(t, px(111100), stop.price)
+
+	require.NoError(t, br.submit(context.Background(), amendOrder(110500, 0, 0)))
+
+	assert.Equal(t, px(110500), stop.price)
+}
+
+func TestBroker_Amend_NeverLoosensAStop(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		d     direction
+		stopN int64
+	}{
+		{"long stop moved down", long, 108000},
+		{"long stop unchanged", long, 108900},
+		{"short stop moved up", short, 112000},
+		{"short stop unchanged", short, 111100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captureLogs(t)
+			br, act := newFillBroker()
+			stop := fixedEntry(t, br, act, tc.d)
+			before := stop.price
+			o := amendOrder(tc.stopN, 0, 0)
+
+			err := br.submit(context.Background(), o)
+
+			require.ErrorIs(t, err, errLoosensStop)
+			assert.True(t, isRejection(err), "the run goes on")
+			assert.Equal(t, stateRejected, o.state)
+			assert.Equal(t, before, stop.price)
+			assert.Empty(t, br.amended)
+		})
+	}
+}
+
+func TestBroker_Amend_AStopMustBeOnTheLosingSideOfTheLatestPrice(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		d     direction
+		stopN int64
+	}{
+		{"long stop at the price", long, 110000},
+		{"long stop above the price", long, 111000},
+		{"short stop at the price", short, 110000},
+		{"short stop below the price", short, 109000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captureLogs(t)
+			br, act := newFillBroker()
+			stop := fixedEntry(t, br, act, tc.d)
+			before := stop.price
+
+			err := br.submit(context.Background(), amendOrder(tc.stopN, 0, 0))
+
+			require.True(t, isRejection(err), "%v", err)
+			assert.Equal(t, before, stop.price)
+		})
+	}
+}
+
+func TestBroker_Amend_ALongsStopCanLockInProfitPastTheEntry(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110000, 112000, 110000, 111500)))
+
+	require.NoError(t, br.submit(context.Background(), amendOrder(110500, 0, 0)))
+
+	assert.Equal(t, px(110500), stop.price, "above the 1.10000 entry, below the 1.11500 latest price")
+}
+
+func TestBroker_Amend_TurnsAFixedStopIntoATrailingOne(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	o := amendOrder(0, 0, 1500)
+
+	require.NoError(t, br.submit(context.Background(), o))
+
+	assert.Equal(t, px(108900), stop.price, "the stop keeps its level now")
+	assert.Equal(t, px(1500), stop.trail)
+	assert.Equal(t, "trail amended to 0.015", stop.history[len(stop.history)-1].reason)
+
+	// From the next bar it ratchets toward profit, and never back.
+	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110500, 112000, 110200, 111500)))
+	assert.Equal(t, px(110500), stop.price)
+	require.NoError(t, br.onBar(context.Background(), dayBar(3, 111000, 111500, 110600, 111000)))
+	assert.Equal(t, px(110500), stop.price)
+	assert.Contains(t, act.positions, "EURUSD")
+}
+
+func TestBroker_Amend_ATrailCanOnlyBeShortened(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		trailN  int64
+		wantErr bool
+	}{
+		{"shorter", 1000, false},
+		{"equal", 1500, true},
+		{"longer", 2500, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captureLogs(t)
+			br, _ := newFillBroker()
+			_, stop := trailingEntry(t, br, long, 1500)
+
+			err := br.submit(context.Background(), amendOrder(0, 0, tc.trailN))
+
+			if tc.wantErr {
+				require.ErrorIs(t, err, errLoosensStop)
+				assert.Equal(t, px(1500), stop.trail)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, px(tc.trailN), stop.trail)
+		})
+	}
+}
+
+func TestBroker_Amend_StopAndTrailTogetherApplyTheStopFirst(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	o := amendOrder(109500, 0, 1000)
+
+	require.NoError(t, br.submit(context.Background(), o))
+
+	assert.Equal(t, px(109500), stop.price)
+	assert.Equal(t, px(1000), stop.trail)
+	assert.Equal(t, "stop 1.089 to 1.095, trail 0 to 0.01", o.history[len(o.history)-1].reason)
+}
+
+func TestBroker_Amend_AddsAndMovesATakeProfit(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	fixedEntry(t, br, act, long)
+	targets := func() []*order {
+		var out []*order
+		for _, x := range br.orders["EURUSD"] {
+			if x.reason == reasonTakeProfit {
+				out = append(out, x)
+			}
+		}
+		return out
+	}
+	require.Empty(t, targets())
+
+	require.NoError(t, br.submit(context.Background(), amendOrder(0, 112000, 0)))
+	require.Len(t, targets(), 1)
+	target := targets()[0]
+	assert.Equal(t, px(112000), target.price)
+	assert.Equal(t, limitOrder, target.orderType)
+	assert.Equal(t, close, target.action)
+	assert.Equal(t, long, target.direction, "the direction of the position it closes")
+
+	// A target may move either way on the winning side: it carries no risk.
+	require.NoError(t, br.submit(context.Background(), amendOrder(0, 111000, 0)))
+	assert.Equal(t, px(111000), target.price)
+	require.NoError(t, br.submit(context.Background(), amendOrder(0, 113000, 0)))
+	assert.Equal(t, px(113000), target.price)
+	assert.Len(t, targets(), 1)
+
+	// The target then fills like any target.
+	require.NoError(t, br.onBar(context.Background(), dayBar(2, 112000, 113500, 111900, 113000)))
+	assert.Equal(t, stateFilled, target.state)
+	assert.Equal(t, px(113000), target.fillPrice)
+	assert.Empty(t, act.positions)
+	assert.Empty(t, br.orders["EURUSD"], "the stop went with the position")
+}
+
+func TestBroker_Amend_ATargetMustBeOnTheWinningSideOfTheLatestPrice(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	fixedEntry(t, br, act, long)
+
+	err := br.submit(context.Background(), amendOrder(0, 109000, 0))
+
+	require.ErrorIs(t, err, errStopWrongSide)
+	assert.True(t, isRejection(err))
+	assert.Len(t, br.orders["EURUSD"], 1, "no target was placed")
+}
+
+func TestBroker_Amend_ARefusedChangeChangesNothing(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+
+	// A good stop and an impossible target: all or nothing.
+	err := br.submit(context.Background(), amendOrder(109500, 109000, 1000))
+
+	require.True(t, isRejection(err))
+	assert.Equal(t, px(108900), stop.price)
+	assert.True(t, stop.trail.IsZero())
+	assert.Len(t, br.orders["EURUSD"], 1)
+	assert.Empty(t, br.amended)
+}
+
+func TestBroker_Amend_WithoutAPositionIsRejectedNotFatal(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	o := amendOrder(109500, 0, 0)
+
+	err := br.submit(context.Background(), o)
+
+	require.ErrorIs(t, err, errNoPosition)
+	assert.True(t, isRejection(err))
+	assert.Equal(t, stateRejected, o.state)
+}
+
+func TestBroker_Amend_AfterTheStopClosedThePositionIsRejected(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	fixedEntry(t, br, act, long)
+	require.NoError(t, br.onBar(context.Background(), dayBar(2, 109000, 109100, 108000, 108500)))
+	require.Empty(t, act.positions)
+
+	err := br.submit(context.Background(), amendOrder(109000, 0, 0))
+
+	require.ErrorIs(t, err, errNoPosition)
+}
+
+func TestBroker_Amend_OffTickPricesAreAFailureNotARejection(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	fixedEntry(t, br, act, long)
+	o := amendOrder(0, 0, 0)
+	o.stopLoss = num.MustParsePrice("1.0950001")
+
+	err := br.submit(context.Background(), o)
+
+	require.ErrorIs(t, err, errInvalidOrder)
+	assert.False(t, isRejection(err), "a strategy bug stops the run")
+}
+
+func TestBroker_Amend_UnknownInstrumentAndCancelledContext(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	fixedEntry(t, br, act, long)
+
+	o := amendOrder(109500, 0, 0)
+	o.instrument = "NOSUCH"
+	require.ErrorIs(t, br.submit(context.Background(), o), errUnknownInstrument)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, br.submit(ctx, amendOrder(109500, 0, 0)), context.Canceled)
+}
+
+func TestBroker_Amend_OnlyChangesTheOrdersOwnAccount(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	other := br.addAccount("b", usd(10000))
+	o := amendOrder(109500, 0, 0)
+	o.accountID = other.id
+
+	err := br.submit(context.Background(), o)
+
+	require.ErrorIs(t, err, errNoPosition, "b has no position")
+	assert.Equal(t, px(108900), stop.price, "a's stop is untouched")
+}
+
+func TestBroker_Amend_TheNewStopTriggersOnALaterBarAtItsLevel(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	require.NoError(t, br.submit(context.Background(), amendOrder(109500, 0, 0)))
+
+	// Day 2 trades down through 1.09500 but never to the old 1.08900.
+	require.NoError(t, br.onBar(context.Background(), dayBar(2, 110000, 110200, 109400, 109600)))
+
+	assert.Equal(t, stateFilled, stop.state)
+	assert.Equal(t, px(109500), stop.fillPrice)
+	assert.Empty(t, act.positions)
+}
+
+func TestBroker_Amend_ADecidedStopDoesNotTriggerOnABarThatOpenedBeforeIt(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	stop := fixedEntry(t, br, act, long)
+	o := amendOrder(109500, 0, 0)
+	o.Time = day(3) // decided on a later bar than the bar below
+	require.NoError(t, br.submit(context.Background(), o))
+
+	_, ok := stop.execution(dayBar(2, 110000, 110200, 109000, 109600))
+
+	assert.False(t, ok, "the bar opened before the amend was decided")
+	assert.Equal(t, day(3), stop.Time)
+}

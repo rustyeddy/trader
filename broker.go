@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
@@ -39,6 +40,12 @@ type broker struct {
 	// journal. Only complete appends to it. The broker's own liquidations are in
 	// it too; closeouts picks them out by their reason.
 	completed []*order
+
+	// amended keeps every amend that was applied, in the order it happened. An
+	// amend changes the resting exits of a position rather than executing, so
+	// it is not in completed and is not counted as a fill; each exit it changed
+	// also carries the change in its own history.
+	amended []*order
 }
 
 func newBroker(id string, markets *catalog) *broker {
@@ -67,6 +74,10 @@ func (br *broker) submit(ctx context.Context, o *order) error {
 	act, ok := br.accounts[o.accountID]
 	if !ok {
 		return fmt.Errorf("submit to broker %s: %w: no account %q", br.id, errUnknownAccount, o.accountID)
+	}
+
+	if o.action == amend {
+		return br.amend(ctx, act, o)
 	}
 
 	if o.action == open {
@@ -129,6 +140,110 @@ func (br *broker) cancel(ctx context.Context, accountID, orderID string, at time
 	if n == 0 {
 		return rejected("cancel %s on broker %s: %w", orderID, br.id, errNoOrder)
 	}
+	return nil
+}
+
+// amend applies the requested change to the protective stop and take profit of
+// the account's open position in o's instrument: the resting exits the broker
+// owns. It never loosens protection, because the account sized the position
+// from its stop: a long's stop only rises and a short's only falls, a trail
+// only gets shorter (or is set on a fixed stop, which keeps its level and
+// trails from the next bar), and a target can move anywhere on the winning side
+// of the latest price. A new stop must lie on the losing side of the latest
+// price, or it would already have triggered. Every change is checked before
+// any is made, so a refused amend changes nothing. A refusal is an expected
+// rejection, recorded on o. The change is in force from the next bar: bars the
+// broker has already processed are not replayed, so an amended stop cannot
+// trigger on a bar that opened before the order was decided.
+func (br *broker) amend(ctx context.Context, act *account, o *order) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m, ok := act.markets.lookup(o.instrument)
+	if !ok {
+		return fmt.Errorf("amend: %w: %q", errUnknownInstrument, o.instrument)
+	}
+	if err := m.checkOrderPrices(o); err != nil {
+		return fmt.Errorf("amend: %w", err)
+	}
+	pos := act.positions[o.instrument]
+	if pos == nil {
+		return reject(o, o.Time, "%w: %s on %s", errNoPosition, o.action, o.instrument)
+	}
+	exit := func(why orderReason) *order {
+		i := slices.IndexFunc(br.orders[o.instrument], func(x *order) bool {
+			return x.accountID == o.accountID && x.action == close && x.reason == why
+		})
+		if i < 0 {
+			return nil
+		}
+		return br.orders[o.instrument][i]
+	}
+	stop, target := exit(reasonStopLoss), exit(reasonTakeProfit)
+	isLong := pos.direction == long
+	mark := pos.markPrice
+
+	// beyondMark: p lies where a stop belongs (below the price of a long)
+	// when losing, or where a target belongs when not.
+	side := func(p num.Price, losing bool) bool {
+		if isLong == losing {
+			return p.Cmp(mark) < 0
+		}
+		return p.Cmp(mark) > 0
+	}
+	if !o.stopLoss.IsZero() {
+		switch {
+		case stop == nil:
+			return reject(o, o.Time, "%w: %s on %s has no stop to move", errNoPosition, o.action, o.instrument)
+		case isLong && o.stopLoss.Cmp(stop.price) <= 0, !isLong && o.stopLoss.Cmp(stop.price) >= 0:
+			return reject(o, o.Time, "%w: stop %s does not tighten the stop %s", errLoosensStop, o.stopLoss, stop.price)
+		case !side(o.stopLoss, true):
+			return reject(o, o.Time, "%w: stop %s is not beyond the latest price %s", errStopWrongSide, o.stopLoss, mark)
+		}
+	}
+	if !o.trail.IsZero() {
+		switch {
+		case stop == nil:
+			return reject(o, o.Time, "%w: %s on %s has no stop to trail", errNoPosition, o.action, o.instrument)
+		case !stop.trail.IsZero() && o.trail.Cmp(stop.trail) >= 0:
+			return reject(o, o.Time, "%w: trail %s does not shorten the trail %s", errLoosensStop, o.trail, stop.trail)
+		}
+	}
+	if !o.takeProfit.IsZero() && !side(o.takeProfit, false) {
+		return reject(o, o.Time, "%w: target %s is not beyond the latest price %s", errStopWrongSide, o.takeProfit, mark)
+	}
+
+	var changes []string
+	if !o.stopLoss.IsZero() {
+		changes = append(changes, "stop "+stop.price.String()+" to "+o.stopLoss.String())
+		stop.price = o.stopLoss
+		stop.record(stateSubmitted, o.Time, "stop amended to "+o.stopLoss.String())
+	}
+	if !o.trail.IsZero() {
+		changes = append(changes, "trail "+stop.trail.String()+" to "+o.trail.String())
+		stop.trail = o.trail
+		stop.record(stateSubmitted, o.Time, "trail amended to "+o.trail.String())
+	}
+	if !o.takeProfit.IsZero() {
+		if target == nil {
+			br.placeExit(&order{accountID: o.accountID, instrument: o.instrument, direction: pos.direction, Time: o.Time},
+				limitOrder, reasonTakeProfit, o.takeProfit)
+			changes = append(changes, "target set to "+o.takeProfit.String())
+		} else {
+			changes = append(changes, "target "+target.price.String()+" to "+o.takeProfit.String())
+			target.price = o.takeProfit
+			target.record(stateSubmitted, o.Time, "target amended to "+o.takeProfit.String())
+		}
+	}
+	if o.id == "" {
+		o.id = br.nextID()
+	}
+	o.record(stateSized, o.Time, "")
+	o.record(stateSubmitted, o.Time, "")
+	o.record(stateFilled, o.Time, strings.Join(changes, ", "))
+	br.amended = append(br.amended, o)
+	slog.InfoContext(ctx, "order amended", "broker", br.id, "account", o.accountID,
+		"order", o.id, "instrument", o.instrument, "changes", strings.Join(changes, ", "))
 	return nil
 }
 
