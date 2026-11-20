@@ -1,0 +1,518 @@
+#+TITLE: ADR-094: External strategy wire protocol v1 (TCP, length-prefixed JSON)
+#+STARTUP: overview indent
+
+* Status
+
+Proposed (#694, part of #690). The transport, scope and package decisions were
+made by the owner on #690 (2026-11-19 and 2026-11-20); this record freezes them
+as a wire contract for review. It becomes Accepted on owner approval.
+
+On acceptance it supersedes the *transport and message* decisions of ADR-062
+(gRPC protocol v1) and ADR-063 (a process manager that launches guests) for the
+live tree: both describe archived code. It builds on ADR-093 (Trader owns sizing, admission and the order
+lifecycle; a request is the =stateRequested= stage of the one Order) and ADR-078
+(security). It does not amend ADR-093.
+
+* Context
+
+External strategies run outside Trader, possibly in another repository or
+language. The archived design used gRPC over a Unix socket with Trader launching
+the guest. The owner decided instead (#690): Trader is a long-running service;
+workers connect to it; one connection is one run; the transport is a persistent
+TCP connection carrying length-prefixed JSON, spec-first and RFC-style, so a
+guest may be written in any language; a benchmark showed this is not materially
+slower than gRPC or a binary encoding on loopback.
+
+Scope of v1 (owner decisions):
+
+- Loopback only. TLS and tokens are deferred; a non-loopback listener is refused.
+- Strictly lock-step: one =bars= frame, one =orders= reply. Batching is deferred
+  until a concrete need appears.
+- Bars only. Fills, positions and account state are not delivered (deferred).
+- No resume or reconnect. One registration is one run.
+- Durable run artifacts (journal, results layout) and REST control are separate
+  designs and not part of this contract.
+
+* Decision
+
+The words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
+
+** 1. Packages
+
+Public packages; =internal/*= (store, layout, canonical) remains unreachable.
+A guest written in Go may import any public trader package (=marketdata=,
+=num=, =instrument=) as well as these.
+
+| Package | Holds | May import within the module |
+|---------+-------+-----------------------------|
+| =strategy= | exported seam: =Strategy=, =Warmer=, the requested =Order= | =marketdata=, =num=, =instrument= |
+| =strategy/proto= | message types, framing, codec, version constant | =strategy=, =marketdata=, =num= |
+| =strategy/client= | Go client: connect, register, run the lock-step loop | =strategy=, =strategy/proto= |
+
+Host code (listener, registration validation, the adapter that lets a
+connection satisfy the engine's strategy interface) lives in a service package
+outside =strategy/*=. =strategy/client= reads no environment variable; its
+endpoint is an argument. =strategy.Order= is a boundary projection of the
+requested order (ADR-093); Trader's own =order= and =orderState= stay
+authoritative, and no parallel lifecycle exists.
+
+** 2. Connection and framing
+
+- Transport: one TCP connection per run. Trader listens on a loopback address
+  only (=127.0.0.1= or =::1=). Starting with a non-loopback address MUST fail.
+- Frame: a 4-byte unsigned big-endian length N, then N bytes of one UTF-8 JSON
+  object. N=0, N above the limit (default 1 MiB, host configuration), invalid
+  UTF-8, a byte-order mark, a non-object or trailing bytes after the object is a
+  =protocol= error. There is no delimiter other than the length.
+- JSON member names inside one object MUST be unique; a duplicate name is a
+  =protocol= error (so every JSON library, v1 or v2, sees the same message).
+- Timestamps are RFC 3339 UTC with a trailing =Z=, whole seconds. Prices and
+  decimals are JSON *strings*; a JSON number where a decimal string is specified
+  is a =protocol= error.
+- Decimal string syntax: =[0-9]+(\.[0-9]+)?=: no sign, no exponent, no spaces, at
+  most 8 fractional digits (the precision of =num.Price=). Parsed with
+  =num.ParsePrice=. Never rounded.
+
+** 3. Envelope
+
+Every message is an object with these members:
+
+| Member | Type | Rule |
+|--------+------+------|
+| =v= | integer | protocol major; 1 in this record |
+| =type= | string | one of =register=, =accepted=, =bars=, =orders=, =done=, =error= |
+| =seq= | integer | per direction, first message is 1, each next is +1 |
+| =run_id= | string | on every message *except* =register= (below) |
+
+- =register= is the only message without =run_id=: the host issues the RunID in
+  =accepted=, so it cannot precede it. =accepted= carries the new RunID; every
+  later message in both directions MUST carry the same value, else =protocol=.
+- A repeated, skipped or out-of-order =seq= is a =protocol= error.
+- Unknown members of the envelope or of a message are ignored (additive
+  evolution). An unknown =type=, or a =type= not allowed in the current state, is
+  a =protocol= error.
+
+** 4. Messages
+
+*** =register= (worker to Trader)
+
+#+begin_src json
+{"v":1,"type":"register","seq":1,
+ "name":"emax-go","version":"0.3.1","build":"git:9f2c1ab",
+ "config":{"short":12,"long":26},
+ "capabilities":["bars","warm"],
+ "run":{"mode":"backtest","interval":"H1",
+        "instruments":["EURUSD","GBPUSD"],
+        "from":"2024-03-01T00:00:00Z","to":"2024-04-01T00:00:00Z",
+        "warm_bars":100}}
+#+end_src
+
+- =name=, =version=, =build= identify the strategy and its source (VCS revision or
+  digest) so results are reproducible. =config= is an opaque JSON object, stored
+  with the run and never interpreted by the protocol.
+- =capabilities= is a closed set: =bars= (required) and =warm=. An unknown value
+  is refused with =rejected=.
+- =run.mode= is =backtest= or =paper= in v1 (owner decision). =live= is a
+  reserved name and is refused with =rejected=. A host that has no paper broker
+  path yet refuses =paper= with =rejected=. A =paper= registration must be
+  authorized by the owner (open question 1).
+- =run.interval= is =H1= or =D1=. =run.instruments= are instrument symbols known
+  to Trader, in the order the worker wants them delivered (that order is the
+  tie order within a frame). =run.from= is inclusive, =run.to= exclusive.
+- =run.warm_bars= (optional, default 0) asks for that many bars per instrument
+  before =from=; it requires the =warm= capability.
+- Registration does not bypass authorization or account risk (ADR-093). The host
+  decides the account and risk policy; the worker cannot name or choose them.
+
+*** =accepted= (Trader to worker)
+
+#+begin_src json
+{"v":1,"type":"accepted","seq":1,"run_id":"r-20241103-7f3a9c",
+ "instruments":["EURUSD","GBPUSD"],"interval":"H1",
+ "warm_bars":100,"reply_timeout_ms":30000}
+#+end_src
+
+Echoes what the host granted (it may grant fewer =warm_bars=) and the reply
+timeout that applies. The RunID is unique per run and is the key to everything
+Trader records about it.
+
+*** =bars= (Trader to worker)
+
+One message per availability instant, never more than one outstanding.
+
+#+begin_src json
+{"v":1,"type":"bars","seq":2,"run_id":"r-20241103-7f3a9c",
+ "frame_at":"2024-03-01T11:00:00Z","warm":false,
+ "bars":[
+  {"instrument":"EURUSD","time":"2024-03-01T10:00:00Z",
+   "available_at":"2024-03-01T11:00:00Z",
+   "bid":{"open":"1.08725","high":"1.08790","low":"1.08690","close":"1.08760"},
+   "ask":{"open":"1.08728","high":"1.08794","low":"1.08693","close":"1.08764"},
+   "mid":{"open":"1.087265","high":"1.08792","low":"1.086915","close":"1.08762"},
+   "volume":2310},
+  {"instrument":"GBPUSD","time":"2024-03-01T10:00:00Z",
+   "available_at":"2024-03-01T11:00:00Z",
+   "bid":{"open":"1.26410","high":"1.26480","low":"1.26370","close":"1.26455"},
+   "ask":{"open":"1.26414","high":"1.26485","low":"1.26374","close":"1.26460"},
+   "mid":{"open":"1.26412","high":"1.264825","low":"1.26372","close":"1.264575"},
+   "volume":1984}]}
+#+end_src
+
+- =frame_at= is the availability instant, Trader's clock. The worker never sees
+  wall-clock time and MUST NOT need it.
+- =bars= holds only the bars that became available at =frame_at=, in the
+  registered instrument order. An instrument with no bar then is absent (not
+  filled or carried forward). It is never empty.
+- A bar has =instrument=, =time= (its open), =available_at= (persisted, ADR-090),
+  =bid=, =ask=, =mid=, optional =trade=, and =volume=. Each of bid, ask, mid and
+  trade is an object with =open=, =high=, =low=, =close= decimal strings; one
+  that does not apply is omitted. Prices are exactly the canonical values; mid may
+  have six decimals.
+- With =warm=true= the frame is a warm-up frame: the worker learns from it and
+  takes no position. Warm frames come first, in order, before any frame with
+  =warm=false=, and every one is answered like any other (the reply MUST have no
+  orders).
+
+*** =orders= (worker to Trader)
+
+Exactly one per =bars=, possibly empty. The orders are submitted in array order,
+after the worker has seen the whole group.
+
+#+begin_src json
+{"v":1,"type":"orders","seq":2,"run_id":"r-20241103-7f3a9c",
+ "in_reply_to":2,
+ "orders":[
+  {"instrument":"EURUSD","action":"open","direction":"long","type":"market",
+   "price":"1.08764","stop_loss":"1.08500","take_profit":"1.09200",
+   "trail":"0.00200","ref":"emax-entry-1"},
+  {"instrument":"GBPUSD","action":"close","ref":"emax-exit-7"}]}
+#+end_src
+
+An empty reply is =[]=: nothing to do on that frame.
+
+*** =done= (Trader to worker)
+
+#+begin_src json
+{"v":1,"type":"done","seq":812,"run_id":"r-20241103-7f3a9c",
+ "status":"completed","reason":""}
+#+end_src
+
+=status= is =completed=, =cancelled= (the owner cancelled or halted the run) or
+=failed=. =reason= is text for people. After =done= the worker closes; Trader
+closes after a short grace.
+
+*** =error= (either direction)
+
+#+begin_src json
+{"v":1,"type":"error","seq":3,"run_id":"r-20241103-7f3a9c",
+ "code":"invalid_order","fatal":true,
+ "message":"orders[0]: open requires stop_loss"}
+#+end_src
+
+All v1 errors are fatal: the sender closes after sending. =code= is a closed
+set: =protocol=, =version=, =rejected=, =invalid_order=, =timeout=, =cancelled=,
+=internal=. =message= is for people and never parsed. An =error= sent before
+=accepted= has no =run_id=.
+
+** 5. State machine
+
+| State (Trader's view) | Accepts | Next |
+|-----------------------+---------+------|
+| Connected | =register= within the registration timeout (10 s) | Registered, else =error timeout= |
+| Registered | (Trader sends =accepted=, or =error rejected= and closes) | Running |
+| Running, idle | (Trader sends =bars=, or =done=) | Running, awaiting reply |
+| Running, awaiting reply | =orders= with =in_reply_to= equal to the outstanding =bars= =seq=, within the reply timeout | Running, idle |
+| Done / failed | nothing; the connection closes | |
+
+Any other message in any state is a =protocol= error. A second =register=, an
+=orders= with nothing outstanding, and an =orders= answering an older frame are
+all =protocol= errors. One =bars= is outstanding at a time.
+
+** 6. Requested order
+
+An order in =orders= is a request (ADR-093). Trader validates it with the same
+rules as =order.validate()=, binds the account, sizes, admits and executes it.
+
+| Member | Type | Rule |
+|--------+------+------|
+| =instrument= | string | required; one of the run's instruments |
+| =action= | string | required: =open=, =add=, =reduce=, =close=, =amend= |
+| =direction= | string | =long= or =short=; required for =open=; MUST be absent for =add=, =reduce=, =close=, =amend= |
+| =type= | string | =market= (default), =limit=, =stop=; =limit= and =stop= only with =open= |
+| =price= | decimal | required for =open= (reference price for sizing; for =limit= and =stop= the trigger price); absent otherwise |
+| =stop_loss= | decimal | *required for =open=*, strictly on the losing side of =price= (below for long, above for short); optional for =amend= (the new stop level); absent otherwise |
+| =take_profit= | decimal | optional for =open=, strictly on the winning side of =price=; optional for =amend= (the new target) |
+| =trail= | decimal | optional, =open= and =amend= only; a positive price distance the protective stop keeps behind the market |
+| =expires= | timestamp | optional, =open= only; must be after =frame_at= |
+| =ref= | string | optional, 1 to 64 printable ASCII characters; echoed in Trader's records, not an identifier |
+
+- Every price is greater than 0 and not above 10000 (=maxPrice=).
+- =expires= is only valid on =open=. =take_profit= and =trail= are valid on =open=
+  and =amend=. =amend= is the only way to change a protective stop or a target
+  after the open (next subsection).
+- For a market =open= the =price= is the worker's reference (typically the last
+  close), not a fill price: the broker fills per the engine's fill rule.
+- =add= and =reduce= carry no direction, price or exits; their size rules are
+  owned by Trader.
+
+*** Amending a stop
+
+=amend= changes the protective stop of the open position in =instrument=. A
+netting account has at most one position per instrument, so the instrument names
+the position. It carries only =instrument=, =action=, =stop_loss=, =take_profit=, =trail= and
+=ref=, and at least one of =stop_loss=, =take_profit= and =trail=.
+
+- *Move the stop*: =stop_loss= is the new fixed level. It can be moved past the
+  entry price to lock in profit.
+- *Turn a fixed stop into a trailing stop*: =trail= on a position whose stop is
+  fixed. The stop keeps its current level now and ratchets toward profit from the
+  next bar, as the broker's trailing stop does. It never moves back.
+- *Tighten a trail*: a smaller =trail= distance on an already trailing stop.
+- *Move or add the target*: =take_profit= is the new target level. A target
+  carries no risk the account sized, so it may move either way, or be added to a
+  position that opened without one; it must lie strictly on the winning side of
+  the latest price. It cannot be removed.
+- Several given: the stop applies first, then the trail, then the target, and
+  all of them or none.
+
+An amend MUST NOT loosen protection. The account sized the position from its
+stop (ADR-093), so a looser stop would raise the risk Trader admitted. A long's
+stop can only rise and a short's only fall; a trail can only be set or
+shortened, never lengthened or removed.
+The amended stop takes effect as an order decided at =frame_at= does: it cannot
+trigger on a bar that opened before that instant.
+
+*** Static and stateful rejection
+
+Two kinds of invalid order are distinguished, as in the engine
+(=order.validate()= is pure; stateful checks belong to the handler):
+
+- *Static* invalidity depends only on the message and the registered run: a
+  missing or forbidden member, a stop on the wrong side of =price=, an unknown
+  instrument, a host-owned member. It fails the run (=error invalid_order=).
+- *Stateful* invalidity depends on what Trader holds when it processes the order:
+  =close=, =reduce= or =amend= with no open position in the instrument, an amend
+  that would loosen the stop or trail, a stop on the wrong side of the
+  instrument's latest close, a =reduce= larger than the position. Trader rejects
+  that order (=stateRejected= with a reason, in the record) and the run
+  continues. The worker is not told in v1, since fills and positions are not
+  delivered; this is why a strategy must track its own position.
+
+*** Host-owned members are refused
+
+An order object MUST NOT carry any of: =units=, =id=, =account_id=, =state=,
+=fill_price=, =reason=, =decided_at=, =history=. Names are compared ignoring case
+and underscores, so =accountID= and =AccountID= are the same name as
+=account_id=. Trader sizes (units), identifies (id), binds the account, owns the
+state, stamps =decided_at= and fills. A message carrying any of them fails the
+run with =error invalid_order= naming the member; it is never ignored, whatever
+its value. Other unknown members of an order are ignored like any unknown member.
+
+*** Whole-message validation
+
+An =orders= message is statically validated before any order in it is
+submitted; one statically invalid order fails the run and nothing from that
+message is submitted. Stateful rejection happens per order, as each is processed. Orders
+accepted from earlier frames and everything already recorded are kept.
+
+** 7. Timeouts and failure (fail closed)
+
+- Registration timeout 10 s after connect: =error timeout=, close.
+- Reply timeout (granted in =accepted=, default 30 s) per =bars=: =error timeout=,
+  run =failed=.
+- Malformed frame or JSON, bad =seq=, wrong =run_id=, unknown =type=, a message
+  not allowed in the state, oversized frame: =error protocol=, run =failed=.
+- Unsupported =v=: =error version= (before =accepted=, so no =run_id=), close.
+- Refused registration: =error rejected= (unknown instrument or capability,
+  unsupported mode, bad range, host policy), close. No run exists.
+- Statically invalid order or host-owned member: =error invalid_order=, run =failed=. A statefully rejected order does not fail the run (section 6).
+- Disconnect, either side, mid-run: run =failed=. No reconnect and no resume.
+- Owner cancel or halt (#692): Trader sends =done= with =cancelled=.
+- Whatever Trader recorded before the failure is kept; a failed run is never
+  silently discarded or retried.
+
+** 8. Versioning
+
+- =v= is the protocol major. Additive changes (new optional members, a new
+  capability, a new optional message used only when negotiated) keep =v=1=. A
+  change to the meaning of an existing member or to the state machine is =v=2=,
+  and Trader MAY accept several majors, answering the worker's =v=.
+- The Go packages in section 1 follow the module's semantic versioning; a change
+  to them that breaks a guest needs a new module major or a deprecation cycle.
+  A protocol major is a breaking change of =strategy/proto=. Other public
+  packages that guests import are under the same promise, so a package is
+  exported only when it is meant to be kept.
+
+** 9. Security
+
+v1 assumes a trusted local worker on the same host. Trader binds loopback only
+and refuses anything else. There is no credential in =register=; adding one is
+an additive change when TLS and tokens are designed (ADR-078 applies then). A
+connection reaching the listener can start a run, so the listener is not exposed
+beyond the host. Nothing a worker sends can set a quantity, an account, a state
+or a broker action (section 6).
+
+* Examples
+
+** Positive examples
+
+The golden files for these are the examples in section 4. In addition:
+
+*** A frame with no new bars is never sent
+
+=bars= is non-empty. An hour in which only EURUSD has a bar produces =bars= with
+one element; no frame is sent for an instant at which no instrument has a bar.
+
+*** Opening a short with exits
+
+#+begin_src json
+{"v":1,"type":"orders","seq":3,"run_id":"r-20241103-7f3a9c","in_reply_to":3,
+ "orders":[{"instrument":"GBPUSD","action":"open","direction":"short",
+            "type":"limit","price":"1.26600","stop_loss":"1.26900",
+            "take_profit":"1.26000","expires":"2024-03-01T20:00:00Z"}]}
+#+end_src
+
+*** Moving a stop, then turning it into a trail
+
+#+begin_src json
+{"v":1,"type":"orders","seq":5,"run_id":"r-20241103-7f3a9c","in_reply_to":5,
+ "orders":[{"instrument":"EURUSD","action":"amend","stop_loss":"1.08764",
+            "ref":"emax-breakeven-1"}]}
+#+end_src
+
+#+begin_src json
+{"v":1,"type":"orders","seq":6,"run_id":"r-20241103-7f3a9c","in_reply_to":6,
+ "orders":[{"instrument":"EURUSD","action":"amend","trail":"0.00150",
+            "ref":"emax-trail-1"}]}
+#+end_src
+
+*** Tolerated unknown member (additive evolution)
+
+#+begin_src json
+{"v":1,"type":"orders","seq":4,"run_id":"r-20241103-7f3a9c","in_reply_to":4,
+ "client_note":"ignored","orders":[]}
+#+end_src
+
+** Negative cases
+
+Each is a conformance case: the host MUST send the listed =error= (or refuse to
+start), close the connection and record the run as =failed= where a run exists.
+Unless stated, the message is the =orders= example of section 4 with the one
+change shown.
+
+| # | Case | Expected |
+|---+------+----------|
+| N1 | open without =stop_loss= | =invalid_order= |
+| N2 | open without =price= | =invalid_order= |
+| N3 | long open with =stop_loss= at or above =price= | =invalid_order= |
+| N4 | short open with =take_profit= at or above =price= | =invalid_order= |
+| N5 | =close= with =direction= | =invalid_order= |
+| N6 | =close= with =price=, =stop_loss=, =take_profit=, =trail= or =expires= | =invalid_order= |
+| N6a | =amend= with neither =stop_loss= nor =trail= | =invalid_order= |
+| N6b | =amend= with =direction=, =price=, =expires= or a =type= other than market | =invalid_order= |
+| N6c | =amend= with =trail=, =stop_loss= or =take_profit= of 0 (a removal) or negative | =invalid_order= |
+| N7 | =type= =limit= with =action= =close= | =invalid_order= |
+| N8 | =limit= open without =price= | =invalid_order= |
+| N9 | open without =direction= | =invalid_order= |
+| N10 | unknown =action= or =type= or =direction= value | =invalid_order= |
+| N11 | =instrument= not registered for the run | =invalid_order= |
+| N12 | =expires= at or before =frame_at= | =invalid_order= |
+| N13 | price above 10000, zero, negative or with 9 decimals | =invalid_order= |
+| N14 | order contains =units= | =invalid_order=, message names =units= |
+| N15 | order contains =accountID= (also =account_id=, =AccountID=) | =invalid_order= |
+| N16 | order contains =id=, =state=, =fill_price=, =reason=, =decided_at= or =history= | =invalid_order= |
+| N17 | one valid and one invalid order in the same message | =invalid_order=; the valid order is not submitted |
+| N18 | non-empty =orders= in reply to a =warm= frame | =invalid_order= |
+| N19 | =price= given as a JSON number | =protocol= |
+| N20 | duplicate member name in any object | =protocol= |
+| N21 | =orders.in_reply_to= not the outstanding =bars= =seq= | =protocol= |
+| N22 | =orders= with nothing outstanding, or a second one for one frame | =protocol= |
+| N23 | =seq= repeated or skipped, either direction | =protocol= |
+| N24 | =run_id= missing or different after =accepted= | =protocol= |
+| N25 | second =register= | =protocol= |
+| N26 | unknown =type= | =protocol= |
+| N27 | frame length 0, above the limit, or not UTF-8 JSON object | =protocol= |
+| N28 | =register= with =v=2= | =version= |
+| N29 | =register= with an unknown instrument, capability or mode, or =mode= =live= | =rejected=, no run |
+| N30 | =register= without the =bars= capability | =rejected=, no run |
+| N31 | no =register= within 10 s | =timeout= |
+| N32 | no =orders= within the reply timeout | =timeout=, run =failed= |
+| N33 | worker disconnects after a =bars= | run =failed=, partial results kept |
+| N34 | Trader started with a non-loopback listen address | startup fails; nothing listens |
+
+Stateful cases (the order is rejected and recorded with a reason; the run
+continues and later frames are delivered):
+
+| # | Case | Expected |
+|---+------+----------|
+| S1 | =amend=, =close= or =reduce= for an instrument with no open position | order =stateRejected= |
+| S2 | =amend= moving a long's stop down, or a short's up | order =stateRejected=, position unchanged |
+| S3 | =amend= with a =trail= larger than the current one | order =stateRejected=, position unchanged |
+| S4 | =amend= with =stop_loss= on the wrong side of the instrument's latest close | order =stateRejected= |
+| S4a | =amend= with =take_profit= on the losing side of the latest close | order =stateRejected=, no target placed |
+| S4b | =amend= with a valid stop and an invalid target | order =stateRejected=, nothing changed |
+| S4c | =amend= of =take_profit= twice, either way on the winning side, then a bar reaching it | one target; it fills at the last level |
+| S5 | =amend= with =trail= on a fixed stop, then a bar that makes a new high | stop ratchets; never moves back |
+| S6 | =amend= to a stop, then a bar that opened before =frame_at= | the amended stop does not trigger on it |
+| S7 | =amend= moving the stop, then a bar that touches the new level | position closes at the stop, reason =stop loss= |
+
+* Consequences
+
+- Any language can host a strategy. A Go strategy can reuse =marketdata=, =num=
+  and the codec; the surface it imports becomes a maintained API.
+- The spec, not Go struct tags, defines the bytes. A codec built on
+  =encoding/json= v1 or v2 must produce and accept identical messages, which the
+  golden and negative tests check (v2 is experimental in Go 1.25).
+- A guest can never size or admit a trade; invalid and host-owned input fails the
+  run loudly instead of being repaired.
+- A strategy can move a stop, lock in profit and switch to or tighten a trailing
+  stop after the open (=amend=), but never loosen what the account sized. This
+  needs an engine change (#695): the broker has no amend operation today.
+- Lock-step means one round trip per availability instant. Backtests run
+  co-located on one host; this record does not make remote guests practical.
+- No fills or positions reach the worker in v1, so a strategy that must know its
+  own position tracks it from its own requests until the =fill= addition.
+- The journal and the results layout are a separate design that records what
+  this protocol exchanges, keyed by RunID.
+
+* Alternatives Considered
+
+- *gRPC over a Unix socket (ADR-062).* Rejected by the owner: adds grpc, protobuf
+  and a protoc toolchain, ties guests to generated stubs, and the benchmark showed
+  no material gain on loopback.
+- *In-process Go interface only.* Kept as the first step: =strategy.Strategy= is
+  what an in-process strategy satisfies, and the host adapter makes a connection
+  satisfy it too.
+- *Trader launches the guest (ADR-063).* Rejected: Trader is a long-running
+  service; an initiator (Investor, a CLI) starts workers.
+- *A message broker (MQTT) or a binary socket.* Deferred; a binary transport can
+  be added later only if a benchmark justifies it, behind the same logical
+  messages.
+- *Per-bar or per-instrument calls.* Rejected: one =bars= frame per availability
+  instant keeps the group semantics of the engine.
+
+* Open questions for the owner
+
+Decided since the first draft (owner, 2026-11-20): amend can only tighten a stop
+and may turn a fixed stop into a trailing one; =take_profit= is optional and
+amendable; =paper= mode is allowed; fills and positions are in v1. The design of
+the broker feedback is the next increment.
+
+1. *Paper authorization.* A paper run reaches a broker account, so ADR-093
+   requires it to be owner-authorized, yet any local connection can register.
+   Proposed: a =paper= registration must match an owner-configured entry (name,
+   optionally build) that names the account and risk policy; the worker never
+   chooses either. Backtests stay open on loopback. Paper frames come from the
+   live feed at availability instants, =from= is the start and there is no =to=.
+2. *Broker feedback design* (fills, rejections, positions). Proposed: the =bars=
+   frame carries =fills= and =rejections= since the last frame and =positions=
+   (the state after them), always sent (no capability), and =done= carries the
+   final ones. A fill has =ref=, order id, instrument, action, direction, units,
+   price, time, reason; a position has instrument, direction, units, average
+   entry, =stop_loss=, =trail=, =take_profit=, =opened_at=. Account equity and
+   margin: not exposed unless the owner wants them.
+3. *Take-profit removal.* Proposed: not allowed, like trail removal.
+4. *Strict order objects.* Unknown members of an order object are ignored
+   (section 6), so a misspelt =take_profit= would be dropped. Proposed: strict
+   for order objects, tolerant for the envelope.
+5. *Defaults.* Registration timeout 10 s, reply timeout 30 s, frame limit 1 MiB.
