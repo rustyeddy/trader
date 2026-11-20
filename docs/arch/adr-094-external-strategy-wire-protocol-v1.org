@@ -102,8 +102,9 @@ Every message is an object with these members:
   later message in both directions MUST carry the same value, else =protocol=.
 - A repeated, skipped or out-of-order =seq= is a =protocol= error.
 - Unknown members of the envelope or of a message are ignored (additive
-  evolution). An unknown =type=, or a =type= not allowed in the current state, is
-  a =protocol= error.
+  evolution), with one exception: an order object is strict (section 6). An
+  unknown =type=, or a =type= not allowed in the current state, is a =protocol=
+  error.
 
 ** 4. Messages
 
@@ -320,7 +321,18 @@ and underscores, so =accountID= and =AccountID= are the same name as
 =account_id=. Trader sizes (units), identifies (id), binds the account, owns the
 state, stamps =decided_at= and fills. A message carrying any of them fails the
 run with =error invalid_order= naming the member; it is never ignored, whatever
-its value. Other unknown members of an order are ignored like any unknown member.
+its value.
+
+*Order objects are strict.* Any member of an order object that is not in the table
+above (and so not a host-owned member either) fails the run with =error
+invalid_order= naming the member. Member names are compared exactly (JSON is case
+sensitive; only the host-owned list is compared ignoring case and underscores).
+A misspelt =take_profit= or =stoploss= is therefore loud, never silently dropped.
+Values are strict too: =action=, =direction= and =type= take only the listed
+strings, prices only the decimal syntax of section 2, =expires= only an RFC 3339
+UTC timestamp, =ref= only 1 to 64 printable ASCII characters, and a JSON =null=
+for any member is invalid. New order members arrive only with a new protocol
+major or a negotiated capability, never as a silent extension.
 
 *** Whole-message validation
 
@@ -435,6 +447,9 @@ change shown.
 | N14 | order contains =units= | =invalid_order=, message names =units= |
 | N15 | order contains =accountID= (also =account_id=, =AccountID=) | =invalid_order= |
 | N16 | order contains =id=, =state=, =fill_price=, =reason=, =decided_at= or =history= | =invalid_order= |
+| N16a | order contains any other unknown member (for example =stoploss=, =Stop_Loss=, =note=) | =invalid_order=, message names the member |
+| N16b | order member is =null=, or =action=, =direction=, =type= is not one of the listed strings (including other casing) | =invalid_order= |
+| N16c | =ref= empty, longer than 64 characters or not printable ASCII | =invalid_order= |
 | N17 | one valid and one invalid order in the same message | =invalid_order=; the valid order is not submitted |
 | N18 | non-empty =orders= in reply to a =warm= frame | =invalid_order= |
 | N19 | =price= given as a JSON number | =protocol= |
@@ -526,10 +541,13 @@ says otherwise. Each is one issue, built, tested and evaluated before the next.
 
 Only the next blocking question is raised at a time, with a default.
 
-*Next, for #699: strict order objects.* Unknown members of an order object are
-ignored (section 6), so a misspelt =take_profit= would be silently dropped.
-Recommended: order objects are strict (any unknown member fails the run) while the
-envelope stays tolerant, so a typo in a risk-bearing field is loud.
+Decided (owner, 2026-11-20): order objects are strict, in structure and in values
+(section 6).
+
+*Next, for #699: strictness of =register=.* A typo in the =run= object (for
+example =instrument= for =instruments=) would silently change the run it asks
+for. Recommended: =run= is strict (an unknown member is =error rejected=), while
+the rest of =register= (and =config=, which is opaque) tolerates unknown members.
 
 Decided later, in their increment (not blocking now):
 
