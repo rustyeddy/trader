@@ -247,6 +247,9 @@ func finishHeader(m Message) (Header, error) {
 	if h.Seq == 0 {
 		return *h, fmt.Errorf("proto: seq starts at 1")
 	}
+	if h.RunID != "" && want == TypeRegister {
+		return *h, fmt.Errorf("proto: a register carries no run_id")
+	}
 	if h.RunID == "" && want != TypeRegister && want != TypeError {
 		return *h, fmt.Errorf("proto: a %s message needs a run_id", want)
 	}

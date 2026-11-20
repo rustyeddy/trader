@@ -23,7 +23,13 @@ func WriteFrame(w io.Writer, payload []byte, max int) error {
 	}
 	buf := make([]byte, 4, 4+len(payload))
 	binary.BigEndian.PutUint32(buf, uint32(len(payload)))
-	_, err := w.Write(append(buf, payload...))
+	buf = append(buf, payload...)
+	n, err := w.Write(buf)
+	if err == nil && n != len(buf) {
+		// An io.Writer must return an error for a short write; one that does not
+		// has left the peer with half a frame, so say so.
+		err = io.ErrShortWrite
+	}
 	return err
 }
 

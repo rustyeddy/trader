@@ -122,3 +122,23 @@ func TestReadFrame_ATransportErrorIsNotAProtocolError(t *testing.T) {
 type errReader struct{ err error }
 
 func (r errReader) Read([]byte) (int, error) { return 0, r.err }
+
+func TestWriteFrame_AShortWriteWithNoErrorIsReported(t *testing.T) {
+	for _, n := range []int{0, 3, 5} {
+		w := &shortWriter{n: n}
+
+		err := WriteFrame(w, []byte("{}"), 10)
+
+		require.ErrorIs(t, err, io.ErrShortWrite, "a writer that took %d of 6 bytes and said nothing", n)
+	}
+}
+
+func TestWriteFrame_AFullWriteIsNotAShortWrite(t *testing.T) {
+	require.NoError(t, WriteFrame(&shortWriter{n: 6}, []byte("{}"), 10))
+}
+
+// shortWriter claims to have written n bytes and reports no error, as a broken
+// io.Writer might.
+type shortWriter struct{ n int }
+
+func (w *shortWriter) Write([]byte) (int, error) { return w.n, nil }

@@ -80,6 +80,10 @@ func decodeHeader(o obj) (Header, error) {
 	if h.Type != TypeRegister && h.Type != TypeError && (!present || id == "") {
 		return h, errorf(CodeProtocol, "message.run_id: required on %s", h.Type)
 	}
+	// The host issues the RunID in Accepted, so a Register cannot carry one.
+	if h.Type == TypeRegister && present {
+		return h, errorf(CodeProtocol, "message.run_id: a register carries none; the host issues it in accepted")
+	}
 	h.RunID = id
 	return h, nil
 }

@@ -397,12 +397,20 @@ func TestDecode_ADuplicateInsideAnOrderIsAProtocolError(t *testing.T) {
 	assert.Contains(t, err.Error(), `"price"`)
 }
 
-func TestDecode_ARegisterMayCarryARunIDWhichIsKept(t *testing.T) {
+func TestDecode_ARegisterCarryingARunIDIsRefused(t *testing.T) {
 	in := strings.Replace(reg, `"seq":1,`, `"seq":1,"run_id":"r-x",`, 1)
 
-	m := decode(t, in).(*Register)
+	_, err := Decode([]byte(in))
 
-	assert.Equal(t, "r-x", m.RunID)
+	require.Error(t, err)
+	assert.Equal(t, CodeProtocol, CodeOf(err))
+	assert.Contains(t, err.Error(), "run_id")
+}
+
+func TestDecode_AnErrorBeforeAcceptedMayOrMayNotCarryARunID(t *testing.T) {
+	with := `{"v":1,"type":"error","seq":1,"run_id":"r-1","code":"timeout","fatal":true,"message":"x"}`
+
+	assert.Equal(t, "r-1", decode(t, with).Head().RunID)
 }
 
 func TestDecode_BarsKeepsInstrumentOrder(t *testing.T) {
