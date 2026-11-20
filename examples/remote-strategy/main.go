@@ -6,23 +6,19 @@
 //
 //	go run ./examples/remote-strategy -addr 127.0.0.1:9100
 //
-// It serves one connection and exits when Trader closes it. A message is a
-// four-byte big-endian length followed by that many bytes of JSON. Trader sends
-// {"bars":[...]}, the bars being marketdata.Bar as encoding/json writes it, and
-// the worker answers {"orders":[]}.
+// It serves one connection and exits when Trader closes it. The wire protocol is
+// described in package strategy.
 package main
 
 import (
-	"encoding/binary"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
 
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func main() {
@@ -38,51 +34,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := serve(conn); err != nil {
+	defer func() { _ = conn.Close() }()
+
+	groups := 0
+	err = strategy.Serve(conn, func([]marketdata.Bar) error {
+		// A real strategy decides here. This one only counts.
+		groups++
+		return nil
+	})
+	if err != nil {
 		log.Fatal(err)
 	}
-}
-
-// serve answers every group of bars with no orders until Trader closes the
-// connection.
-func serve(conn net.Conn) error {
-	defer func() { _ = conn.Close() }()
-	for groups := 1; ; groups++ {
-		var in struct {
-			Bars []marketdata.Bar `json:"bars"`
-		}
-		if err := read(conn, &in); err != nil {
-			if err == io.EOF {
-				fmt.Fprintf(os.Stderr, "done: %d groups\n", groups-1)
-				return nil
-			}
-			return err
-		}
-		// A real strategy decides here. This one only has a look.
-		if err := write(conn, map[string]any{"orders": []any{}}); err != nil {
-			return err
-		}
-	}
-}
-
-func read(r io.Reader, v any) error {
-	var prefix [4]byte
-	if _, err := io.ReadFull(r, prefix[:]); err != nil {
-		return err
-	}
-	body := make([]byte, binary.BigEndian.Uint32(prefix[:]))
-	if _, err := io.ReadFull(r, body); err != nil {
-		return err
-	}
-	return json.Unmarshal(body, v)
-}
-
-func write(w io.Writer, v any) error {
-	body, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	buf := binary.BigEndian.AppendUint32(nil, uint32(len(body)))
-	_, err = w.Write(append(buf, body...))
-	return err
+	fmt.Fprintf(os.Stderr, "done: %d groups\n", groups)
 }

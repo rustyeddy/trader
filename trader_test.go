@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/marketdata"
+	remotestrat "github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -230,12 +231,11 @@ func TestTrader_HandleOrder_Amend(t *testing.T) {
 // workerOpts shapes testWorker. The zero value answers every group with no orders
 // until the trader hangs up.
 type workerOpts struct {
-	dropAfter int               // hang up after answering this many groups; 0 never
-	orders    []json.RawMessage // what every answer holds
+	dropOn int // hang up on receiving this group without answering it; 0 never
 }
 
 // testWorker is the example worker in process: it listens on loopback, serves one
-// connection and keeps every group of bars it was sent.
+// connection with strategy.Serve and keeps every group of bars it was sent.
 type testWorker struct {
 	addr   string
 	groups [][]marketdata.Bar
@@ -257,19 +257,13 @@ func startWorker(t *testing.T, o workerOpts) *testWorker {
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		for {
-			var in barsMessage
-			if readMessage(conn, &in) != nil {
-				return
+		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar) error {
+			w.groups = append(w.groups, bars)
+			if o.dropOn > 0 && len(w.groups) == o.dropOn {
+				return errors.New("hang up")
 			}
-			w.groups = append(w.groups, in.Bars)
-			if writeMessage(conn, ordersMessage{Orders: o.orders}) != nil {
-				return
-			}
-			if o.dropAfter > 0 && len(w.groups) == o.dropAfter {
-				return
-			}
-		}
+			return nil
+		})
 	}()
 	return w
 }
@@ -359,7 +353,7 @@ func TestRemoteStrategy_BacktestFailsWhenTheWorkerDisconnects(t *testing.T) {
 	captureLogs(t)
 	prices := scenarioPrices(t, remoteScenario)
 
-	w := startWorker(t, workerOpts{dropAfter: 2})
+	w := startWorker(t, workerOpts{dropOn: 3})
 	remote, err := dialRemote("remote", w.addr)
 	require.NoError(t, err)
 	defer func() { _ = remote.close() }()
@@ -367,7 +361,7 @@ func TestRemoteStrategy_BacktestFailsWhenTheWorkerDisconnects(t *testing.T) {
 	err = (&backtest{}).runSeries(ctx, newRemoteTrader(t, remote), prices)
 	require.Error(t, err, "a dead worker ends the run instead of hanging it")
 	assert.ErrorContains(t, err, "remote strategy")
-	assert.Len(t, w.finish(), 2, "the run stopped at the first group it could not deliver")
+	assert.Len(t, w.finish(), 3, "the worker hung up on its third group, which the run never got an answer to")
 }
 
 // TestRemoteStrategy_ExampleWorker runs the real example as a separate process.
