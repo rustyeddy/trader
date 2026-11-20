@@ -27,6 +27,7 @@ const (
 	add
 	close
 	reduce
+	amend // tighten the protective stop or target of an open position, or turn a fixed stop into a trailing one
 )
 
 type orderType uint8
@@ -212,11 +213,14 @@ func (o *order) validate() error {
 	if num.Max(o.price, o.stopLoss, o.takeProfit).Cmp(maxPrice) > 0 {
 		return fmt.Errorf("%w: prices must not exceed %s", errInvalidOrder, maxPrice)
 	}
-	if !o.takeProfit.IsZero() && o.action != open {
-		return fmt.Errorf("%w: take profit must be positive and only an open carries one", errInvalidOrder)
+	if !o.takeProfit.IsZero() && o.action != open && o.action != amend {
+		return fmt.Errorf("%w: take profit must be positive and only an open or an amend carries one", errInvalidOrder)
 	}
-	if !o.trail.IsZero() && o.action != open {
-		return fmt.Errorf("%w: trail must be positive and only an open carries one", errInvalidOrder)
+	if !o.trail.IsZero() && o.action != open && o.action != amend {
+		return fmt.Errorf("%w: trail must be positive and only an open or an amend carries one", errInvalidOrder)
+	}
+	if !o.stopLoss.IsZero() && o.action != open && o.action != amend {
+		return fmt.Errorf("%w: a %s carries no stop loss", errInvalidOrder, o.action)
 	}
 	if !o.expires.IsZero() && (o.action != open || !o.expires.After(o.Time)) {
 		return fmt.Errorf("%w: expiry must be after the order's time and only an open has one", errInvalidOrder)
@@ -246,6 +250,19 @@ func (o *order) validate() error {
 		if !o.takeProfit.IsZero() && !o.beyond(o.takeProfit, false) {
 			return fmt.Errorf("%w: %s take profit %s is not beyond the entry price %s",
 				errInvalidOrder, o.direction, o.takeProfit, o.price)
+		}
+	case amend:
+		if o.instrument == "" {
+			return fmt.Errorf("%w: amend requires an instrument", errInvalidOrder)
+		}
+		if o.direction != noDirection {
+			return fmt.Errorf("%w: amend takes no direction (got %s)", errInvalidOrder, o.direction)
+		}
+		if !o.price.IsZero() {
+			return fmt.Errorf("%w: amend takes no price; it names the new stop, target or trail", errInvalidOrder)
+		}
+		if o.stopLoss.IsZero() && o.takeProfit.IsZero() && o.trail.IsZero() {
+			return fmt.Errorf("%w: amend requires a new stop loss, take profit or trail", errInvalidOrder)
 		}
 	case add, reduce, close:
 		if o.instrument == "" {
@@ -292,6 +309,8 @@ func (a action) String() string {
 		return "close"
 	case reduce:
 		return "reduce"
+	case amend:
+		return "amend"
 	}
 	return "unknown"
 }
