@@ -110,7 +110,13 @@ func (tr *trader) onFrame(ctx context.Context, f frame) error {
 		return fmt.Errorf("broker on frame at %s: %w", f.availableAt.Format(time.RFC3339), err)
 	}
 
-	for _, o := range tr.strategy.onBars(ctx, f.bars) {
+	orders := tr.strategy.onBars(ctx, f.bars)
+	if fs, ok := tr.strategy.(failer); ok {
+		if err := fs.err(); err != nil {
+			return err
+		}
+	}
+	for _, o := range orders {
 		if o == nil {
 			continue
 		}

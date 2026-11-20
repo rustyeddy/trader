@@ -29,6 +29,13 @@ type warmer interface {
 	warm(ctx context.Context, bars []marketdata.Bar)
 }
 
+// failer is implemented by a strategy whose onBars cannot return an error, such
+// as one running in another process. The trader asks it after every onBars and
+// stops the run on a non-nil error, without using what that call returned.
+type failer interface {
+	err() error
+}
+
 // eachBar adapts a decision made one bar at a time: it asks decide about every bar
 // of the group in order and returns the orders it gave, in that order.
 func eachBar(ctx context.Context, bars []marketdata.Bar, decide func(context.Context, marketdata.Bar) *order) []*order {
