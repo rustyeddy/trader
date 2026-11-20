@@ -3,9 +3,7 @@
 
 * Status
 
-Superseded. Superseded by ADR-094 (Trader does not launch or own strategy
-processes; workers are started by their initiator and connect over loopback TCP).
-The original status, below, is kept for the record: Accepted.
+Accepted
 
 * Context
 

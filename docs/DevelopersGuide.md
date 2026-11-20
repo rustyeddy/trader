@@ -94,15 +94,6 @@ build:     raw partition --ReadSourcePartition--> marketdata.SourcePartition
   uses `Load` with `SkipStale`). `rest` imports only `service` and the public
   `marketdata` model, and no provider (a test enforces it); `cmd/trader/serve.go` reads
   the environment (`TRADER_API_TOKEN`) and refuses a non-loopback address without it.
-- `strategy`, `strategy/proto` and `strategy/server` are the public side of external
-  strategies (ADR-094). `strategy` is the seam a strategy implements and the requested
-  `Order`; `strategy/proto` is the wire contract and its strict codec; `strategy/server`
-  is the host: a loopback TCP listener, registration, the RunID and the lock-step
-  session. The server imports only `strategy` and `strategy/proto` (tests enforce it, and
-  that no guest package imports it); the engine is attached through the `Admit` and
-  `Handle` callbacks (#703). `trader serve` starts it on `127.0.0.1:8081`
-  (`--strategy-listen host:port` changes the address, `off` turns it off; a non-loopback
-  address is refused). Until the engine is attached every registration is refused.
 - `service.MigrateLayout` (`trader data migrate`, ADR-092) moves `raw/<source>` to
   `<source>/raw` with `store.Move` (one rename, never overwrites), the mapping in
   `layout.LegacyRawDir` and verification by `store.Inventory`; it is a dry run unless

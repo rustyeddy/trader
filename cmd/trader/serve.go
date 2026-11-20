@@ -17,8 +17,6 @@ import (
 	"github.com/rustyeddy/trader/internal/store"
 	"github.com/rustyeddy/trader/rest"
 	"github.com/rustyeddy/trader/service"
-	"github.com/rustyeddy/trader/strategy/proto"
-	strategyserver "github.com/rustyeddy/trader/strategy/server"
 )
 
 // envAPIToken is where the bearer token the API requires comes from (like the
@@ -27,17 +25,9 @@ const envAPIToken = "TRADER_API_TOKEN"
 
 const defaultListen = "127.0.0.1:8080"
 
-// defaultStrategyListen is where the strategy service listens unless told
-// otherwise: loopback only, like the API. strategyOff turns it off.
-const (
-	defaultStrategyListen = "127.0.0.1:8081"
-	strategyOff           = "off"
-)
-
 type serveFlags struct {
 	config, dataRoot string
 	listen           string
-	strategyListen   string
 	timeout          time.Duration
 }
 
@@ -58,13 +48,7 @@ environment, in which case every request must carry "Authorization: Bearer <toke
 There is no TLS: put it behind a proxy if it leaves the machine. The data root is
 --data-root, then ` + envDataRoot + `, then marketdata.root in ` + defaultConfigPath + `, then
 the default ` + store.DefaultRoot + `. It runs until interrupted and then finishes the
-requests in flight.
-
-It also starts the strategy service, the loopback TCP protocol external strategies
-connect to (ADR-094), on ` + defaultStrategyListen + ` unless --strategy-listen names another
-loopback address; "` + strategyOff + `" turns it off. That service has no TLS or token, so an
-address that is not loopback is refused. Until the engine is attached to it every
-registration is refused with an explanation, and no run starts.`,
+requests in flight.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runServe(cmd, f)
@@ -74,7 +58,6 @@ registration is refused with an explanation, and no run starts.`,
 	fl.StringVar(&f.config, "config", defaultConfigPath, "config file (a missing default file is fine when flags or the environment supply the values)")
 	fl.StringVar(&f.dataRoot, "data-root", "", "data root (default: "+envDataRoot+", then marketdata.root in the config file, then "+store.DefaultRoot+")")
 	fl.StringVar(&f.listen, "listen", defaultListen, "address to listen on, host:port (a non-loopback host needs "+envAPIToken+")")
-	fl.StringVar(&f.strategyListen, "strategy-listen", defaultStrategyListen, "loopback address of the strategy service, host:port, or \""+strategyOff+"\" (a non-loopback host is refused)")
 	fl.DurationVar(&f.timeout, "request-timeout", rest.DefaultTimeout, "longest one request may take")
 	return cmd
 }
@@ -106,15 +89,6 @@ func (a *app) runServe(cmd *cobra.Command, f serveFlags) error {
 	if f.timeout <= 0 {
 		return errors.New("--request-timeout must be positive")
 	}
-	if f.strategyListen != strategyOff {
-		slocal, err := strategyserver.IsLoopbackAddr(f.strategyListen)
-		if err != nil {
-			return fmt.Errorf("--strategy-listen: %w", err)
-		}
-		if !slocal {
-			return fmt.Errorf("--strategy-listen %q is not a loopback address: the strategy protocol has no TLS or token in v1", f.strategyListen)
-		}
-	}
 	cfg, err := loadConfig(f.config, cmd.Flags().Changed("config"))
 	if err != nil {
 		return err
@@ -125,14 +99,6 @@ func (a *app) runServe(cmd *cobra.Command, f serveFlags) error {
 	ln, err := net.Listen("tcp", f.listen)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
-	}
-
-	var sln net.Listener
-	if f.strategyListen != strategyOff {
-		if sln, err = strategyserver.Listen(f.strategyListen); err != nil {
-			_ = ln.Close()
-			return fmt.Errorf("--strategy-listen: %w", err)
-		}
 	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
@@ -163,69 +129,20 @@ func (a *app) runServe(cmd *cobra.Command, f serveFlags) error {
 		return fmt.Errorf("write: %w", werr)
 	}
 
-	// The strategy service: nil channel when it is off, so its case never fires.
-	var sdone chan struct{}
-	var serr error
-	if sln != nil {
-		ssrv, nerr := strategyserver.New(strategyserver.Config{
-			Admit:  admitNoEngine,
-			Handle: func(context.Context, *strategyserver.Session) error { return errNoEngine },
-			Logger: logging.WithComponent(slog.Default(), logging.ComponentStrategy),
-		})
-		if nerr != nil {
-			_ = sln.Close()
-			_ = ln.Close()
-			return nerr
-		}
-		if _, werr := fmt.Fprintf(cmd.OutOrStdout(), "strategy protocol on tcp://%s (loopback only; runs are refused until the engine is attached)\n", sln.Addr()); werr != nil {
-			_ = sln.Close()
-			_ = ln.Close()
-			return fmt.Errorf("write: %w", werr)
-		}
-		sdone = make(chan struct{})
-		go func() { serr = ssrv.Serve(ctx, sln); close(sdone) }()
-	} else if _, werr := fmt.Fprintln(cmd.OutOrStdout(), "strategy protocol off"); werr != nil {
-		_ = ln.Close()
-		return fmt.Errorf("write: %w", werr)
-	}
-	stopStrategy := func() {
-		stop()
-		if sdone != nil {
-			<-sdone
-		}
-	}
-
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
-	var runErr error
 	select {
 	case err := <-errc:
-		stopStrategy()
 		return err // the server stopped by itself: never a clean Shutdown
-	case <-sdone:
-		runErr = fmt.Errorf("strategy service stopped: %w", serr) // it only stops by itself on a failure
 	case <-ctx.Done():
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdown); err != nil {
-		stopStrategy()
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	if err := <-errc; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		stopStrategy()
 		return err
 	}
-	stopStrategy()
-	return runErr
-}
-
-// errNoEngine is why a strategy run cannot start yet.
-var errNoEngine = errors.New("strategy runs are not available: the engine is not attached to the strategy service")
-
-// admitNoEngine refuses every registration until the engine is attached to the
-// service (#703): the service is up and observable, but starts no run, so nothing
-// can reach an account or a broker through it.
-func admitNoEngine(context.Context, *proto.Register) (strategyserver.Grant, error) {
-	return strategyserver.Grant{}, strategyserver.Reject("strategy runs are not available yet: the engine is not attached to the strategy service (issue #703)")
+	return nil
 }
