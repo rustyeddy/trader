@@ -23,15 +23,28 @@ TCP connection carrying length-prefixed JSON, spec-first and RFC-style, so a
 guest may be written in any language; a benchmark showed this is not materially
 slower than gRPC or a binary encoding on loopback.
 
-Scope of v1 (owner decisions):
+*Protocol v1 is a milestone* (GitHub milestone "Strategy Protocol"), not the
+first slice: the first complete protocol version with which real external
+strategy backtests can be run. It is reached through increments, each built,
+tested and evaluated on its own. Until the milestone is evaluated the protocol
+is a draft: messages may still change, and this record stays Proposed. When the
+milestone closes the wire format is frozen as =v=1= and this record is Accepted.
 
-- Loopback only. TLS and tokens are deferred; a non-loopback listener is refused.
-- Strictly lock-step: one =bars= frame, one =orders= reply. Batching is deferred
-  until a concrete need appears.
-- Bars only. Fills, positions and account state are not delivered (deferred).
-- No resume or reconnect. One registration is one run.
-- Durable run artifacts (journal, results layout) and REST control are separate
-  designs and not part of this contract.
+Capabilities the owner has decided v1 contains: registration and RunID; lock-step
+=bars= and =orders=; the requested order with a mandatory stop for opens;
+=amend= of stop, trailing stop and target; broker feedback (fills, rejections,
+positions); =backtest= and =paper= modes. Implementation staging is separate from
+this scope (section 10).
+
+Not in v1 (owner decisions; each waits for a concrete need):
+
+- TLS and tokens. v1 listens on loopback only; a non-loopback listener is refused.
+- Batching of =bars= frames. v1 is strictly lock-step.
+- Reconnect and resume. One registration is one run.
+- =live= mode.
+
+Durable run artifacts (journal, results layout) and REST control are separate
+designs (#702, #700) that record and control what this protocol exchanges.
 
 * Decision
 
@@ -295,8 +308,9 @@ Two kinds of invalid order are distinguished, as in the engine
   that would loosen the stop or trail, a stop on the wrong side of the
   instrument's latest close, a =reduce= larger than the position. Trader rejects
   that order (=stateRejected= with a reason, in the record) and the run
-  continues. The worker is not told in v1, since fills and positions are not
-  delivered; this is why a strategy must track its own position.
+  continues. Until broker feedback is delivered (increment #698) the worker is
+  not told, so a strategy must track its own position; once it is, the rejection
+  is reported with the order's =ref= and the reason.
 
 *** Host-owned members are refused
 
@@ -467,11 +481,12 @@ continues and later frames are delivered):
   run loudly instead of being repaired.
 - A strategy can move a stop, lock in profit and switch to or tighten a trailing
   stop after the open (=amend=), but never loosen what the account sized. This
-  needs an engine change (#695): the broker has no amend operation today.
+  needs an engine change (#695, PR #696).
 - Lock-step means one round trip per availability instant. Backtests run
   co-located on one host; this record does not make remote guests practical.
-- No fills or positions reach the worker in v1, so a strategy that must know its
-  own position tracks it from its own requests until the =fill= addition.
+- Broker feedback (fills, rejections, positions) is part of v1 and is designed
+  and built as its own increment (#698). Until then a worker tracks its own
+  position from its own requests.
 - The journal and the results layout are a separate design that records what
   this protocol exchanges, keyed by RunID.
 
@@ -491,28 +506,38 @@ continues and later frames are delivered):
 - *Per-bar or per-instrument calls.* Rejected: one =bars= frame per availability
   instant keeps the group semantics of the engine.
 
-* Open questions for the owner
+* Implementation staging (section 10)
 
-Decided since the first draft (owner, 2026-11-20): amend can only tighten a stop
-and may turn a fixed stop into a trailing one; =take_profit= is optional and
-amendable; =paper= mode is allowed; fills and positions are in v1. The design of
-the broker feedback is the next increment.
+Staging is not scope: every item below is in the v1 milestone unless section 1
+says otherwise. Each is one issue, built, tested and evaluated before the next.
 
-1. *Paper authorization.* A paper run reaches a broker account, so ADR-093
-   requires it to be owner-authorized, yet any local connection can register.
-   Proposed: a =paper= registration must match an owner-configured entry (name,
-   optionally build) that names the account and risk policy; the worker never
-   chooses either. Backtests stay open on loopback. Paper frames come from the
-   live feed at availability instants, =from= is the start and there is no =to=.
-2. *Broker feedback design* (fills, rejections, positions). Proposed: the =bars=
-   frame carries =fills= and =rejections= since the last frame and =positions=
-   (the state after them), always sent (no capability), and =done= carries the
-   final ones. A fill has =ref=, order id, instrument, action, direction, units,
-   price, time, reason; a position has instrument, direction, units, average
-   entry, =stop_loss=, =trail=, =take_profit=, =opened_at=. Account equity and
-   margin: not exposed unless the owner wants them.
-3. *Take-profit removal.* Proposed: not allowed, like trail removal.
-4. *Strict order objects.* Unknown members of an order object are ignored
-   (section 6), so a misspelt =take_profit= would be dropped. Proposed: strict
-   for order objects, tolerant for the envelope.
-5. *Defaults.* Registration timeout 10 s, reply timeout 30 s, frame limit 1 MiB.
+| Issue | Increment | Evaluated by |
+|-------+-----------+--------------|
+| #695 | engine =amend= (PR #696) | broker tests; EMAX output unchanged |
+| #699 | public =strategy=, =strategy/proto= (codec) | golden and negative cases; external import test |
+| #701 | loopback TCP listener, registration, RunID | fake worker over real TCP |
+| #703 | drive external =OnBars= into the backtest engine | in-process versus external parity |
+| #698 | broker feedback: fills, rejections, positions | ordering, no double delivery, parity |
+| #704 | reference worker and conformance suite | the negative and stateful cases of this record |
+| #702 | durable RunID journal | a run can be rebuilt from it |
+| #700 | REST read/control of runs | completed and active runs |
+
+* Open questions, by increment
+
+Only the next blocking question is raised at a time, with a default.
+
+*Next, for #699: strict order objects.* Unknown members of an order object are
+ignored (section 6), so a misspelt =take_profit= would be silently dropped.
+Recommended: order objects are strict (any unknown member fails the run) while the
+envelope stays tolerant, so a typo in a risk-bearing field is loud.
+
+Decided later, in their increment (not blocking now):
+
+- Broker feedback shape and delivery (#698). Starting proposal: =fills=,
+  =rejections= and =positions= carried on the =bars= frame, with the final ones on
+  =done=; account equity and margin not exposed.
+- Paper authorization and frame source (#701 or its own issue): a =paper=
+  registration matches an owner-configured entry naming the account and risk
+  policy; the worker never chooses either.
+- Removal of a target (#695/#699): proposed not allowed, like a trail.
+- Timeout and frame-size defaults (#701): 10 s registration, 30 s reply, 1 MiB.
