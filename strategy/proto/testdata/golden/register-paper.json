@@ -1,0 +1,1 @@
+{"v":1,"type":"register","seq":1,"name":"emax-go","version":"","build":"","config":{},"capabilities":["bars"],"run":{"mode":"paper","interval":"D1","instruments":["EURUSD"],"from":"2024-03-01T00:00:00Z","warm_bars":0}}

@@ -1,0 +1,1 @@
+{"v":1,"type":"error","seq":3,"run_id":"r-20241103-7f3a9c","code":"invalid_order","fatal":true,"message":"orders[0]: open requires stop_loss"}
