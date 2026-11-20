@@ -11,11 +11,11 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 )
 
-// DefaultTimeout is how long Remote waits for the worker to answer one group.
+// DefaultTimeout is how long Client waits for the worker to answer one group.
 const DefaultTimeout = 30 * time.Second
 
-// Remote is the trader's end of a connection to a worker.
-type Remote struct {
+// Client is the trader's end of a connection to a worker.
+type Client struct {
 	// Timeout is how long OnBars waits for an answer; zero means DefaultTimeout.
 	Timeout time.Duration
 
@@ -24,7 +24,7 @@ type Remote struct {
 
 // Dial connects to a worker listening at addr, which must be a loopback address:
 // nothing here is authenticated or encrypted.
-func Dial(addr string) (*Remote, error) {
+func Dial(addr string) (*Client, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("worker address %q: %w", addr, err)
@@ -36,17 +36,17 @@ func Dial(addr string) (*Remote, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Remote{conn: conn}, nil
+	return &Client{conn: conn}, nil
 }
 
 // Close ends the session; the worker sees the connection close and stops.
-func (r *Remote) Close() error { return r.conn.Close() }
+func (r *Client) Close() error { return r.conn.Close() }
 
 // OnBars sends one group of bars and waits for the answer. It returns an error if
 // the worker does not answer within the timeout or ctx ends first, if the
 // connection fails, or if the answer holds any orders. After an error the
 // connection should be closed.
-func (r *Remote) OnBars(ctx context.Context, bars []marketdata.Bar) error {
+func (r *Client) OnBars(ctx context.Context, bars []marketdata.Bar) error {
 	timeout := r.Timeout
 	if timeout == 0 {
 		timeout = DefaultTimeout
@@ -78,7 +78,7 @@ func (r *Remote) OnBars(ctx context.Context, bars []marketdata.Bar) error {
 	return err
 }
 
-func (r *Remote) exchange(bars []marketdata.Bar) error {
+func (r *Client) exchange(bars []marketdata.Bar) error {
 	if err := writeMessage(r.conn, barsMessage{Bars: bars}); err != nil {
 		return fmt.Errorf("sending bars: %w", err)
 	}

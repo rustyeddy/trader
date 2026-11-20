@@ -31,8 +31,8 @@ func TestPackage_DoesNotImportTheEngine(t *testing.T) {
 	}
 }
 
-// A real Remote against Serve over loopback TCP.
-func TestRemoteAndServe(t *testing.T) {
+// A real Client against Serve over loopback TCP.
+func TestClientAndServe(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer func() { _ = ln.Close() }()

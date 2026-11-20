@@ -13,7 +13,7 @@
 //
 // Orders are not carried yet: the answer must be empty.
 //
-// The trader side is Dial and Remote; the worker side is Serve.
+// The trader side is Dial and Client; the worker side is Serve.
 package strategy
 
 import (

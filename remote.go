@@ -18,7 +18,7 @@ import (
 // answer. The failer bridge goes away when onBars can return an error.
 type remoteStrategy struct {
 	id     string
-	remote *remotestrat.Remote
+	remote *remotestrat.Client
 	failed error
 }
 

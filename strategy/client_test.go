@@ -49,7 +49,7 @@ func TestDial_NothingListening(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestRemote_OnBars(t *testing.T) {
+func TestClient_OnBars(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("an empty answer is success", func(t *testing.T) {
