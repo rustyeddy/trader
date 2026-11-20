@@ -1,1 +1,0 @@
-{"v":1,"type":"register","seq":1,"name":"emax-go","version":"0.3.1","build":"git:9f2c1ab","config":{"short":12,"long":26},"capabilities":["bars","warm"],"run":{"mode":"backtest","interval":"H1","instruments":["EURUSD","GBPUSD"],"from":"2024-03-01T00:00:00Z","to":"2024-04-01T00:00:00Z","warm_bars":100}}

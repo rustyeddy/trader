@@ -1,1 +1,0 @@
-{"v":1,"type":"orders","seq":5,"run_id":"01JC8ZXQ5T3V9R0K4M7N2B6D8F","in_reply_to":5,"orders":[{"instrument":"EURUSD","action":"amend","type":"market","stop_loss":"1.08764","take_profit":"1.10000","trail":"0.00150","ref":"emax-breakeven-1"}]}

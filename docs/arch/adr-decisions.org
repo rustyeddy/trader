@@ -36,9 +36,15 @@ the MCP server, the Alpaca and Stooq providers, account activity, the strategy
 protocol and process manager, the public SDK surface, and similar) may name
 packages, commands or paths that exist only in the archive. Their reasoning still
 informs the design; where an ADR names a path, check the tree. ADR-004, ADR-078 and
-ADR-086 to ADR-094 describe the live tree (ADR-090 to ADR-094 are
-Accepted). Whether an archived-code ADR is
+ADR-086 to ADR-093 describe the live tree (ADR-090, ADR-091 and ADR-092 are
+Accepted; ADR-093 is Accepted). Whether an archived-code ADR is
 superseded when its code is ported is decided when it is ported.
+
+The external strategy TCP/JSON implementation and ADR-094 were withdrawn for
+simplification after the Strategy Protocol milestone work. ADR-062 and ADR-063
+remain historical decisions for the archived implementation, not instructions
+to restore its gRPC/process-manager design. The replacement external strategy
+transport will be decided incrementally, reusing existing domain types.
 
 * Status Definitions
 
@@ -181,8 +187,8 @@ the original decided, use full supersession instead.
 | 059 | Atomic entry-with-protective-stop submission (order.IntentEnterWithStop) (in adr-059-bracket-entry-with-stop.org) | Accepted, amended by 061 |
 | 060 | strategy.FillHandler — an authoritative per-bar fill-delivery capability (in adr-060-fill-handler-capability.org) | Accepted |
 | 061 | risk.SizeInput.ReferencePrice and a full-notional risk.Sizer (in adr-061-full-notional-sizer.org) | Accepted, partial amendment of 059 |
-| 062 | External Strategy Protocol v1 and out-of-process architecture (in adr-062-external-strategy-protocol-v1.org) | Superseded by ADR-094 |
-| 063 | External strategy process manager and Unix-domain socket transport (in adr-063-external-strategy-process-manager.org) | Superseded by ADR-094 |
+| 062 | External Strategy Protocol v1 and out-of-process architecture (in adr-062-external-strategy-protocol-v1.org) | Accepted |
+| 063 | External strategy process manager and Unix-domain socket transport (in adr-063-external-strategy-process-manager.org) | Accepted |
 | 064 | Git-describe-derived version and build metadata (in adr-064-git-describe-version-metadata.org) | Accepted |
 | 065 | Supported strategy/research API and private runtime (in adr-065-public-strategy-research-surface.org) | Accepted |
 | 066 | Account-level initial-margin admission for the simulator/backtester (in adr-066-account-initial-margin-admission.org) | Accepted |
@@ -213,7 +219,6 @@ the original decided, use full supersession instead.
 | 091 | Domain-owned services and shared market-data model (in adr-091-domain-services-and-shared-marketdata.org) | Accepted; implemented (#657, #663, #667, #641) |
 | 092 | Provider packages, the store and root-less data APIs (in adr-092-provider-packages-and-store.org) | Accepted (#687); amends parts of 089 |
 | 093 | Trader is the sole risk authority for all requested orders (in adr-093-trader-is-the-risk-authority.org) | Accepted (owner approval, #686) |
-| 094 | External strategy wire protocol v1, TCP and length-prefixed JSON (in adr-094-external-strategy-wire-protocol-v1.org) | Accepted (owner approval 2026-11-20, #705); supersedes 062 and 063 |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.
