@@ -129,6 +129,11 @@ func (tr *trader) onFrame(ctx context.Context, f frame) error {
 			return err
 		}
 	}
+	// The journal could not write: stop at this safe point, after the frame is
+	// whole, rather than trade on without the record the run is meant to keep.
+	if err := tr.broker.journal.err(); err != nil {
+		return fmt.Errorf("journal: %w", err)
+	}
 	return nil
 }
 
@@ -153,6 +158,7 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 	}
 
 	tr.watch(o)
+	o.journal = tr.broker.journal // before the first record, so the requested line is kept
 	o.record(stateRequested, o.Time, "")
 	if err := tr.broker.submit(ctx, o); err != nil {
 		if !isRejection(err) {

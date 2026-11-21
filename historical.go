@@ -19,15 +19,83 @@ type Result struct{ r *result }
 // nothing that varies between runs.
 func (r *Result) Write(w io.Writer) error { return r.r.write(w) }
 
+// Summary is what a finished run came to, as data: the numbers Write prints, exact,
+// for a run record to keep. It is read from the result, not calculated again.
+type Summary struct {
+	Strategy       string     `json:"strategy"`
+	Account        string     `json:"account"`
+	InitialBalance num.Money  `json:"initial_balance"`
+	Bars           int        `json:"bars"`
+	Orders         OrderCount `json:"orders"`
+	Trades         int        `json:"trades"`
+	Wins           int        `json:"wins"`
+	Losses         int        `json:"losses"`
+	BreakEven      int        `json:"break_even"`
+	Realized       num.Money  `json:"realized"`
+	Unrealized     num.Money  `json:"unrealized"`
+	Balance        num.Money  `json:"balance"`
+	Equity         num.Money  `json:"equity"`
+	Open           []Position `json:"open"`
+}
+
+// OrderCount is how many orders ended where, as in Write's orders line.
+type OrderCount struct {
+	Submitted int `json:"submitted"`
+	Filled    int `json:"filled"`
+	Rejected  int `json:"rejected"`
+	Cancelled int `json:"cancelled"`
+	Pending   int `json:"pending"`
+}
+
+// Position is a position still open when the run ended.
+type Position struct {
+	Instrument string       `json:"instrument"`
+	Direction  string       `json:"direction"`
+	Units      num.Quantity `json:"units"`
+	EntryPrice num.Price    `json:"entry_price"`
+	MarkPrice  num.Price    `json:"mark_price"`
+}
+
+// Summary returns the run's numbers.
+func (r *Result) Summary() Summary {
+	x := r.r
+	s := Summary{
+		Strategy: runStrategy, Account: runAccount, InitialBalance: num.MustParseMoney(runBalance, usdCurrency),
+		Bars:   x.bars,
+		Orders: OrderCount{Submitted: x.submitted, Filled: x.filled, Rejected: x.rejected, Cancelled: x.cancelled, Pending: x.pending},
+		Trades: x.trades, Wins: x.wins, Losses: x.losses, BreakEven: x.breakEven,
+		Realized: x.realized, Unrealized: x.unrealized, Balance: x.balance, Equity: x.equity,
+		Open: []Position{},
+	}
+	for _, p := range x.open {
+		s.Open = append(s.Open, Position{Instrument: p.instrument, Direction: p.direction.String(), Units: p.units,
+			EntryPrice: p.entryPrice, MarkPrice: p.markPrice})
+	}
+	return s
+}
+
 // The fixed configuration of RunSeries: the one the EMAX scenarios were worked out
 // for, applied to each instrument of the run. Choosing a strategy and an account
 // is a later piece of work.
 const (
-	runShort    = 2
-	runLong     = 4
-	runBalance  = "10000" // USD
-	runStrategy = "emax"
+	runShort   = 2
+	runLong    = 4
+	runBalance = "10000" // USD
+
+	// StrategyEMAX names the strategy RunSeries trades.
+	StrategyEMAX = "emax"
+	runStrategy  = StrategyEMAX
+	runAccount   = "sim123"
 )
+
+// RunOptions are the optional parts of a run.
+type RunOptions struct {
+	// Journal, when not nil, is written one JSON line for every transition of every
+	// order of the run, in the order they happen (see journal). The engine opens no
+	// file; the caller owns the writer. If a write fails the run stops with that
+	// error, and what was written before it stays.
+	Journal io.Writer
+}
 
 // RunSeries backtests the series, which a reader has already loaded, on one
 // shared account and broker: EMAX on each instrument, one strategy callback per
@@ -51,6 +119,13 @@ const (
 // the canonical data it came from, are not changed. Series are of different
 // instruments; an empty series contributes nothing.
 func RunSeries(ctx context.Context, name string, tradeFrom time.Time, series ...marketdata.Series) (*Result, error) {
+	return RunSeriesWith(ctx, RunOptions{}, name, tradeFrom, series...)
+}
+
+// RunSeriesWith is RunSeries with options. A run with the zero RunOptions is a
+// RunSeries run, and what it trades does not depend on the options: a journal only
+// records.
+func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom time.Time, series ...marketdata.Series) (*Result, error) {
 	if len(series) == 0 {
 		return nil, errors.New("run: no series")
 	}
@@ -92,13 +167,19 @@ func RunSeries(ctx context.Context, name string, tradeFrom time.Time, series ...
 		return nil, err
 	}
 	br := newBroker("sim", markets)
+	if opts.Journal != nil {
+		br.journal = newJournal(opts.Journal)
+	}
 	tr := &trader{
 		broker:   br,
-		account:  br.addAccount("sim123", num.MustParseMoney(runBalance, usdCurrency)),
+		account:  br.addAccount(runAccount, num.MustParseMoney(runBalance, usdCurrency)),
 		strategy: strat,
 	}
 	if err := (&backtest{}).runSeriesFrom(ctx, tr, tradeFrom, run...); err != nil {
 		return nil, err
+	}
+	if err := br.journal.err(); err != nil { // the last frame's transitions too
+		return nil, fmt.Errorf("journal: %w", err)
 	}
 	res, err := newResult(name, bars, tr)
 	if err != nil {

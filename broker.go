@@ -46,6 +46,11 @@ type broker struct {
 	// it is not in completed and is not counted as a fill; each exit it changed
 	// also carries the change in its own history.
 	amended []*order
+
+	// journal, when not nil, is given to every order the broker makes itself (its
+	// protective exits and closeouts) and to the orders it is handed: see
+	// trader.handleOrder. A run sets it before any order exists.
+	journal *journal
 }
 
 func newBroker(id string, markets *catalog) *broker {
@@ -235,8 +240,8 @@ func (br *broker) amend(ctx context.Context, act *account, o *order) error {
 	}
 	if !o.takeProfit.IsZero() {
 		if target == nil {
-			br.placeExit(&order{accountID: o.accountID, instrument: o.instrument, direction: pos.direction, Time: o.Time},
-				limitOrder, reasonTakeProfit, o.takeProfit)
+			br.placeExit(&order{accountID: o.accountID, instrument: o.instrument, direction: pos.direction, Time: o.Time, journal: o.journal},
+				limitOrder, reasonTakeProfit, o.takeProfit, num.Price{})
 			changes = append(changes, "target set to "+o.takeProfit.String())
 		} else {
 			changes = append(changes, "target "+target.price.String()+" to "+o.takeProfit.String())
@@ -546,14 +551,14 @@ func (br *broker) enforceMargin(ctx context.Context, f frame, act *account) erro
 // open o carries them, as resting closes the broker owns.
 func (br *broker) placeExits(o *order) {
 	if !o.stopLoss.IsZero() {
-		br.placeExit(o, stopOrder, reasonStopLoss, o.stopLoss).trail = o.trail
+		br.placeExit(o, stopOrder, reasonStopLoss, o.stopLoss, o.trail)
 	}
 	if !o.takeProfit.IsZero() {
-		br.placeExit(o, limitOrder, reasonTakeProfit, o.takeProfit)
+		br.placeExit(o, limitOrder, reasonTakeProfit, o.takeProfit, num.Price{})
 	}
 }
 
-func (br *broker) placeExit(o *order, typ orderType, why orderReason, p num.Price) *order {
+func (br *broker) placeExit(o *order, typ orderType, why orderReason, p, trail num.Price) *order {
 	x := &order{
 		id:         br.nextID(),
 		accountID:  o.accountID,
@@ -563,7 +568,9 @@ func (br *broker) placeExit(o *order, typ orderType, why orderReason, p num.Pric
 		orderType:  typ,
 		reason:     why,
 		price:      p,
+		trail:      trail, // part of the order before its first record, so the journal's requested line has it
 		Time:       o.Time,
+		journal:    o.journal, // before the first record: the requested line is the order's first
 	}
 	x.record(stateRequested, x.Time, "")
 	br.enqueue(x)
@@ -613,6 +620,7 @@ func (br *broker) closePosition(b marketdata.Bar, act *account, pos *position, w
 		reason:     why,
 		price:      p,
 		Time:       b.Time,
+		journal:    br.journal,
 	}
 	o.record(stateRequested, b.Time, "")
 	o.record(stateSubmitted, b.Time, "")

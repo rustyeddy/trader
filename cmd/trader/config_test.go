@@ -19,6 +19,16 @@ func TestLoadConfig_ReadsTheNestedMarketdataBlock(t *testing.T) {
 	assert.Equal(t, marketdataConfig{Root: "/somewhere", Provider: "oanda", BaseURL: "https://example.test", Instruments: []string{"EURUSD", "GBPUSD"}, Interval: "h1"}, cfg.Marketdata)
 }
 
+func TestLoadConfig_ReadsTheResultsRoot(t *testing.T) {
+	cfg, err := loadConfig(writeConfig(t, "results:\n  root: /srv/elsewhere/results\n"), true)
+
+	require.NoError(t, err)
+	assert.Equal(t, resultsConfig{Root: "/srv/elsewhere/results"}, cfg.Results)
+
+	_, err = loadConfig(writeConfig(t, "results:\n  root: /x\n  token: nope\n"), true)
+	assert.Error(t, err, "a results key that is not known, or looks like a secret, is refused like any other")
+}
+
 func TestLoadConfig_AMissingFileIsFineUnlessNamed(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.yml")
 
