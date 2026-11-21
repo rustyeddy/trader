@@ -89,11 +89,20 @@ func (w *worker) decide(bars []marketdata.Bar, events []strategy.Event) ([]strat
 			return nil, err
 		}
 		return []strategy.Order{{
-			Instrument: b.Instrument, Action: "open", Direction: "long",
-			Price: closePrice, StopLoss: stop, Ref: entryRef,
+			Instrument: b.Instrument,
+			Action:     "open",
+			Direction:  "long",
+			Price:      closePrice,
+			StopLoss:   stop,
+			Ref:        entryRef,
 		}}, nil
+
 	case w.groups == closeAt && w.inPosition:
-		return []strategy.Order{{Instrument: b.Instrument, Action: "close", Price: closePrice}}, nil
+		return []strategy.Order{{
+			Instrument: b.Instrument,
+			Action:     "close",
+			Price:      closePrice,
+		}}, nil
 	}
 	return nil, nil
 }
