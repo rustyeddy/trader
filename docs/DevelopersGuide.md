@@ -154,7 +154,10 @@ account and broker (`replay.go`, `backtest.go`):
   and the run directory (`internal/results`, the one package that opens those files),
   then `LoadSeries` (the market-data service's policy for missing, bad and stale
   months), then `RunSeriesWith`, then finalizes `run.json`; `trader backtest` only
-  parses flags and prints.
+  parses flags and prints. `RunOptions.Worker` (`--worker`) swaps the built-in strategy
+  for a remote one (`strategy_remote.go`, the transport in package `strategy`) with
+  everything else unchanged; `examples/emax` is the canonical worker, and its parity
+  with the built-in EMAX is tested (`trader_test.go`, `service/backtest_test.go`).
 - Mid prices and ticks (#667). A canonical mid is the exact midpoint of bid and
   ask, so it can sit half a tick from a whole tick (1.100005 for ticks of 0.00001).
   `trader.RunSeries` rounds every bar price to the nearest tick of the market (a

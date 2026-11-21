@@ -5,17 +5,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math/rand/v2"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/examples/emax/emax"
 	"github.com/rustyeddy/trader/internal/id"
 	"github.com/rustyeddy/trader/internal/results"
 	"github.com/rustyeddy/trader/internal/store/storetest"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/provider/oanda"
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -517,4 +523,138 @@ func TestRunBacktest_EveryRunGetsItsOwnDirectory(t *testing.T) {
 	assert.Less(t, first.RunID.String(), second.RunID.String(), "later runs sort later")
 	a, b := readRunDir(t, first.Dir), readRunDir(t, second.Dir)
 	assert.Equal(t, a.events, b.events, "the same run writes the same journal; only run.json carries a run's own identity")
+}
+
+// walkPoints is a seeded walk in ticks above a base, hour by hour, for a month of
+// quotes with many crossovers.
+func walkPoints(seed uint64, hours int) []int64 {
+	rng := rand.New(rand.NewPCG(seed, seed*7+1))
+	points := make([]int64, hours)
+	var p int64
+	for i := range points {
+		p += rng.Int64N(301) - 150
+		points[i] = p
+	}
+	return points
+}
+
+// serveEMAX serves examples/emax in this process over loopback TCP, through the
+// public SDK, and returns its address. If failAfter is positive the worker gives up
+// on that group, as a crashing process would. It reports how the worker ended.
+func serveEMAX(t *testing.T, failAfter int) (addr string, ended func() error) {
+	t.Helper()
+	s, err := emax.New(emax.Config{Short: 2, Long: 4, StopPct: num.MustParseRate("0.01"), Tick: num.MustParsePrice("0.00001")})
+	require.NoError(t, err)
+	addrs := make(chan string, 1)
+	done := make(chan error, 1)
+	groups := 0
+	go func() {
+		done <- strategy.ListenAndServe("127.0.0.1:0", func(a net.Addr) { addrs <- a.String() },
+			func(bars []marketdata.Bar, events []strategy.Event) ([]strategy.Order, error) {
+				groups++
+				if failAfter > 0 && groups > failAfter {
+					return nil, errors.New("worker crashed")
+				}
+				return s.OnBars(bars, events)
+			})
+	}()
+	return <-addrs, func() error { return <-done }
+}
+
+// A real month, built into canonical bars through the store, then run with the
+// built-in EMAX and with the EMAX example as a worker, from the same data and
+// settings, journaled each.
+func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAX(t *testing.T) {
+	storetest.Root(t)
+	// An odd spread gives half-tick mids, which the engine rounds: the parity holds
+	// through that too.
+	monthSpread(t, "EURUSD", time.January, 110000, 3, walkPoints(1, 600)...)
+	monthSpread(t, "GBPUSD", time.January, 125000, 3, walkPoints(2, 600)...)
+	buildCanonical(t, janToMar("EURUSD", "GBPUSD"))
+	builtinReq := backtestReq(t, "EURUSD", "GBPUSD")
+	builtin, err := RunBacktest(context.Background(), nil, builtinReq)
+	require.NoError(t, err)
+
+	addr, ended := serveEMAX(t, 0)
+	remoteReq := backtestReq(t, "EURUSD", "GBPUSD")
+	remoteReq.Worker = addr
+	remote, err := RunBacktest(context.Background(), nil, remoteReq)
+	require.NoError(t, err)
+	require.NoError(t, ended(), "the worker stops cleanly when the run closes the connection")
+
+	b, r := readRunDir(t, builtin.Dir), readRunDir(t, remote.Dir)
+
+	// What names the run or its strategy, or reads the wall clock, may differ. Nothing else.
+	assert.Equal(t, map[string]any{"name": "emax", "transport": "in-process"}, b.rec["strategy"])
+	assert.Equal(t, map[string]any{"name": "remote", "transport": "tcp", "addr": addr}, r.rec["strategy"])
+	for _, rec := range []map[string]any{b.rec, r.rec} {
+		delete(rec, "run_id")
+		delete(rec, "strategy")
+		delete(rec, "started_at")
+		delete(rec, "ended_at")
+		delete(rec["result"].(map[string]any), "strategy")
+	}
+	assert.Equal(t, b.rec, r.rec, "status, instruments, range and the engine's result: orders, trades, balance, equity, open positions")
+	assert.Equal(t, "completed", b.rec["status"])
+	assert.Equal(t, b.events, r.events, "every order, fill and protective exit, in order, to the price")
+	require.Greater(t, len(b.events), 100, "a real comparison, not an empty one")
+	assert.Positive(t, b.rec["result"].(map[string]any)["trades"])
+}
+
+func TestRunBacktest_ARemoteRunThatLosesItsWorkerKeepsThePartialJournal(t *testing.T) {
+	storetest.Root(t)
+	monthSpread(t, "EURUSD", time.January, 110000, 3, walkPoints(1, 600)...)
+	buildCanonical(t, janToMar("EURUSD"))
+	full, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD"))
+	require.NoError(t, err)
+
+	addr, ended := serveEMAX(t, 250) // dies on its 251st group
+	req := backtestReq(t, "EURUSD")
+	req.Worker = addr
+	_, err = RunBacktest(context.Background(), nil, req)
+	require.Error(t, err)
+	require.Error(t, ended())
+
+	assert.ErrorContains(t, err, "strategy remote: reading orders", "the failure says it was the worker")
+	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
+	assert.Equal(t, "failed", run.rec["status"])
+	assert.Contains(t, run.rec["error"], "strategy remote: reading orders")
+	assert.NotContains(t, run.rec, "result")
+	assert.Equal(t, map[string]any{"name": "remote", "transport": "tcp", "addr": addr}, run.rec["strategy"])
+
+	whole := readRunDir(t, full.Dir).events
+	require.NotEmpty(t, run.events, "what was recorded before the worker died is kept")
+	require.Less(t, len(run.events), len(whole), "and the run did not get to the end")
+	assert.Equal(t, whole[:len(run.events)], run.events, "the partial journal is the start of the full one: nothing lost, nothing invented")
+}
+
+func TestRunBacktest_ARemoteRunWithNoWorkerListeningIsAFailedRun(t *testing.T) {
+	storetest.Root(t)
+	monthSpread(t, "EURUSD", time.January, 110000, 3, walkPoints(1, 100)...)
+	buildCanonical(t, janToMar("EURUSD"))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+	req := backtestReq(t, "EURUSD")
+	req.Worker = addr
+
+	_, err = RunBacktest(context.Background(), nil, req)
+
+	require.Error(t, err)
+	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
+	assert.Equal(t, "failed", run.rec["status"])
+	assert.Empty(t, run.events)
+}
+
+func TestRunBacktest_AWorkerMustBeOnLoopback(t *testing.T) {
+	storetest.Root(t)
+	monthSpread(t, "EURUSD", time.January, 110000, 3, walkPoints(1, 100)...)
+	buildCanonical(t, janToMar("EURUSD"))
+	req := backtestReq(t, "EURUSD")
+	req.Worker = "8.8.8.8:9100"
+
+	_, err := RunBacktest(context.Background(), nil, req)
+
+	assert.ErrorContains(t, err, "not loopback")
 }

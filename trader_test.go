@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	emaxworker "github.com/rustyeddy/trader/examples/emax/emax"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	remotestrat "github.com/rustyeddy/trader/strategy"
@@ -657,5 +660,162 @@ func TestRemoteStrategy_BadOrdersFailTheRunAndProcessNone(t *testing.T) {
 			require.NoError(t, remote.close()) // the worker stops when the trader hangs up
 			assert.Len(t, w.finish(), ruleOpenAt, "the run stopped at the group that failed")
 		})
+	}
+}
+
+// emaxConfig is the built-in EMAX's settings (historical.go: windows 2 and 4, a 1%
+// stop) and the tick of the instruments the scenarios trade, for the worker.
+func emaxConfig() emaxworker.Config {
+	return emaxworker.Config{Short: runShort, Long: runLong, StopPct: rateOnePercent, Tick: px(1)}
+}
+
+// serveEMAX serves examples/emax in this process over loopback TCP, through the
+// public SDK only, and returns its address. The worker stops when the trader hangs
+// up, which the run does when it ends; the test waits for that.
+func serveEMAX(t *testing.T, cfg emaxworker.Config) string {
+	t.Helper()
+	s, err := emaxworker.New(cfg)
+	require.NoError(t, err)
+
+	addrs := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- remotestrat.ListenAndServe("127.0.0.1:0",
+			func(a net.Addr) { addrs <- a.String() },
+			func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
+				return s.OnBars(bars, events)
+			})
+	}()
+	addr := <-addrs
+	t.Cleanup(func() { require.NoError(t, <-done, "the worker ends cleanly when the run closes the connection") })
+	return addr
+}
+
+// parityRun is one run, journaled.
+type parityRun struct {
+	journal string
+	summary Summary
+	text    string // Result.Write
+}
+
+func runParity(t *testing.T, opts RunOptions, series ...marketdata.Series) parityRun {
+	t.Helper()
+	var buf bytes.Buffer
+	opts.Journal = &buf
+	res, err := RunSeriesWith(context.Background(), opts, "parity", time.Time{}, series...)
+	require.NoError(t, err)
+	var text bytes.Buffer
+	require.NoError(t, res.Write(&text))
+	return parityRun{journal: buf.String(), summary: res.Summary(), text: text.String()}
+}
+
+// assertParity says the remote run is the built-in run: the same orders in the same
+// order, the same sizes and fills and exits, the same final positions and account.
+// Only what names the strategy may differ.
+func assertParity(t *testing.T, builtin, remote parityRun) {
+	t.Helper()
+	require.NotEmpty(t, builtin.journal)
+	assert.Equal(t, builtin.journal, remote.journal,
+		"every order transition, fill and protective exit, in the same order and to the same price")
+	b, r := builtin.summary, remote.summary
+	assert.Equal(t, StrategyEMAX, b.Strategy)
+	assert.Equal(t, StrategyRemote, r.Strategy)
+	b.Strategy, r.Strategy = "", ""
+	assert.Equal(t, b, r, "orders, trades, balance, equity and open positions")
+	assert.Equal(t, builtin.text, remote.text, "the summary a person reads")
+}
+
+func TestEMAXParity_RemoteMatchesBuiltInOnTheScenarios(t *testing.T) {
+	for _, scenario := range scenarios {
+		t.Run(scenario, func(t *testing.T) {
+			captureLogs(t)
+			prices := scenarioPrices(t, scenario)
+
+			builtin := runParity(t, RunOptions{}, prices)
+			remote := runParity(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, prices)
+
+			assertParity(t, builtin, remote)
+		})
+	}
+}
+
+// randomWalk is hourly mid bars for an instrument: a seeded walk in ticks, so a
+// test gets many crossovers, stops and flips from data that is the same every time.
+func randomWalk(instrument string, start int64, bars int, seed uint64) marketdata.Series {
+	rng := rand.New(rand.NewPCG(seed, seed*7+1))
+	t0 := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
+	s := marketdata.Series{Source: "oanda", Instrument: instrument, Interval: "h1"}
+	prev := start
+	for i := range bars {
+		closeP := prev + rng.Int64N(401) - 200 // up to 20 pips a bar
+		hi := max(prev, closeP) + rng.Int64N(60)
+		lo := min(prev, closeP) - rng.Int64N(60)
+		at := t0.Add(time.Duration(i) * time.Hour)
+		s.Bars = append(s.Bars, marketdata.Bar{
+			Instrument: instrument, Time: at, AvailableAt: at.Add(time.Hour), Volume: 100,
+			Mid: marketdata.OHLC{Open: px(prev), High: px(hi), Low: px(lo), Close: px(closeP)},
+		})
+		prev = closeP
+	}
+	return s
+}
+
+func TestEMAXParity_RemoteMatchesBuiltInOnALongTwoInstrumentWalk(t *testing.T) {
+	captureLogs(t)
+	eur, gbp := randomWalk("EURUSD", 110000, 1500, 1), randomWalk("GBPUSD", 125000, 1500, 2)
+
+	builtin := runParity(t, RunOptions{}, eur, gbp)
+	remote := runParity(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, eur, gbp)
+
+	assertParity(t, builtin, remote)
+	// The walk is not a vacuous comparison: it opens, flips and stops out.
+	assert.Greater(t, builtin.summary.Orders.Filled, 100)
+	assert.Greater(t, builtin.summary.Trades, 20)
+	assert.Contains(t, builtin.journal, `"cause":"stop loss"`)
+	assert.Contains(t, builtin.journal, `"direction":"short"`)
+	assert.Positive(t, builtin.summary.Orders.Cancelled, "a close cancels the position's stop")
+}
+
+// The comparison can fail: a worker that differs in one setting is not the built-in
+// strategy, and the journals say so.
+func TestEMAXParity_ADifferentWorkerIsCaught(t *testing.T) {
+	captureLogs(t)
+	walk := randomWalk("EURUSD", 110000, 400, 6)
+	wider := emaxConfig()
+	wider.StopPct = num.MustParseRate("0.02")
+
+	builtin := runParity(t, RunOptions{}, walk)
+	other := runParity(t, RunOptions{Worker: serveEMAX(t, wider)}, walk)
+
+	assert.NotEqual(t, builtin.journal, other.journal)
+}
+
+func TestRunSeriesWith_AWorkerIsNotShownTheBarsBeforeTradeFrom(t *testing.T) {
+	captureLogs(t)
+	walk := randomWalk("EURUSD", 110000, 300, 3)
+	from := walk.Bars[100].Time
+	w := startWorker(t, workerOpts{})
+
+	res, err := RunSeriesWith(context.Background(), RunOptions{Worker: w.addr}, "x", from, walk)
+
+	require.NoError(t, err)
+	groups := w.finish()
+	require.Len(t, groups, 200, "one group for each bar from tradeFrom on")
+	assert.Equal(t, from, groups[0][0].Time, "the warm-up bars are not sent: a worker starts cold at tradeFrom")
+	assert.Equal(t, 200, res.Summary().Bars)
+}
+
+// The worker's EMA is a copy of the built-in one (a worker cannot import it), so the
+// two must give the same number for the same closes, to the last bit.
+func TestEMAXParity_TheWorkersEMAIsTheBuiltInEMA(t *testing.T) {
+	walk := randomWalk("EURUSD", 110000, 400, 4)
+	for _, window := range []int{1, 2, 4, 10, 50, 200} {
+		builtin, worker := newEMA(window), emaxworker.NewEMA(window)
+		for i, b := range walk.Bars {
+			bv, bok := builtin.onBar(b)
+			wv, wok := worker.OnBar(b)
+			require.Equal(t, bok, wok, "window %d bar %d: seeded at the same bar", window, i)
+			require.Equal(t, bv, wv, "window %d bar %d", window, i)
+		}
 	}
 }

@@ -38,6 +38,11 @@ type BacktestRequest struct {
 	AllowBad     bool
 	AllowMissing bool
 
+	// Worker, when not empty, is the loopback host:port of a worker process that
+	// trades instead of the built-in EMAX (see trader.RunOptions.Worker). It is not
+	// warmed up, so the months before From are not loaded for it.
+	Worker string
+
 	// ResultsRoot is the directory the run's results go under (results.DefaultRoot
 	// unless the transport was told otherwise). It is required: every run is
 	// journaled, so there is no way to run without one.
@@ -92,6 +97,9 @@ func RunBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest) (*B
 		Instruments: req.Instruments, From: req.From.UTC(), To: req.To.UTC(), StartedAt: clock.Clock(),
 	}
 	rec.Strategy.Name, rec.Strategy.Transport = trader.StrategyEMAX, "in-process"
+	if req.Worker != "" {
+		rec.Strategy.Name, rec.Strategy.Transport, rec.Strategy.Addr = trader.StrategyRemote, "tcp", req.Worker
+	}
 	run, err := results.Start(req.ResultsRoot, rec)
 	if err != nil {
 		return nil, fmt.Errorf("backtest: %w", err)
@@ -135,9 +143,12 @@ func runBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest, sou
 	if bars == 0 {
 		return nil, fmt.Errorf("backtest %s: no bars in the range", what)
 	}
-	warm, err := warmupBars(ctx, log, req)
-	if err != nil {
-		return nil, err
+	var warm map[string][]marketdata.Bar
+	if req.Worker == "" { // a worker is not warmed up: the engine would not show it these bars
+		warm, err = warmupBars(ctx, log, req)
+		if err != nil {
+			return nil, err
+		}
 	}
 	series := make([]marketdata.Series, 0, len(results))
 	for _, r := range results {
@@ -147,7 +158,7 @@ func runBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest, sou
 		}
 		series = append(series, s)
 	}
-	res, err := trader.RunSeriesWith(ctx, trader.RunOptions{Journal: journal}, what, req.From, series...)
+	res, err := trader.RunSeriesWith(ctx, trader.RunOptions{Journal: journal, Worker: req.Worker}, what, req.From, series...)
 	if err != nil {
 		return nil, fmt.Errorf("backtest %s: %w", what, err)
 	}
