@@ -10,3 +10,8 @@ marketdata:
   # Defaults for `trader data download`; --instrument and --interval win.
   instruments: [EURUSD]
   interval: h1
+results:
+  # Where each run's results go, in a directory named by its RunID: run.json and
+  # events.jsonl. --results-root, then TRADER_RESULTS_ROOT, then this value, then
+  # /srv/trading/backtest/results.
+  root: /srv/trading/backtest/results

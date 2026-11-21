@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -43,7 +45,7 @@ func putWave(t *testing.T, root, symbol string, base int64) {
 func backtestArgs(t *testing.T, root, to string, extra ...string) []string {
 	t.Helper()
 	return append([]string{"backtest", "--config", writeConfig(t, ""), "--data-root", root, "--instrument", "EURUSD,GBPUSD",
-		"--interval", "h1", "--from", "2024-01-01", "--to", to}, extra...)
+		"--interval", "h1", "--from", "2024-01-01", "--to", to, "--results-root", t.TempDir()}, extra...)
 }
 
 func TestBacktest_RunsTwoInstrumentsFromTheStoreAndPrintsTheSummaryWithoutAToken(t *testing.T) {
@@ -57,6 +59,90 @@ func TestBacktest_RunsTwoInstrumentsFromTheStoreAndPrintsTheSummaryWithoutAToken
 	assert.Contains(t, out, "oanda EURUSD,GBPUSD h1 [2024-01-01T00:00:00Z, 2024-02-01T00:00:00Z): 24 bars")
 	assert.Contains(t, out, "orders: submitted")
 	assert.NotEmpty(t, logs)
+}
+
+// runDirs lists the run directories under root (each named by a RunID).
+func runDirs(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	require.NoError(t, err)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+func TestBacktest_JournalsTheRunAndSaysWhere(t *testing.T) {
+	root := storetest.Root(t)
+	putWave(t, root, "EURUSD", 110000)
+	putWave(t, root, "GBPUSD", 125000)
+	results := t.TempDir()
+	args := backtestArgs(t, root, "2024-02-01")
+	args[len(args)-1] = results // --results-root
+
+	out, _, err := runData(t, nil, args...)
+
+	require.NoError(t, err)
+	dirs := runDirs(t, results)
+	require.Len(t, dirs, 1)
+	assert.Contains(t, out, "run "+dirs[0]+": "+filepath.Join(results, dirs[0]), "the summary ends by saying where the run is")
+	assert.FileExists(t, filepath.Join(results, dirs[0], "run.json"))
+	assert.FileExists(t, filepath.Join(results, dirs[0], "events.jsonl"))
+}
+
+// TestBacktest_ResultsRootIsFlagThenEnvironmentThenFile checks the order the
+// results root is resolved in, the same as the data root's.
+func TestBacktest_ResultsRootIsFlagThenEnvironmentThenFile(t *testing.T) {
+	root := storetest.Root(t)
+	putWave(t, root, "EURUSD", 110000)
+	putWave(t, root, "GBPUSD", 125000)
+	flagDir, envDir, fileDir := t.TempDir(), t.TempDir(), t.TempDir()
+	withFile := func() []string {
+		args := backtestArgs(t, root, "2024-02-01")
+		args = args[:len(args)-2] // no --results-root
+		args[2] = writeConfig(t, "results:\n  root: "+fileDir+"\n")
+		return args
+	}
+
+	_, _, err := runData(t, nil, withFile()...)
+	require.NoError(t, err)
+	assert.Len(t, runDirs(t, fileDir), 1, "the config file's root, with no flag or environment")
+
+	_, _, err = runData(t, map[string]string{envResultsRoot: envDir}, withFile()...)
+	require.NoError(t, err)
+	assert.Len(t, runDirs(t, envDir), 1, "the environment beats the file")
+	assert.Len(t, runDirs(t, fileDir), 1, "and the file got nothing more")
+
+	_, _, err = runData(t, map[string]string{envResultsRoot: envDir}, append(withFile(), "--results-root", flagDir)...)
+	require.NoError(t, err)
+	assert.Len(t, runDirs(t, flagDir), 1, "the flag beats both")
+	assert.Len(t, runDirs(t, envDir), 1)
+}
+
+func TestOrDefault(t *testing.T) {
+	assert.Equal(t, "x", orDefault("x", "d"))
+	assert.Equal(t, "d", orDefault("", "d"))
+	assert.Equal(t, "/srv/trading/backtest/results", service.DefaultResultsRoot)
+}
+
+func TestBacktest_AFailedRunIsJournaledToo(t *testing.T) {
+	root := storetest.Root(t)
+	putWave(t, root, "EURUSD", 110000)
+	putWave(t, root, "GBPUSD", 125000)
+	results := t.TempDir()
+	args := backtestArgs(t, root, "2024-03-01") // February is missing
+	args[len(args)-1] = results
+
+	_, _, err := runData(t, nil, args...)
+
+	require.ErrorIs(t, err, service.ErrNotLoadable)
+	dirs := runDirs(t, results)
+	require.Len(t, dirs, 1)
+	assert.ErrorContains(t, err, filepath.Join(results, dirs[0]), "the error says where the run is")
+	data, rerr := os.ReadFile(filepath.Join(results, dirs[0], "run.json"))
+	require.NoError(t, rerr)
+	assert.Contains(t, string(data), `"status": "failed"`)
 }
 
 func TestBacktest_FailsOnAMissingMonthUnlessAllowed(t *testing.T) {

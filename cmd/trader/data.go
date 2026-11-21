@@ -24,6 +24,9 @@ const (
 	envOANDAToken = "TRADER_OANDA_TOKEN"
 	envDataRoot   = "TRADER_DATA_ROOT"
 
+	// envResultsRoot is where a run's results (its RunID directory) go.
+	envResultsRoot = "TRADER_RESULTS_ROOT"
+
 	// defaultBaseURL is OANDA's practice host, so a run without a base URL can
 	// only read demo data; the live host is chosen explicitly.
 	defaultBaseURL = "https://api-fxpractice.oanda.com"

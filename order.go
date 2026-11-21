@@ -130,6 +130,10 @@ type order struct {
 
 	state   orderState
 	history []orderEvent
+
+	// journal, when not nil, is told of every transition record writes. It is set
+	// before the order's first record, so the requested line is never lost.
+	journal *journal
 }
 
 // record moves the order to state s at time at, appends the event to its
@@ -139,6 +143,9 @@ func (o *order) record(s orderState, at time.Time, reason string) {
 	first := len(o.history) == 0
 	o.state, o.Time = s, at
 	o.history = append(o.history, orderEvent{state: s, time: at, reason: reason})
+	if o.journal != nil {
+		o.journal.record(o, o.history[len(o.history)-1])
+	}
 
 	attrs := []any{
 		"order", o.id,

@@ -67,9 +67,10 @@ h1 and d1 only.`,
 // rangeOptions are the options build and status share: what to read, and the data
 // root, resolved from flag, environment and file.
 type rangeOptions struct {
-	symbols  []string
-	interval string
-	from, to time.Time
+	symbols     []string
+	interval    string
+	from, to    time.Time
+	resultsRoot string // results.root of the config file; the flag and the environment are not here
 }
 
 // resolveRange resolves the shared options (flag, environment, file) and points
@@ -99,7 +100,7 @@ func (a *app) resolveRange(cmd *cobra.Command, f buildFlags) (rangeOptions, erro
 	if err != nil {
 		return rangeOptions{}, err
 	}
-	return rangeOptions{symbols: symbols, interval: interval, from: from, to: to}, nil
+	return rangeOptions{symbols: symbols, interval: interval, from: from, to: to, resultsRoot: cfg.Results.Root}, nil
 }
 
 // runBuild resolves every option and hands the request to the application

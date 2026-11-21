@@ -1,12 +1,18 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/internal/results"
 	"github.com/rustyeddy/trader/internal/store/storetest"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/provider/oanda"
@@ -58,8 +64,10 @@ func monthSpread(t *testing.T, instrument string, m time.Month, base, spreadTick
 
 var wave = []int64{0, 0, 0, 0, 500, 1000, 1500, 1000, 500, 0, -500, -1000}
 
-func backtestReq(instruments ...string) BacktestRequest {
-	return BacktestRequest{Instruments: instruments, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 2, 1, 0)}
+// backtestReq is a request for January 2024, journaled under a temporary results root.
+func backtestReq(t *testing.T, instruments ...string) BacktestRequest {
+	t.Helper()
+	return BacktestRequest{Instruments: instruments, Interval: "h1", From: utc(2024, 1, 1, 0), To: utc(2024, 2, 1, 0), ResultsRoot: t.TempDir()}
 }
 
 func buildCanonical(t *testing.T, req BuildRequest) {
@@ -74,7 +82,7 @@ func TestRunBacktest_LoadsTwoInstrumentsFromCanonicalStorageAndRunsThem(t *testi
 	month(t, "GBPUSD", time.January, 125000, wave...)
 	buildCanonical(t, janToMar("EURUSD", "GBPUSD"))
 
-	res, err := RunBacktest(context.Background(), nil, backtestReq("EURUSD", "GBPUSD"))
+	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD", "GBPUSD"))
 
 	require.NoError(t, err)
 	var out bytes.Buffer
@@ -88,7 +96,7 @@ func TestRunBacktest_ARangeIsCutByOpeningTime(t *testing.T) {
 	storetest.Root(t)
 	month(t, "EURUSD", time.January, 110000, wave...)
 	buildCanonical(t, janToMar("EURUSD"))
-	req := backtestReq("EURUSD")
+	req := backtestReq(t, "EURUSD")
 	req.From, req.To = utc(2024, 1, 2, 2), utc(2024, 1, 2, 8) // opening times 02:00 to 07:00
 
 	res, err := RunBacktest(context.Background(), nil, req)
@@ -103,7 +111,7 @@ func TestRunBacktest_AMissingMonthFailsUnlessAllowed(t *testing.T) {
 	storetest.Root(t)
 	month(t, "EURUSD", time.January, 110000, wave...)
 	buildCanonical(t, janToMar("EURUSD"))
-	req := backtestReq("EURUSD")
+	req := backtestReq(t, "EURUSD")
 	req.To = utc(2024, 3, 1, 0) // February has no data
 
 	res, err := RunBacktest(context.Background(), nil, req)
@@ -128,7 +136,7 @@ func TestRunBacktest_ABadMonthFailsUnlessAllowedAndNothingRunsWhenOneInstrumentF
 	putRaw(t, "GBPUSD", 2024, time.January, rows...)
 	buildCanonical(t, janToMar("EURUSD", "GBPUSD"))
 
-	res, err := RunBacktest(context.Background(), nil, backtestReq("EURUSD", "GBPUSD"))
+	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD", "GBPUSD"))
 
 	require.ErrorIs(t, err, ErrNotLoadable)
 	assert.Nil(t, res)
@@ -136,7 +144,7 @@ func TestRunBacktest_ABadMonthFailsUnlessAllowedAndNothingRunsWhenOneInstrumentF
 	assert.Contains(t, err.Error(), "2024-01 bad")
 	assert.NotContains(t, err.Error(), "EURUSD: ", "the instrument that loaded is not blamed")
 
-	req := backtestReq("EURUSD", "GBPUSD")
+	req := backtestReq(t, "EURUSD", "GBPUSD")
 	req.AllowBad = true
 	res, err = RunBacktest(context.Background(), nil, req)
 	require.NoError(t, err)
@@ -147,14 +155,14 @@ func TestRunBacktest_RefusesWhatCannotBeRun(t *testing.T) {
 	storetest.Root(t)
 	month(t, "EURUSD", time.January, 110000, wave...)
 	buildCanonical(t, janToMar("EURUSD"))
-	reversed := backtestReq("EURUSD")
+	reversed := backtestReq(t, "EURUSD")
 	reversed.From, reversed.To = reversed.To, reversed.From
-	otherSource := backtestReq("EURUSD")
+	otherSource := backtestReq(t, "EURUSD")
 	otherSource.Source = "alpaca"
-	noInstrument := backtestReq()
-	badInterval := backtestReq("EURUSD")
+	noInstrument := backtestReq(t)
+	badInterval := backtestReq(t, "EURUSD")
 	badInterval.Interval = "w1"
-	nothing := backtestReq("EURUSD")
+	nothing := backtestReq(t, "EURUSD")
 	nothing.From, nothing.To = utc(2024, 1, 20, 0), utc(2024, 1, 21, 0) // the month loads, no bar opens in it
 	for name, tc := range map[string]struct {
 		req  BacktestRequest
@@ -181,7 +189,7 @@ func TestRunBacktest_AnInstrumentTheEngineHasNoMarketForIsRefusedByTheEngine(t *
 	month(t, "USDJPY", time.January, 14000000, wave...)
 	buildCanonical(t, janToMar("USDJPY"))
 
-	res, err := RunBacktest(context.Background(), nil, backtestReq("USDJPY"))
+	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "USDJPY"))
 
 	require.Error(t, err)
 	assert.Nil(t, res)
@@ -196,7 +204,7 @@ func TestRunBacktest_ACancelledContextStopsTheRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := RunBacktest(ctx, nil, backtestReq("EURUSD"))
+	_, err := RunBacktest(ctx, nil, backtestReq(t, "EURUSD"))
 
 	require.ErrorIs(t, err, context.Canceled)
 }
@@ -216,7 +224,7 @@ func TestRunBacktest_ARealisticOneTickSpreadRunsAndKeepsTheHalfTickMid(t *testin
 	require.NoError(t, err)
 	require.False(t, onTick, "the canonical mid sits between two ticks: %s", loaded[0].Series.Bars[0].Mid.Close)
 
-	res, err := RunBacktest(context.Background(), nil, backtestReq("EURUSD", "GBPUSD"))
+	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD", "GBPUSD"))
 
 	require.NoError(t, err)
 	var out bytes.Buffer
@@ -234,7 +242,7 @@ func TestRunBacktest_ARealisticOneTickSpreadRunsAndKeepsTheHalfTickMid(t *testin
 // January, the month before, prefill it when they can be loaded.
 func TestRunBacktest_TheMonthBeforeTheRangePrefillsTheIndicators(t *testing.T) {
 	febReq := func() BacktestRequest {
-		r := backtestReq("EURUSD")
+		r := backtestReq(t, "EURUSD")
 		r.From, r.To = utc(2024, 2, 1, 0), utc(2024, 3, 1, 0)
 		return r
 	}
@@ -293,14 +301,220 @@ func TestRunBacktest_AnInteriorGapTheCalendarDoesNotExplainFailsUnlessAllowed(t 
 	putRaw(t, "EURUSD", 2024, time.January, rows...)
 	buildCanonical(t, janToMar("EURUSD"))
 
-	res, err := RunBacktest(context.Background(), nil, backtestReq("EURUSD"))
+	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD"))
 
 	require.ErrorIs(t, err, ErrNotLoadable)
 	assert.Nil(t, res, "nothing is replayed over a hole")
 	assert.Contains(t, err.Error(), "gap unexplained 2024-01-09T04:00Z 2024-01-09T08:00Z, 4 bars")
-	req := backtestReq("EURUSD")
+	req := backtestReq(t, "EURUSD")
 	req.AllowMissing = true
 	res, err = RunBacktest(context.Background(), nil, req)
 	require.NoError(t, err)
 	assert.NotNil(t, res)
+}
+
+// A run, as a client such as Investor reads it: two files, nothing else.
+type runFiles struct {
+	rec    map[string]any
+	events []map[string]any
+}
+
+func readRunDir(t *testing.T, dir string) runFiles {
+	t.Helper()
+	var r runFiles
+	data, err := os.ReadFile(filepath.Join(dir, results.RunFile))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &r.rec))
+	f, err := os.Open(filepath.Join(dir, results.EventsFile))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var e map[string]any
+		require.NoError(t, json.Unmarshal(sc.Bytes(), &e), sc.Text())
+		r.events = append(r.events, e)
+	}
+	require.NoError(t, sc.Err())
+	return r
+}
+
+// onlyRun is the one run directory under root.
+func onlyRun(t *testing.T, root string) string {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	_, err = id.ParseRunID(entries[0].Name())
+	require.NoError(t, err, "a run directory is named by its RunID")
+	return filepath.Join(root, entries[0].Name())
+}
+
+func TestRunBacktest_JournalsTheRunInADirectoryNamedByItsRunID(t *testing.T) {
+	storetest.Root(t)
+	month(t, "EURUSD", time.January, 110000, wave...)
+	buildCanonical(t, janToMar("EURUSD"))
+	req := backtestReq(t, "EURUSD")
+
+	res, err := RunBacktest(context.Background(), nil, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, onlyRun(t, req.ResultsRoot), res.Dir)
+	assert.Equal(t, filepath.Base(res.Dir), res.RunID.String())
+
+	// From here on only the files are read: no trader object.
+	run := readRunDir(t, res.Dir)
+	assert.Equal(t, res.RunID.String(), run.rec["run_id"])
+	assert.Equal(t, "backtest", run.rec["kind"])
+	assert.Equal(t, map[string]any{"name": "emax", "transport": "in-process"}, run.rec["strategy"])
+	assert.Equal(t, "oanda", run.rec["source"])
+	assert.Equal(t, "h1", run.rec["interval"])
+	assert.Equal(t, []any{"EURUSD"}, run.rec["instruments"])
+	assert.Equal(t, "2024-01-01T00:00:00Z", run.rec["from"])
+	assert.Equal(t, "2024-02-01T00:00:00Z", run.rec["to"])
+	assert.Equal(t, "completed", run.rec["status"])
+	assert.NotContains(t, run.rec, "error")
+	started, err := time.Parse(time.RFC3339Nano, run.rec["started_at"].(string))
+	require.NoError(t, err)
+	ended, err := time.Parse(time.RFC3339Nano, run.rec["ended_at"].(string))
+	require.NoError(t, err)
+	assert.False(t, ended.Before(started))
+	runStarted, err := res.RunID.Time()
+	require.NoError(t, err)
+	assert.WithinDuration(t, started, runStarted, time.Second, "the RunID carries the time the run began")
+
+	// An opening request, its admission, its fill, and a closing fill.
+	byOrder := map[float64][]map[string]any{}
+	for i, e := range run.events {
+		assert.EqualValues(t, i+1, e["seq"])
+		byOrder[e["order"].(float64)] = append(byOrder[e["order"].(float64)], e)
+	}
+	open := byOrder[1]
+	require.GreaterOrEqual(t, len(open), 4)
+	for i, want := range []string{"requested", "sized", "submitted", "filled"} {
+		assert.Equal(t, want, open[i]["state"])
+	}
+	assert.Equal(t, "open", open[0]["action"])
+	assert.Equal(t, "EURUSD", open[0]["instrument"])
+	assert.Equal(t, "strategy", open[0]["cause"])
+	assert.NotEmpty(t, open[0]["stop_loss"], "the stop the strategy asked for")
+	assert.NotEmpty(t, open[1]["units"], "the size the account chose")
+	assert.NotEmpty(t, open[3]["fill_price"])
+
+	var closed bool
+	for _, e := range run.events {
+		if e["state"] == "filled" && e["action"] == "close" {
+			closed = true
+		}
+	}
+	assert.True(t, closed, "a closing fill, by the strategy or the broker's stop")
+
+	// The record's result is the engine's summary, and agrees with the journal: an
+	// order is submitted once, and no run here amends a stop or trails one.
+	result := run.rec["result"].(map[string]any)
+	assert.Equal(t, "emax", result["strategy"])
+	var submitted float64
+	for _, e := range run.events {
+		if e["state"] == "submitted" {
+			submitted++
+		}
+	}
+	assert.Equal(t, result["orders"].(map[string]any)["submitted"], submitted,
+		"every order the engine counts as submitted has one submitted line")
+}
+
+func TestRunBacktest_ARunThatFailsIsStillJournaledAsFailed(t *testing.T) {
+	storetest.Root(t)
+	month(t, "EURUSD", time.January, 110000, wave...)
+	buildCanonical(t, janToMar("EURUSD"))
+	req := backtestReq(t, "EURUSD")
+	req.To = utc(2024, 3, 1, 0) // February was never built
+
+	res, err := RunBacktest(context.Background(), nil, req)
+
+	require.ErrorIs(t, err, ErrNotLoadable)
+	assert.Nil(t, res)
+	dir := onlyRun(t, req.ResultsRoot)
+	assert.ErrorContains(t, err, dir, "the error says where the run is")
+	run := readRunDir(t, dir)
+	assert.Equal(t, "failed", run.rec["status"])
+	assert.Contains(t, run.rec["error"], "EURUSD")
+	assert.NotContains(t, run.rec, "result")
+	assert.Equal(t, "backtest", run.rec["kind"])
+	assert.NotEmpty(t, run.rec["ended_at"])
+	assert.Empty(t, run.events, "it never got as far as an order")
+}
+
+func TestRunBacktest_ARequestTheEngineRefusesIsAFailedRunToo(t *testing.T) {
+	storetest.Root(t)
+	req := backtestReq(t)
+	req.Interval = "m5"
+
+	_, err := RunBacktest(context.Background(), nil, req)
+
+	require.Error(t, err)
+	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
+	assert.Equal(t, "failed", run.rec["status"])
+	assert.NotEmpty(t, run.rec["error"])
+}
+
+func TestRunBacktest_ACancelledRunIsJournaledAsCancelled(t *testing.T) {
+	storetest.Root(t)
+	month(t, "EURUSD", time.January, 110000, wave...)
+	buildCanonical(t, janToMar("EURUSD"))
+	req := backtestReq(t, "EURUSD")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := RunBacktest(ctx, nil, req)
+
+	require.ErrorIs(t, err, context.Canceled)
+	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
+	assert.Equal(t, "cancelled", run.rec["status"])
+}
+
+func TestRunBacktest_NothingRunsWithoutSomewhereToRecordIt(t *testing.T) {
+	storetest.Root(t)
+	month(t, "EURUSD", time.January, 110000, wave...)
+	buildCanonical(t, janToMar("EURUSD"))
+
+	t.Run("no results root", func(t *testing.T) {
+		req := backtestReq(t, "EURUSD")
+		req.ResultsRoot = ""
+		_, err := RunBacktest(context.Background(), nil, req)
+		assert.ErrorContains(t, err, "no results root")
+	})
+	t.Run("a root that cannot be made", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "file")
+		require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
+		req := backtestReq(t, "EURUSD")
+		req.ResultsRoot = file
+		_, err := RunBacktest(context.Background(), nil, req)
+		assert.ErrorContains(t, err, "results root")
+	})
+	t.Run("an unsupported source is refused before a run exists", func(t *testing.T) {
+		req := backtestReq(t, "EURUSD")
+		req.Source = "stooq"
+		_, err := RunBacktest(context.Background(), nil, req)
+		assert.ErrorContains(t, err, "not supported")
+		entries, rerr := os.ReadDir(req.ResultsRoot)
+		require.NoError(t, rerr)
+		assert.Empty(t, entries, "no run, so no directory")
+	})
+}
+
+func TestRunBacktest_EveryRunGetsItsOwnDirectory(t *testing.T) {
+	storetest.Root(t)
+	month(t, "EURUSD", time.January, 110000, wave...)
+	buildCanonical(t, janToMar("EURUSD"))
+	req := backtestReq(t, "EURUSD")
+
+	first, err := RunBacktest(context.Background(), nil, req)
+	require.NoError(t, err)
+	second, err := RunBacktest(context.Background(), nil, req)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first.Dir, second.Dir)
+	assert.Less(t, first.RunID.String(), second.RunID.String(), "later runs sort later")
+	a, b := readRunDir(t, first.Dir), readRunDir(t, second.Dir)
+	assert.Equal(t, a.events, b.events, "the same run writes the same journal; only run.json carries a run's own identity")
 }

@@ -145,10 +145,16 @@ account and broker (`replay.go`, `backtest.go`):
 - `trader.RunSeries(ctx, name, series...)` is the engine's entry for series a reader
   loaded: it works on copies, normalizes instrument keys, refuses an instrument it
   has no market for, runs EMAX on each instrument with the scenarios' fixed
-  settings and returns a `Result` (`Write` prints the summary). The engine opens no
-  file. `service.RunBacktest` is the application service that joins the two:
-  `LoadSeries` (the market-data service's policy for missing, bad and stale
-  months), then `RunSeries`; `trader backtest` only parses flags and prints.
+  settings and returns a `Result` (`Write` prints the summary, `Summary` has the numbers).
+  The engine opens no file; `RunSeriesWith` takes an `io.Writer` for the journal, which
+  `order.record` feeds (`journal.go`; only `service.RunBacktest` journals every run, a direct
+  `RunSeries` call writes one only if given a writer) so every order transition of every order,
+  the broker's exits included, is written as it happens. `service.RunBacktest` is the
+  application service that joins the two and journals every run: it makes the RunID
+  and the run directory (`internal/results`, the one package that opens those files),
+  then `LoadSeries` (the market-data service's policy for missing, bad and stale
+  months), then `RunSeriesWith`, then finalizes `run.json`; `trader backtest` only
+  parses flags and prints.
 - Mid prices and ticks (#667). A canonical mid is the exact midpoint of bid and
   ask, so it can sit half a tick from a whole tick (1.100005 for ticks of 0.00001).
   `trader.RunSeries` rounds every bar price to the nearest tick of the market (a

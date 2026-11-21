@@ -23,6 +23,12 @@ const defaultConfigPath = "etc/trader.yml"
 // secret is an error rather than ignored.
 type fileConfig struct {
 	Marketdata marketdataConfig `yaml:"marketdata"`
+	Results    resultsConfig    `yaml:"results"`
+}
+
+// resultsConfig is where the results of runs are kept.
+type resultsConfig struct {
+	Root string `yaml:"root"`
 }
 
 type marketdataConfig struct {

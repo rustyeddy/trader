@@ -53,6 +53,7 @@ default `/srv/data`.
 | Option | Flag | Environment | Config key |
 |---|---|---|---|
 | data root | `--data-root` | `TRADER_DATA_ROOT` | `marketdata.root` (default `/srv/data`) |
+| results root | `--results-root` (backtest) | `TRADER_RESULTS_ROOT` | `results.root` (default `/srv/trading/backtest/results`) |
 | instruments | `--instrument` (repeat or comma-separated) | | `marketdata.instruments` |
 | interval | `--interval` | | `marketdata.interval` |
 | OANDA host | `--base-url` (download only) | | `marketdata.base_url` |
@@ -285,7 +286,34 @@ prices to the nearest tick of the market (a mid between two ticks rounds up); th
 stored data is not changed.
 
 Output: the engine's summary for the run (bars, orders, trades, money, open
-positions).
+positions), then `run <RunID>: <directory>`.
+
+### Results
+
+Every run is journaled, whether it completes, fails or is cancelled. It gets a RunID
+(`run_` and a sortable ULID that carries the time it began) and a directory of that
+name under the results root (`--results-root`, then `TRADER_RESULTS_ROOT`, then
+`results.root`, then `/srv/trading/backtest/results`; the root is created if it is
+missing). Two files are enough to read a run:
+
+- `run.json`: the RunID, kind (`backtest`), strategy, source, interval, instruments,
+  range, wall-clock `started_at` and `ended_at`, `status` (`running` while it runs,
+  then `completed`, `failed` or `cancelled`), `error` and, for a completed run, the
+  engine's `result` (orders, trades, balance, equity, open positions). A run that was
+  cut off, say by a crash, still says `running`.
+- `events.jsonl`: one JSON line for every order transition, in the order it
+  happened: `requested` (what was asked: instrument, action, direction, type, price,
+  stop, target), `sized` (the account's size), `submitted` (the broker's id), `filled`
+  (units, fill price, and what the order was), `rejected` or `cancelled` (with the
+  reason). The broker's own orders, protective stops, targets and margin closeouts,
+  are in it with their `cause`. Lines carry the simulated time only, so two runs that
+  trade the same way write the same lines. A failed run keeps the events it had.
+
+```sh
+ls /srv/trading/backtest/results                       # one directory per run
+jq . /srv/trading/backtest/results/run_*/run.json      # status, error, result
+jq -c 'select(.state=="filled")' /srv/trading/backtest/results/run_*/events.jsonl
+```
 
 ## Backtests
 
