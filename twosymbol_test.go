@@ -57,7 +57,7 @@ func (s *reactStrategy) onBar(_ context.Context, b marketdata.Bar) *order {
 	return o
 }
 
-func (s *reactStrategy) onBars(ctx context.Context, bars []marketdata.Bar) []*order {
+func (s *reactStrategy) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
 	return eachBar(ctx, bars, s.onBar)
 }
 
@@ -543,7 +543,7 @@ type groupSpy struct {
 
 func (s *groupSpy) name() string { return "groupspy" }
 func (s *groupSpy) init() error  { return nil }
-func (s *groupSpy) onBars(_ context.Context, bars []marketdata.Bar) []*order {
+func (s *groupSpy) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, error) {
 	var labels []string
 	var orders []*order
 	for _, b := range bars {
@@ -558,7 +558,7 @@ func (s *groupSpy) onBars(_ context.Context, bars []marketdata.Bar) []*order {
 	}
 	s.groups = append(s.groups, labels)
 	s.atCall = append(s.atCall, s.held())
-	return orders
+	return orders, nil
 }
 
 // The strategy is called exactly once per distinct availability instant, with the

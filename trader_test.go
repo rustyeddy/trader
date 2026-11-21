@@ -1,9 +1,21 @@
 package trader
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"net"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
+	remotestrat "github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -214,4 +226,171 @@ func TestTrader_HandleOrder_Amend(t *testing.T) {
 
 		assert.Equal(t, "a", o.accountID)
 	})
+}
+
+// workerOpts shapes testWorker. The zero value answers every group with no orders
+// until the trader hangs up.
+type workerOpts struct {
+	dropOn int // hang up on receiving this group without answering it; 0 never
+}
+
+// testWorker is the example worker in process: it listens on loopback, serves one
+// connection with strategy.Serve and keeps every group of bars it was sent.
+type testWorker struct {
+	addr   string
+	groups [][]marketdata.Bar
+	done   sync.WaitGroup
+}
+
+func startWorker(t *testing.T, o workerOpts) *testWorker {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	w := &testWorker{addr: ln.Addr().String()}
+	w.done.Add(1)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		defer w.done.Done()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar) error {
+			w.groups = append(w.groups, bars)
+			if o.dropOn > 0 && len(w.groups) == o.dropOn {
+				return errors.New("hang up")
+			}
+			return nil
+		})
+	}()
+	return w
+}
+
+// finish waits for the worker to stop (the trader closed or it hung up) and returns
+// what it was sent.
+func (w *testWorker) finish() [][]marketdata.Bar {
+	w.done.Wait()
+	return w.groups
+}
+
+// jsonOf is a value as the wire carries it, to compare bars without caring how
+// time.Time or num values are held in memory.
+func jsonOf(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(b)
+}
+
+// recorder is an in-process strategy that records the groups it is shown and
+// trades nothing: the reference the remote path is compared with.
+type recorder struct{ groups [][]marketdata.Bar }
+
+func (r *recorder) name() string { return "recorder" }
+func (r *recorder) init() error  { return nil }
+func (r *recorder) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, error) {
+	r.groups = append(r.groups, slices.Clone(bars))
+	return nil, nil
+}
+
+func newRemoteTrader(t *testing.T, s strategy) *trader {
+	t.Helper()
+	tr := newTestTrader()
+	tr.strategy = s
+	return tr
+}
+
+// failingStrategy returns an order together with an error: the order must not be
+// used.
+type failingStrategy struct{}
+
+func (failingStrategy) name() string { return "failing" }
+func (failingStrategy) init() error  { return nil }
+func (failingStrategy) onBars(context.Context, []marketdata.Bar) ([]*order, error) {
+	return []*order{{instrument: "EURUSD", action: open, direction: long, orderType: marketOrder}}, errors.New("worker is gone")
+}
+
+func TestTrader_OnFrame_StopsWhenTheStrategyHasFailed(t *testing.T) {
+	captureLogs(t)
+	tr := newRemoteTrader(t, failingStrategy{})
+	f := frame{availableAt: testStart, bars: []marketdata.Bar{{Instrument: "EURUSD", Time: testStart, AvailableAt: testStart}}}
+
+	assert.ErrorContains(t, tr.onFrame(context.Background(), f), "worker is gone")
+	assert.Empty(t, tr.broker.orders, "the order it returned was not submitted")
+	assert.Empty(t, tr.rejected)
+}
+
+const remoteScenario = "a-reversal-exit"
+
+func TestRemoteStrategy_BacktestMatchesInProcess(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+	prices := scenarioPrices(t, remoteScenario)
+
+	ref := &recorder{}
+	require.NoError(t, (&backtest{}).runSeries(ctx, newRemoteTrader(t, ref), prices))
+	require.Greater(t, len(ref.groups), 3, "the fixture gives several deliveries")
+
+	w := startWorker(t, workerOpts{})
+	remote, err := dialRemote("remote", w.addr)
+	require.NoError(t, err)
+	tr := newRemoteTrader(t, remote)
+	require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
+	require.NoError(t, remote.close())
+
+	assert.Equal(t, jsonOf(t, ref.groups), jsonOf(t, w.finish()), "the worker saw the same groups, in the same order")
+	assert.Empty(t, tr.broker.completed, "no orders, so nothing happened")
+	assert.Empty(t, tr.account.trades, "no trades")
+	assert.True(t, tr.account.balance.Equal(usd(1000)), "balance untouched")
+}
+
+func TestRemoteStrategy_BacktestFailsWhenTheWorkerDisconnects(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+	prices := scenarioPrices(t, remoteScenario)
+
+	w := startWorker(t, workerOpts{dropOn: 3})
+	remote, err := dialRemote("remote", w.addr)
+	require.NoError(t, err)
+	defer func() { _ = remote.close() }()
+
+	err = (&backtest{}).runSeries(ctx, newRemoteTrader(t, remote), prices)
+	require.Error(t, err, "a dead worker ends the run instead of hanging it")
+	assert.ErrorContains(t, err, "strategy remote")
+	assert.Len(t, w.finish(), 3, "the worker hung up on its third group, which the run never got an answer to")
+}
+
+// TestRemoteStrategy_ExampleWorker runs the real example as a separate process.
+func TestRemoteStrategy_ExampleWorker(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+	prices := scenarioPrices(t, remoteScenario)
+
+	bin := filepath.Join(t.TempDir(), "remote-strategy")
+	out, err := exec.Command("go", "build", "-o", bin, "./examples/remote-strategy").CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	var stderr bytes.Buffer
+	cmd := exec.Command(bin, "-addr", "127.0.0.1:0")
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	require.NoError(t, err)
+	addr := strings.TrimSpace(strings.TrimPrefix(line, "listening on "))
+
+	remote, err := dialRemote("example", addr)
+	require.NoError(t, err)
+	tr := newRemoteTrader(t, remote)
+	require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
+	require.NoError(t, remote.close())
+	require.NoError(t, cmd.Wait(), "the worker exits when the trader closes")
+
+	assert.Empty(t, tr.account.trades)
+	assert.Contains(t, stderr.String(), "done: ")
 }
