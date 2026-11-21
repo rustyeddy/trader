@@ -61,18 +61,20 @@ func toOrders(requests []remotestrat.Order, bars []marketdata.Bar) ([]*order, er
 }
 
 // orderTime is the time an order is made on: the opening time of the group's bar
-// of that instrument or, for an instrument with no bar in the group, of the
-// group's first bar. Which instruments a worker may order is not checked here.
+// of that instrument or, for an instrument with no bar in the group, when the
+// group became available (its bars' latest AvailableAt, which is the same for
+// every bar of a frame). Which instruments a worker may order is not checked here.
 func orderTime(instrument string, bars []marketdata.Bar) time.Time {
+	var available time.Time
 	for _, b := range bars {
 		if b.Instrument == instrument {
 			return b.Time
 		}
+		if b.AvailableAt.After(available) {
+			available = b.AvailableAt
+		}
 	}
-	if len(bars) > 0 {
-		return bars[0].Time
-	}
-	return time.Time{}
+	return available
 }
 
 // toOrder maps one request onto an order and validates it. It sets only what the

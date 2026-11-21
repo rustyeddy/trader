@@ -12,7 +12,8 @@
 //	{"orders":[{"instrument":"EURUSD","action":"open","direction":"long",
 //	            "price":"1.10000","stop_loss":"1.09000"}]}
 //
-// The orders may be empty. Each is a request (see Order): the trader decides the
+// The list must be present, but may be empty; an answer without it, or with
+// null, is an error. Each order is a request (see Order): the trader decides the
 // size, whether to admit it, and everything that follows. A field the protocol
 // does not define, such as units, is an error, not ignored.
 //
@@ -44,18 +45,12 @@ type ordersMessage struct {
 //
 // Prices are decimal strings. Action and Direction use the trader's own words.
 type Order struct {
-	Instrument string `json:"instrument"`
-	// Action is "open", "add", "close" or "reduce".
-	Action string `json:"action"`
-	// Direction is "long" or "short", for an open only.
-	Direction string `json:"direction,omitempty"`
-	// Type is "market" (the default when empty), "limit" or "stop".
-	Type string `json:"type,omitempty"`
-	// Price is the reference price of a market order, or the trigger of a limit
-	// or stop order.
-	Price num.Price `json:"price,omitzero"`
-	// StopLoss is where the protective stop goes; an open requires it.
-	StopLoss   num.Price `json:"stop_loss,omitzero"`
+	Instrument string    `json:"instrument"`
+	Action     string    `json:"action"`              // Action is "open", "add", "close" or "reduce".
+	Direction  string    `json:"direction,omitempty"` // Direction is "long" or "short", for an open only.
+	Type       string    `json:"type,omitempty"`      // Type is "market" (the default when empty), "limit" or "stop".
+	Price      num.Price `json:"price,omitzero"`      // the reference price of a market order, or the trigger of a limit or stop order.
+	StopLoss   num.Price `json:"stop_loss,omitzero"`  // StopLoss is where the protective stop goes; an open requires it.
 	TakeProfit num.Price `json:"take_profit,omitzero"`
 }
 

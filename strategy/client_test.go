@@ -105,6 +105,14 @@ func TestClient_OnBars(t *testing.T) {
 			assert.ErrorContains(t, err, "unknown field", field)
 		}
 	})
+	t.Run("an answer without an orders list is an error", func(t *testing.T) {
+		for _, body := range []string{`{}`, `{"orders":null}`} {
+			r := answerWith(t, body)
+			orders, err := r.OnBars(ctx, oneBar)
+			assert.ErrorContains(t, err, "no orders list", body)
+			assert.Empty(t, orders)
+		}
+	})
 	t.Run("a malformed answer is an error", func(t *testing.T) {
 		for _, body := range []string{`nope`, `{"orders":[`, `{"orders":{}}`, `{"orders":[{"price":1.1}]}`, `{"orders":[]} x`, `{"orders":[{"price":"abc"}]}`} {
 			r := answerWith(t, body)

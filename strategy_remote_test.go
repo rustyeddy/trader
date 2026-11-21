@@ -123,7 +123,11 @@ func TestToOrder(t *testing.T) {
 
 func TestToOrders(t *testing.T) {
 	t1, t2 := testStart, testStart.Add(time.Hour)
-	bars := []marketdata.Bar{{Instrument: "EURUSD", Time: t1}, {Instrument: "GBPUSD", Time: t2}}
+	avail := t2.Add(time.Hour) // bars of different opening times, available together
+	bars := []marketdata.Bar{
+		{Instrument: "EURUSD", Time: t1, AvailableAt: avail},
+		{Instrument: "GBPUSD", Time: t2, AvailableAt: avail},
+	}
 	good := remotestrat.Order{Instrument: "EURUSD", Action: "open", Direction: "long", Price: px(110000), StopLoss: px(109000)}
 
 	t.Run("none is none", func(t *testing.T) {
@@ -141,13 +145,13 @@ func TestToOrders(t *testing.T) {
 		assert.Equal(t, t2, orders[0].Time)
 		assert.Equal(t, t1, orders[1].Time)
 	})
-	t.Run("an instrument outside the group is not refused; it takes the group's first bar time", func(t *testing.T) {
+	t.Run("an instrument outside the group is not refused; it takes the time the group became available", func(t *testing.T) {
 		other := good
 		other.Instrument = "USDJPY"
 		orders, err := toOrders([]remotestrat.Order{other}, bars)
 		require.NoError(t, err)
 		require.Len(t, orders, 1)
-		assert.Equal(t, t1, orders[0].Time)
+		assert.Equal(t, avail, orders[0].Time, "not the opening time of some other instrument's bar")
 	})
 	t.Run("one bad order fails them all and names it", func(t *testing.T) {
 		bad := good

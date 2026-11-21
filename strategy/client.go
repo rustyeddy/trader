@@ -82,5 +82,8 @@ func (r *Client) exchange(bars []marketdata.Bar) ([]Order, error) {
 	if err := readMessage(r.conn, &reply); err != nil {
 		return nil, fmt.Errorf("reading orders: %w", err)
 	}
+	if reply.Orders == nil {
+		return nil, errors.New("answer has no orders list; send an empty one, {\"orders\":[]}")
+	}
 	return reply.Orders, nil
 }
