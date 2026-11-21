@@ -161,3 +161,52 @@ func TestToOrders(t *testing.T) {
 		assert.Nil(t, orders, "the valid first order is not returned either")
 	})
 }
+
+func TestRemoteStrategy_Feedback(t *testing.T) {
+	ctx := context.Background()
+	bars := []marketdata.Bar{{Instrument: "EURUSD", Time: testStart, AvailableAt: testStart}}
+	at := testStart
+	broker := &order{id: "t-2", instrument: "EURUSD", action: close, direction: long, reason: reasonStopLoss, fillPrice: px(109000)}
+
+	reqs := []remotestrat.Order{{Instrument: "EURUSD", Action: "open", Direction: "long", Price: px(110000), StopLoss: px(109000), Ref: "entry"}}
+	w := startWorker(t, workerOpts{decide: func(n int, _ []marketdata.Bar, _ []remotestrat.Event) ([]remotestrat.Order, error) {
+		if n == 1 {
+			return reqs, nil
+		}
+		return nil, nil
+	}})
+	r, err := dialRemote("remote", w.addr)
+	require.NoError(t, err)
+
+	orders, err := r.onBars(ctx, bars) // the worker asks for an order labelled "entry"
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	assert.Equal(t, "entry", r.refs[orders[0]], "the adapter remembers the label of the order it made")
+
+	// The trader hands over what happened; it goes with the next group.
+	r.feedback([]feedbackEvent{
+		{orders[0], orderEvent{state: stateSubmitted, time: at}},
+		{orders[0], orderEvent{state: stateFilled, time: at}},
+		{broker, orderEvent{state: stateFilled, time: at}},
+	})
+	assert.Len(t, r.pending, 3)
+	assert.Empty(t, r.refs, "a filled order's label is forgotten")
+
+	_, err = r.onBars(ctx, bars)
+	require.NoError(t, err)
+	assert.Empty(t, r.pending, "sent once")
+	_, err = r.onBars(ctx, bars)
+	require.NoError(t, err)
+	require.NoError(t, r.close())
+	w.finish()
+
+	require.Len(t, w.events, 3)
+	assert.Empty(t, w.events[0], "nothing before the first order")
+	require.Len(t, w.events[1], 3)
+	assert.Empty(t, w.events[2], "not repeated")
+	assert.Equal(t, []string{"accepted", "filled", "filled"}, []string{w.events[1][0].Kind, w.events[1][1].Kind, w.events[1][2].Kind})
+	assert.Equal(t, "entry", w.events[1][0].Ref)
+	assert.Equal(t, "entry", w.events[1][1].Ref)
+	assert.Empty(t, w.events[1][2].Ref, "the broker's own stop was not the worker's order")
+	assert.Equal(t, "stop loss", w.events[1][2].Cause)
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -74,4 +75,18 @@ func TestOrder_WireForm(t *testing.T) {
 		{"instrument":"EURUSD","action":"close"},
 		{"instrument":"EURUSD","action":"open","direction":"short","price":"1.1","stop_loss":"1.11"}]}`, body,
 		"zero prices and empty words are left out, prices are decimal strings")
+}
+
+func TestEvent_WireForm(t *testing.T) {
+	at := time.Date(2010, 1, 6, 0, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	require.NoError(t, writeMessage(&buf, barsMessage{Events: []Event{
+		{Time: at, Kind: Rejected, Instrument: "EURUSD", Action: "open", Direction: "long", Ref: "entry", Cause: "strategy", Reason: "not enough margin"},
+		{Time: at, Kind: Filled, ID: "sim-2", Instrument: "EURUSD", Action: "close", Direction: "long",
+			Units: num.MustParseQuantity("1000"), Price: num.MustParsePrice("1.09"), Cause: "stop loss"},
+	}}))
+	assert.JSONEq(t, `{"bars":null,"events":[
+		{"time":"2010-01-06T00:00:00Z","kind":"rejected","ref":"entry","instrument":"EURUSD","action":"open","direction":"long","cause":"strategy","reason":"not enough margin"},
+		{"time":"2010-01-06T00:00:00Z","kind":"filled","id":"sim-2","instrument":"EURUSD","action":"close","direction":"long","units":"1000","price":"1.09","cause":"stop loss"}]}`,
+		buf.String()[4:], "empty fields are left out; prices and sizes are decimal strings")
 }

@@ -16,9 +16,16 @@ import (
 type remoteStrategy struct {
 	id     string
 	client *remotestrat.Client
+
+	// refs is the worker's label for each order it requested, to echo on the
+	// order's events. pending is what the trader has told it since the last
+	// group, sent with the next one.
+	refs    map[*order]string
+	pending []remotestrat.Event
 }
 
 var _ strategy = (*remoteStrategy)(nil)
+var _ feedbacker = (*remoteStrategy)(nil)
 
 // dialRemote connects to the worker listening at addr (loopback only).
 func dialRemote(id, addr string) (*remoteStrategy, error) {
@@ -36,15 +43,41 @@ func (r *remoteStrategy) init() error { return nil }
 // close ends the session; the worker sees the connection close and exits.
 func (r *remoteStrategy) close() error { return r.client.Close() }
 
-// onBars hands the frame to the worker and maps the orders it requests onto the
-// trader's own. Any failure, including an order that does not map or validate, is
-// returned and stops the run, and then none of the group's orders is processed.
+// feedback keeps what the trader did since the last group; the next onBars sends
+// it to the worker.
+func (r *remoteStrategy) feedback(events []feedbackEvent) {
+	for _, e := range events {
+		r.pending = append(r.pending, toWireEvent(e, r.refs[e.order]))
+		if e.state != stateSubmitted {
+			delete(r.refs, e.order) // filled, rejected or cancelled: nothing more to say
+		}
+	}
+}
+
+// onBars hands the frame, and the events since the last one, to the worker and
+// maps the orders it requests onto the trader's own. Any failure, including an
+// order that does not map or validate, is returned and stops the run, and then
+// none of the group's orders is processed.
 func (r *remoteStrategy) onBars(ctx context.Context, bars []marketdata.Bar) ([]*order, error) {
-	requests, err := r.client.OnBars(ctx, bars)
+	events := r.pending
+	r.pending = nil
+	requests, err := r.client.OnBars(ctx, bars, events)
 	if err != nil {
 		return nil, err
 	}
-	return toOrders(requests, bars)
+	orders, err := toOrders(requests, bars)
+	if err != nil {
+		return nil, err
+	}
+	for i, o := range orders {
+		if ref := requests[i].Ref; ref != "" {
+			if r.refs == nil {
+				r.refs = make(map[*order]string)
+			}
+			r.refs[o] = ref
+		}
+	}
+	return orders, nil
 }
 
 // toOrders maps every request, in order, or fails without returning any.

@@ -5,9 +5,10 @@
 // The protocol is two JSON messages, each preceded by its length as four
 // big-endian bytes. For every group of bars the trader sends
 //
-//	{"bars":[...]}
+//	{"bars":[...],"events":[...]}
 //
-// (marketdata.Bar as encoding/json writes it) and the worker answers
+// (marketdata.Bar as encoding/json writes it; the events are what the trader did
+// since the last group, see Event, and may be empty) and the worker answers
 //
 //	{"orders":[{"instrument":"EURUSD","action":"open","direction":"long",
 //	            "price":"1.10000","stop_loss":"1.09000"}]}
@@ -25,13 +26,15 @@ package strategy
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
 type barsMessage struct {
-	Bars []marketdata.Bar `json:"bars"`
+	Bars   []marketdata.Bar `json:"bars"`
+	Events []Event          `json:"events"`
 }
 
 type ordersMessage struct {
@@ -52,6 +55,49 @@ type Order struct {
 	Price      num.Price `json:"price,omitzero"`      // the reference price of a market order, or the trigger of a limit or stop order.
 	StopLoss   num.Price `json:"stop_loss,omitzero"`  // StopLoss is where the protective stop goes; an open requires it.
 	TakeProfit num.Price `json:"take_profit,omitzero"`
+	// Ref is the worker's own label for the order. The trader echoes it on the
+	// order's events so the worker can tell which request an event is about. It
+	// means nothing to the trader.
+	Ref string `json:"ref,omitempty"`
+}
+
+// Event kinds.
+const (
+	Accepted  = "accepted"  // the trader sized the order and queued it with the broker
+	Filled    = "filled"    // the broker executed it
+	Rejected  = "rejected"  // the trader or broker refused it; Reason says why
+	Cancelled = "cancelled" // it was accepted, then withdrawn before it filled
+)
+
+// Event is something the trader did, reported to the worker with the next group
+// of bars. It is a read-only fact: the worker cannot change it, and it carries no
+// account or position state. Each event is delivered once, in the order it
+// happened, and never before the trader knew it: an order the worker requests in
+// one answer is first reported with the group after it.
+type Event struct {
+	// Time is when it happened: the opening time of the bar it happened on.
+	Time time.Time `json:"time"`
+	// Kind is one of Accepted, Filled, Rejected, Cancelled.
+	Kind string `json:"kind"`
+	// ID is the order's id, assigned by the trader. It is empty for an order
+	// refused before it was queued, which never gets one.
+	ID string `json:"id,omitempty"`
+	// Ref is the Ref the worker gave the order; empty for an order the trader's
+	// broker made itself, such as a protective stop.
+	Ref        string `json:"ref,omitempty"`
+	Instrument string `json:"instrument"`
+	Action     string `json:"action"`
+	Direction  string `json:"direction,omitempty"`
+	// Units is the size the trader chose, for Accepted and Filled.
+	Units num.Quantity `json:"units,omitzero"`
+	// Price is the fill price, for Filled.
+	Price num.Price `json:"price,omitzero"`
+	// Cause is why the order exists: "strategy" for a worker's order, or
+	// "stop loss", "take profit" or "margin closeout" for one the broker made. A
+	// Filled event with cause "stop loss" is a protective-stop exit.
+	Cause string `json:"cause"`
+	// Reason says why, for Rejected.
+	Reason string `json:"reason,omitempty"`
 }
 
 // requireLoopback refuses an address that is not on this machine's loopback

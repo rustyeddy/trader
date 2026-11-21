@@ -19,11 +19,11 @@ func TestServe(t *testing.T) {
 		var got [][]marketdata.Bar
 		done := make(chan error, 1)
 		go func() {
-			done <- Serve(b, func(bars []marketdata.Bar) ([]Order, error) { got = append(got, bars); return nil, nil })
+			done <- Serve(b, func(bars []marketdata.Bar, _ []Event) ([]Order, error) { got = append(got, bars); return nil, nil })
 		}()
 
 		for i := 0; i < 3; i++ {
-			require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar}))
+			require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
 			var out ordersMessage
 			require.NoError(t, readMessage(a, &out))
 			assert.NotNil(t, out.Orders, "an empty list on the wire, not null")
@@ -40,29 +40,54 @@ func TestServe(t *testing.T) {
 			{Instrument: "EURUSD", Action: "open", Direction: "long", Price: num.MustParsePrice("1.1"), StopLoss: num.MustParsePrice("1.09")},
 			{Instrument: "EURUSD", Action: "close"},
 		}
-		go func() { done <- Serve(b, func([]marketdata.Bar) ([]Order, error) { return want, nil }) }()
+		go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return want, nil }) }()
 
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar}))
+		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
 		var out ordersMessage
 		require.NoError(t, readMessage(a, &out))
 		assert.Equal(t, want, out.Orders)
 		require.NoError(t, a.Close())
 		require.NoError(t, <-done)
 	})
+	t.Run("hands the events to onBars", func(t *testing.T) {
+		a, b := net.Pipe()
+		done := make(chan error, 1)
+		var got []Event
+		go func() {
+			done <- Serve(b, func(_ []marketdata.Bar, events []Event) ([]Order, error) { got = events; return nil, nil })
+		}()
+		want := []Event{{Kind: Filled, ID: "sim-1", Instrument: "EURUSD", Action: "open", Cause: "strategy"}}
+		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: want}))
+		var out ordersMessage
+		require.NoError(t, readMessage(a, &out))
+		require.NoError(t, a.Close())
+		require.NoError(t, <-done)
+		assert.Equal(t, want, got)
+	})
+	t.Run("a request without an events list is an error", func(t *testing.T) {
+		for _, body := range []string{`{"bars":[]}`, `{"bars":[],"events":null}`} {
+			a, b := net.Pipe()
+			done := make(chan error, 1)
+			go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil }) }()
+			writeRaw(a, body)
+			assert.ErrorContains(t, <-done, "no events list", body)
+			_ = a.Close()
+		}
+	})
 	t.Run("an error from onBars ends it without an answer", func(t *testing.T) {
 		a, b := net.Pipe()
 		defer func() { _ = a.Close() }()
 		boom := errors.New("boom")
 		done := make(chan error, 1)
-		go func() { done <- Serve(b, func([]marketdata.Bar) ([]Order, error) { return nil, boom }) }()
+		go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, boom }) }()
 
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar}))
+		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
 		assert.ErrorIs(t, <-done, boom)
 	})
 	t.Run("a garbled message is an error", func(t *testing.T) {
 		a, b := net.Pipe()
 		done := make(chan error, 1)
-		go func() { done <- Serve(b, func([]marketdata.Bar) ([]Order, error) { return nil, nil }) }()
+		go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil }) }()
 
 		_, err := a.Write([]byte{0, 0, 0, 4, 'n', 'o', 'p', 'e'})
 		require.NoError(t, err)
@@ -77,14 +102,14 @@ func TestListenAndServe(t *testing.T) {
 		done := make(chan error, 1)
 		go func() {
 			done <- ListenAndServe("127.0.0.1:0", func(a net.Addr) { addrs <- a },
-				func([]marketdata.Bar) ([]Order, error) { groups++; return nil, nil })
+				func([]marketdata.Bar, []Event) ([]Order, error) { groups++; return nil, nil })
 		}()
 
 		c, err := Dial((<-addrs).String())
 		require.NoError(t, err)
-		_, err = c.OnBars(context.Background(), oneBar)
+		_, err = c.OnBars(context.Background(), oneBar, nil)
 		require.NoError(t, err)
-		_, err = c.OnBars(context.Background(), oneBar)
+		_, err = c.OnBars(context.Background(), oneBar, nil)
 		require.NoError(t, err)
 		require.NoError(t, c.Close())
 		require.NoError(t, <-done)
@@ -98,18 +123,20 @@ func TestListenAndServe(t *testing.T) {
 		require.NoError(t, probe.Close())
 
 		done := make(chan error, 1)
-		go func() { done <- ListenAndServe(addr, nil, func([]marketdata.Bar) ([]Order, error) { return nil, nil }) }()
+		go func() {
+			done <- ListenAndServe(addr, nil, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil })
+		}()
 
 		var c *Client
 		require.Eventually(t, func() bool { c, err = Dial(addr); return err == nil }, 2*time.Second, 10*time.Millisecond)
-		_, err = c.OnBars(context.Background(), oneBar)
+		_, err = c.OnBars(context.Background(), oneBar, nil)
 		require.NoError(t, err)
 		require.NoError(t, c.Close())
 		require.NoError(t, <-done)
 	})
 	t.Run("a non-loopback address is refused", func(t *testing.T) {
 		for _, addr := range []string{"0.0.0.0:0", ":0", "8.8.8.8:9100", "no-port"} {
-			err := ListenAndServe(addr, nil, func([]marketdata.Bar) ([]Order, error) { return nil, nil })
+			err := ListenAndServe(addr, nil, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil })
 			assert.Error(t, err, addr)
 		}
 	})
@@ -117,6 +144,6 @@ func TestListenAndServe(t *testing.T) {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		defer func() { _ = ln.Close() }()
-		assert.Error(t, ListenAndServe(ln.Addr().String(), nil, func([]marketdata.Bar) ([]Order, error) { return nil, nil }))
+		assert.Error(t, ListenAndServe(ln.Addr().String(), nil, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil }))
 	})
 }

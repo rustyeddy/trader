@@ -86,6 +86,9 @@ type trader struct {
 	// in the order they were refused. They never join broker.completed, which
 	// keeps the rejections that happen at the fill, so no order is in both.
 	rejected []*order
+
+	// feedbackLog is what a strategy that wants feedback has been told.
+	feedbackLog feedbackLog
 }
 
 // onBar handles one bar: onFrame with a frame of that bar alone.
@@ -110,6 +113,9 @@ func (tr *trader) onFrame(ctx context.Context, f frame) error {
 		return fmt.Errorf("broker on frame at %s: %w", f.availableAt.Format(time.RFC3339), err)
 	}
 
+	if fb, ok := tr.strategy.(feedbacker); ok {
+		fb.feedback(tr.collectEvents())
+	}
 	orders, err := tr.strategy.onBars(ctx, f.bars)
 	if err != nil {
 		return fmt.Errorf("strategy %s: %w", tr.strategy.name(), err)
@@ -146,6 +152,7 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 		return fmt.Errorf("strategy order at %s %s: %w", o.instrument, o.Time.Format(time.DateOnly), err)
 	}
 
+	tr.watch(o)
 	o.record(stateRequested, o.Time, "")
 	if err := tr.broker.submit(ctx, o); err != nil {
 		if !isRejection(err) {
