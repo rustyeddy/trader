@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"errors"
 	"io"
 	"net"
 
@@ -11,7 +12,7 @@ import (
 // from the trader and serves it (see Serve) until the trader closes it. ready, if
 // not nil, is called once with the address actually bound, which is how a caller
 // learns the port of "127.0.0.1:0".
-func ListenAndServe(addr string, ready func(net.Addr), onBars func(bars []marketdata.Bar) ([]Order, error)) error {
+func ListenAndServe(addr string, ready func(net.Addr), onBars func(bars []marketdata.Bar, events []Event) ([]Order, error)) error {
 	if err := requireLoopback(addr); err != nil {
 		return err
 	}
@@ -35,7 +36,7 @@ func ListenAndServe(addr string, ready func(net.Addr), onBars func(bars []market
 // onBars with it and answers with the orders it returns (none is fine), until
 // the trader closes the connection (Serve then returns nil). If onBars returns an
 // error Serve returns it without answering. Serve does not close conn.
-func Serve(conn net.Conn, onBars func(bars []marketdata.Bar) ([]Order, error)) error {
+func Serve(conn net.Conn, onBars func(bars []marketdata.Bar, events []Event) ([]Order, error)) error {
 	for {
 		var in barsMessage
 		if err := readMessage(conn, &in); err != nil {
@@ -44,7 +45,10 @@ func Serve(conn net.Conn, onBars func(bars []marketdata.Bar) ([]Order, error)) e
 			}
 			return err
 		}
-		orders, err := onBars(in.Bars)
+		if in.Events == nil {
+			return errors.New("request has no events list")
+		}
+		orders, err := onBars(in.Bars, in.Events)
 		if err != nil {
 			return err
 		}

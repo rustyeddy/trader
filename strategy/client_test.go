@@ -80,35 +80,62 @@ func TestClient_OnBars(t *testing.T) {
 	t.Run("an empty answer is no orders", func(t *testing.T) {
 		r := answerWith(t, `{"orders":[]}`)
 		for range 2 {
-			orders, err := r.OnBars(ctx, oneBar)
+			orders, err := r.OnBars(ctx, oneBar, nil)
 			require.NoError(t, err)
 			assert.Empty(t, orders)
 		}
 	})
 	t.Run("requested orders come back in order, prices exact", func(t *testing.T) {
 		r := answerWith(t, `{"orders":[
-			{"instrument":"EURUSD","action":"open","direction":"long","type":"limit","price":"1.10000","stop_loss":"1.09000","take_profit":"1.12000"},
+			{"instrument":"EURUSD","action":"open","direction":"long","type":"limit","price":"1.10000","stop_loss":"1.09000","take_profit":"1.12000","ref":"entry"},
 			{"instrument":"GBPUSD","action":"close"}]}`)
-		orders, err := r.OnBars(ctx, oneBar)
+		orders, err := r.OnBars(ctx, oneBar, nil)
 		require.NoError(t, err)
 		require.Len(t, orders, 2)
 		assert.Equal(t, Order{
 			Instrument: "EURUSD", Action: "open", Direction: "long", Type: "limit",
-			Price: num.MustParsePrice("1.1"), StopLoss: num.MustParsePrice("1.09"), TakeProfit: num.MustParsePrice("1.12"),
+			Price: num.MustParsePrice("1.1"), StopLoss: num.MustParsePrice("1.09"), TakeProfit: num.MustParsePrice("1.12"), Ref: "entry",
 		}, orders[0])
 		assert.Equal(t, Order{Instrument: "GBPUSD", Action: "close"}, orders[1])
 	})
 	t.Run("a field the worker may not send is an error", func(t *testing.T) {
 		for _, field := range []string{`"units":"1000"`, `"id":"x"`, `"state":"filled"`, `"account":"a"`, `"fill_price":"1.1"`, `"nonsense":1`} {
 			r := answerWith(t, `{"orders":[{"instrument":"EURUSD","action":"close",`+field+`}]}`)
-			_, err := r.OnBars(ctx, oneBar)
+			_, err := r.OnBars(ctx, oneBar, nil)
 			assert.ErrorContains(t, err, "unknown field", field)
 		}
+	})
+	t.Run("sends the events, and an empty list rather than null when there are none", func(t *testing.T) {
+		requests := make(chan barsMessage, 2)
+		addr := rawWorker(t, func(c net.Conn) {
+			for {
+				var in barsMessage
+				if readMessage(c, &in) != nil {
+					return
+				}
+				requests <- in
+				writeRaw(c, `{"orders":[]}`)
+			}
+		})
+		r, err := Dial(addr)
+		require.NoError(t, err)
+		defer func() { _ = r.Close() }()
+
+		_, err = r.OnBars(ctx, oneBar, nil)
+		require.NoError(t, err)
+		first := <-requests
+		assert.NotNil(t, first.Events)
+		assert.Empty(t, first.Events)
+
+		want := []Event{{Kind: Rejected, Instrument: "EURUSD", Action: "open", Ref: "entry", Cause: "strategy", Reason: "no margin"}}
+		_, err = r.OnBars(ctx, oneBar, want)
+		require.NoError(t, err)
+		assert.Equal(t, want, (<-requests).Events)
 	})
 	t.Run("an answer without an orders list is an error", func(t *testing.T) {
 		for _, body := range []string{`{}`, `{"orders":null}`} {
 			r := answerWith(t, body)
-			orders, err := r.OnBars(ctx, oneBar)
+			orders, err := r.OnBars(ctx, oneBar, nil)
 			assert.ErrorContains(t, err, "no orders list", body)
 			assert.Empty(t, orders)
 		}
@@ -116,7 +143,7 @@ func TestClient_OnBars(t *testing.T) {
 	t.Run("a malformed answer is an error", func(t *testing.T) {
 		for _, body := range []string{`nope`, `{"orders":[`, `{"orders":{}}`, `{"orders":[{"price":1.1}]}`, `{"orders":[]} x`, `{"orders":[{"price":"abc"}]}`} {
 			r := answerWith(t, body)
-			orders, err := r.OnBars(ctx, oneBar)
+			orders, err := r.OnBars(ctx, oneBar, nil)
 			assert.Error(t, err, body)
 			assert.Empty(t, orders)
 		}
@@ -129,7 +156,7 @@ func TestClient_OnBars(t *testing.T) {
 		r, err := Dial(addr)
 		require.NoError(t, err)
 		defer func() { _ = r.Close() }()
-		_, err = r.OnBars(ctx, oneBar)
+		_, err = r.OnBars(ctx, oneBar, nil)
 		assert.ErrorContains(t, err, "reading orders")
 	})
 	t.Run("a silent worker times out", func(t *testing.T) {
@@ -146,7 +173,7 @@ func TestClient_OnBars(t *testing.T) {
 		r.Timeout = 50 * time.Millisecond
 
 		start := time.Now()
-		_, err = r.OnBars(ctx, oneBar)
+		_, err = r.OnBars(ctx, oneBar, nil)
 		assert.ErrorContains(t, err, "did not answer within")
 		assert.Less(t, time.Since(start), 2*time.Second)
 	})
@@ -165,7 +192,7 @@ func TestClient_OnBars(t *testing.T) {
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(50*time.Millisecond, cancel)
 		start := time.Now()
-		_, err = r.OnBars(cctx, oneBar)
+		_, err = r.OnBars(cctx, oneBar, nil)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Less(t, time.Since(start), 2*time.Second)
 	})
@@ -183,7 +210,7 @@ func TestClient_OnBars(t *testing.T) {
 
 		cctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
-		_, err = r.OnBars(cctx, oneBar)
+		_, err = r.OnBars(cctx, oneBar, nil)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 	})
 }

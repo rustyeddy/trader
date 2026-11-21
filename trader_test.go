@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os/exec"
 	"path/filepath"
@@ -234,7 +235,7 @@ func TestTrader_HandleOrder_Amend(t *testing.T) {
 type workerOpts struct {
 	dropOn int // hang up on receiving this group without answering it; 0 never
 	// decide, if set, says which orders to request on the n-th group (from 1).
-	decide func(n int, bars []marketdata.Bar) ([]remotestrat.Order, error)
+	decide func(n int, bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error)
 }
 
 // testWorker is the example worker in process: it listens on loopback, serves one
@@ -242,6 +243,7 @@ type workerOpts struct {
 type testWorker struct {
 	addr   string
 	groups [][]marketdata.Bar
+	events [][]remotestrat.Event // what came with each group
 	done   sync.WaitGroup
 }
 
@@ -260,14 +262,15 @@ func startWorker(t *testing.T, o workerOpts) *testWorker {
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar) ([]remotestrat.Order, error) {
+		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
 			w.groups = append(w.groups, bars)
+			w.events = append(w.events, events)
 			n := len(w.groups)
 			if o.dropOn > 0 && n == o.dropOn {
 				return nil, errors.New("hang up")
 			}
 			if o.decide != nil {
-				return o.decide(n, bars)
+				return o.decide(n, bars, events)
 			}
 			return nil, nil
 		})
@@ -304,7 +307,12 @@ func (r *recorder) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, e
 
 func newRemoteTrader(t *testing.T, s strategy) *trader {
 	t.Helper()
-	tr := newTestTrader()
+	return newRemoteTraderWith(t, s, usd(1000))
+}
+
+func newRemoteTraderWith(t *testing.T, s strategy, balance money) *trader {
+	t.Helper()
+	tr := newTestTraderWithBalance(balance)
 	tr.strategy = s
 	return tr
 }
@@ -398,16 +406,17 @@ func TestRemoteStrategy_ExampleWorker(t *testing.T) {
 	require.NoError(t, remote.close())
 	require.NoError(t, cmd.Wait(), "the worker exits when the trader closes")
 
-	ref := newRemoteTrader(t, &openThenClose{})
+	ref := newRemoteTrader(t, newInProcessRule(ruleStopDistance))
 	require.NoError(t, (&backtest{}).runSeries(ctx, ref, prices))
 	assert.Equal(t, outcomeOf(ref), outcomeOf(tr), "the real example trades like the in-process rule")
 	assert.Equal(t, 1, len(tr.account.trades), "it opened and closed one position")
 	assert.Contains(t, stderr.String(), "done: ")
+	assert.Contains(t, stderr.String(), "event: 2010-01-07 filled open EURUSD strategy ref=\"entry\"", "the example prints what Trader reports")
 }
 
-// The example worker's rule, once as the worker answers it and once as an in-process
-// strategy: open long on the third group with a stop 0.015 below the close, close on
-// the sixth.
+// The example worker's rule, once as the worker answers it and once as an
+// in-process strategy: open long on the third group with a stop below the close,
+// close on the sixth if the entry filled and the stop has not taken it out.
 const (
 	ruleOpenAt  = 3
 	ruleCloseAt = 6
@@ -415,31 +424,80 @@ const (
 
 var ruleStopDistance = num.MustParsePrice("0.015")
 
-func openThenCloseRequests(n int, bars []marketdata.Bar) ([]remotestrat.Order, error) {
+// feedbackRule is that rule, driven by the events the trader reports.
+type feedbackRule struct {
+	stopDistance num.Price
+	groups       int
+	inPosition   bool
+}
+
+func (r *feedbackRule) step(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
+	for _, e := range events {
+		switch {
+		case e.Ref == "entry" && e.Kind == remotestrat.Filled:
+			r.inPosition = true
+		case e.Kind == remotestrat.Filled && e.Cause == "stop loss":
+			r.inPosition = false
+		}
+	}
+	r.groups++
 	b := bars[0]
 	c := b.OHLC().Close
-	switch n {
-	case ruleOpenAt:
-		stop, err := c.Sub(ruleStopDistance)
+	switch {
+	case r.groups == ruleOpenAt:
+		stop, err := c.Sub(r.stopDistance)
 		if err != nil {
 			return nil, err
 		}
-		return []remotestrat.Order{{Instrument: b.Instrument, Action: "open", Direction: "long", Price: c, StopLoss: stop}}, nil
-	case ruleCloseAt:
+		return []remotestrat.Order{{Instrument: b.Instrument, Action: "open", Direction: "long", Price: c, StopLoss: stop, Ref: "entry"}}, nil
+	case r.groups == ruleCloseAt && r.inPosition:
 		return []remotestrat.Order{{Instrument: b.Instrument, Action: "close", Price: c}}, nil
 	}
 	return nil, nil
 }
 
-// openThenClose is the same rule as an in-process strategy, the reference the
-// remote run is compared with.
-type openThenClose struct{ n int }
+// ruleWorker is the rule as the worker's callback.
+func ruleWorker(distance num.Price) func(int, []marketdata.Bar, []remotestrat.Event) ([]remotestrat.Order, error) {
+	r := &feedbackRule{stopDistance: distance}
+	return func(_ int, bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
+		return r.step(bars, events)
+	}
+}
 
-func (*openThenClose) name() string { return "open-then-close" }
-func (*openThenClose) init() error  { return nil }
-func (s *openThenClose) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, error) {
-	s.n++
-	requests, err := openThenCloseRequests(s.n, bars)
+// inProcessRule is the same rule as an in-process strategy that asks for feedback:
+// the reference the remote run is compared with.
+type inProcessRule struct {
+	rule    feedbackRule
+	entry   *order
+	pending []remotestrat.Event
+	seen    [][]remotestrat.Event // the events given with each group
+}
+
+func newInProcessRule(distance num.Price) *inProcessRule {
+	return &inProcessRule{rule: feedbackRule{stopDistance: distance}}
+}
+
+func (*inProcessRule) name() string { return "in-process-rule" }
+func (*inProcessRule) init() error  { return nil }
+
+func (s *inProcessRule) feedback(events []feedbackEvent) {
+	for _, e := range events {
+		ref := ""
+		if e.order == s.entry {
+			ref = "entry"
+		}
+		s.pending = append(s.pending, toWireEvent(e, ref))
+	}
+}
+
+func (s *inProcessRule) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, error) {
+	events := s.pending
+	if events == nil {
+		events = []remotestrat.Event{} // as on the wire: an empty list, not null
+	}
+	s.pending = nil
+	s.seen = append(s.seen, events)
+	requests, err := s.rule.step(bars, events)
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +506,7 @@ func (s *openThenClose) onBars(_ context.Context, bars []marketdata.Bar) ([]*ord
 		o := &order{instrument: q.Instrument, price: q.Price, stopLoss: q.StopLoss, orderType: marketOrder, Time: bars[0].Time}
 		if q.Action == "open" {
 			o.action, o.direction = open, long
+			s.entry = o
 		} else {
 			o.action = close
 		}
@@ -459,16 +518,18 @@ func (s *openThenClose) onBars(_ context.Context, bars []marketdata.Bar) ([]*ord
 // outcome is what a run came to: every order that ended or waits, with its sizing
 // and fill, and the account.
 type outcome struct {
-	orders  []orderResult
-	balance num.Money
-	trades  int
+	orders   []orderResult
+	rejected []orderResult // refused before they reached the broker
+	balance  num.Money
+	trades   int
 }
 
 func outcomeOf(tr *trader) outcome {
 	return outcome{
-		orders:  orderResults(slices.Concat(tr.broker.completed, tr.broker.orders["EURUSD"])),
-		balance: tr.account.balance,
-		trades:  len(tr.account.trades),
+		orders:   orderResults(slices.Concat(tr.broker.completed, tr.broker.orders["EURUSD"])),
+		rejected: orderResults(tr.rejected),
+		balance:  tr.account.balance,
+		trades:   len(tr.account.trades),
 	}
 }
 
@@ -477,7 +538,7 @@ func TestRemoteStrategy_OrdersMatchInProcess(t *testing.T) {
 	captureLogs(t)
 	prices := scenarioPrices(t, remoteScenario)
 
-	inProc := newRemoteTrader(t, &openThenClose{})
+	inProc := newRemoteTrader(t, newInProcessRule(ruleStopDistance))
 	require.NoError(t, (&backtest{}).runSeries(ctx, inProc, prices))
 	want := outcomeOf(inProc)
 	require.Len(t, want.orders, 3, "the open, the close, and the broker's stop cancelled by it")
@@ -487,7 +548,7 @@ func TestRemoteStrategy_OrdersMatchInProcess(t *testing.T) {
 	assert.Equal(t, 1, want.trades)
 	assert.NotZero(t, want.orders[0].units, "the trader sized it, the strategy did not")
 
-	w := startWorker(t, workerOpts{decide: openThenCloseRequests})
+	w := startWorker(t, workerOpts{decide: ruleWorker(ruleStopDistance)})
 	remote, err := dialRemote("remote", w.addr)
 	require.NoError(t, err)
 	tr := newRemoteTrader(t, remote)
@@ -500,6 +561,54 @@ func TestRemoteStrategy_OrdersMatchInProcess(t *testing.T) {
 	assert.True(t, want.balance.Equal(got.balance), "same final balance: %s vs %s", want.balance, got.balance)
 	assert.Equal(t, want.trades, got.trades)
 	assert.Equal(t, orderHistoryOf(inProc), orderHistoryOf(tr), "same lifecycle")
+}
+
+func TestRemoteStrategy_FeedbackMatchesInProcess(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+	tests := []struct {
+		name     string
+		distance num.Price
+		balance  money
+		want     []string // "group: kind action cause" of every event the worker is told
+	}{
+		{"fill then a close it asked for", ruleStopDistance, usd(1000), []string{
+			"4: accepted open strategy", "4: filled open strategy",
+			"7: accepted close strategy", "7: filled close strategy"}},
+		{"a protective stop takes it out and the worker skips its close", num.MustParsePrice("0.002"), usd(1000), []string{
+			"4: accepted open strategy", "4: filled open strategy",
+			"6: filled close stop loss"}},
+		{"a refusal at sizing reaches the worker with its reason", ruleStopDistance, usd(0), []string{
+			"4: rejected open strategy"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prices := scenarioPrices(t, remoteScenario)
+
+			ref := newInProcessRule(tt.distance)
+			inProc := newRemoteTraderWith(t, ref, tt.balance)
+			require.NoError(t, (&backtest{}).runSeries(ctx, inProc, prices))
+
+			w := startWorker(t, workerOpts{decide: ruleWorker(tt.distance)})
+			remote, err := dialRemote("remote", w.addr)
+			require.NoError(t, err)
+			tr := newRemoteTraderWith(t, remote, tt.balance)
+			require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
+			require.NoError(t, remote.close())
+			w.finish()
+
+			var told []string
+			for i, events := range w.events {
+				for _, e := range events {
+					told = append(told, fmt.Sprintf("%d: %s %s %s", i+1, e.Kind, e.Action, e.Cause))
+				}
+			}
+			assert.Equal(t, tt.want, told)
+			assert.Equal(t, jsonOf(t, ref.seen), jsonOf(t, w.events), "the worker is told what the in-process strategy is told")
+			assert.Equal(t, outcomeOf(inProc), outcomeOf(tr), "and the runs end the same")
+			assert.Len(t, w.events, len(w.groups), "every group carries an events list, possibly empty")
+		})
+	}
 }
 
 // orderHistoryOf is every order's lifecycle, by id.
@@ -528,7 +637,7 @@ func TestRemoteStrategy_BadOrdersFailTheRunAndProcessNone(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := startWorker(t, workerOpts{decide: func(n int, _ []marketdata.Bar) ([]remotestrat.Order, error) {
+			w := startWorker(t, workerOpts{decide: func(n int, _ []marketdata.Bar, _ []remotestrat.Event) ([]remotestrat.Order, error) {
 				if n == ruleOpenAt {
 					return tt.orders, nil
 				}

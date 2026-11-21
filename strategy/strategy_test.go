@@ -46,13 +46,13 @@ func TestClientAndServe(t *testing.T) {
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		done <- Serve(conn, func([]marketdata.Bar) ([]Order, error) { groups++; return nil, nil })
+		done <- Serve(conn, func([]marketdata.Bar, []Event) ([]Order, error) { groups++; return nil, nil })
 	}()
 
 	r, err := Dial(ln.Addr().String())
 	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
-		_, err := r.OnBars(context.Background(), oneBar)
+		_, err := r.OnBars(context.Background(), oneBar, nil)
 		require.NoError(t, err)
 	}
 	require.NoError(t, r.Close())

@@ -38,11 +38,12 @@ func Dial(addr string) (*Client, error) {
 // Close ends the session; the worker sees the connection close and stops.
 func (r *Client) Close() error { return r.conn.Close() }
 
-// OnBars sends one group of bars and waits for the answer: the orders the worker
-// requests, in order, possibly none. It returns an error if the worker does not
+// OnBars sends one group of bars with the events since the last group (none is
+// fine) and waits for the answer: the orders the worker requests, in order,
+// possibly none. It returns an error if the worker does not
 // answer within the timeout or ctx ends first, if the connection fails, or if the
 // answer is not a valid message. After an error the connection should be closed.
-func (r *Client) OnBars(ctx context.Context, bars []marketdata.Bar) ([]Order, error) {
+func (r *Client) OnBars(ctx context.Context, bars []marketdata.Bar, events []Event) ([]Order, error) {
 	timeout := r.Timeout
 	if timeout == 0 {
 		timeout = DefaultTimeout
@@ -58,7 +59,7 @@ func (r *Client) OnBars(ctx context.Context, bars []marketdata.Bar) ([]Order, er
 	stop := context.AfterFunc(ctx, func() { _ = r.conn.SetDeadline(time.Unix(1, 0)) })
 	defer stop()
 
-	orders, err := r.exchange(bars)
+	orders, err := r.exchange(bars, events)
 	switch {
 	case err == nil:
 		return orders, nil
@@ -74,8 +75,11 @@ func (r *Client) OnBars(ctx context.Context, bars []marketdata.Bar) ([]Order, er
 	return nil, err
 }
 
-func (r *Client) exchange(bars []marketdata.Bar) ([]Order, error) {
-	if err := writeMessage(r.conn, barsMessage{Bars: bars}); err != nil {
+func (r *Client) exchange(bars []marketdata.Bar, events []Event) ([]Order, error) {
+	if events == nil {
+		events = []Event{} // an empty list on the wire, not null
+	}
+	if err := writeMessage(r.conn, barsMessage{Bars: bars, Events: events}); err != nil {
 		return nil, fmt.Errorf("sending bars: %w", err)
 	}
 	var reply ordersMessage
