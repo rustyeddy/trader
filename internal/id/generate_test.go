@@ -84,14 +84,26 @@ func TestGenerator_ReportsEntropyExhaustion(t *testing.T) {
 	require.ErrorIs(t, err, ErrEntropyExhausted)
 }
 
-func TestGenerator_ReportsClockMovedBackward(t *testing.T) {
-	times := []time.Time{t0.Add(time.Millisecond), t0}
-	g := NewGenerator(func() time.Time { t := times[0]; times = times[1:]; return t }, Random{})
+func TestGenerator_ClockMovingBackwardContinuesFromTheLastMillisecond(t *testing.T) {
+	// 5 ms, then back to 2 ms, then forward again to 9 ms.
+	times := []time.Time{t0.Add(5 * time.Millisecond), t0.Add(2 * time.Millisecond), t0.Add(9 * time.Millisecond)}
+	g := NewGenerator(func() time.Time { t := times[0]; times = times[1:]; return t }, NewDeterministic(1, 2))
 
-	_, err := g.RunID()
+	var ids []RunID
+	for range 3 {
+		got, err := g.RunID()
+		require.NoError(t, err, "a run can always get an ID")
+		ids = append(ids, got)
+	}
+
+	assert.Less(t, ids[0].String(), ids[1].String(), "still strictly increasing after the step back")
+	assert.Less(t, ids[1].String(), ids[2].String())
+	second, err := ids[1].Time()
 	require.NoError(t, err)
-	_, err = g.RunID()
-	require.ErrorIs(t, err, ErrClockMovedBackward)
+	assert.True(t, second.Equal(t0.Add(5*time.Millisecond)), "stamped with the last millisecond used, not the earlier one: %s", second)
+	third, err := ids[2].Time()
+	require.NoError(t, err)
+	assert.True(t, third.Equal(t0.Add(9*time.Millisecond)), "and follows the clock again once it passes it")
 }
 
 func TestGenerator_ConcurrentUseGivesUniqueIDs(t *testing.T) {

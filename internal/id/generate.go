@@ -29,12 +29,6 @@ func (Random) Entropy() ([10]byte, error) {
 	return b, nil
 }
 
-// ErrClockMovedBackward reports that a Generator saw its clock return an earlier
-// time than one it had already used for an identifier. The wall clock can do this,
-// briefly, after an adjustment; Generate says so rather than silently reusing or
-// ignoring the earlier time.
-var ErrClockMovedBackward = errors.New("id: clock moved backward")
-
 // ErrEntropyExhausted reports that a Generator made 2^80 IDs within one
 // millisecond and cannot make another that still sorts after them.
 var ErrEntropyExhausted = errors.New("id: entropy exhausted within one millisecond")
@@ -43,6 +37,11 @@ var ErrEntropyExhausted = errors.New("id: entropy exhausted within one milliseco
 // time itself. IDs made within the same millisecond get strictly increasing entropy
 // rather than fresh random values (the ULID spec's monotonic generation), so their
 // text sorts in the order they were made.
+//
+// If the clock steps backwards (an NTP correction, say) the Generator carries on
+// from the last millisecond it used instead of failing: a run must always be able
+// to get an ID, and uniqueness and order matter more than the ID's time being exact
+// during an adjustment.
 //
 // A *Generator is safe for concurrent use: uniqueness and order hold across
 // goroutines sharing one.
@@ -65,13 +64,15 @@ func NewGenerator(now func() time.Time, source EntropySource) *Generator {
 // RunID makes a new RunID.
 //
 // It returns ErrEntropyExhausted if it has already made 2^80 IDs in the current
-// millisecond, and ErrClockMovedBackward if the clock went back. Neither falls
-// back to weaker behavior silently.
+// millisecond; it never falls back to weaker entropy silently.
 func (g *Generator) RunID() (RunID, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	ms := g.now().UnixMilli()
+	if g.hasLast && ms < g.lastMS {
+		ms = g.lastMS // the clock went back: continue from the last millisecond
+	}
 
 	var rnd [10]byte
 	switch {
@@ -81,14 +82,12 @@ func (g *Generator) RunID() (RunID, error) {
 			return RunID{}, err
 		}
 		rnd = r
-	case ms == g.lastMS:
+	default: // the same millisecond, or the clock went back to it
 		next, overflowed := ulid.IncrementEntropy(g.lastRand)
 		if overflowed {
 			return RunID{}, ErrEntropyExhausted
 		}
 		rnd = next
-	default:
-		return RunID{}, ErrClockMovedBackward
 	}
 
 	v, err := ulid.New(ms, rnd)
