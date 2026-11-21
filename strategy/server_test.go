@@ -72,13 +72,20 @@ func TestListenAndServe(t *testing.T) {
 		assert.Equal(t, 2, groups)
 	})
 	t.Run("a nil ready is allowed", func(t *testing.T) {
+		// Without ready the port is unknown, so pick a free one and give it back.
+		probe, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		addr := probe.Addr().String()
+		require.NoError(t, probe.Close())
+
 		done := make(chan error, 1)
-		go func() { done <- ListenAndServe("127.0.0.1:0", nil, func([]marketdata.Bar) error { return nil }) }()
-		select {
-		case err := <-done:
-			t.Fatalf("returned early: %v", err)
-		case <-time.After(50 * time.Millisecond):
-		}
+		go func() { done <- ListenAndServe(addr, nil, func([]marketdata.Bar) error { return nil }) }()
+
+		var c *Client
+		require.Eventually(t, func() bool { c, err = Dial(addr); return err == nil }, 2*time.Second, 10*time.Millisecond)
+		require.NoError(t, c.OnBars(context.Background(), oneBar))
+		require.NoError(t, c.Close())
+		require.NoError(t, <-done)
 	})
 	t.Run("a non-loopback address is refused", func(t *testing.T) {
 		for _, addr := range []string{"0.0.0.0:0", ":0", "8.8.8.8:9100", "no-port"} {

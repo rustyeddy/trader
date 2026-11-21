@@ -27,7 +27,9 @@ func main() {
 
 	groups := 0
 	err := strategy.ListenAndServe(*addr,
-		func(a net.Addr) { fmt.Println("listening on", a) }, // for whoever started us
+		func(a net.Addr) {
+			fmt.Println("listening on", a)
+		}, // for whoever started us
 		func([]marketdata.Bar) error {
 			// A real strategy decides here. This one only counts.
 			groups++
