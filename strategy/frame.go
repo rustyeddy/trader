@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -49,5 +50,15 @@ func readMessage(r io.Reader, v any) error {
 		}
 		return err
 	}
-	return json.Unmarshal(body, v)
+	// Strict: a field the protocol does not define is an error, so a worker cannot
+	// slip in something the trader would ignore without saying so.
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("unexpected data after the message")
+	}
+	return nil
 }

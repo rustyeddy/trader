@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,4 +61,17 @@ func TestReadMessage_Errors(t *testing.T) {
 		huge := binary.BigEndian.AppendUint32(nil, maxMessage+1)
 		assert.ErrorContains(t, readMessage(bytes.NewReader(huge), &v), "exceeds")
 	})
+}
+
+func TestOrder_WireForm(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, writeMessage(&buf, ordersMessage{Orders: []Order{
+		{Instrument: "EURUSD", Action: "close"},
+		{Instrument: "EURUSD", Action: "open", Direction: "short", Price: num.MustParsePrice("1.1"), StopLoss: num.MustParsePrice("1.11")},
+	}}))
+	body := buf.String()[4:]
+	assert.JSONEq(t, `{"orders":[
+		{"instrument":"EURUSD","action":"close"},
+		{"instrument":"EURUSD","action":"open","direction":"short","price":"1.1","stop_loss":"1.11"}]}`, body,
+		"zero prices and empty words are left out, prices are decimal strings")
 }

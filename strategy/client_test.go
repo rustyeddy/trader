@@ -2,12 +2,13 @@ package strategy
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/binary"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,35 +50,76 @@ func TestDial_NothingListening(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// writeRaw sends body as one message, bypassing the types, so a test can send what
+// a worker must not.
+func writeRaw(c net.Conn, body string) {
+	_, _ = c.Write(append(binary.BigEndian.AppendUint32(nil, uint32(len(body))), body...))
+}
+
+// answerWith is a worker that answers every group with the given raw body.
+func answerWith(t *testing.T, body string) *Client {
+	t.Helper()
+	addr := rawWorker(t, func(c net.Conn) {
+		for {
+			var in barsMessage
+			if readMessage(c, &in) != nil {
+				return
+			}
+			writeRaw(c, body)
+		}
+	})
+	r, err := Dial(addr)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+	return r
+}
+
 func TestClient_OnBars(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("an empty answer is success", func(t *testing.T) {
-		addr := rawWorker(t, func(c net.Conn) {
-			for {
-				var in barsMessage
-				if readMessage(c, &in) != nil {
-					return
-				}
-				_ = writeMessage(c, ordersMessage{})
-			}
-		})
-		r, err := Dial(addr)
-		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
-		assert.NoError(t, r.OnBars(ctx, oneBar))
-		assert.NoError(t, r.OnBars(ctx, oneBar))
+	t.Run("an empty answer is no orders", func(t *testing.T) {
+		r := answerWith(t, `{"orders":[]}`)
+		for range 2 {
+			orders, err := r.OnBars(ctx, oneBar)
+			require.NoError(t, err)
+			assert.Empty(t, orders)
+		}
 	})
-	t.Run("orders in the answer are an error", func(t *testing.T) {
-		addr := rawWorker(t, func(c net.Conn) {
-			var in barsMessage
-			_ = readMessage(c, &in)
-			_ = writeMessage(c, ordersMessage{Orders: []json.RawMessage{json.RawMessage(`{}`)}})
-		})
-		r, err := Dial(addr)
+	t.Run("requested orders come back in order, prices exact", func(t *testing.T) {
+		r := answerWith(t, `{"orders":[
+			{"instrument":"EURUSD","action":"open","direction":"long","type":"limit","price":"1.10000","stop_loss":"1.09000","take_profit":"1.12000"},
+			{"instrument":"GBPUSD","action":"close"}]}`)
+		orders, err := r.OnBars(ctx, oneBar)
 		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
-		assert.ErrorContains(t, r.OnBars(ctx, oneBar), "not supported")
+		require.Len(t, orders, 2)
+		assert.Equal(t, Order{
+			Instrument: "EURUSD", Action: "open", Direction: "long", Type: "limit",
+			Price: num.MustParsePrice("1.1"), StopLoss: num.MustParsePrice("1.09"), TakeProfit: num.MustParsePrice("1.12"),
+		}, orders[0])
+		assert.Equal(t, Order{Instrument: "GBPUSD", Action: "close"}, orders[1])
+	})
+	t.Run("a field the worker may not send is an error", func(t *testing.T) {
+		for _, field := range []string{`"units":"1000"`, `"id":"x"`, `"state":"filled"`, `"account":"a"`, `"fill_price":"1.1"`, `"nonsense":1`} {
+			r := answerWith(t, `{"orders":[{"instrument":"EURUSD","action":"close",`+field+`}]}`)
+			_, err := r.OnBars(ctx, oneBar)
+			assert.ErrorContains(t, err, "unknown field", field)
+		}
+	})
+	t.Run("an answer without an orders list is an error", func(t *testing.T) {
+		for _, body := range []string{`{}`, `{"orders":null}`} {
+			r := answerWith(t, body)
+			orders, err := r.OnBars(ctx, oneBar)
+			assert.ErrorContains(t, err, "no orders list", body)
+			assert.Empty(t, orders)
+		}
+	})
+	t.Run("a malformed answer is an error", func(t *testing.T) {
+		for _, body := range []string{`nope`, `{"orders":[`, `{"orders":{}}`, `{"orders":[{"price":1.1}]}`, `{"orders":[]} x`, `{"orders":[{"price":"abc"}]}`} {
+			r := answerWith(t, body)
+			orders, err := r.OnBars(ctx, oneBar)
+			assert.Error(t, err, body)
+			assert.Empty(t, orders)
+		}
 	})
 	t.Run("a worker that hangs up is an error", func(t *testing.T) {
 		addr := rawWorker(t, func(c net.Conn) {
@@ -87,7 +129,8 @@ func TestClient_OnBars(t *testing.T) {
 		r, err := Dial(addr)
 		require.NoError(t, err)
 		defer func() { _ = r.Close() }()
-		assert.ErrorContains(t, r.OnBars(ctx, oneBar), "reading orders")
+		_, err = r.OnBars(ctx, oneBar)
+		assert.ErrorContains(t, err, "reading orders")
 	})
 	t.Run("a silent worker times out", func(t *testing.T) {
 		release := make(chan struct{})
@@ -103,7 +146,7 @@ func TestClient_OnBars(t *testing.T) {
 		r.Timeout = 50 * time.Millisecond
 
 		start := time.Now()
-		err = r.OnBars(ctx, oneBar)
+		_, err = r.OnBars(ctx, oneBar)
 		assert.ErrorContains(t, err, "did not answer within")
 		assert.Less(t, time.Since(start), 2*time.Second)
 	})
@@ -122,7 +165,8 @@ func TestClient_OnBars(t *testing.T) {
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(50*time.Millisecond, cancel)
 		start := time.Now()
-		assert.ErrorIs(t, r.OnBars(cctx, oneBar), context.Canceled)
+		_, err = r.OnBars(cctx, oneBar)
+		assert.ErrorIs(t, err, context.Canceled)
 		assert.Less(t, time.Since(start), 2*time.Second)
 	})
 	t.Run("a context deadline shorter than the timeout wins", func(t *testing.T) {
@@ -139,6 +183,7 @@ func TestClient_OnBars(t *testing.T) {
 
 		cctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
-		assert.ErrorIs(t, r.OnBars(cctx, oneBar), context.DeadlineExceeded)
+		_, err = r.OnBars(cctx, oneBar)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
 	})
 }

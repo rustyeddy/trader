@@ -9,9 +9,13 @@
 //
 // (marketdata.Bar as encoding/json writes it) and the worker answers
 //
-//	{"orders":[]}
+//	{"orders":[{"instrument":"EURUSD","action":"open","direction":"long",
+//	            "price":"1.10000","stop_loss":"1.09000"}]}
 //
-// Orders are not carried yet: the answer must be empty.
+// The list must be present, but may be empty; an answer without it, or with
+// null, is an error. Each order is a request (see Order): the trader decides the
+// size, whether to admit it, and everything that follows. A field the protocol
+// does not define, such as units, is an error, not ignored.
 //
 // The trader side is Dial and Client; the worker side is ListenAndServe, or Serve
 // for a connection already in hand. Both sides are loopback-only: nothing here is
@@ -19,11 +23,11 @@
 package strategy
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 )
 
 type barsMessage struct {
@@ -31,7 +35,23 @@ type barsMessage struct {
 }
 
 type ordersMessage struct {
-	Orders []json.RawMessage `json:"orders"`
+	Orders []Order `json:"orders"`
+}
+
+// Order is what a worker may ask for. It is a request on the wire, not the
+// trader's order: the trader maps it onto its own order, sizes it, applies the
+// account's risk rules and the broker executes it. A worker cannot say how many
+// units, nor name an id, account, state or fill; such a field is refused.
+//
+// Prices are decimal strings. Action and Direction use the trader's own words.
+type Order struct {
+	Instrument string    `json:"instrument"`
+	Action     string    `json:"action"`              // Action is "open", "add", "close" or "reduce".
+	Direction  string    `json:"direction,omitempty"` // Direction is "long" or "short", for an open only.
+	Type       string    `json:"type,omitempty"`      // Type is "market" (the default when empty), "limit" or "stop".
+	Price      num.Price `json:"price,omitzero"`      // the reference price of a market order, or the trigger of a limit or stop order.
+	StopLoss   num.Price `json:"stop_loss,omitzero"`  // StopLoss is where the protective stop goes; an open requires it.
+	TakeProfit num.Price `json:"take_profit,omitzero"`
 }
 
 // requireLoopback refuses an address that is not on this machine's loopback

@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 	remotestrat "github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -232,6 +233,8 @@ func TestTrader_HandleOrder_Amend(t *testing.T) {
 // until the trader hangs up.
 type workerOpts struct {
 	dropOn int // hang up on receiving this group without answering it; 0 never
+	// decide, if set, says which orders to request on the n-th group (from 1).
+	decide func(n int, bars []marketdata.Bar) ([]remotestrat.Order, error)
 }
 
 // testWorker is the example worker in process: it listens on loopback, serves one
@@ -257,12 +260,16 @@ func startWorker(t *testing.T, o workerOpts) *testWorker {
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar) error {
+		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar) ([]remotestrat.Order, error) {
 			w.groups = append(w.groups, bars)
-			if o.dropOn > 0 && len(w.groups) == o.dropOn {
-				return errors.New("hang up")
+			n := len(w.groups)
+			if o.dropOn > 0 && n == o.dropOn {
+				return nil, errors.New("hang up")
 			}
-			return nil
+			if o.decide != nil {
+				return o.decide(n, bars)
+			}
+			return nil, nil
 		})
 	}()
 	return w
@@ -391,6 +398,155 @@ func TestRemoteStrategy_ExampleWorker(t *testing.T) {
 	require.NoError(t, remote.close())
 	require.NoError(t, cmd.Wait(), "the worker exits when the trader closes")
 
-	assert.Empty(t, tr.account.trades)
+	ref := newRemoteTrader(t, &openThenClose{})
+	require.NoError(t, (&backtest{}).runSeries(ctx, ref, prices))
+	assert.Equal(t, outcomeOf(ref), outcomeOf(tr), "the real example trades like the in-process rule")
+	assert.Equal(t, 1, len(tr.account.trades), "it opened and closed one position")
 	assert.Contains(t, stderr.String(), "done: ")
+}
+
+// The example worker's rule, once as the worker answers it and once as an in-process
+// strategy: open long on the third group with a stop 0.015 below the close, close on
+// the sixth.
+const (
+	ruleOpenAt  = 3
+	ruleCloseAt = 6
+)
+
+var ruleStopDistance = num.MustParsePrice("0.015")
+
+func openThenCloseRequests(n int, bars []marketdata.Bar) ([]remotestrat.Order, error) {
+	b := bars[0]
+	c := b.OHLC().Close
+	switch n {
+	case ruleOpenAt:
+		stop, err := c.Sub(ruleStopDistance)
+		if err != nil {
+			return nil, err
+		}
+		return []remotestrat.Order{{Instrument: b.Instrument, Action: "open", Direction: "long", Price: c, StopLoss: stop}}, nil
+	case ruleCloseAt:
+		return []remotestrat.Order{{Instrument: b.Instrument, Action: "close", Price: c}}, nil
+	}
+	return nil, nil
+}
+
+// openThenClose is the same rule as an in-process strategy, the reference the
+// remote run is compared with.
+type openThenClose struct{ n int }
+
+func (*openThenClose) name() string { return "open-then-close" }
+func (*openThenClose) init() error  { return nil }
+func (s *openThenClose) onBars(_ context.Context, bars []marketdata.Bar) ([]*order, error) {
+	s.n++
+	requests, err := openThenCloseRequests(s.n, bars)
+	if err != nil {
+		return nil, err
+	}
+	var orders []*order
+	for _, q := range requests {
+		o := &order{instrument: q.Instrument, price: q.Price, stopLoss: q.StopLoss, orderType: marketOrder, Time: bars[0].Time}
+		if q.Action == "open" {
+			o.action, o.direction = open, long
+		} else {
+			o.action = close
+		}
+		orders = append(orders, o)
+	}
+	return orders, nil
+}
+
+// outcome is what a run came to: every order that ended or waits, with its sizing
+// and fill, and the account.
+type outcome struct {
+	orders  []orderResult
+	balance num.Money
+	trades  int
+}
+
+func outcomeOf(tr *trader) outcome {
+	return outcome{
+		orders:  orderResults(slices.Concat(tr.broker.completed, tr.broker.orders["EURUSD"])),
+		balance: tr.account.balance,
+		trades:  len(tr.account.trades),
+	}
+}
+
+func TestRemoteStrategy_OrdersMatchInProcess(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+	prices := scenarioPrices(t, remoteScenario)
+
+	inProc := newRemoteTrader(t, &openThenClose{})
+	require.NoError(t, (&backtest{}).runSeries(ctx, inProc, prices))
+	want := outcomeOf(inProc)
+	require.Len(t, want.orders, 3, "the open, the close, and the broker's stop cancelled by it")
+	assert.Equal(t, stateFilled, want.orders[0].state, "open")
+	assert.Equal(t, stateFilled, want.orders[1].state, "close")
+	assert.Equal(t, stateCancelled, want.orders[2].state, "the stop")
+	assert.Equal(t, 1, want.trades)
+	assert.NotZero(t, want.orders[0].units, "the trader sized it, the strategy did not")
+
+	w := startWorker(t, workerOpts{decide: openThenCloseRequests})
+	remote, err := dialRemote("remote", w.addr)
+	require.NoError(t, err)
+	tr := newRemoteTrader(t, remote)
+	require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
+	require.NoError(t, remote.close())
+	w.finish()
+
+	got := outcomeOf(tr)
+	assert.Equal(t, want.orders, got.orders, "same orders, sizes, fills and times")
+	assert.True(t, want.balance.Equal(got.balance), "same final balance: %s vs %s", want.balance, got.balance)
+	assert.Equal(t, want.trades, got.trades)
+	assert.Equal(t, orderHistoryOf(inProc), orderHistoryOf(tr), "same lifecycle")
+}
+
+// orderHistoryOf is every order's lifecycle, by id.
+func orderHistoryOf(tr *trader) map[string][]orderEvent {
+	histories := make(map[string][]orderEvent)
+	for _, o := range slices.Concat(tr.broker.completed, tr.broker.orders["EURUSD"]) {
+		histories[o.id] = o.history
+	}
+	return histories
+}
+
+func TestRemoteStrategy_BadOrdersFailTheRunAndProcessNone(t *testing.T) {
+	ctx := context.Background()
+	captureLogs(t)
+	prices := scenarioPrices(t, remoteScenario)
+	valid := remotestrat.Order{Instrument: "EURUSD", Action: "open", Direction: "long", Price: px(110000), StopLoss: px(109000)}
+
+	tests := []struct {
+		name   string
+		orders []remotestrat.Order
+		want   string
+	}{
+		{"open without a stop", []remotestrat.Order{{Instrument: "EURUSD", Action: "open", Direction: "long", Price: px(110000)}}, "stop loss"},
+		{"unsupported action", []remotestrat.Order{{Instrument: "EURUSD", Action: "amend", StopLoss: px(109000)}}, `unsupported action "amend"`},
+		{"a bad order after a good one", []remotestrat.Order{valid, {Instrument: "EURUSD", Action: "frobnicate"}}, "requested order 2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := startWorker(t, workerOpts{decide: func(n int, _ []marketdata.Bar) ([]remotestrat.Order, error) {
+				if n == ruleOpenAt {
+					return tt.orders, nil
+				}
+				return nil, nil
+			}})
+			remote, err := dialRemote("remote", w.addr)
+			require.NoError(t, err)
+			defer func() { _ = remote.close() }()
+			tr := newRemoteTrader(t, remote)
+
+			err = (&backtest{}).runSeries(ctx, tr, prices)
+			require.ErrorContains(t, err, tt.want)
+			assert.Empty(t, tr.broker.completed, "no order of the failed group was processed")
+			assert.Empty(t, tr.broker.orders["EURUSD"])
+			assert.Empty(t, tr.rejected)
+			assert.Empty(t, tr.account.trades)
+			require.NoError(t, remote.close()) // the worker stops when the trader hangs up
+			assert.Len(t, w.finish(), ruleOpenAt, "the run stopped at the group that failed")
+		})
+	}
 }
