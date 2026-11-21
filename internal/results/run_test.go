@@ -144,12 +144,42 @@ func TestFinish(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, run.events.Close()) // the disk goes away under the buffer
 
-		got := run.Finish(nil, nil)
+		got := run.Finish(nil, map[string]int{"trades": 1})
 
 		require.ErrorContains(t, got, "journal")
 		m := readRecord(t, run.Dir())
 		assert.Equal(t, "failed", m["status"])
 		assert.Contains(t, m["error"], "journal")
+		assert.NotContains(t, m, "result", "a run whose record is incomplete reports no result")
+	})
+	t.Run("a failed run whose journal also fails says both and keeps its own status", func(t *testing.T) {
+		run := start(t)
+		_, err := run.Journal().Write([]byte("not on disk yet\n"))
+		require.NoError(t, err)
+		require.NoError(t, run.events.Close())
+		disconnect := errors.New("worker disconnected")
+
+		got := run.Finish(disconnect, nil)
+
+		require.ErrorIs(t, got, disconnect)
+		assert.ErrorContains(t, got, "journal")
+		m := readRecord(t, run.Dir())
+		assert.Equal(t, "failed", m["status"])
+		assert.Contains(t, m["error"], "worker disconnected")
+		assert.Contains(t, m["error"], "the journal is incomplete", "the disconnect is not the only thing wrong with events.jsonl")
+	})
+	t.Run("a cancelled run whose journal also fails is still cancelled and says so", func(t *testing.T) {
+		run := start(t)
+		_, err := run.Journal().Write([]byte("not on disk yet\n"))
+		require.NoError(t, err)
+		require.NoError(t, run.events.Close())
+
+		got := run.Finish(context.Canceled, nil)
+
+		require.ErrorIs(t, got, context.Canceled, "the status is classified from the run's own error")
+		m := readRecord(t, run.Dir())
+		assert.Equal(t, "cancelled", m["status"])
+		assert.Contains(t, m["error"], "the journal is incomplete")
 	})
 	t.Run("run.json is replaced whole and no temporary file is left", func(t *testing.T) {
 		run := start(t)

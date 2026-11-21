@@ -89,6 +89,14 @@ const (
 )
 
 // RunOptions are the optional parts of a run.
+//
+// Journaling is the application's rule, not the engine's: every run started through
+// service.RunBacktest (which is what `trader backtest` calls) is journaled, with a
+// RunID and a results directory. RunSeries and RunSeriesWith are the engine's
+// library entry points and write a journal only if handed a writer, which is how
+// tests and any other caller that does not want a run directory use them. The
+// scenario regression (Run, the six EMAX scenarios) is not a run in that sense: it
+// is the baseline the journaled runs are compared with, and has no directory.
 type RunOptions struct {
 	// Journal, when not nil, is written one JSON line for every transition of every
 	// order of the run, in the order they happen (see journal). The engine opens no

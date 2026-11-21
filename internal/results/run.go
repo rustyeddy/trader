@@ -112,25 +112,43 @@ func (r *Run) Journal() io.Writer { return r.buf }
 
 // Finish ends the run: it flushes and closes the journal and rewrites run.json
 // with the outcome. runErr is how the run ended (nil for completed), result the
-// engine's summary when it completed. A failure to flush or close the journal makes
-// a completed run a failed one, since what it recorded is not all there. The
-// returned error is the run's own, with the journal's added when that is the cause.
+// engine's summary when it completed.
+//
+// The status is the run's own: completed, cancelled (runErr is context.Canceled) or
+// failed. The journal is always flushed and closed, and if that fails too the error
+// is added to the run's, never dropped: a completed run becomes failed, since what it
+// recorded is not all there, and a failed or cancelled one keeps its status and says
+// in its error that events.jsonl may be incomplete. The returned error carries both
+// (errors.Is still finds the run's own).
 func (r *Run) Finish(runErr error, result any) error {
-	if err := r.buf.Flush(); err != nil && runErr == nil {
-		runErr = fmt.Errorf("journal: %w", err)
+	var jerr error
+	if err := r.buf.Flush(); err != nil {
+		jerr = fmt.Errorf("journal: %w", err)
 	}
-	if err := r.events.Close(); err != nil && runErr == nil {
-		runErr = fmt.Errorf("journal: %w", err)
+	if err := r.events.Close(); err != nil {
+		jerr = errors.Join(jerr, fmt.Errorf("journal: %w", err))
 	}
-	r.rec.EndedAt = clock.Clock()
+
+	status := Completed
 	switch {
+	case runErr == nil && jerr != nil:
+		status, runErr, jerr = Failed, jerr, nil
 	case runErr == nil:
-		r.rec.Status = Completed
-		r.rec.Result = result
 	case errors.Is(runErr, context.Canceled):
-		r.rec.Status, r.rec.Error = Cancelled, runErr.Error()
+		status = Cancelled
 	default:
-		r.rec.Status, r.rec.Error = Failed, runErr.Error()
+		status = Failed
+	}
+	if jerr != nil {
+		runErr = fmt.Errorf("%w (and the journal is incomplete: %w)", runErr, jerr)
+	}
+
+	r.rec.EndedAt = clock.Clock()
+	r.rec.Status = status
+	if runErr != nil {
+		r.rec.Error = runErr.Error()
+	} else {
+		r.rec.Result = result
 	}
 	if err := writeRecord(r.dir, r.rec); err != nil {
 		return errors.Join(runErr, err)

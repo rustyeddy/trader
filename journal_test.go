@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -159,6 +160,27 @@ func TestRunSeriesWith_AJournalThatCannotWriteEndsTheRunWithItsError(t *testing.
 	require.ErrorContains(t, err, "journal: disk full")
 	assert.Nil(t, res)
 	assert.Equal(t, 4, w.writes, "after the first failure it stops writing")
+}
+
+// shortWriter writes one byte fewer than it is given and reports no error, which
+// io.Writer forbids but nothing stops a writer doing.
+type shortWriter struct{ buf bytes.Buffer }
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	n, _ := w.buf.Write(p[:len(p)-1])
+	return n, nil
+}
+
+func TestRunSeriesWith_AShortWriteIsAFailedJournalNotASuccess(t *testing.T) {
+	captureLogs(t)
+	w := &shortWriter{}
+
+	res, err := RunSeriesWith(context.Background(), RunOptions{Journal: w}, "x", time.Time{}, scenarioPrices(t, "a-reversal-exit"))
+
+	require.ErrorIs(t, err, io.ErrShortWrite)
+	require.ErrorContains(t, err, "journal")
+	assert.Nil(t, res)
+	assert.NotContains(t, w.buf.String(), "\n", "no line was reported written, and none is complete")
 }
 
 func TestJournal_ErrOfNilIsNil(t *testing.T) {

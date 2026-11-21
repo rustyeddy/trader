@@ -96,7 +96,12 @@ func (j *journal) record(o *order, e orderEvent) {
 	}
 	line, err := json.Marshal(l)
 	if err == nil {
-		_, err = j.w.Write(append(line, '\n'))
+		line = append(line, '\n')
+		var n int
+		n, err = j.w.Write(line)
+		if err == nil && n < len(line) {
+			err = io.ErrShortWrite // a writer may write less and say nothing: a cut line is a failure
+		}
 	}
 	if err != nil {
 		j.failed = err

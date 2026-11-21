@@ -147,7 +147,8 @@ account and broker (`replay.go`, `backtest.go`):
   has no market for, runs EMAX on each instrument with the scenarios' fixed
   settings and returns a `Result` (`Write` prints the summary, `Summary` has the numbers).
   The engine opens no file; `RunSeriesWith` takes an `io.Writer` for the journal, which
-  `order.record` feeds (`journal.go`) so every order transition of every order,
+  `order.record` feeds (`journal.go`; only `service.RunBacktest` journals every run, a direct
+  `RunSeries` call writes one only if given a writer) so every order transition of every order,
   the broker's exits included, is written as it happens. `service.RunBacktest` is the
   application service that joins the two and journals every run: it makes the RunID
   and the run directory (`internal/results`, the one package that opens those files),
