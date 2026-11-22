@@ -1,12 +1,10 @@
 # Trader server and strategy clients
 
-**Status:** Direction accepted by the owner (#720). This document records it; it is not an implementation. Today the connection runs the other way (Trader dials a worker, `--worker`), one run per connection, on loopback. Everything under "Direction" and "Future" is work not yet done, and each piece needs its own issue. When the direction is built, this becomes an ADR.
+**Status:** Direction accepted by the owner (#720). Implemented for one backtest at a time (#722): `trader serve` listens for strategy clients (`--strategy-listen`, on by default, loopback), `strategy.Run` is the client, and `trader backtest --worker` and the listening worker are gone. What is described here as the example shape below is now real except where it says otherwise; "Future" is not done, and each piece needs its own issue. When the direction is settled this becomes an ADR.
 
-## Where we are
+## Where we were
 
-`trader backtest --worker host:port` (#703 to #717) connects *out* to a strategy process that is already listening (`examples/emax`). The connection carries one run: the warm-up bars, then each completed-bars group with the execution feedback since the last one, answered with requested orders. When the run ends Trader closes the connection and the worker exits. The engine, sizing, risk, broker, account and journal are Trader's, and the worker only asks (ADR-093).
-
-That works, but the worker has to be started first, by hand, for each run, and it cannot choose what to run.
+Until #722, `trader backtest --worker host:port` (#703 to #717) connected *out* to a strategy process that was already listening. The connection carried one run: the warm-up bars, then each completed-bars group with the execution feedback since the last one, answered with requested orders. The worker had to be started first, by hand, for each run, and could not choose what to run. The exchange inside the run is unchanged by the inversion; what changed is who dials and who starts the run.
 
 ## Direction
 
@@ -95,18 +93,16 @@ This is ADR-093 unchanged: moving which side listens changes who starts a run, n
 
 ### Examples
 
-These are illustrative: the commands and the Go shape below are not implemented, and the names will be decided when they are.
-
 ```sh
-# Terminal 1: Trader runs and stays up
-trader serve --strategy-addr 127.0.0.1:9100
+# Terminal 1: Trader runs and stays up (--strategy-listen 127.0.0.1:9100 is the default)
+trader serve
 
 # Terminal 2: a strategy connects, runs once, prints the result, exits
-go run ./examples/emax --trader 127.0.0.1:9100 \
-    --instrument EURUSD,GBPUSD --interval h1 --from 2024-01-01 --to 2024-04-01
+go run ./examples/emax -trader 127.0.0.1:9100 \
+    -instrument EURUSD,GBPUSD -interval h1 -from 2024-01-01 -to 2024-04-01
 ```
 
-The client's Go shape, in the same spirit as today's `strategy.ListenAndServe`: the handler is the one the example already has, and the run is a value the client asks for.
+The client's Go shape (package `strategy`): the handler is the one the example already has, and the run is a value the client asks for.
 
 ```go
 result, err := strategy.Run(ctx, "127.0.0.1:9100",
@@ -129,7 +125,7 @@ Not part of this direction's first implementation, and not decided here.
 - **Several runs at once.** A backtest or study per connection, each with its own engine, broker, account, journal and RunID, sharing only the read-only market data and the results root. This needs the engine to hold no package-level state, a limit on runs in flight and per-run cancellation. Until then a second client waits or is refused.
 - **Studies and scanners as runs.** The same request, with a different kind of run; `run.json` already records the kind.
 - **REST control and reading of runs** (#700) on top of the same run records, so a run can be listed, read or cancelled without the client that started it.
-- **One process or two.** Whether the strategy server is `trader serve` (today a read-only REST server for market data) or a separate listener in the same program is open.
+- **One process.** The strategy listener runs inside `trader serve` next to the read-only REST server, on its own port; it is on by default and `--strategy-listen ""` turns it off.
 
 ## Scope limits
 
@@ -143,4 +139,4 @@ This direction, and the work that implements it first, does **not** include:
 - changing the wire framing, the order and event types, or the journal format;
 - a framework: no plugin system, no strategy registry, no process manager (the archived gRPC design in ADR-062 and ADR-063 is not being restored).
 
-The first implementation increment is protocol inversion alone: the server listens, a client connects and asks for one run, and the rest of the run is as it is today.
+The first implementation increment (#722) is protocol inversion alone: the server listens, a client connects and asks for one run, and the rest of the run is as it was. A second client waits in the listener's backlog and bounds its own wait (`strategy.WithQueueTimeout`); there is no busy protocol.

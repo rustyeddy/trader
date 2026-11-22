@@ -17,6 +17,7 @@ import (
 	"github.com/rustyeddy/trader/internal/store"
 	"github.com/rustyeddy/trader/rest"
 	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // envAPIToken is where the bearer token the API requires comes from (like the
@@ -26,17 +27,30 @@ const envAPIToken = "TRADER_API_TOKEN"
 const defaultListen = "127.0.0.1:8080"
 
 type serveFlags struct {
-	config, dataRoot string
-	listen           string
-	timeout          time.Duration
+	config, dataRoot, resultsRoot string
+	listen                        string
+	strategyListen                string
+	timeout                       time.Duration
 }
 
 func newServeCmd(a *app) *cobra.Command {
 	var f serveFlags
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Serve the canonical market data over HTTP (read only)",
-		Long: `Serve the canonical bars over a read-only REST API:
+		Short: "Run Trader as a server: market data over HTTP, and strategy clients over TCP",
+		Long: `Run Trader as a long-lived server. It does two things, each on its own port.
+
+It accepts strategy clients (--strategy-listen, on by default at ` + defaultStrategyListen + `, loopback
+only; an empty value turns it off). A strategy is an external process that connects,
+asks for one backtest (instruments, interval, range), trades it and receives the
+result; examples/emax is the canonical one. Trader runs one such backtest at a time:
+a second client waits until the first is done, and gives up after its own timeout.
+Each run is journaled under the results root like trader backtest (--results-root,
+` + envResultsRoot + `, results.root, then ` + service.DefaultResultsRoot + `), a client that fails
+ends only its own run, and the server keeps running. The month before the range is
+sent first as warm-up bars.
+
+It serves the canonical bars over a read-only REST API:
 
   GET /v1/marketdata/bars?instrument=EURUSD&interval=h1&from=2024-01-01T00:00:00Z&to=2024-02-01T00:00:00Z
 
@@ -47,8 +61,9 @@ other address (a non-loopback one) is refused unless ` + envAPIToken + ` is set 
 environment, in which case every request must carry "Authorization: Bearer <token>".
 There is no TLS: put it behind a proxy if it leaves the machine. The data root is
 --data-root, then ` + envDataRoot + `, then marketdata.root in ` + defaultConfigPath + `, then
-the default ` + store.DefaultRoot + `. It runs until interrupted and then finishes the
-requests in flight.`,
+the default ` + store.DefaultRoot + `. It runs until interrupted, then finishes the
+requests in flight and cancels the strategy run in progress, if any, waiting a few
+seconds for it to be journaled as cancelled.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runServe(cmd, f)
@@ -58,6 +73,8 @@ requests in flight.`,
 	fl.StringVar(&f.config, "config", defaultConfigPath, "config file (a missing default file is fine when flags or the environment supply the values)")
 	fl.StringVar(&f.dataRoot, "data-root", "", "data root (default: "+envDataRoot+", then marketdata.root in the config file, then "+store.DefaultRoot+")")
 	fl.StringVar(&f.listen, "listen", defaultListen, "address to listen on, host:port (a non-loopback host needs "+envAPIToken+")")
+	fl.StringVar(&f.strategyListen, "strategy-listen", defaultStrategyListen, "loopback host:port to accept strategy clients on; empty turns the strategy listener off")
+	fl.StringVar(&f.resultsRoot, "results-root", "", "results root for strategy runs (default: "+envResultsRoot+", then results.root in the config file, then "+service.DefaultResultsRoot+")")
 	fl.DurationVar(&f.timeout, "request-timeout", rest.DefaultTimeout, "longest one request may take")
 	return cmd
 }
@@ -100,6 +117,11 @@ func (a *app) runServe(cmd *cobra.Command, f serveFlags) error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	sln, err := listenStrategy(f.strategyListen)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
@@ -126,23 +148,70 @@ func (a *app) runServe(cmd *cobra.Command, f serveFlags) error {
 	}
 	if _, werr := fmt.Fprintf(cmd.OutOrStdout(), "listening on http://%s (data root %s; %s)\n", ln.Addr(), store.Root(), auth); werr != nil {
 		_ = ln.Close()
+		if sln != nil {
+			_ = sln.Close()
+		}
 		return fmt.Errorf("write: %w", werr)
+	}
+
+	// The strategy listener serves one run at a time on its own goroutine. Its
+	// handler's context is a child of ctx, so a failure of either server stops both.
+	runCtx, cancelRuns := context.WithCancel(ctx)
+	defer cancelRuns()
+	var strategyDone chan error
+	if sln != nil {
+		resultsRoot := orDefault(resolveRoot(f.resultsRoot, a.getenv(envResultsRoot), cfg.Results.Root), service.DefaultResultsRoot)
+		if _, werr := fmt.Fprintf(cmd.OutOrStdout(), "strategy clients on %s (results root %s)\n", sln.Addr(), resultsRoot); werr != nil {
+			_ = ln.Close()
+			_ = sln.Close()
+			return fmt.Errorf("write: %w", werr)
+		}
+		strategyDone = make(chan error, 1)
+		go func() {
+			strategyDone <- strategy.ServeRuns(runCtx, sln, strategyRuns(logging.WithComponent(slog.Default(), logging.ComponentBacktest), resultsRoot))
+		}()
 	}
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
+	var serveErr error
 	select {
-	case err := <-errc:
-		return err // the server stopped by itself: never a clean Shutdown
+	case serveErr = <-errc:
+		// The HTTP server stopped by itself: never a clean Shutdown.
+		cancelRuns()
+		waitStrategy(strategyDone)
+		return serveErr
+	case serveErr = <-strategyDone:
+		strategyDone = nil
+		cancelRuns()
+		if serveErr == nil {
+			serveErr = errors.New("the strategy listener stopped")
+		}
+		serveErr = fmt.Errorf("strategy listener: %w", serveErr)
 	case <-ctx.Done():
 	}
+	cancelRuns() // the run in progress is cancelled and journaled as such
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdown); err != nil {
-		return fmt.Errorf("shutdown: %w", err)
+		return errors.Join(serveErr, fmt.Errorf("shutdown: %w", err))
 	}
+	waitStrategy(strategyDone)
 	if err := <-errc; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+		return errors.Join(serveErr, err)
 	}
-	return nil
+	return serveErr
+}
+
+// waitStrategy gives the strategy listener a few seconds to finish the run it was
+// cancelled in, so the run is journaled as cancelled before the process exits. A
+// nil channel is no listener.
+func waitStrategy(done <-chan error) {
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+	}
 }

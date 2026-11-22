@@ -4,190 +4,293 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
-	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestServe(t *testing.T) {
-	t.Run("answers each group with no orders until the peer closes", func(t *testing.T) {
-		a, b := net.Pipe()
-		var got [][]marketdata.Bar
-		done := make(chan error, 1)
+var goodRequest = RunRequest{Instruments: []string{"EURUSD"}, Interval: "h1", From: utc(2024, 1), To: utc(2024, 2)}
+
+// startServer runs ServeRuns on a loopback listener until the test ends, and
+// returns the address and a function that stops it and returns what ServeRuns did.
+func startServer(t *testing.T, handle RunHandler) (addr string, stop func() error) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- ServeRuns(ctx, ln, handle) }()
+	var once sync.Once
+	var result error
+	stop = func() error {
+		once.Do(func() {
+			cancel()
+			select {
+			case result = <-done:
+			case <-time.After(5 * time.Second):
+				result = errors.New("ServeRuns did not return")
+			}
+		})
+		return result
+	}
+	t.Cleanup(func() { _ = stop() })
+	return ln.Addr().String(), stop
+}
+
+// echoRun is a handler that accepts with a RunID, asks the client about one group
+// of bars and ends completed, with the number of orders it was given as the summary.
+func echoRun(id string) RunHandler {
+	return func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		if err := s.Accept(id); err != nil {
+			return Result{}, err
+		}
+		orders, err := s.Client.OnBars(ctx, []marketdata.Bar{{Instrument: req.Instruments[0], Volume: 1}}, nil)
+		if err != nil {
+			return Result{RunID: id, Status: StatusFailed}, err
+		}
+		return Result{RunID: id, Status: StatusCompleted, Summary: []byte(`{"orders":` + itoa(len(orders)) + `}`)}, nil
+	}
+}
+
+func itoa(n int) string { return string(rune('0' + n)) }
+
+func askForOneOrder(bars []marketdata.Bar, _ []Event) ([]Order, error) {
+	return []Order{{Instrument: bars[0].Instrument, Action: "close"}}, nil
+}
+
+func TestServeRuns_ServesARunAndSendsTheResult(t *testing.T) {
+	addr, _ := startServer(t, echoRun("run_1"))
+
+	res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+
+	require.NoError(t, err)
+	assert.Equal(t, "run_1", res.RunID)
+	assert.Equal(t, StatusCompleted, res.Status)
+	assert.JSONEq(t, `{"orders":1}`, string(res.Summary))
+}
+
+func TestServeRuns_HandsTheHandlerTheValidatedRequestAndTheClientsAddress(t *testing.T) {
+	var got RunRequest
+	var remote string
+	addr, _ := startServer(t, func(_ context.Context, req RunRequest, s *Session) (Result, error) {
+		got, remote = req, s.Remote
+		return Result{}, errors.New("not today")
+	})
+
+	_, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+
+	require.Error(t, err)
+	assert.Equal(t, goodRequest, got)
+	assert.Contains(t, remote, "127.0.0.1:")
+}
+
+func TestServeRuns_ServesClientsBackToBackOnOneServer(t *testing.T) {
+	var n int
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		n++
+		return echoRun("run_"+itoa(n))(ctx, req, s)
+	})
+
+	for i := 1; i <= 3; i++ {
+		res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+		require.NoError(t, err, "client %d", i)
+		assert.Equal(t, "run_"+itoa(i), res.RunID)
+	}
+}
+
+func TestServeRuns_ARefusedRunHasNoRunIDAndTheServerGoesOn(t *testing.T) {
+	calls := 0
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		calls++
+		if calls == 1 {
+			return Result{}, errors.New(`interval "m1" is not supported`)
+		}
+		return echoRun("run_ok")(ctx, req, s)
+	})
+
+	_, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+	assert.ErrorContains(t, err, `the trader refused the run: interval "m1" is not supported`)
+
+	res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+	require.NoError(t, err)
+	assert.Equal(t, "run_ok", res.RunID)
+}
+
+func TestServeRuns_ABadRequestIsRefusedWithoutCallingTheHandlerAndTheServerGoesOn(t *testing.T) {
+	calls := 0
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		calls++
+		return echoRun("run_ok")(ctx, req, s)
+	})
+
+	for name, body := range map[string]string{
+		"from after to":    `{"run":{"instruments":["EURUSD"],"interval":"h1","from":"2024-02-01T00:00:00Z","to":"2024-01-01T00:00:00Z"}}`,
+		"no instruments":   `{"run":{"instruments":[],"interval":"h1","from":"2024-01-01T00:00:00Z","to":"2024-02-01T00:00:00Z"}}`,
+		"an unknown field": `{"run":{"instruments":["EURUSD"],"interval":"h1","from":"2024-01-01T00:00:00Z","to":"2024-02-01T00:00:00Z","units":5}}`,
+		"not a run":        `{"bars":[],"events":[]}`,
+		"not json":         `nope`,
+		"a null run":       `{"run":null}`,
+		"trailing garbage": `{"run":{}} x`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := net.Dial("tcp", addr)
+			require.NoError(t, err)
+			defer func() { _ = c.Close() }()
+			writeRaw(c, body)
+			var start startMessage
+			require.NoError(t, readMessage(c, &start))
+			assert.NotEmpty(t, start.Error)
+			assert.Nil(t, start.Accepted)
+		})
+	}
+	assert.Zero(t, calls)
+
+	res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+	require.NoError(t, err)
+	assert.Equal(t, "run_ok", res.RunID)
+}
+
+func TestServeRuns_AClientThatSaysNothingDoesNotHoldTheNextOneUpForever(t *testing.T) {
+	prev := requestTimeout
+	requestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { requestTimeout = prev })
+	addr, _ := startServer(t, echoRun("run_ok"))
+
+	silent, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer func() { _ = silent.Close() }()
+
+	res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+	require.NoError(t, err)
+	assert.Equal(t, "run_ok", res.RunID)
+}
+
+func TestServeRuns_AClientThatLeavesMidRunEndsOnlyThatRun(t *testing.T) {
+	var runs int
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		runs++
+		return echoRun("run_"+itoa(runs))(ctx, req, s)
+	})
+
+	// The first client takes the bars and fails: Run hangs up.
+	_, err := Run(context.Background(), addr, goodRequest, func([]marketdata.Bar, []Event) ([]Order, error) {
+		return nil, errors.New("strategy crashed")
+	})
+	assert.ErrorContains(t, err, "strategy crashed")
+
+	res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+	require.NoError(t, err)
+	assert.Equal(t, "run_2", res.RunID, "the server took the next client")
+	assert.Equal(t, StatusCompleted, res.Status)
+}
+
+func TestServeRuns_AFailureAfterAcceptanceIsAResultWithTheRunID(t *testing.T) {
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		if err := s.Accept("run_f"); err != nil {
+			return Result{}, err
+		}
+		return Result{RunID: "run_f", Status: StatusFailed}, errors.New("no bars for EURUSD")
+	})
+
+	res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+
+	require.NoError(t, err, "a run Trader failed is a result, not a transport error")
+	assert.Equal(t, "run_f", res.RunID)
+	assert.Equal(t, StatusFailed, res.Status)
+	assert.Equal(t, "no bars for EURUSD", res.Error)
+	assert.Empty(t, res.Summary)
+}
+
+func TestSession_AcceptTwiceIsAnError(t *testing.T) {
+	var second error
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		require.NoError(t, s.Accept("run_1"))
+		second = s.Accept("run_1")
+		return Result{RunID: "run_1", Status: StatusCompleted}, nil
+	})
+
+	_, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+
+	require.NoError(t, err)
+	assert.Error(t, second)
+}
+
+// While one run is active the next client waits in the backlog and is served when
+// it ends; one that will not wait gives up with an error of its own.
+func TestServeRuns_ASecondClientWaitsForTheFirstRun(t *testing.T) {
+	hold, started := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			close(started)
+			<-hold
+		}
+		return echoRun("run_x")(ctx, req, s)
+	})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+		firstDone <- err
+	}()
+	<-started
+
+	t.Run("one that is out of patience gives up", func(t *testing.T) {
+		_, err := Run(context.Background(), addr, goodRequest, askForOneOrder, WithQueueTimeout(100*time.Millisecond))
+		assert.ErrorContains(t, err, "did not accept the run within")
+	})
+	t.Run("one that waits is served after the first", func(t *testing.T) {
+		second := make(chan error, 1)
 		go func() {
-			done <- Serve(b, func(bars []marketdata.Bar, _ []Event) ([]Order, error) { got = append(got, bars); return nil, nil })
+			_, err := Run(context.Background(), addr, goodRequest, askForOneOrder, WithQueueTimeout(10*time.Second))
+			second <- err
 		}()
-
-		for i := 0; i < 3; i++ {
-			require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
-			var out ordersMessage
-			require.NoError(t, readMessage(a, &out))
-			assert.NotNil(t, out.Orders, "an empty list on the wire, not null")
-			assert.Empty(t, out.Orders)
-		}
-		require.NoError(t, a.Close())
-		require.NoError(t, <-done, "a closed connection is a clean end")
-		assert.Len(t, got, 3)
-	})
-	t.Run("answers with the orders onBars returns, in order", func(t *testing.T) {
-		a, b := net.Pipe()
-		done := make(chan error, 1)
-		want := []Order{
-			{Instrument: "EURUSD", Action: "open", Direction: "long", Price: num.MustParsePrice("1.1"), StopLoss: num.MustParsePrice("1.09")},
-			{Instrument: "EURUSD", Action: "close"},
-		}
-		go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return want, nil }) }()
-
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
-		var out ordersMessage
-		require.NoError(t, readMessage(a, &out))
-		assert.Equal(t, want, out.Orders)
-		require.NoError(t, a.Close())
-		require.NoError(t, <-done)
-	})
-	t.Run("hands the events to onBars", func(t *testing.T) {
-		a, b := net.Pipe()
-		done := make(chan error, 1)
-		var got []Event
-		go func() {
-			done <- Serve(b, func(_ []marketdata.Bar, events []Event) ([]Order, error) { got = events; return nil, nil })
-		}()
-		want := []Event{{Kind: Filled, ID: "sim-1", Instrument: "EURUSD", Action: "open", Cause: "strategy"}}
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: want}))
-		var out ordersMessage
-		require.NoError(t, readMessage(a, &out))
-		require.NoError(t, a.Close())
-		require.NoError(t, <-done)
-		assert.Equal(t, want, got)
-	})
-	t.Run("a request without an events list is an error", func(t *testing.T) {
-		for _, body := range []string{`{"bars":[]}`, `{"bars":[],"events":null}`} {
-			a, b := net.Pipe()
-			done := make(chan error, 1)
-			go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil }) }()
-			writeRaw(a, body)
-			assert.ErrorContains(t, <-done, "no events list", body)
-			_ = a.Close()
-		}
-	})
-	t.Run("an error from onBars ends it without an answer", func(t *testing.T) {
-		a, b := net.Pipe()
-		defer func() { _ = a.Close() }()
-		boom := errors.New("boom")
-		done := make(chan error, 1)
-		go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, boom }) }()
-
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
-		assert.ErrorIs(t, <-done, boom)
-	})
-	t.Run("a garbled message is an error", func(t *testing.T) {
-		a, b := net.Pipe()
-		done := make(chan error, 1)
-		go func() { done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil }) }()
-
-		_, err := a.Write([]byte{0, 0, 0, 4, 'n', 'o', 'p', 'e'})
-		require.NoError(t, err)
-		assert.Error(t, <-done)
+		time.Sleep(50 * time.Millisecond)
+		close(hold)
+		require.NoError(t, <-firstDone)
+		require.NoError(t, <-second)
 	})
 }
 
-func TestServe_Warmup(t *testing.T) {
-	t.Run("warm-up bars go to the warm-up function, never to onBars, and are answered with no orders", func(t *testing.T) {
-		a, b := net.Pipe()
-		var warmed, decided [][]marketdata.Bar
-		done := make(chan error, 1)
-		go func() {
-			done <- Serve(b, func(bars []marketdata.Bar, _ []Event) ([]Order, error) {
-				decided = append(decided, bars)
-				return []Order{{Instrument: "EURUSD", Action: "close"}}, nil
-			}, WithWarmup(func(bars []marketdata.Bar) { warmed = append(warmed, bars) }))
-		}()
-
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}, Warmup: true}))
-		var out ordersMessage
-		require.NoError(t, readMessage(a, &out))
-		assert.NotNil(t, out.Orders)
-		assert.Empty(t, out.Orders)
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
-		require.NoError(t, readMessage(a, &out))
-		assert.Len(t, out.Orders, 1, "a trading group is still decided")
-
-		require.NoError(t, a.Close())
-		require.NoError(t, <-done)
-		assert.Len(t, warmed, 1)
-		assert.Len(t, decided, 1)
+func TestServeRuns_StoppingItCancelsTheRunInProgressAndReturnsNil(t *testing.T) {
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	addr, stop := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		require.NoError(t, s.Accept("run_c"))
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		return Result{RunID: "run_c", Status: StatusCancelled, Error: "context canceled"}, ctx.Err()
 	})
-	t.Run("without a warm-up function the bars are acknowledged and ignored", func(t *testing.T) {
-		a, b := net.Pipe()
-		calls := 0
-		done := make(chan error, 1)
-		go func() {
-			done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { calls++; return nil, nil })
-		}()
 
-		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}, Warmup: true}))
-		var out ordersMessage
-		require.NoError(t, readMessage(a, &out))
-		assert.Empty(t, out.Orders)
-		require.NoError(t, a.Close())
-		require.NoError(t, <-done)
-		assert.Zero(t, calls)
-	})
+	got := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), addr, goodRequest, askForOneOrder)
+		got <- res
+	}()
+	<-started
+
+	require.NoError(t, stop())
+
+	<-cancelled
+	res := <-got
+	require.NotNil(t, res)
+	assert.Equal(t, StatusCancelled, res.Status)
+	_, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	assert.Error(t, err, "it no longer accepts")
 }
 
-func TestListenAndServe(t *testing.T) {
-	t.Run("serves one connection on the bound address", func(t *testing.T) {
-		addrs := make(chan net.Addr, 1)
-		groups := 0
-		done := make(chan error, 1)
-		go func() {
-			done <- ListenAndServe("127.0.0.1:0", func(a net.Addr) { addrs <- a },
-				func([]marketdata.Bar, []Event) ([]Order, error) { groups++; return nil, nil })
-		}()
+func TestServeRuns_RefusesAListenerThatIsNotLoopback(t *testing.T) {
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
 
-		c, err := Dial((<-addrs).String())
-		require.NoError(t, err)
-		_, err = c.OnBars(context.Background(), oneBar, nil)
-		require.NoError(t, err)
-		_, err = c.OnBars(context.Background(), oneBar, nil)
-		require.NoError(t, err)
-		require.NoError(t, c.Close())
-		require.NoError(t, <-done)
-		assert.Equal(t, 2, groups)
-	})
-	t.Run("a nil ready is allowed", func(t *testing.T) {
-		// Without ready the port is unknown, so pick a free one and give it back.
-		probe, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		addr := probe.Addr().String()
-		require.NoError(t, probe.Close())
+	err = ServeRuns(context.Background(), ln, echoRun("x"))
 
-		done := make(chan error, 1)
-		go func() {
-			done <- ListenAndServe(addr, nil, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil })
-		}()
-
-		var c *Client
-		require.Eventually(t, func() bool { c, err = Dial(addr); return err == nil }, 2*time.Second, 10*time.Millisecond)
-		_, err = c.OnBars(context.Background(), oneBar, nil)
-		require.NoError(t, err)
-		require.NoError(t, c.Close())
-		require.NoError(t, <-done)
-	})
-	t.Run("a non-loopback address is refused", func(t *testing.T) {
-		for _, addr := range []string{"0.0.0.0:0", ":0", "8.8.8.8:9100", "no-port"} {
-			err := ListenAndServe(addr, nil, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil })
-			assert.Error(t, err, addr)
-		}
-	})
-	t.Run("an address in use is an error", func(t *testing.T) {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		defer func() { _ = ln.Close() }()
-		assert.Error(t, ListenAndServe(ln.Addr().String(), nil, func([]marketdata.Bar, []Event) ([]Order, error) { return nil, nil }))
-	})
+	assert.ErrorContains(t, err, "not loopback")
 }

@@ -2,7 +2,6 @@ package trader
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
 
@@ -13,26 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDialRemote_Errors(t *testing.T) {
-	_, err := dialRemote("x", "8.8.8.8:9100")
-	assert.ErrorContains(t, err, "remote strategy x")
-
-	ln, lerr := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, lerr)
-	addr := ln.Addr().String()
-	require.NoError(t, ln.Close())
-	_, err = dialRemote("x", addr)
-	assert.ErrorContains(t, err, "remote strategy x")
-}
-
 func TestRemoteStrategy_OnBars(t *testing.T) {
 	ctx := context.Background()
 	bars := []marketdata.Bar{{Instrument: "EURUSD", Volume: 1}}
 
 	t.Run("an empty answer is no orders and no error", func(t *testing.T) {
 		w := startWorker(t, workerOpts{})
-		r, err := dialRemote("remote", w.addr)
-		require.NoError(t, err)
+		r := w.remote("remote")
 
 		assert.Equal(t, "remote", r.name())
 		require.NoError(t, r.init())
@@ -41,16 +27,13 @@ func TestRemoteStrategy_OnBars(t *testing.T) {
 			require.NoError(t, err)
 			assert.Empty(t, orders)
 		}
-		require.NoError(t, r.close())
 		assert.Len(t, w.finish(), 2, "the worker saw both groups")
 	})
 	t.Run("a dead worker is an error", func(t *testing.T) {
 		w := startWorker(t, workerOpts{dropOn: 2})
-		r, err := dialRemote("remote", w.addr)
-		require.NoError(t, err)
-		defer func() { _ = r.close() }()
+		r := w.remote("remote")
 
-		_, err = r.onBars(ctx, bars)
+		_, err := r.onBars(ctx, bars)
 		require.NoError(t, err, "the first group was answered")
 		orders, err := r.onBars(ctx, bars)
 		assert.Error(t, err)
@@ -175,8 +158,7 @@ func TestRemoteStrategy_Feedback(t *testing.T) {
 		}
 		return nil, nil
 	}})
-	r, err := dialRemote("remote", w.addr)
-	require.NoError(t, err)
+	r := w.remote("remote")
 
 	orders, err := r.onBars(ctx, bars) // the worker asks for an order labelled "entry"
 	require.NoError(t, err)
@@ -197,7 +179,6 @@ func TestRemoteStrategy_Feedback(t *testing.T) {
 	assert.Empty(t, r.pending, "sent once")
 	_, err = r.onBars(ctx, bars)
 	require.NoError(t, err)
-	require.NoError(t, r.close())
 	w.finish()
 
 	require.Len(t, w.events, 3)

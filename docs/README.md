@@ -11,7 +11,7 @@
 | [arch/package-boundaries.org](arch/package-boundaries.org) | the live packages and what each may import |
 | [arch/adr-decisions.org](arch/adr-decisions.org) | the registry of architecture decisions. ADR-089 (accepted, amended in part) and ADR-090 to ADR-092 (Proposed, implemented) describe the current market-data structure |
 | [arch/market-data-storage.md](arch/market-data-storage.md) | the data path convention |
-| [arch/trader-server-strategy-client.md](arch/trader-server-strategy-client.md) | the accepted direction for external strategies: Trader as a persistent server, strategies as clients (a direction, not yet implemented; today Trader dials a worker) |
+| [arch/trader-server-strategy-client.md](arch/trader-server-strategy-client.md) | external strategies: Trader as a persistent server (`trader serve`), strategies as connecting clients (implemented for one backtest at a time; concurrency is future work) |
 | [CONTRIBUTING.org](CONTRIBUTING.org) | issue, branch, pull request and merge process |
 | [workflows/](workflows) | testing, AI-assisted development, review rubric, Go testing rules |
 | [../AGENTS.md](../AGENTS.md) | principles, layering, security and working rules for agents and contributors |

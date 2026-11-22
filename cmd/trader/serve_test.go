@@ -43,11 +43,21 @@ func (b *syncBuffer) String() string {
 // stop function that interrupts it and returns what Execute returned.
 func startServer(t *testing.T, env map[string]string, args ...string) (base string, stop func() error) {
 	t.Helper()
+	base, _, stop = startServerOutput(t, env, args...)
+	return base, stop
+}
+
+// startServerOutput is startServer that also returns what the server prints.
+func startServerOutput(t *testing.T, env map[string]string, args ...string) (base string, out *syncBuffer, stop func() error) {
+	t.Helper()
 	a := newApp()
 	a.getenv = func(k string) string { return env[k] }
-	out := &syncBuffer{}
+	out = &syncBuffer{}
 	a.cmd.SetOut(out)
 	a.cmd.SetErr(io.Discard)
+	// Every test server takes its own strategy port; a test that wants another
+	// setting passes its own --strategy-listen, which comes later and wins.
+	args = append([]string{"--strategy-listen", "127.0.0.1:0", "--results-root", t.TempDir()}, args...)
 	a.cmd.SetArgs(append([]string{"--log-output", filepath.Join(t.TempDir(), "serve.log"), "serve"}, args...))
 	prev := slogDefault()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,7 +85,7 @@ func startServer(t *testing.T, env map[string]string, args ...string) (base stri
 		}
 	}
 	t.Cleanup(func() { _ = stop() })
-	return base, stop
+	return base, out, stop
 }
 
 func httpGet(t *testing.T, target string, header ...string) (int, string) {
@@ -151,11 +161,14 @@ func TestServe_RefusesWhatItShouldNotStartWith(t *testing.T) {
 		args []string
 		want string
 	}{
-		"every interface without a token": {nil, []string{"--listen", "0.0.0.0:0"}, envAPIToken},
-		"an empty host without a token":   {nil, []string{"--listen", ":0"}, envAPIToken},
-		"a LAN address without a token":   {nil, []string{"--listen", "192.168.1.5:0"}, envAPIToken},
-		"not an address":                  {nil, []string{"--listen", "nonsense"}, "--listen"},
-		"a zero timeout":                  {nil, []string{"--request-timeout", "0s"}, "--request-timeout"},
+		"every interface without a token":        {nil, []string{"--listen", "0.0.0.0:0"}, envAPIToken},
+		"an empty host without a token":          {nil, []string{"--listen", ":0"}, envAPIToken},
+		"a LAN address without a token":          {nil, []string{"--listen", "192.168.1.5:0"}, envAPIToken},
+		"not an address":                         {nil, []string{"--listen", "nonsense"}, "--listen"},
+		"a zero timeout":                         {nil, []string{"--request-timeout", "0s"}, "--request-timeout"},
+		"a strategy listener off the machine":    {nil, []string{"--listen", "127.0.0.1:0", "--strategy-listen", "0.0.0.0:0"}, "--strategy-listen"},
+		"a LAN strategy listener":                {nil, []string{"--listen", "127.0.0.1:0", "--strategy-listen", "192.168.1.5:0"}, "loopback"},
+		"a strategy listener that is no address": {nil, []string{"--listen", "127.0.0.1:0", "--strategy-listen", "nonsense"}, "--strategy-listen"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -182,14 +195,16 @@ func TestLoopback(t *testing.T) {
 
 func TestServeCommand_IsTransportOnly(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod + "/service": true, mod + "/internal/store": true, mod + "/internal/logging": true, mod + "/rest": true}
-	f, err := parser.ParseFile(token.NewFileSet(), "serve.go", nil, parser.ImportsOnly)
-	require.NoError(t, err)
-	for _, imp := range f.Imports {
-		path, uerr := strconv.Unquote(imp.Path.Value)
-		require.NoError(t, uerr)
-		if path == mod || strings.HasPrefix(path, mod+"/") {
-			assert.True(t, allowed[path], "serve.go imports %s", path)
+	allowed := map[string]bool{mod + "/service": true, mod + "/internal/store": true, mod + "/internal/logging": true, mod + "/rest": true, mod + "/strategy": true}
+	for _, file := range []string{"serve.go", "strategyserver.go"} {
+		f, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
+		require.NoError(t, err)
+		for _, imp := range f.Imports {
+			path, uerr := strconv.Unquote(imp.Path.Value)
+			require.NoError(t, uerr)
+			if path == mod || strings.HasPrefix(path, mod+"/") {
+				assert.True(t, allowed[path], "%s imports %s", file, path)
+			}
 		}
 	}
 }

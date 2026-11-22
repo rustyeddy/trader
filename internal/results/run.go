@@ -157,6 +157,9 @@ func (r *Run) Finish(runErr error, result any) error {
 	return runErr
 }
 
+// Status is the run's status: Running until Finish, then how it ended.
+func (r *Run) Status() string { return r.rec.Status }
+
 // writeRecord replaces run.json with rec: written to a temporary file, synced and
 // renamed over it, so a reader sees the old record or the new one and never half.
 func writeRecord(dir string, rec Record) error {
