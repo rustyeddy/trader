@@ -15,6 +15,12 @@
 | [workflows/](workflows) | testing, AI-assisted development, review rubric, Go testing rules |
 | [../AGENTS.md](../AGENTS.md) | principles, layering, security and working rules for agents and contributors |
 
+## Accepted direction (not yet implemented)
+
+| Document | What it is |
+|---|---|
+| [arch/trader-server-strategy-clients.md](arch/trader-server-strategy-clients.md) | Trader as persistent server, connecting strategy clients, run lifecycle, and future independent/concurrent sessions |
+
 ## Background and history
 
 These describe how the design was reached or the earlier, larger runtime. They are
