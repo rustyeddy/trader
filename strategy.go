@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
@@ -60,8 +61,8 @@ type emax struct {
 	pos     direction // side it is in (noDirection: flat)
 	pending direction // side to open on the next bar, after a flipping close
 
-	emaShort *ema
-	emaLong  *ema
+	emaShort *indicators.EMA
+	emaLong  *indicators.EMA
 }
 
 func (e *emax) name() string {
@@ -74,8 +75,8 @@ func (e *emax) name() string {
 // run once its EMAs are ready.
 func (e *emax) warm(_ context.Context, bars []marketdata.Bar) error {
 	for _, b := range bars {
-		e.emaShort.onBar(b)
-		e.emaLong.onBar(b)
+		emaOnBar(e.emaShort, b)
+		emaOnBar(e.emaLong, b)
 	}
 	return nil
 }
@@ -98,8 +99,13 @@ func (e *emax) init() error {
 	if e.tick.IsZero() {
 		return fmt.Errorf("emax: no price tick")
 	}
-	e.emaShort = newEMA(e.short)
-	e.emaLong = newEMA(e.long)
+	var err error
+	if e.emaShort, err = indicators.NewEMA(e.short); err != nil {
+		return fmt.Errorf("emax: short window: %w", err)
+	}
+	if e.emaLong, err = indicators.NewEMA(e.long); err != nil {
+		return fmt.Errorf("emax: long window: %w", err)
+	}
 	return nil
 }
 
@@ -120,8 +126,8 @@ func (e *emax) init() error {
 // oversight; see rule 11 in emax-validation.org and TODO 1 in todo.org.
 func (e *emax) onBar(ctx context.Context, b marketdata.Bar) *order {
 	// Feed both EMAs every bar so the long one warms up on the same data.
-	s, sok := e.emaShort.onBar(b)
-	l, lok := e.emaLong.onBar(b)
+	s, sok := emaOnBar(e.emaShort, b)
+	l, lok := emaOnBar(e.emaLong, b)
 	if !sok || !lok {
 		return nil
 	}
@@ -206,6 +212,15 @@ func (e *emax) stopFor(entry num.Price, d direction) (num.Price, error) {
 		return entry.Add(dist)
 	}
 	return entry.Sub(dist)
+}
+
+// emaOnBar feeds an EMA the bar's close and returns its value, and false until it
+// is seeded. A close is a price, so it is always finite and Update cannot refuse it.
+func emaOnBar(e *indicators.EMA, b marketdata.Bar) (float64, bool) {
+	if err := e.Update(b.OHLC().Close.Float64()); err != nil {
+		panic("emax: " + err.Error())
+	}
+	return e.Value(), e.Ready()
 }
 
 // emaxEach trades EMAX on each of several instruments through one trader,

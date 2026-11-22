@@ -483,12 +483,12 @@ func assertEMAs(t *testing.T, scenario string, exact []struct{ short, long float
 			}
 			i++
 			if i <= 3 {
-				assert.Less(t, r.emax.emaLong.count, r.emax.long, "EMA(4) is not warm before the fourth bar")
+				assert.False(t, r.emax.emaLong.Ready(), "EMA(4) is not warm before the fourth bar")
 				continue
 			}
 			want := exact[i-4]
-			assert.InDelta(t, want.short/100_000, r.emax.emaShort.value, 1e-9, "EMA(2) on bar %d", i-1)
-			assert.InDelta(t, want.long/100_000, r.emax.emaLong.value, 1e-9, "EMA(4) on bar %d", i-1)
+			assert.InDelta(t, want.short/100_000, r.emax.emaShort.Value(), 1e-9, "EMA(2) on bar %d", i-1)
+			assert.InDelta(t, want.long/100_000, r.emax.emaLong.Value(), 1e-9, "EMA(4) on bar %d", i-1)
 		}
 	})
 	assert.Equal(t, len(exact)+3, i)
@@ -866,7 +866,7 @@ func TestEMAXBacktest_PendingOpenIgnoresATrendThatCrossedBack(t *testing.T) {
 				return
 			}
 			if b.Time.Equal(jan(15)) {
-				assert.Greater(t, r.emax.emaShort.value, r.emax.emaLong.value, "the trend is long again when the short goes in")
+				assert.Greater(t, r.emax.emaShort.Value(), r.emax.emaLong.Value(), "the trend is long again when the short goes in")
 			}
 		}
 	}

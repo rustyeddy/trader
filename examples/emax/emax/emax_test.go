@@ -19,7 +19,7 @@ import (
 // is. (The root package's parity test imports this one, not the other way round.)
 func TestPackage_UsesOnlyThePublicSDK(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader/"
-	public := map[string]bool{mod + "strategy": true, mod + "marketdata": true, mod + "num": true}
+	public := map[string]bool{mod + "strategy": true, mod + "marketdata": true, mod + "num": true, mod + "indicators": true}
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
 	for _, name := range files {
@@ -74,19 +74,17 @@ func TestConfig_Validate(t *testing.T) {
 	}
 }
 
-func TestEMA(t *testing.T) {
-	e := NewEMA(3)
-	_, ok := e.OnBar(bar("X", "3"))
+func TestOnBar_FeedsTheEMAWithTheClose(t *testing.T) {
+	e := newEMA(3)
+	_, ok := onBar(e, bar("X", "3"))
 	assert.False(t, ok, "not seeded until a full window")
-	_, ok = e.OnBar(bar("X", "6"))
+	_, ok = onBar(e, bar("X", "6"))
 	assert.False(t, ok)
-	v, ok := e.OnBar(bar("X", "9"))
+	v, ok := onBar(e, bar("X", "9"))
 	require.True(t, ok)
 	assert.Equal(t, 6.0, v, "seeded with the simple average of the first window")
-	v, _ = e.OnBar(bar("X", "10"))
+	v, _ = onBar(e, bar("X", "10"))
 	assert.Equal(t, 8.0, v, "then 2/(window+1) of the way to each close: 6 + 0.5*(10-6)")
-
-	assert.Panics(t, func() { NewEMA(0) })
 }
 
 func TestOnBars_FlipsByAClosingThenAnOpeningBar(t *testing.T) {

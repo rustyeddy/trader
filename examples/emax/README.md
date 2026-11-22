@@ -10,7 +10,7 @@ does for the built-in strategy.
 | File | What it is |
 |---|---|
 | `main.go` | The program: flags, then `strategy.ListenAndServe`. |
-| `emax/emax.go` | The strategy: `emax.New(cfg)` and `OnBars`, plus the EMA. |
+| `emax/emax.go` | The strategy: `emax.New(cfg)` and `OnBars`, using `indicators.EMA`. |
 
 ## The rule
 
@@ -81,6 +81,7 @@ month built through the store (`service`) are each run with the built-in strateg
 with this worker over TCP from the same data, settings and account, and the
 journals (every order transition, fill and protective exit, in order, to the price),
 the summaries and the final positions must be identical. A run that disagrees is a
-regression to explain, not a difference in protocol. The worker's EMA is a copy of
-the built-in one (a worker cannot import Trader's private code), and a test checks the
-two give the same value to the last bit.
+regression to explain, not a difference in protocol. Both use the one
+EMA in the public `indicators` package, so the indicator is not a place they can differ;
+the rule itself (signal, flip, stop) is written twice, and these tests keep the copies
+the same.

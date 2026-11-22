@@ -7,9 +7,9 @@
 // opposite open on the next. Every open carries a stop a fixed fraction of the
 // price away. The strategy asks only: Trader sizes, admits and fills.
 //
-// This is the same rule as the EMAX built into Trader (strategy.go, indicators.go
-// in the root package), written again here because a worker cannot import it. The
-// two are kept honest by a parity test in the root package: the same series, the
+// This is the same rule as the EMAX built into Trader (strategy.go in the root
+// package), written again here because a worker cannot import it; both use the one
+// EMA in package indicators. The two are kept honest by a parity test in the root package: the same series, the
 // same settings and the same account must give the same orders, fills and result
 // through the worker over TCP as through the built-in strategy. If you change the
 // rule in either place, that test says so.
@@ -18,6 +18,7 @@ package emax
 import (
 	"fmt"
 
+	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/strategy"
@@ -79,7 +80,7 @@ const (
 // strategy stays flat until the trend turns. pending is the side to open on the
 // next bar, after a flipping close.
 type instrument struct {
-	short, long *EMA
+	short, long *indicators.EMA
 	pos         side
 	pending     side
 }
@@ -104,8 +105,8 @@ func (s *Strategy) OnBars(bars []marketdata.Bar, _ []strategy.Event) ([]strategy
 func (s *Strategy) Warm(bars []marketdata.Bar) {
 	for _, b := range bars {
 		st := s.state(b.Instrument)
-		st.short.OnBar(b)
-		st.long.OnBar(b)
+		onBar(st.short, b)
+		onBar(st.long, b)
 	}
 }
 
@@ -113,7 +114,7 @@ func (s *Strategy) Warm(bars []marketdata.Bar) {
 func (s *Strategy) state(name string) *instrument {
 	st := s.by[name]
 	if st == nil {
-		st = &instrument{short: NewEMA(s.cfg.Short), long: NewEMA(s.cfg.Long)}
+		st = &instrument{short: newEMA(s.cfg.Short), long: newEMA(s.cfg.Long)}
 		s.by[name] = st
 	}
 	return st
@@ -121,8 +122,8 @@ func (s *Strategy) state(name string) *instrument {
 
 func (s *Strategy) onBar(st *instrument, b marketdata.Bar) (strategy.Order, bool) {
 	// Feed both EMAs every bar so the long one warms up on the same data.
-	sv, sok := st.short.OnBar(b)
-	lv, lok := st.long.OnBar(b)
+	sv, sok := onBar(st.short, b)
+	lv, lok := onBar(st.long, b)
 	if !sok || !lok {
 		return strategy.Order{}, false
 	}
@@ -199,37 +200,21 @@ func (s *Strategy) stopFor(entry num.Price, d side) (num.Price, error) {
 	return entry.Sub(dist)
 }
 
-// EMA is an exponential moving average of the close, seeded with the simple average
-// of the first window closes.
-type EMA struct {
-	window int
-	alpha  float64
-	count  int
-	sum    float64 // while seeding
-	value  float64
+// newEMA is an EMA of the shared indicators package. The window was checked by
+// Config.Validate, so the constructor cannot refuse it.
+func newEMA(window int) *indicators.EMA {
+	e, err := indicators.NewEMA(window)
+	if err != nil {
+		panic("emax: " + err.Error())
+	}
+	return e
 }
 
-// NewEMA returns an EMA of the given window, which must be positive.
-func NewEMA(window int) *EMA {
-	if window <= 0 {
-		panic("emax: ema window must be > 0")
+// onBar feeds an EMA the bar's close and returns its value, and false until it is
+// seeded. A close is a price, so it is always finite and Update cannot refuse it.
+func onBar(e *indicators.EMA, b marketdata.Bar) (float64, bool) {
+	if err := e.Update(b.OHLC().Close.Float64()); err != nil {
+		panic("emax: " + err.Error())
 	}
-	return &EMA{window: window, alpha: 2 / float64(window+1)}
-}
-
-// OnBar takes the bar's close and returns the EMA, and false until a full window
-// has been seen to seed it.
-func (e *EMA) OnBar(b marketdata.Bar) (float64, bool) {
-	val := b.OHLC().Close.Float64()
-	if e.count < e.window {
-		e.count++
-		e.sum += val
-		if e.count < e.window {
-			return 0, false
-		}
-		e.value = e.sum / float64(e.window)
-		return e.value, true
-	}
-	e.value += e.alpha * (val - e.value)
-	return e.value, true
+	return e.Value(), e.Ready()
 }

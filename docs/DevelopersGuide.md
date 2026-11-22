@@ -52,6 +52,11 @@ cmd/trader  ->  service  ->  marketdata/service  ->  marketdata/internal/canonic
   `List`. Nothing else opens, renames or walks data files; a test enforces it.
 - **Public models** (`marketdata`, `num`, `instrument`) import no service,
   transport or provider.
+- **Indicators** (`indicators`) are concrete types, `NewX(period)`, `Update`, `Ready`,
+  `Value`, with no common interface. Trader's EMAX, its scanner and ATR study, and
+  the `examples/emax` worker all use them, so there is one EMA. They import only the
+  standard library and `num` (ATR keeps its true ranges as exact prices); a test
+  enforces it.
 
 Each boundary has an architecture test that fails when it is crossed; when you add
 a boundary, add its test and prove it fails (see AGENTS.md).

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -164,6 +165,11 @@ func TestRunATRStudy_CancelledPartWayThrough(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestRunATRStudy_InvalidWindowPanics(t *testing.T) {
-	assert.Panics(t, func() { _, _ = runATRStudy(studyBars(atrFixture()), 0) })
+// The indicator reports a bad window as an error (it used to panic in the root
+// package); the study passes it on, and returns no measurements.
+func TestRunATRStudy_InvalidWindowIsAnError(t *testing.T) {
+	got, err := runATRStudy(studyBars(atrFixture()), 0)
+
+	require.ErrorIs(t, err, indicators.ErrInvalidPeriod)
+	assert.Nil(t, got)
 }
