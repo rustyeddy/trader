@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -57,7 +58,7 @@ func classifyTrend(short, long float64) trend {
 
 // emaPair is one instrument's indicator state.
 type emaPair struct {
-	short, long *ema
+	short, long *indicators.EMA
 }
 
 // runEMAScan classifies each bar's instrument by its short and long EMAs, in the
@@ -79,13 +80,21 @@ func runEMAScan(bars iter.Seq2[marketdata.Bar, error], short, long int) ([]trend
 		}
 		pair := pairs[b.Instrument]
 		if pair == nil {
-			pair = &emaPair{short: newEMA(short), long: newEMA(long)}
+			p := &emaPair{}
+			var err error
+			if p.short, err = indicators.NewEMA(short); err == nil {
+				p.long, err = indicators.NewEMA(long)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("ema scan: %w", err)
+			}
+			pair = p
 			pairs[b.Instrument] = pair
 		}
 
 		// Feed both every bar, so the long one warms up on the same data.
-		s, sok := pair.short.onBar(b)
-		l, lok := pair.long.onBar(b)
+		s, sok := emaOnBar(pair.short, b)
+		l, lok := emaOnBar(pair.long, b)
 		if sok && lok {
 			readings = append(readings, trendReading{b.Instrument, b.AvailableAt, classifyTrend(s, l)})
 		}

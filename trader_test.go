@@ -879,18 +879,3 @@ func TestRunSeriesWith_AWorkerThatDropsDuringWarmupFailsTheRun(t *testing.T) {
 	assert.Contains(t, err.Error(), "warm-up")
 	assert.Empty(t, journal.String())
 }
-
-// The worker's EMA is a copy of the built-in one (a worker cannot import it), so the
-// two must give the same number for the same closes, to the last bit.
-func TestEMAXParity_TheWorkersEMAIsTheBuiltInEMA(t *testing.T) {
-	walk := randomWalk("EURUSD", 110000, 400, 4)
-	for _, window := range []int{1, 2, 4, 10, 50, 200} {
-		builtin, worker := newEMA(window), emaxworker.NewEMA(window)
-		for i, b := range walk.Bars {
-			bv, bok := builtin.onBar(b)
-			wv, wok := worker.OnBar(b)
-			require.Equal(t, bok, wok, "window %d bar %d: seeded at the same bar", window, i)
-			require.Equal(t, bv, wv, "window %d bar %d", window, i)
-		}
-	}
-}

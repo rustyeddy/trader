@@ -88,35 +88,6 @@ func TestFormatPrice_FiveDecimals(t *testing.T) {
 	assert.Equal(t, "1.10437", formatPrice(num.MustParsePrice("1.104379")), "digits beyond the tick are cut, never rounded")
 }
 
-func TestAbove_IsTheDistanceAboveOrZero(t *testing.T) {
-	assert.Equal(t, px(4), above(px(9), px(5)))
-	assert.True(t, above(px(5), px(9)).IsZero(), "below is no distance above")
-	assert.True(t, above(px(5), px(5)).IsZero())
-	assert.Equal(t, px(4), mustDiff(px(9), px(5)))
-}
-
-func TestNewATR_RefusesAWindowThatCouldLeaveTheRange(t *testing.T) {
-	assert.Panics(t, func() { newATR(0) })
-	assert.Panics(t, func() { newATR(maxATRWindow + 1) })
-	assert.NotPanics(t, func() { newATR(maxATRWindow) })
-}
-
-func TestATR_TrueRangeIncludesTheGapFromThePreviousClose(t *testing.T) {
-	a := newATR(1)
-	_, ok := a.onBar(marketdata.Bar{Mid: marketdata.OHLC{Open: px(100000), High: px(100500), Low: px(99500), Close: px(100000)}})
-	require.False(t, ok, "the first bar only supplies a close")
-
-	// Gaps up: the range 100100..100300 is 200 points, but the high is 300 above the previous close.
-	got, ok := a.onBar(marketdata.Bar{Mid: marketdata.OHLC{Open: px(100200), High: px(100300), Low: px(100100), Close: px(100250)}})
-	require.True(t, ok)
-	assert.InDelta(t, 0.003, got, 1e-12)
-
-	// Gaps down: the low is 400 below the previous close of 100250.
-	got, ok = a.onBar(marketdata.Bar{Mid: marketdata.OHLC{Open: px(99900), High: px(99950), Low: px(99850), Close: px(99900)}})
-	require.True(t, ok)
-	assert.InDelta(t, 0.004, got, 1e-12)
-}
-
 func TestEmax_StopFor_RoundsHalfEvenAtOneEightThenFloorsToTheTick(t *testing.T) {
 	e := &emax{tick: px(1), short: 2, long: 4, stopPct: rt(400)} // 0.04%
 	require.NoError(t, e.init())

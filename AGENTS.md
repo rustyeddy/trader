@@ -45,6 +45,7 @@ cmd/trader            transport: flags, environment, config file; no domain logi
 provider/<name>       one external system's integration (provider/oanda)
 store                 the only place data files are read and written
 marketdata, num, instrument   public models and values
+indicators            public streaming indicators (EMA, SMA, ATR, RSI, RollingStdDev, ZScore)
 ```
 
 - Dependencies point down only. Domain services do not call each other; an

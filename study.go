@@ -5,6 +5,7 @@ import (
 	"iter"
 	"time"
 
+	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -21,14 +22,21 @@ type atrObservation struct {
 // needs no trader, broker or account. Cancellation arrives through bars, as an
 // error. On any error it returns no measurements, never a partial series.
 func runATRStudy(bars iter.Seq2[marketdata.Bar, error], window int) ([]atrObservation, error) {
-	indicator := newATR(window)
+	indicator, err := indicators.NewATR(window)
+	if err != nil {
+		return nil, fmt.Errorf("atr study: %w", err)
+	}
 	var observations []atrObservation
 	for b, err := range bars {
 		if err != nil {
 			return nil, fmt.Errorf("atr study: reading bars: %w", err)
 		}
-		if value, ok := indicator.onBar(b); ok {
-			observations = append(observations, atrObservation{instrument: b.Instrument, opened: b.Time, value: value})
+		px := b.OHLC()
+		if err := indicator.Update(px.High, px.Low, px.Close); err != nil {
+			return nil, fmt.Errorf("atr study: %w", err)
+		}
+		if indicator.Ready() {
+			observations = append(observations, atrObservation{instrument: b.Instrument, opened: b.Time, value: indicator.Value()})
 		}
 	}
 	return observations, nil

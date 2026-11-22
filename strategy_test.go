@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,7 +69,7 @@ func TestEmax_LongWarmsOnSameBars(t *testing.T) {
 	}
 	// Regression: the long EMA must be seeded from bars 1-4 (value 2.5). If it
 	// were only fed after the short EMA warmed, the next value would differ.
-	v, ok := e.emaLong.onBar(marketdata.Bar{Mid: marketdata.OHLC{Close: px(4 * 100_000)}})
+	v, ok := emaOnBar(e.emaLong, marketdata.Bar{Mid: marketdata.OHLC{Close: px(4 * 100_000)}})
 	require.True(t, ok)
 	assert.InDelta(t, 2.5+0.4*(4-2.5), v, 1e-9)
 }
@@ -433,4 +434,22 @@ func TestEmaxEach_Warm_RoutesBarsToTheirInstrumentAndIgnoresOthers(t *testing.T)
 	next.Time = eur[3].Time.AddDate(0, 0, 1)
 	require.NotNil(t, s.onBar(ctx, next), "EURUSD was warmed")
 	assert.Nil(t, s.onBar(ctx, marketdata.Bar{Instrument: "GBPUSD"}), "GBPUSD is not traded")
+}
+
+// emaOnBar feeds the close and reports the EMA once it is seeded: the SMA of the
+// first window closes, then the recurrence. The indicator's own behavior is tested
+// in package indicators.
+func TestEmaOnBar_ReportsTheEMAOfTheCloseOnceSeeded(t *testing.T) {
+	e, err := indicators.NewEMA(3) // alpha = 0.5
+	require.NoError(t, err)
+
+	var got []float64
+	for i, b := range closes(1, 2, 3, 4, 2) {
+		v, ok := emaOnBar(e, b)
+		assert.Equal(t, i >= 2, ok, "bar %d", i)
+		if ok {
+			got = append(got, v)
+		}
+	}
+	assert.Equal(t, []float64{2, 3, 2.5}, got)
 }
