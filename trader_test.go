@@ -247,7 +247,11 @@ type testWorker struct {
 	addr   string
 	groups [][]marketdata.Bar
 	events [][]remotestrat.Event // what came with each group
-	done   sync.WaitGroup
+	// warmups is what came marked as warm-up, in order; log is every message, warm-up
+	// or group, as "warm" or "group", to show which came first.
+	warmups [][]marketdata.Bar
+	log     []string
+	done    sync.WaitGroup
 }
 
 func startWorker(t *testing.T, o workerOpts) *testWorker {
@@ -266,6 +270,7 @@ func startWorker(t *testing.T, o workerOpts) *testWorker {
 		}
 		defer func() { _ = conn.Close() }()
 		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
+			w.log = append(w.log, "group")
 			w.groups = append(w.groups, bars)
 			w.events = append(w.events, events)
 			n := len(w.groups)
@@ -276,7 +281,10 @@ func startWorker(t *testing.T, o workerOpts) *testWorker {
 				return o.decide(n, bars, events)
 			}
 			return nil, nil
-		})
+		}, remotestrat.WithWarmup(func(bars []marketdata.Bar) {
+			w.log = append(w.log, "warm")
+			w.warmups = append(w.warmups, bars)
+		}))
 	}()
 	return w
 }
@@ -684,7 +692,7 @@ func serveEMAX(t *testing.T, cfg emaxworker.Config) string {
 			func(a net.Addr) { addrs <- a.String() },
 			func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
 				return s.OnBars(bars, events)
-			})
+			}, remotestrat.WithWarmup(s.Warm))
 	}()
 	addr := <-addrs
 	t.Cleanup(func() { require.NoError(t, <-done, "the worker ends cleanly when the run closes the connection") })
@@ -700,9 +708,15 @@ type parityRun struct {
 
 func runParity(t *testing.T, opts RunOptions, series ...marketdata.Series) parityRun {
 	t.Helper()
+	return runParityFrom(t, opts, time.Time{}, series...)
+}
+
+// runParityFrom is runParity with the bars before tradeFrom as warm-up.
+func runParityFrom(t *testing.T, opts RunOptions, tradeFrom time.Time, series ...marketdata.Series) parityRun {
+	t.Helper()
 	var buf bytes.Buffer
 	opts.Journal = &buf
-	res, err := RunSeriesWith(context.Background(), opts, "parity", time.Time{}, series...)
+	res, err := RunSeriesWith(context.Background(), opts, "parity", tradeFrom, series...)
 	require.NoError(t, err)
 	var text bytes.Buffer
 	require.NoError(t, res.Write(&text))
@@ -790,7 +804,9 @@ func TestEMAXParity_ADifferentWorkerIsCaught(t *testing.T) {
 	assert.NotEqual(t, builtin.journal, other.journal)
 }
 
-func TestRunSeriesWith_AWorkerIsNotShownTheBarsBeforeTradeFrom(t *testing.T) {
+// The bars before tradeFrom reach a worker as warm-up, first and in order, and are
+// not groups to decide: the worker is asked about nothing before tradeFrom.
+func TestRunSeriesWith_AWorkerIsWarmedWithTheBarsBeforeTradeFrom(t *testing.T) {
 	captureLogs(t)
 	walk := randomWalk("EURUSD", 110000, 300, 3)
 	from := walk.Bars[100].Time
@@ -801,8 +817,67 @@ func TestRunSeriesWith_AWorkerIsNotShownTheBarsBeforeTradeFrom(t *testing.T) {
 	require.NoError(t, err)
 	groups := w.finish()
 	require.Len(t, groups, 200, "one group for each bar from tradeFrom on")
-	assert.Equal(t, from, groups[0][0].Time, "the warm-up bars are not sent: a worker starts cold at tradeFrom")
-	assert.Equal(t, 200, res.Summary().Bars)
+	assert.Equal(t, from, groups[0][0].Time, "the first decision is at tradeFrom")
+	require.Len(t, w.warmups, 100, "one warm-up message for each bar before it")
+	assert.Equal(t, walk.Bars[0].Time, w.warmups[0][0].Time)
+	assert.Equal(t, walk.Bars[99].Time, w.warmups[99][0].Time)
+	assert.Equal(t, append(slices.Repeat([]string{"warm"}, 100), slices.Repeat([]string{"group"}, 200)...), w.log,
+		"all the warm-up first, then the groups")
+	assert.Equal(t, 200, res.Summary().Bars, "warm-up bars are not counted")
+	assert.Zero(t, res.Summary().Orders.Submitted)
+}
+
+// A worker that is warmed trades like the built-in strategy that is warmed. The
+// comparison is not vacuous: warming changes what the strategy does, so a cold run
+// of the same bars differs.
+func TestEMAXParity_RemoteMatchesBuiltInWhenBothAreWarmed(t *testing.T) {
+	captureLogs(t)
+	walk := randomWalk("EURUSD", 110000, 600, 8)
+	from := walk.Bars[200].Time
+
+	builtin := runParityFrom(t, RunOptions{}, from, walk)
+	remote := runParityFrom(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, from, walk)
+
+	assertParity(t, builtin, remote)
+	cold := walk
+	cold.Bars = walk.Bars[200:]
+	assert.NotEqual(t, builtin.journal, runParity(t, RunOptions{}, cold).journal, "warm-up changes the trading")
+	assert.Greater(t, builtin.summary.Orders.Filled, 30)
+}
+
+// Two instruments, warmed through the merged feed.
+func TestEMAXParity_RemoteMatchesBuiltInWhenBothAreWarmedOnTwoInstruments(t *testing.T) {
+	captureLogs(t)
+	eur := randomWalk("EURUSD", 110000, 600, 9)
+	gbp := randomWalk("GBPUSD", 125000, 600, 10)
+	from := eur.Bars[250].Time
+
+	builtin := runParityFrom(t, RunOptions{}, from, eur, gbp)
+	remote := runParityFrom(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, from, eur, gbp)
+
+	assertParity(t, builtin, remote)
+	assert.Greater(t, builtin.summary.Orders.Filled, 30)
+}
+
+// A worker that cannot take the warm-up ends the run before anything is traded.
+func TestRunSeriesWith_AWorkerThatDropsDuringWarmupFailsTheRun(t *testing.T) {
+	captureLogs(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		if conn, err := ln.Accept(); err == nil {
+			_ = conn.Close()
+		}
+	}()
+	walk := randomWalk("EURUSD", 110000, 100, 3)
+	var journal bytes.Buffer
+
+	_, err = RunSeriesWith(context.Background(), RunOptions{Worker: ln.Addr().String(), Journal: &journal}, "x", walk.Bars[50].Time, walk)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "warm-up")
+	assert.Empty(t, journal.String())
 }
 
 // The worker's EMA is a copy of the built-in one (a worker cannot import it), so the

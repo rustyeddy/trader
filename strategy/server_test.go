@@ -95,6 +95,50 @@ func TestServe(t *testing.T) {
 	})
 }
 
+func TestServe_Warmup(t *testing.T) {
+	t.Run("warm-up bars go to the warm-up function, never to onBars, and are answered with no orders", func(t *testing.T) {
+		a, b := net.Pipe()
+		var warmed, decided [][]marketdata.Bar
+		done := make(chan error, 1)
+		go func() {
+			done <- Serve(b, func(bars []marketdata.Bar, _ []Event) ([]Order, error) {
+				decided = append(decided, bars)
+				return []Order{{Instrument: "EURUSD", Action: "close"}}, nil
+			}, WithWarmup(func(bars []marketdata.Bar) { warmed = append(warmed, bars) }))
+		}()
+
+		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}, Warmup: true}))
+		var out ordersMessage
+		require.NoError(t, readMessage(a, &out))
+		assert.NotNil(t, out.Orders)
+		assert.Empty(t, out.Orders)
+		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}}))
+		require.NoError(t, readMessage(a, &out))
+		assert.Len(t, out.Orders, 1, "a trading group is still decided")
+
+		require.NoError(t, a.Close())
+		require.NoError(t, <-done)
+		assert.Len(t, warmed, 1)
+		assert.Len(t, decided, 1)
+	})
+	t.Run("without a warm-up function the bars are acknowledged and ignored", func(t *testing.T) {
+		a, b := net.Pipe()
+		calls := 0
+		done := make(chan error, 1)
+		go func() {
+			done <- Serve(b, func([]marketdata.Bar, []Event) ([]Order, error) { calls++; return nil, nil })
+		}()
+
+		require.NoError(t, writeMessage(a, barsMessage{Bars: oneBar, Events: []Event{}, Warmup: true}))
+		var out ordersMessage
+		require.NoError(t, readMessage(a, &out))
+		assert.Empty(t, out.Orders)
+		require.NoError(t, a.Close())
+		require.NoError(t, <-done)
+		assert.Zero(t, calls)
+	})
+}
+
 func TestListenAndServe(t *testing.T) {
 	t.Run("serves one connection on the bound address", func(t *testing.T) {
 		addrs := make(chan net.Addr, 1)

@@ -48,10 +48,11 @@ The worker serves one run and exits when Trader closes the connection. To compar
 with the built-in strategy, run the same command without `--worker`: the summaries
 are the same (see Parity).
 
-A worker is not warmed up. The built-in EMAX is prefilled with the month before
-`--from`; a worker is only shown bars from `--from` on, so it starts cold. For the
-comparison, use a range whose earlier month is not stored, or accept that the first
-few bars may differ.
+Both are warmed up the same way. The built-in EMAX is prefilled with the month before
+`--from`, when it is stored; the worker is sent those bars first, marked as warm-up, and
+`Strategy.Warm` feeds its EMAs with them and nothing else (it takes no position, and the
+worker answers a warm-up with no orders; one with an order ends the run). A worker that
+does not register `strategy.WithWarmup` ignores them and starts cold.
 
 ## Where the results are
 

@@ -401,14 +401,14 @@ func TestEmax_Warm_PrefillsTheEMAsAndTakesNoPosition(t *testing.T) {
 
 	cold := newTestEmax(t, 2, 4)
 	warm := newTestEmax(t, 2, 4)
-	warm.warm(ctx, rising)
+	require.NoError(t, warm.warm(ctx, rising))
 
 	next := closes(1, 2, 3, 4, 5)[4]
 	assert.Nil(t, cold.onBar(ctx, next), "a cold EMAX has no signal on its first bar")
 	require.NotNil(t, warm.onBar(ctx, next), "a warmed one already has its EMAs, and trades the trend")
 	assert.Equal(t, noDirection, newTestEmax(t, 2, 4).pos)
 	again := newTestEmax(t, 2, 4)
-	again.warm(ctx, rising)
+	require.NoError(t, again.warm(ctx, rising))
 	assert.Equal(t, noDirection, again.pos, "warming takes no position")
 	assert.Equal(t, noDirection, again.pending)
 }
@@ -426,7 +426,7 @@ func TestEmaxEach_Warm_RoutesBarsToTheirInstrumentAndIgnoresOthers(t *testing.T)
 		other[i].Instrument = "GBPUSD"
 	}
 
-	s.warm(ctx, append(eur, other...))
+	require.NoError(t, s.warm(ctx, append(eur, other...)))
 
 	next := closes(1, 2, 3, 4, 5)[4]
 	next.Instrument = "EURUSD"

@@ -90,16 +90,33 @@ type instrument struct {
 func (s *Strategy) OnBars(bars []marketdata.Bar, _ []strategy.Event) ([]strategy.Order, error) {
 	var orders []strategy.Order
 	for _, b := range bars {
-		st := s.by[b.Instrument]
-		if st == nil {
-			st = &instrument{short: NewEMA(s.cfg.Short), long: NewEMA(s.cfg.Long)}
-			s.by[b.Instrument] = st
-		}
-		if o, ok := s.onBar(st, b); ok {
+		if o, ok := s.onBar(s.state(b.Instrument), b); ok {
 			orders = append(orders, o)
 		}
 	}
 	return orders, nil
+}
+
+// Warm learns from bars that came before the range being traded: it feeds the
+// EMAs and nothing else, so no signal or position state changes and no order
+// comes of it. The first bar traded then finds the EMAs seeded, as the built-in
+// EMAX does after its own warm-up.
+func (s *Strategy) Warm(bars []marketdata.Bar) {
+	for _, b := range bars {
+		st := s.state(b.Instrument)
+		st.short.OnBar(b)
+		st.long.OnBar(b)
+	}
+}
+
+// state is the instrument's own state, made on its first bar.
+func (s *Strategy) state(name string) *instrument {
+	st := s.by[name]
+	if st == nil {
+		st = &instrument{short: NewEMA(s.cfg.Short), long: NewEMA(s.cfg.Long)}
+		s.by[name] = st
+	}
+	return st
 }
 
 func (s *Strategy) onBar(st *instrument, b marketdata.Bar) (strategy.Order, bool) {

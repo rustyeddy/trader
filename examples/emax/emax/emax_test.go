@@ -156,3 +156,24 @@ func TestOnBars_AShortWhoseStopWouldExceedTheLargestPriceIsSkippedAndNotRetried(
 	}
 	assert.Empty(t, asked, "the open is skipped, and the signal is consumed, so it is not asked again on the next bar")
 }
+
+// Warm only feeds the EMAs: it takes no position and asks for nothing, and the
+// first bar traded finds the EMAs seeded, as after the built-in EMAX's warm-up.
+func TestWarm_SeedsTheEMAsAndTakesNoPosition(t *testing.T) {
+	warm, err := New(cfg())
+	require.NoError(t, err)
+	cold, err := New(cfg())
+	require.NoError(t, err)
+	warm.Warm([]marketdata.Bar{bar("EURUSD", "1.0"), bar("EURUSD", "1.1"), bar("EURUSD", "1.2"), bar("EURUSD", "1.3")})
+
+	first := []marketdata.Bar{bar("EURUSD", "1.4")}
+	coldOrders, err := cold.OnBars(first, nil)
+	require.NoError(t, err)
+	warmOrders, err := warm.OnBars(first, nil)
+	require.NoError(t, err)
+
+	assert.Empty(t, coldOrders, "a cold worker has no signal on its first bar")
+	require.Len(t, warmOrders, 1, "a warmed one trades the trend it was shown")
+	assert.Equal(t, "open", warmOrders[0].Action)
+	assert.Equal(t, "long", warmOrders[0].Direction)
+}

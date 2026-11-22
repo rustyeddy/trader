@@ -3,6 +3,7 @@ package strategy
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"net"
 	"testing"
 	"time"
@@ -213,4 +214,53 @@ func TestClient_OnBars(t *testing.T) {
 		_, err = r.OnBars(cctx, oneBar, nil)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 	})
+}
+
+func TestClient_Warm(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("sends the bars marked as warm-up, with an empty events list", func(t *testing.T) {
+		var got barsMessage
+		var raw string
+		addr := rawWorker(t, func(c net.Conn) {
+			var in map[string]any
+			_ = readMessage(c, &in)
+			b, _ := json.Marshal(in)
+			raw = string(b)
+			got.Warmup, _ = in["warmup"].(bool)
+			writeRaw(c, `{"orders":[]}`)
+		})
+		r, err := Dial(addr)
+		require.NoError(t, err)
+		defer func() { _ = r.Close() }()
+
+		require.NoError(t, r.Warm(ctx, oneBar))
+
+		assert.True(t, got.Warmup)
+		assert.Contains(t, raw, `"events":[]`)
+	})
+	t.Run("an answer with an order is an error: nothing is traded on warm-up bars", func(t *testing.T) {
+		r := answerWith(t, `{"orders":[{"instrument":"EURUSD","action":"close"}]}`)
+
+		err := r.Warm(ctx, oneBar)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "warm-up")
+	})
+	t.Run("an answer without the orders list is an error", func(t *testing.T) {
+		r := answerWith(t, `{}`)
+		assert.Error(t, r.Warm(ctx, oneBar))
+	})
+}
+
+// A request that is not a warm-up does not say so on the wire, so the bytes of
+// every trading group are what they were before warm-up existed.
+func TestBarsMessage_WarmupIsOmittedWhenFalse(t *testing.T) {
+	b, err := json.Marshal(barsMessage{Bars: oneBar, Events: []Event{}})
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "warmup")
+
+	b, err = json.Marshal(barsMessage{Bars: oneBar, Events: []Event{}, Warmup: true})
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"warmup":true`)
 }

@@ -176,7 +176,10 @@ account and broker (`replay.go`, `backtest.go`):
   bars of the UTC month before `From` when they can be loaded: it uses the loader
   and the run's `AllowBad`, treats a missing month as simply absent, and runs an
   instrument without warm-up (logged) when its earlier months are stale or bad.
-  Only the traded range is strict.
+  Only the traded range is strict. A remote worker is a `warmer` too: each warm-up
+  group is sent over the same connection as `{"bars":..., "events":[], "warmup":true}`
+  (`Client.Warm`), the worker's `strategy.WithWarmup` function learns from it, and it
+  answers with no orders; an order in that answer fails the run.
 
 ## Tests
 

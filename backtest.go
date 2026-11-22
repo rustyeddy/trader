@@ -79,7 +79,9 @@ func (bt *backtest) runSeriesFrom(ctx context.Context, tr *trader, tradeFrom tim
 				}
 			}
 			if len(warm) > 0 && w != nil {
-				w.warm(ctx, warm)
+				if err := w.warm(ctx, warm); err != nil {
+					return fmt.Errorf("warm-up: %w", err)
+				}
 			}
 			if len(live) == 0 {
 				continue

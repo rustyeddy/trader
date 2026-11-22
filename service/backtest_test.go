@@ -556,7 +556,7 @@ func serveEMAX(t *testing.T, failAfter int) (addr string, ended func() error) {
 					return nil, errors.New("worker crashed")
 				}
 				return s.OnBars(bars, events)
-			})
+			}, strategy.WithWarmup(s.Warm))
 	}()
 	return <-addrs, func() error { return <-done }
 }
@@ -599,6 +599,46 @@ func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAX(t *testing.T) {
 	assert.Equal(t, b.events, r.events, "every order, fill and protective exit, in order, to the price")
 	require.Greater(t, len(b.events), 100, "a real comparison, not an empty one")
 	assert.Positive(t, b.rec["result"].(map[string]any)["trades"])
+}
+
+// January is the month before From, so the built-in EMAX is warmed by it and the
+// worker is sent it as warm-up: the comparison covers a normal historical run. It
+// is not vacuous: the same February without January trades differently.
+func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAXWhenTheMonthBeforeIsWarmup(t *testing.T) {
+	febReq := func(worker string) BacktestRequest {
+		r := backtestReq(t, "EURUSD", "GBPUSD")
+		r.From, r.To, r.Worker = utc(2024, 2, 1, 0), utc(2024, 3, 1, 0), worker
+		return r
+	}
+	storetest.Root(t)
+	for _, m := range []time.Month{time.January, time.February} {
+		monthSpread(t, "EURUSD", m, 110000, 3, walkPoints(uint64(m), 600)...)
+		monthSpread(t, "GBPUSD", m, 125000, 3, walkPoints(uint64(m)+10, 600)...)
+	}
+	buildCanonical(t, janToMar("EURUSD", "GBPUSD"))
+	builtin, err := RunBacktest(context.Background(), nil, febReq(""))
+	require.NoError(t, err)
+
+	addr, ended := serveEMAX(t, 0)
+	remote, err := RunBacktest(context.Background(), nil, febReq(addr))
+	require.NoError(t, err)
+	require.NoError(t, ended())
+
+	b, r := readRunDir(t, builtin.Dir), readRunDir(t, remote.Dir)
+	assert.Equal(t, b.events, r.events, "every order, fill and exit, to the price")
+	assert.Equal(t, b.rec["result"].(map[string]any)["balance"], r.rec["result"].(map[string]any)["balance"])
+	assert.Equal(t, b.rec["result"].(map[string]any)["open"], r.rec["result"].(map[string]any)["open"])
+	require.Greater(t, len(b.events), 100)
+
+	// Without January the built-in run is cold, and it trades differently: the
+	// warm-up is what the worker was compared on.
+	storetest.Root(t)
+	monthSpread(t, "EURUSD", time.February, 110000, 3, walkPoints(uint64(time.February), 600)...)
+	monthSpread(t, "GBPUSD", time.February, 125000, 3, walkPoints(uint64(time.February)+10, 600)...)
+	buildCanonical(t, janToMar("EURUSD", "GBPUSD"))
+	cold, err := RunBacktest(context.Background(), nil, febReq(""))
+	require.NoError(t, err)
+	assert.NotEqual(t, b.events, readRunDir(t, cold.Dir).events)
 }
 
 func TestRunBacktest_ARemoteRunThatLosesItsWorkerKeepsThePartialJournal(t *testing.T) {

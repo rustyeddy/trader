@@ -109,9 +109,9 @@ type RunOptions struct {
 	// Worker, when not empty, is the loopback host:port of a worker process that
 	// trades instead of the built-in EMAX: Trader connects to it and, for every group
 	// of bars, asks what it wants (package strategy). Everything else is the same run:
-	// the same engine loop, account sizing, broker and journal. A worker is not warmed
-	// up: the bars before tradeFrom are not shown to it, so it starts cold at
-	// tradeFrom, as a strategy that does not implement warmer always does.
+	// the same engine loop, account sizing, broker and journal. The bars before
+	// tradeFrom reach it as warm-up (Client.Warm): it prefills its indicators from
+	// them, and an order in its answer to one is an error.
 	Worker string
 }
 

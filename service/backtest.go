@@ -39,8 +39,8 @@ type BacktestRequest struct {
 	AllowMissing bool
 
 	// Worker, when not empty, is the loopback host:port of a worker process that
-	// trades instead of the built-in EMAX (see trader.RunOptions.Worker). It is not
-	// warmed up, so the months before From are not loaded for it.
+	// trades instead of the built-in EMAX (see trader.RunOptions.Worker). It is
+	// warmed up from the months before From like the built-in strategy.
 	Worker string
 
 	// ResultsRoot is the directory the run's results go under (results.DefaultRoot
@@ -143,12 +143,9 @@ func runBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest, sou
 	if bars == 0 {
 		return nil, fmt.Errorf("backtest %s: no bars in the range", what)
 	}
-	var warm map[string][]marketdata.Bar
-	if req.Worker == "" { // a worker is not warmed up: the engine would not show it these bars
-		warm, err = warmupBars(ctx, log, req)
-		if err != nil {
-			return nil, err
-		}
+	warm, err := warmupBars(ctx, log, req)
+	if err != nil {
+		return nil, err
 	}
 	series := make([]marketdata.Series, 0, len(results))
 	for _, r := range results {

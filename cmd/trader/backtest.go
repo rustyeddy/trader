@@ -49,8 +49,8 @@ A run that fails or is cancelled is journaled too, with its status and why.
 --worker host:port trades with an external strategy process listening on that
 loopback address (examples/emax is the canonical one) instead of the built-in EMAX:
 every group of bars goes to it over TCP and JSON and it answers with the orders it
-wants; Trader sizes, admits and fills them exactly as for the built-in strategy. A
-worker is not warmed up, so the months before --from are not loaded for it.`,
+wants; Trader sizes, admits and fills them exactly as for the built-in strategy. The
+month before --from is sent first as warm-up bars, for it to prefill its indicators.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runBacktest(cmd, f)
@@ -64,7 +64,7 @@ worker is not warmed up, so the months before --from are not loaded for it.`,
 	fl.StringVar(&f.interval, "interval", "", "h1 or d1 (default: marketdata.interval)")
 	fl.StringVar(&f.from, "from", "", "first instant, UTC: YYYY-MM-DD or RFC 3339 (required)")
 	fl.StringVar(&f.to, "to", "", "end of the range, exclusive, UTC: YYYY-MM-DD or RFC 3339 (required)")
-	fl.StringVar(&f.worker, "worker", "", "loopback host:port of a worker process that trades instead of the built-in EMAX (see examples/emax); it is not warmed up")
+	fl.StringVar(&f.worker, "worker", "", "loopback host:port of a worker process that trades instead of the built-in EMAX (see examples/emax)")
 	fl.StringVar(&f.resultsRoot, "results-root", "", "results root (default: "+envResultsRoot+", then results.root in the config file, then "+service.DefaultResultsRoot+")")
 	fl.BoolVar(&f.allowBad, "allow-bad", false, "accept months that have bad records (their good bars load)")
 	fl.BoolVar(&f.allowMissing, "allow-missing", false, "accept months with no canonical file (a gap in the series)")

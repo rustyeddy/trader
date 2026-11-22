@@ -47,7 +47,8 @@ func main() {
 		func(bars []marketdata.Bar, events []strategy.Event) ([]strategy.Order, error) {
 			groups++
 			return s.OnBars(bars, events)
-		})
+		},
+		strategy.WithWarmup(s.Warm)) // bars from before the range: indicators only
 	if err != nil {
 		log.Fatal(err)
 	}
