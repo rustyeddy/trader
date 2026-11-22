@@ -60,7 +60,7 @@ type Position struct {
 func (r *Result) Summary() Summary {
 	x := r.r
 	s := Summary{
-		Strategy: runStrategy, Account: runAccount, InitialBalance: num.MustParseMoney(runBalance, usdCurrency),
+		Strategy: x.strategy, Account: runAccount, InitialBalance: num.MustParseMoney(runBalance, usdCurrency),
 		Bars:   x.bars,
 		Orders: OrderCount{Submitted: x.submitted, Filled: x.filled, Rejected: x.rejected, Cancelled: x.cancelled, Pending: x.pending},
 		Trades: x.trades, Wins: x.wins, Losses: x.losses, BreakEven: x.breakEven,
@@ -82,10 +82,12 @@ const (
 	runLong    = 4
 	runBalance = "10000" // USD
 
-	// StrategyEMAX names the strategy RunSeries trades.
-	StrategyEMAX = "emax"
-	runStrategy  = StrategyEMAX
-	runAccount   = "sim123"
+	// StrategyEMAX names the strategy RunSeries trades unless RunOptions names a
+	// worker, which is StrategyRemote.
+	StrategyEMAX   = "emax"
+	StrategyRemote = "remote"
+	runStrategy    = StrategyEMAX
+	runAccount     = "sim123"
 )
 
 // RunOptions are the optional parts of a run.
@@ -103,6 +105,14 @@ type RunOptions struct {
 	// file; the caller owns the writer. If a write fails the run stops with that
 	// error, and what was written before it stays.
 	Journal io.Writer
+
+	// Worker, when not empty, is the loopback host:port of a worker process that
+	// trades instead of the built-in EMAX: Trader connects to it and, for every group
+	// of bars, asks what it wants (package strategy). Everything else is the same run:
+	// the same engine loop, account sizing, broker and journal. The bars before
+	// tradeFrom reach it as warm-up (Client.Warm): it prefills its indicators from
+	// them, and an order in its answer to one is an error.
+	Worker string
 }
 
 // RunSeries backtests the series, which a reader has already loaded, on one
@@ -169,10 +179,21 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 	}
 	slices.Sort(instruments)
 
-	strat := &emaxEach{id: runStrategy, instruments: instruments, short: runShort, long: runLong,
-		stopPct: rateOnePercent, markets: markets}
-	if err := strat.init(); err != nil {
-		return nil, err
+	var strat strategy
+	if opts.Worker != "" {
+		remote, err := dialRemote(StrategyRemote, opts.Worker)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = remote.close() }() // the worker sees the connection close and stops
+		strat = remote
+	} else {
+		emax := &emaxEach{id: runStrategy, instruments: instruments, short: runShort, long: runLong,
+			stopPct: rateOnePercent, markets: markets}
+		if err := emax.init(); err != nil {
+			return nil, err
+		}
+		strat = emax
 	}
 	br := newBroker("sim", markets)
 	if opts.Journal != nil {

@@ -13,6 +13,12 @@
 //	{"orders":[{"instrument":"EURUSD","action":"open","direction":"long",
 //	            "price":"1.10000","stop_loss":"1.09000"}]}
 //
+// Before the first group the trader may send the bars that precede the range it
+// trades, each group marked "warmup":true, with no events. They are for the worker
+// to prefill its indicators from; it answers {"orders":[]}, and an answer with an
+// order is an error, since nothing is traded on them. A worker that does not use
+// history ignores them (see WithWarmup).
+//
 // The list must be present, but may be empty; an answer without it, or with
 // null, is an error. Each order is a request (see Order): the trader decides the
 // size, whether to admit it, and everything that follows. A field the protocol
@@ -35,6 +41,9 @@ import (
 type barsMessage struct {
 	Bars   []marketdata.Bar `json:"bars"`
 	Events []Event          `json:"events"`
+	// Warmup marks bars from before the range being traded: the worker learns from
+	// them (fills its indicators) and answers with no orders.
+	Warmup bool `json:"warmup,omitempty"`
 }
 
 type ordersMessage struct {

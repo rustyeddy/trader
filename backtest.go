@@ -79,7 +79,9 @@ func (bt *backtest) runSeriesFrom(ctx context.Context, tr *trader, tradeFrom tim
 				}
 			}
 			if len(warm) > 0 && w != nil {
-				w.warm(ctx, warm)
+				if err := w.warm(ctx, warm); err != nil {
+					return fmt.Errorf("warm-up: %w", err)
+				}
 			}
 			if len(live) == 0 {
 				continue
@@ -112,6 +114,7 @@ func readError(last marketdata.Bar, err error) error {
 // stops included; pending is what is still waiting when the data ends.
 type result struct {
 	scenario string
+	strategy string // the name of the strategy that traded
 	bars     int
 
 	submitted, filled, rejected, cancelled, pending int
@@ -136,8 +139,12 @@ func newResult(scenario string, bars int, tr *trader) (*result, error) {
 	if err != nil {
 		return nil, err
 	}
+	name := ""
+	if tr.strategy != nil { // a trader built without one, as some tests do
+		name = tr.strategy.name()
+	}
 	r := &result{
-		scenario: scenario, bars: bars, rejected: len(tr.rejected),
+		scenario: scenario, strategy: name, bars: bars, rejected: len(tr.rejected),
 		balance: act.balance, unrealized: unrealized, equity: equity,
 		realized: realized,
 	}

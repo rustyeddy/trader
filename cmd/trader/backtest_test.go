@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -196,4 +198,70 @@ func TestBacktestCommand_IsTransportOnly(t *testing.T) {
 			assert.True(t, allowed[path], "backtest.go imports %s: the command may import only the application service, the store and logging", path)
 		}
 	}
+}
+
+// startEMAXProcess builds examples/emax and runs it as a separate process, as an
+// operator would, and returns the address it prints.
+func startEMAXProcess(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "emax")
+	out, err := exec.Command("go", "build", "-o", bin, "../../examples/emax").CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	cmd := exec.Command(bin, "-addr", "127.0.0.1:0")
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	require.NoError(t, err)
+	return strings.TrimSpace(strings.TrimPrefix(line, "listening on "))
+}
+
+// TestBacktest_WorkerTradesLikeTheBuiltInStrategy runs the command twice on the same
+// stored data: with the built-in EMAX, and with the EMAX example as a separate process
+// over loopback TCP. The summaries are the same.
+func TestBacktest_WorkerTradesLikeTheBuiltInStrategy(t *testing.T) {
+	root := storetest.Root(t)
+	putWave(t, root, "EURUSD", 110000)
+	putWave(t, root, "GBPUSD", 125000)
+	builtin, _, err := runData(t, nil, backtestArgs(t, root, "2024-02-01")...)
+	require.NoError(t, err)
+
+	addr := startEMAXProcess(t)
+	results := t.TempDir()
+	args := backtestArgs(t, root, "2024-02-01", "--worker", addr)
+	args[len(args)-3] = results // --results-root's value, which comes before --worker
+	remote, _, err := runData(t, nil, args...)
+
+	require.NoError(t, err)
+	summary := func(out string) string { return out[:strings.LastIndex(strings.TrimSpace(out), "\nrun ")] }
+	assert.Equal(t, summary(builtin), summary(remote), "the same orders, trades and money")
+	assert.Contains(t, remote, "orders: submitted")
+	assert.NotContains(t, remote, "submitted 0,", "it traded")
+	dirs := runDirs(t, results)
+	require.Len(t, dirs, 1)
+	rec, rerr := os.ReadFile(filepath.Join(results, dirs[0], "run.json"))
+	require.NoError(t, rerr)
+	assert.Contains(t, string(rec), `"transport": "tcp"`)
+	assert.Contains(t, string(rec), `"addr": "`+addr+`"`)
+}
+
+func TestBacktest_AWorkerThatIsNotListeningIsAFailedRun(t *testing.T) {
+	root := storetest.Root(t)
+	putWave(t, root, "EURUSD", 110000)
+	putWave(t, root, "GBPUSD", 125000)
+	results := t.TempDir()
+	args := backtestArgs(t, root, "2024-02-01", "--worker", "127.0.0.1:1")
+	args[len(args)-3] = results
+
+	_, _, err := runData(t, nil, args...)
+
+	require.Error(t, err)
+	dirs := runDirs(t, results)
+	require.Len(t, dirs, 1, "the run exists, and says it failed")
+	rec, rerr := os.ReadFile(filepath.Join(results, dirs[0], "run.json"))
+	require.NoError(t, rerr)
+	assert.Contains(t, string(rec), `"status": "failed"`)
 }

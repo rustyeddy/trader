@@ -26,6 +26,7 @@ type remoteStrategy struct {
 
 var _ strategy = (*remoteStrategy)(nil)
 var _ feedbacker = (*remoteStrategy)(nil)
+var _ warmer = (*remoteStrategy)(nil)
 
 // dialRemote connects to the worker listening at addr (loopback only).
 func dialRemote(id, addr string) (*remoteStrategy, error) {
@@ -52,6 +53,13 @@ func (r *remoteStrategy) feedback(events []feedbackEvent) {
 			delete(r.refs, e.order) // filled, rejected or cancelled: nothing more to say
 		}
 	}
+}
+
+// warm sends the bars from before the range to the worker as a warm-up: it
+// prefills its indicators and answers with no orders. Nothing here reaches the
+// broker or the journal, and the worker answering with an order is an error.
+func (r *remoteStrategy) warm(ctx context.Context, bars []marketdata.Bar) error {
+	return r.client.Warm(ctx, bars)
 }
 
 // onBars hands the frame, and the events since the last one, to the worker and

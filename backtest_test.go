@@ -610,10 +610,11 @@ type warmSpy struct {
 	warmed []string
 }
 
-func (s *warmSpy) warm(_ context.Context, bars []marketdata.Bar) {
+func (s *warmSpy) warm(_ context.Context, bars []marketdata.Bar) error {
 	for _, b := range bars {
 		s.warmed = append(s.warmed, b.Instrument+"@"+b.AvailableAt.Format("Mon 15:04"))
 	}
+	return nil
 }
 
 func TestBacktestRunSeriesFrom_WarmBarsPrefillTheStrategyAndAreNeverTraded(t *testing.T) {

@@ -48,6 +48,7 @@ type Record struct {
 	Strategy struct {
 		Name      string `json:"name"`
 		Transport string `json:"transport"`
+		Addr      string `json:"addr,omitempty"` // the worker's address, for a tcp strategy
 	} `json:"strategy"`
 	Source      string    `json:"source"`
 	Interval    string    `json:"interval"`

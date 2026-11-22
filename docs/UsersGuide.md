@@ -288,6 +288,19 @@ stored data is not changed.
 Output: the engine's summary for the run (bars, orders, trades, money, open
 positions), then `run <RunID>: <directory>`.
 
+### An external strategy
+
+`--worker host:port` trades with a strategy running as its own process on a loopback
+address instead of the built-in EMAX. Trader sends each group of completed bars over TCP
+and JSON; the worker answers with the orders it wants (it never says how many units);
+Trader sizes, admits, fills and journals them as it does for the built-in strategy. A
+worker is warmed up like the built-in strategy: the month before `--from` is sent first,
+marked as warm-up, for it to prefill its indicators; nothing is traded on it, and a
+worker that answers it with an order fails the run. [`examples/emax`](../examples/emax/README.md) is the canonical worker (the same
+EMAX, written against the public SDK) and its README says how to run it and read the
+journal. A worker that cannot be reached, disconnects or crashes ends the run as
+`failed`, with the events recorded until then.
+
 ### Results
 
 Every run is journaled, whether it completes, fails or is cancelled. It gets a RunID

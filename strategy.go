@@ -25,9 +25,10 @@ type strategy interface {
 // it is given came before the first one the strategy trades: it learns from them
 // (feeds its indicators) but takes no position and returns no order, so a run that
 // starts at a date does not start its indicators cold. A strategy that does not
-// implement it is simply not warmed.
+// implement it is simply not warmed. An error (a worker that cannot be reached, or
+// answers a warm-up with an order) stops the run.
 type warmer interface {
-	warm(ctx context.Context, bars []marketdata.Bar)
+	warm(ctx context.Context, bars []marketdata.Bar) error
 }
 
 // eachBar adapts a decision made one bar at a time: it asks decide about every bar
@@ -71,11 +72,12 @@ func (e *emax) name() string {
 // no order comes of it. The first bar after the warm-up then finds the EMAs seeded,
 // so EMAX sees the trend as it already stands, as it does at the first bar of any
 // run once its EMAs are ready.
-func (e *emax) warm(_ context.Context, bars []marketdata.Bar) {
+func (e *emax) warm(_ context.Context, bars []marketdata.Bar) error {
 	for _, b := range bars {
 		e.emaShort.onBar(b)
 		e.emaLong.onBar(b)
 	}
+	return nil
 }
 
 // onBars is onBar for each bar of the group.
@@ -249,12 +251,15 @@ func (s *emaxEach) init() error {
 
 // warm hands each bar to its instrument's emax; bars of instruments it was not
 // given are ignored.
-func (s *emaxEach) warm(ctx context.Context, bars []marketdata.Bar) {
+func (s *emaxEach) warm(ctx context.Context, bars []marketdata.Bar) error {
 	for _, b := range bars {
 		if e, ok := s.byInstrument[b.Instrument]; ok {
-			e.warm(ctx, []marketdata.Bar{b})
+			if err := e.warm(ctx, []marketdata.Bar{b}); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // onBars hands each bar to its instrument's emax; the group's orders come back in
