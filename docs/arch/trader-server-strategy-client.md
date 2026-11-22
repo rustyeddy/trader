@@ -12,19 +12,32 @@ That works, but the worker has to be started first, by hand, for each run, and i
 
 **Trader is the persistent server. A strategy is a client that connects, starts a run, and leaves when the run is done.**
 
-```text
-            loopback TCP, length-prefixed JSON
- ┌───────────────────┐                      ┌────────────────────────────────────┐
- │  strategy client  │ ───── connect ─────▶ │  Trader server (long-lived)        │
- │  (its own process,│ ◀──── bars, events ─ │                                    │
- │   any language)   │ ───── orders ──────▶ │  one run per connection:           │
- │                   │ ◀──── result ─────── │   engine ─ sizing/risk ─ broker ─  │
- └───────────────────┘                      │   account ─ journal ─ RunID        │
-                                            │                                    │
-                                            │  shared, read-only: market data    │
-                                            │  store, results root               │
-                                            └────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph clients["Strategy / research clients (own processes, any language)"]
+        C1["strategy client"]
+        C2["strategy or study client"]
+    end
+
+    subgraph server["Trader server (long-lived)"]
+        direction TB
+        L["listener<br/>loopback TCP, length-prefixed JSON"]
+        subgraph run["one run per connection"]
+            direction LR
+            E["engine"] --> R["sizing and risk"] --> B["broker and account"]
+        end
+        L --> run
+    end
+
+    MD[("market data store<br/>shared, read only")]
+    OUT[("results root<br/>Trader-owned, written per run:<br/>run.json, events.jsonl")]
+
+    C1 <-->|"start run, bars and events, orders, result"| L
+    C2 <-.->|"future: concurrent runs"| L
+    MD --> E
+    run -->|"journal"| OUT
 ```
+
 
 ### One run, in sequence
 
@@ -77,7 +90,7 @@ This is ADR-093 unchanged: moving which side listens changes who starts a run, n
 
 - The server outlives its runs. Starting, finishing, failing or abandoning a run never stops the server.
 - A run belongs to its connection. If the client disconnects, crashes, times out or sends something invalid, the run ends as `failed` (or `cancelled` when it was asked to stop), its journal keeps what had happened until then, `run.json` says why, and the server goes on accepting connections. This is what `--worker` does today for a worker that dies.
-- If the server stops, it cancels the runs in progress and finalizes their records first; a client sees the connection close and no terminal result.
+- Graceful shutdown is a goal, not something that exists yet: a server asked to stop should cancel the runs in progress and finalize their records (`cancelled`, journal flushed) before it exits, and a client should see the connection close with no terminal result. A forced termination (a kill, a crash, a power loss) cannot guarantee that. The record of such a run is left as it was last written, which is why `run.json` is written atomically at the start and a run's status is `running` until it is finalized; deciding how a restarted server treats such a run is part of the future work.
 - A client sees only its own run. It cannot read, stop or influence another client's run, the account of another run, or the results root.
 
 ### Examples
