@@ -1,11 +1,16 @@
 BIN := bin/trader
+INSTALL_DIR := $(HOME)/go/bin
+
+# VERSION is the release tag this build is at (v0.5.0), or how far past it
+# (v0.5.0-12-gabc1234, plus -dirty with uncommitted changes), for `trader version`.
+VERSION := $(shell git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --always --dirty 2>/dev/null)
 
 # LINT_VERSION is pinned so `make lint` behaves identically for every
 # contributor and in CI, rather than silently changing behavior when a
 # new golangci-lint release adds or reconfigures linters.
 LINT_VERSION := v2.13.0
 
-.PHONY: all check tidy-check fmt-check test race cover vet lint smoke build run clean
+.PHONY: all check tidy-check fmt-check test race cover vet lint smoke build install run clean
 
 all: check build
 
@@ -59,7 +64,13 @@ smoke:
 	exit $$rc
 
 build:
-	go build -o $(BIN) ./cmd/trader
+	go build -ldflags "-X main.gitDescribe=$(VERSION)" -o $(BIN) ./cmd/trader
+
+# install copies the built binary to $(INSTALL_DIR) (~/go/bin), which is
+# usually on PATH, so `trader` runs from anywhere.
+install: build
+	mkdir -p $(INSTALL_DIR)
+	install -m 0755 $(BIN) $(INSTALL_DIR)/trader
 
 run:
 	go run ./cmd/trader
