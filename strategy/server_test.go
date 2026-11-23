@@ -169,6 +169,33 @@ func TestServeRuns_AClientThatSaysNothingDoesNotHoldTheNextOneUpForever(t *testi
 	assert.Equal(t, "run_ok", res.RunID)
 }
 
+// A run may pause for longer than the request timeout between acceptance and the
+// first bars, and between the last bars and the result: the deadlines set for the
+// acceptance and the result must not cut those waits short.
+func TestServeRuns_PausesAfterAcceptanceAndBeforeTheResultAreNotCutShort(t *testing.T) {
+	prev := requestTimeout
+	requestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { requestTimeout = prev })
+	pause := 3 * requestTimeout
+
+	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {
+		if err := s.Accept("run_p"); err != nil {
+			return Result{}, err
+		}
+		time.Sleep(pause) // loading bars
+		if _, err := s.Client.OnBars(ctx, []marketdata.Bar{{Instrument: req.Instruments[0], Volume: 1}}, nil); err != nil {
+			return Result{RunID: "run_p", Status: StatusFailed}, err
+		}
+		time.Sleep(pause) // finishing the run
+		return Result{RunID: "run_p", Status: StatusCompleted}, nil
+	})
+
+	res, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+
+	require.NoError(t, err)
+	assert.Equal(t, StatusCompleted, res.Status)
+}
+
 func TestServeRuns_AClientThatLeavesMidRunEndsOnlyThatRun(t *testing.T) {
 	var runs int
 	addr, _ := startServer(t, func(ctx context.Context, req RunRequest, s *Session) (Result, error) {

@@ -146,6 +146,25 @@ func TestRun_ProtocolViolationsFromTraderAreErrors(t *testing.T) {
 	}
 }
 
+func TestRun_AResultThatIsNotForTheAcceptedRunOrHasNoFinalStatusIsAnError(t *testing.T) {
+	accepted := startMessage{Accepted: &acceptedRun{RunID: "run_1"}}
+	for name, res := range map[string]Result{
+		"another run":        {RunID: "run_2", Status: StatusCompleted},
+		"no run id":          {Status: StatusCompleted},
+		"no status":          {RunID: "run_1"},
+		"a status not final": {RunID: "run_1", Status: "running"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			addr, _ := fakeTrader(t, func(c net.Conn) {
+				_ = writeMessage(c, accepted)
+				_ = writeMessage(c, resultMessage{Result: res})
+			})
+			_, err := Run(context.Background(), addr, goodRequest, askForOneOrder)
+			assert.Error(t, err)
+		})
+	}
+}
+
 func TestRun_TraderHangingUpBeforeTheResultIsAnError(t *testing.T) {
 	addr, _ := fakeTrader(t, func(c net.Conn) {
 		_ = writeMessage(c, startMessage{Accepted: &acceptedRun{RunID: "run_1"}})

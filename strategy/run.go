@@ -79,11 +79,12 @@ func run(conn net.Conn, req RunRequest, onBars func([]marketdata.Bar, []Event) (
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		return nil, err
 	}
-	return follow(conn, onBars, o)
+	return follow(conn, start.Accepted.RunID, onBars, o)
 }
 
-// follow answers Trader's messages until its result.
-func follow(conn net.Conn, onBars func([]marketdata.Bar, []Event) ([]Order, error), o options) (*Result, error) {
+// follow answers Trader's messages until its result, which must belong to the
+// accepted run and carry a final status.
+func follow(conn net.Conn, runID string, onBars func([]marketdata.Bar, []Event) ([]Order, error), o options) (*Result, error) {
 	for {
 		var in barsMessage
 		if err := readMessage(conn, &in); err != nil {
@@ -95,6 +96,14 @@ func follow(conn net.Conn, onBars func([]marketdata.Bar, []Event) ([]Order, erro
 		if in.Result != nil {
 			if in.Bars != nil || in.Events != nil || in.Warmup {
 				return nil, errors.New("a result message carries nothing else")
+			}
+			if in.Result.RunID != runID {
+				return nil, fmt.Errorf("the result is for run %q, not the accepted run %q", in.Result.RunID, runID)
+			}
+			switch in.Result.Status {
+			case StatusCompleted, StatusFailed, StatusCancelled:
+			default:
+				return nil, fmt.Errorf("the result has status %q, not completed, failed or cancelled", in.Result.Status)
 			}
 			return in.Result, nil
 		}
