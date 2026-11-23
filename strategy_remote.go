@@ -9,7 +9,8 @@ import (
 	remotestrat "github.com/rustyeddy/trader/strategy"
 )
 
-// remoteStrategy is a strategy that runs in another process on this machine. It
+// remoteStrategy is a strategy that runs in another process on this machine, and
+// connected to Trader. It
 // adapts the transport in package strategy to the engine's strategy interface:
 // each onBars sends the frame to the worker and waits for its answer, so the
 // engine runs exactly as it does for an in-process strategy.
@@ -28,21 +29,14 @@ var _ strategy = (*remoteStrategy)(nil)
 var _ feedbacker = (*remoteStrategy)(nil)
 var _ warmer = (*remoteStrategy)(nil)
 
-// dialRemote connects to the worker listening at addr (loopback only).
-func dialRemote(id, addr string) (*remoteStrategy, error) {
-	c, err := remotestrat.Dial(addr)
-	if err != nil {
-		return nil, fmt.Errorf("remote strategy %s: %w", id, err)
-	}
-	return &remoteStrategy{id: id, client: c}, nil
+// newRemote adapts a client's accepted connection, which the caller owns and closes.
+func newRemote(id string, client *remotestrat.Client) *remoteStrategy {
+	return &remoteStrategy{id: id, client: client}
 }
 
 func (r *remoteStrategy) name() string { return r.id }
 
 func (r *remoteStrategy) init() error { return nil }
-
-// close ends the session; the worker sees the connection close and exits.
-func (r *remoteStrategy) close() error { return r.client.Close() }
 
 // feedback keeps what the trader did since the last group; the next onBars sends
 // it to the worker.

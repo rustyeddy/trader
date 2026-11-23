@@ -123,7 +123,9 @@ func TestRunBacktest_AMissingMonthFailsUnlessAllowed(t *testing.T) {
 	res, err := RunBacktest(context.Background(), nil, req)
 
 	require.ErrorIs(t, err, ErrNotLoadable)
-	assert.Nil(t, res)
+	if res != nil { // a run that failed after it was made comes back with its RunID, never a result
+		assert.Nil(t, res.Result)
+	}
 	for _, want := range []string{"oanda EURUSD h1", "2024-02 missing"} {
 		assert.Contains(t, err.Error(), want, "the error names source, instrument, interval and the month")
 	}
@@ -145,7 +147,9 @@ func TestRunBacktest_ABadMonthFailsUnlessAllowedAndNothingRunsWhenOneInstrumentF
 	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD", "GBPUSD"))
 
 	require.ErrorIs(t, err, ErrNotLoadable)
-	assert.Nil(t, res)
+	if res != nil { // a run that failed after it was made comes back with its RunID, never a result
+		assert.Nil(t, res.Result)
+	}
 	assert.Contains(t, err.Error(), "GBPUSD")
 	assert.Contains(t, err.Error(), "2024-01 bad")
 	assert.NotContains(t, err.Error(), "EURUSD: ", "the instrument that loaded is not blamed")
@@ -184,7 +188,9 @@ func TestRunBacktest_RefusesWhatCannotBeRun(t *testing.T) {
 			res, err := RunBacktest(context.Background(), nil, tc.req)
 
 			require.Error(t, err)
-			assert.Nil(t, res)
+			if res != nil { // a run that failed after it was made comes back with its RunID, never a result
+				assert.Nil(t, res.Result)
+			}
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
@@ -198,7 +204,9 @@ func TestRunBacktest_AnInstrumentTheEngineHasNoMarketForIsRefusedByTheEngine(t *
 	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "USDJPY"))
 
 	require.Error(t, err)
-	assert.Nil(t, res)
+	if res != nil { // a run that failed after it was made comes back with its RunID, never a result
+		assert.Nil(t, res.Result)
+	}
 	assert.Contains(t, err.Error(), "USDJPY")
 	assert.Contains(t, err.Error(), "oanda USDJPY h1")
 }
@@ -310,7 +318,9 @@ func TestRunBacktest_AnInteriorGapTheCalendarDoesNotExplainFailsUnlessAllowed(t 
 	res, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD"))
 
 	require.ErrorIs(t, err, ErrNotLoadable)
-	assert.Nil(t, res, "nothing is replayed over a hole")
+	if res != nil {
+		assert.Nil(t, res.Result, "nothing is replayed over a hole")
+	}
 	assert.Contains(t, err.Error(), "gap unexplained 2024-01-09T04:00Z 2024-01-09T08:00Z, 4 bars")
 	req := backtestReq(t, "EURUSD")
 	req.AllowMissing = true
@@ -438,7 +448,9 @@ func TestRunBacktest_ARunThatFailsIsStillJournaledAsFailed(t *testing.T) {
 	res, err := RunBacktest(context.Background(), nil, req)
 
 	require.ErrorIs(t, err, ErrNotLoadable)
-	assert.Nil(t, res)
+	if res != nil { // a run that failed after it was made comes back with its RunID, never a result
+		assert.Nil(t, res.Result)
+	}
 	dir := onlyRun(t, req.ResultsRoot)
 	assert.ErrorContains(t, err, dir, "the error says where the run is")
 	run := readRunDir(t, dir)
@@ -538,32 +550,79 @@ func walkPoints(seed uint64, hours int) []int64 {
 	return points
 }
 
-// serveEMAX serves examples/emax in this process over loopback TCP, through the
-// public SDK, and returns its address. If failAfter is positive the worker gives up
-// on that group, as a crashing process would. It reports how the worker ended.
-func serveEMAX(t *testing.T, failAfter int) (addr string, ended func() error) {
+// emaxClient is examples/emax as a strategy client's two functions, through the
+// public SDK only. If failAfter is positive it gives up on that group, as a
+// crashing process would.
+func emaxClient(t *testing.T, failAfter int) (onBars func([]marketdata.Bar, []strategy.Event) ([]strategy.Order, error), warm func([]marketdata.Bar)) {
 	t.Helper()
 	s, err := emax.New(emax.Config{Short: 2, Long: 4, StopPct: num.MustParseRate("0.01"), Tick: num.MustParsePrice("0.00001")})
 	require.NoError(t, err)
-	addrs := make(chan string, 1)
-	done := make(chan error, 1)
 	groups := 0
+	return func(bars []marketdata.Bar, events []strategy.Event) ([]strategy.Order, error) {
+		groups++
+		if failAfter > 0 && groups > failAfter {
+			return nil, errors.New("strategy crashed")
+		}
+		return s.OnBars(bars, events)
+	}, s.Warm
+}
+
+// clientRun is one backtest asked for by a client: what Trader's service made of
+// it, and what the client was told.
+type clientRun struct {
+	run       *BacktestRun // the service's side
+	runErr    error
+	result    *strategy.Result // the client's side
+	clientErr error
+	client    string // the client's address, as Trader saw it
+}
+
+// runForClient serves req to a client the way trader serve does: a strategy
+// listener accepts the client's strategy.Run and its handler runs RunBacktest with
+// the session as the strategy. The client trades with onBars and warm.
+func runForClient(t *testing.T, req BacktestRequest, onBars func([]marketdata.Bar, []strategy.Event) ([]strategy.Order, error), warm func([]marketdata.Bar)) clientRun {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	var out clientRun
+	handled := make(chan struct{})
 	go func() {
-		done <- strategy.ListenAndServe("127.0.0.1:0", func(a net.Addr) { addrs <- a.String() },
-			func(bars []marketdata.Bar, events []strategy.Event) ([]strategy.Order, error) {
-				groups++
-				if failAfter > 0 && groups > failAfter {
-					return nil, errors.New("worker crashed")
-				}
-				return s.OnBars(bars, events)
-			}, strategy.WithWarmup(s.Warm))
+		served <- strategy.ServeRuns(ctx, ln, func(ctx context.Context, _ strategy.RunRequest, s *strategy.Session) (strategy.Result, error) {
+			defer close(handled)
+			req.Remote, req.RemoteAddr, req.OnStart = s.Client, s.Remote, s.Accept
+			out.client = s.Remote
+			out.run, out.runErr = RunBacktest(ctx, nil, req)
+			if out.run == nil {
+				return strategy.Result{}, out.runErr
+			}
+			res := strategy.Result{RunID: out.run.RunID.String(), Status: out.run.Status}
+			if out.runErr != nil {
+				res.Error = out.runErr.Error()
+				return res, nil
+			}
+			summary, err := json.Marshal(out.run.Summary())
+			res.Summary = summary
+			return res, err
+		})
 	}()
-	return <-addrs, func() error { return <-done }
+	out.result, out.clientErr = strategy.Run(context.Background(), ln.Addr().String(),
+		strategy.RunRequest{Instruments: req.Instruments, Interval: req.Interval, From: req.From, To: req.To},
+		onBars, strategy.WithWarmup(warm))
+	select {
+	case <-handled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the run handler did not finish")
+	}
+	cancel()
+	require.NoError(t, <-served)
+	return out
 }
 
 // A real month, built into canonical bars through the store, then run with the
-// built-in EMAX and with the EMAX example as a worker, from the same data and
-// settings, journaled each.
+// built-in EMAX and with the EMAX example as a client that asked for the run, from
+// the same data and settings, journaled each.
 func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAX(t *testing.T) {
 	storetest.Root(t)
 	// An odd spread gives half-tick mids, which the engine rounds: the parity holds
@@ -575,18 +634,16 @@ func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAX(t *testing.T) {
 	builtin, err := RunBacktest(context.Background(), nil, builtinReq)
 	require.NoError(t, err)
 
-	addr, ended := serveEMAX(t, 0)
-	remoteReq := backtestReq(t, "EURUSD", "GBPUSD")
-	remoteReq.Worker = addr
-	remote, err := RunBacktest(context.Background(), nil, remoteReq)
-	require.NoError(t, err)
-	require.NoError(t, ended(), "the worker stops cleanly when the run closes the connection")
+	onBars, warm := emaxClient(t, 0)
+	got := runForClient(t, backtestReq(t, "EURUSD", "GBPUSD"), onBars, warm)
+	require.NoError(t, got.runErr)
+	require.NoError(t, got.clientErr, "the client ends on the run's result")
 
-	b, r := readRunDir(t, builtin.Dir), readRunDir(t, remote.Dir)
+	b, r := readRunDir(t, builtin.Dir), readRunDir(t, got.run.Dir)
 
 	// What names the run or its strategy, or reads the wall clock, may differ. Nothing else.
 	assert.Equal(t, map[string]any{"name": "emax", "transport": "in-process"}, b.rec["strategy"])
-	assert.Equal(t, map[string]any{"name": "remote", "transport": "tcp", "addr": addr}, r.rec["strategy"])
+	assert.Equal(t, map[string]any{"name": "remote", "transport": "tcp", "addr": got.client}, r.rec["strategy"])
 	for _, rec := range []map[string]any{b.rec, r.rec} {
 		delete(rec, "run_id")
 		delete(rec, "strategy")
@@ -599,15 +656,22 @@ func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAX(t *testing.T) {
 	assert.Equal(t, b.events, r.events, "every order, fill and protective exit, in order, to the price")
 	require.Greater(t, len(b.events), 100, "a real comparison, not an empty one")
 	assert.Positive(t, b.rec["result"].(map[string]any)["trades"])
+
+	// The client was told the RunID before anything else, and the result is the summary.
+	assert.Equal(t, got.run.RunID.String(), got.result.RunID)
+	assert.Equal(t, strategy.StatusCompleted, got.result.Status)
+	var summary map[string]any
+	require.NoError(t, json.Unmarshal(got.result.Summary, &summary))
+	assert.Equal(t, r.rec["result"].(map[string]any)["balance"], summary["balance"], "the result is the summary run.json holds")
 }
 
 // January is the month before From, so the built-in EMAX is warmed by it and the
-// worker is sent it as warm-up: the comparison covers a normal historical run. It
+// client is sent it as warm-up: the comparison covers a normal historical run. It
 // is not vacuous: the same February without January trades differently.
 func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAXWhenTheMonthBeforeIsWarmup(t *testing.T) {
-	febReq := func(worker string) BacktestRequest {
+	febReq := func() BacktestRequest {
 		r := backtestReq(t, "EURUSD", "GBPUSD")
-		r.From, r.To, r.Worker = utc(2024, 2, 1, 0), utc(2024, 3, 1, 0), worker
+		r.From, r.To = utc(2024, 2, 1, 0), utc(2024, 3, 1, 0)
 		return r
 	}
 	storetest.Root(t)
@@ -616,85 +680,124 @@ func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAXWhenTheMonthBeforeIsWarmup(t
 		monthSpread(t, "GBPUSD", m, 125000, 3, walkPoints(uint64(m)+10, 600)...)
 	}
 	buildCanonical(t, janToMar("EURUSD", "GBPUSD"))
-	builtin, err := RunBacktest(context.Background(), nil, febReq(""))
+	builtin, err := RunBacktest(context.Background(), nil, febReq())
 	require.NoError(t, err)
 
-	addr, ended := serveEMAX(t, 0)
-	remote, err := RunBacktest(context.Background(), nil, febReq(addr))
-	require.NoError(t, err)
-	require.NoError(t, ended())
+	onBars, warm := emaxClient(t, 0)
+	got := runForClient(t, febReq(), onBars, warm)
+	require.NoError(t, got.runErr)
+	require.NoError(t, got.clientErr)
 
-	b, r := readRunDir(t, builtin.Dir), readRunDir(t, remote.Dir)
+	b, r := readRunDir(t, builtin.Dir), readRunDir(t, got.run.Dir)
 	assert.Equal(t, b.events, r.events, "every order, fill and exit, to the price")
 	assert.Equal(t, b.rec["result"].(map[string]any)["balance"], r.rec["result"].(map[string]any)["balance"])
 	assert.Equal(t, b.rec["result"].(map[string]any)["open"], r.rec["result"].(map[string]any)["open"])
 	require.Greater(t, len(b.events), 100)
 
 	// Without January the built-in run is cold, and it trades differently: the
-	// warm-up is what the worker was compared on.
+	// warm-up is what the client was compared on.
 	storetest.Root(t)
 	monthSpread(t, "EURUSD", time.February, 110000, 3, walkPoints(uint64(time.February), 600)...)
 	monthSpread(t, "GBPUSD", time.February, 125000, 3, walkPoints(uint64(time.February)+10, 600)...)
 	buildCanonical(t, janToMar("EURUSD", "GBPUSD"))
-	cold, err := RunBacktest(context.Background(), nil, febReq(""))
+	cold, err := RunBacktest(context.Background(), nil, febReq())
 	require.NoError(t, err)
 	assert.NotEqual(t, b.events, readRunDir(t, cold.Dir).events)
 }
 
-func TestRunBacktest_ARemoteRunThatLosesItsWorkerKeepsThePartialJournal(t *testing.T) {
+func TestRunBacktest_ARemoteRunThatLosesItsClientKeepsTheRunIDAndThePartialJournal(t *testing.T) {
 	storetest.Root(t)
 	monthSpread(t, "EURUSD", time.January, 110000, 3, walkPoints(1, 600)...)
 	buildCanonical(t, janToMar("EURUSD"))
 	full, err := RunBacktest(context.Background(), nil, backtestReq(t, "EURUSD"))
 	require.NoError(t, err)
 
-	addr, ended := serveEMAX(t, 250) // dies on its 251st group
+	onBars, warm := emaxClient(t, 250) // dies on its 251st group
 	req := backtestReq(t, "EURUSD")
-	req.Worker = addr
-	_, err = RunBacktest(context.Background(), nil, req)
-	require.Error(t, err)
-	require.Error(t, ended())
+	got := runForClient(t, req, onBars, warm)
 
-	assert.ErrorContains(t, err, "strategy remote: reading orders", "the failure says it was the worker")
+	require.Error(t, got.runErr)
+	require.Error(t, got.clientErr, "the client that crashed is told so by its own error")
+	assert.ErrorContains(t, got.runErr, "strategy remote: reading orders", "the failure says it was the client")
+	require.NotNil(t, got.run, "the failed run is returned with its RunID")
+	assert.Equal(t, results.Failed, got.run.Status)
+	assert.Nil(t, got.run.Result)
+
 	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
+	assert.Equal(t, got.run.RunID.String(), run.rec["run_id"])
 	assert.Equal(t, "failed", run.rec["status"])
 	assert.Contains(t, run.rec["error"], "strategy remote: reading orders")
 	assert.NotContains(t, run.rec, "result")
-	assert.Equal(t, map[string]any{"name": "remote", "transport": "tcp", "addr": addr}, run.rec["strategy"])
+	assert.Equal(t, map[string]any{"name": "remote", "transport": "tcp", "addr": got.client}, run.rec["strategy"])
 
 	whole := readRunDir(t, full.Dir).events
-	require.NotEmpty(t, run.events, "what was recorded before the worker died is kept")
+	require.NotEmpty(t, run.events, "what was recorded before the client died is kept")
 	require.Less(t, len(run.events), len(whole), "and the run did not get to the end")
 	assert.Equal(t, whole[:len(run.events)], run.events, "the partial journal is the start of the full one: nothing lost, nothing invented")
 }
 
-func TestRunBacktest_ARemoteRunWithNoWorkerListeningIsAFailedRun(t *testing.T) {
-	storetest.Root(t)
-	monthSpread(t, "EURUSD", time.January, 110000, 3, walkPoints(1, 100)...)
-	buildCanonical(t, janToMar("EURUSD"))
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	addr := ln.Addr().String()
-	require.NoError(t, ln.Close())
+// The RunID goes to the client before any bars, and a run that is then refused by
+// the OnStart hook still keeps its directory, its RunID and a failed record.
+func TestRunBacktest_OnStartGetsTheRunIDBeforeAnythingIsLoadedAndAFailureKeepsTheRun(t *testing.T) {
+	storetest.Root(t) // nothing is built: loading would fail, and must not be reached
 	req := backtestReq(t, "EURUSD")
-	req.Worker = addr
+	var got string
+	req.OnStart = func(runID string) error {
+		got = runID
+		return errors.New("the client is gone")
+	}
 
-	_, err = RunBacktest(context.Background(), nil, req)
+	run, err := RunBacktest(context.Background(), nil, req)
 
 	require.Error(t, err)
-	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
-	assert.Equal(t, "failed", run.rec["status"])
-	assert.Empty(t, run.events)
+	assert.ErrorContains(t, err, "the client is gone")
+	require.NotNil(t, run)
+	assert.Equal(t, run.RunID.String(), got)
+	assert.Equal(t, results.Failed, run.Status)
+	rec := readRunDir(t, onlyRun(t, req.ResultsRoot))
+	assert.Equal(t, "failed", rec.rec["status"])
+	assert.Equal(t, got, rec.rec["run_id"])
+	assert.Empty(t, rec.events)
 }
 
-func TestRunBacktest_AWorkerMustBeOnLoopback(t *testing.T) {
+// A run that fails while loading is a failed run with a RunID, returned with the error.
+func TestRunBacktest_AFailureAfterTheRunWasMadeReturnsTheRun(t *testing.T) {
+	storetest.Root(t) // nothing built: the bars cannot be loaded
+	req := backtestReq(t, "EURUSD")
+
+	run, err := RunBacktest(context.Background(), nil, req)
+
+	require.Error(t, err)
+	require.NotNil(t, run)
+	assert.Equal(t, results.Failed, run.Status)
+	assert.NotEmpty(t, run.Dir)
+	assert.Nil(t, run.Result)
+}
+
+// A cancelled run is returned too, with the cancelled status.
+func TestRunBacktest_ACancelledRunIsReturnedWithTheCancelledStatus(t *testing.T) {
 	storetest.Root(t)
 	monthSpread(t, "EURUSD", time.January, 110000, 3, walkPoints(1, 100)...)
 	buildCanonical(t, janToMar("EURUSD"))
+	ctx, cancel := context.WithCancel(context.Background())
 	req := backtestReq(t, "EURUSD")
-	req.Worker = "8.8.8.8:9100"
+	req.OnStart = func(string) error { cancel(); return nil }
 
-	_, err := RunBacktest(context.Background(), nil, req)
+	run, err := RunBacktest(ctx, nil, req)
 
-	assert.ErrorContains(t, err, "not loopback")
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, run)
+	assert.Equal(t, results.Cancelled, run.Status)
+}
+
+// A request Trader refuses before a run exists has no RunID and no run.
+func TestRunBacktest_ARefusedRequestReturnsNoRun(t *testing.T) {
+	storetest.Root(t)
+	req := backtestReq(t, "EURUSD")
+	req.Source = "stooq"
+
+	run, err := RunBacktest(context.Background(), nil, req)
+
+	require.Error(t, err)
+	assert.Nil(t, run)
 }

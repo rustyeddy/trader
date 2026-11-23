@@ -10,6 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
+	remotestrat "github.com/rustyeddy/trader/strategy"
 )
 
 // Result is the summary of one finished run.
@@ -106,13 +107,14 @@ type RunOptions struct {
 	// error, and what was written before it stays.
 	Journal io.Writer
 
-	// Worker, when not empty, is the loopback host:port of a worker process that
-	// trades instead of the built-in EMAX: Trader connects to it and, for every group
-	// of bars, asks what it wants (package strategy). Everything else is the same run:
-	// the same engine loop, account sizing, broker and journal. The bars before
-	// tradeFrom reach it as warm-up (Client.Warm): it prefills its indicators from
-	// them, and an order in its answer to one is an error.
-	Worker string
+	// Remote, when not nil, is a strategy client that has connected to Trader and
+	// asked for this run: it trades instead of the built-in EMAX. Trader asks it,
+	// for every group of bars, what it wants (package strategy). Everything else is
+	// the same run: the same engine loop, account sizing, broker and journal. The
+	// bars before tradeFrom reach it as warm-up (Client.Warm): it prefills its
+	// indicators from them, and an order in its answer to one is an error. The
+	// connection stays open; whoever accepted it closes it.
+	Remote *remotestrat.Client
 }
 
 // RunSeries backtests the series, which a reader has already loaded, on one
@@ -180,13 +182,8 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 	slices.Sort(instruments)
 
 	var strat strategy
-	if opts.Worker != "" {
-		remote, err := dialRemote(StrategyRemote, opts.Worker)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = remote.close() }() // the worker sees the connection close and stops
-		strat = remote
+	if opts.Remote != nil {
+		strat = newRemote(StrategyRemote, opts.Remote)
 	} else {
 		emax := &emaxEach{id: runStrategy, instruments: instruments, short: runShort, long: runLong,
 			stopPct: rateOnePercent, markets: markets}

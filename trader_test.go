@@ -1,18 +1,16 @@
 package trader
 
 import (
-	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net"
-	"os/exec"
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -241,58 +239,107 @@ type workerOpts struct {
 	decide func(n int, bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error)
 }
 
-// testWorker is the example worker in process: it listens on loopback, serves one
-// connection with strategy.Serve and keeps every group of bars it was sent.
+// testWorker is a strategy client in this process, connected to a real strategy
+// listener the way `trader serve` makes the connection: strategy.ServeRuns on
+// loopback accepts the client's strategy.Run and hands the test the session's
+// Client, which the engine then drives. It keeps every group of bars it was sent.
 type testWorker struct {
-	addr   string
 	groups [][]marketdata.Bar
 	events [][]remotestrat.Event // what came with each group
 	// warmups is what came marked as warm-up, in order; log is every message, warm-up
 	// or group, as "warm" or "group", to show which came first.
 	warmups [][]marketdata.Bar
 	log     []string
-	done    sync.WaitGroup
+
+	sessions chan *remotestrat.Client
+	release  chan struct{}
+	done     sync.WaitGroup // the client's Run
+	result   *remotestrat.Result
+	runErr   error // what the client's Run returned
+	stop     func()
 }
 
-func startWorker(t *testing.T, o workerOpts) *testWorker {
+var testRun = remotestrat.RunRequest{
+	Instruments: []string{"EURUSD"}, Interval: "h1",
+	From: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
+}
+
+// startSession connects a client with the given strategy functions to a strategy
+// listener; warm may be nil.
+func startSession(t *testing.T, onBars func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error), warm func([]marketdata.Bar)) *testWorker {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	w := &testWorker{addr: ln.Addr().String()}
-	w.done.Add(1)
-	t.Cleanup(func() { _ = ln.Close() })
+	w := &testWorker{sessions: make(chan *remotestrat.Client, 1), release: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() {
+		served <- remotestrat.ServeRuns(ctx, ln, func(_ context.Context, _ remotestrat.RunRequest, s *remotestrat.Session) (remotestrat.Result, error) {
+			if err := s.Accept("run_test"); err != nil {
+				return remotestrat.Result{}, err
+			}
+			w.sessions <- s.Client
+			<-w.release // the test is running the engine on the session
+			return remotestrat.Result{RunID: "run_test", Status: remotestrat.StatusCompleted}, nil
+		})
+	}()
+	var once sync.Once
+	w.stop = func() {
+		once.Do(func() {
+			w.release <- struct{}{} // lets the handler return the result
+			w.done.Wait()
+			cancel()
+			require.NoError(t, <-served)
+		})
+	}
+	t.Cleanup(w.stop)
 
+	w.done.Add(1)
 	go func() {
 		defer w.done.Done()
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		defer func() { _ = conn.Close() }()
-		_ = remotestrat.Serve(conn, func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
-			w.log = append(w.log, "group")
-			w.groups = append(w.groups, bars)
-			w.events = append(w.events, events)
-			n := len(w.groups)
-			if o.dropOn > 0 && n == o.dropOn {
-				return nil, errors.New("hang up")
-			}
-			if o.decide != nil {
-				return o.decide(n, bars, events)
-			}
-			return nil, nil
-		}, remotestrat.WithWarmup(func(bars []marketdata.Bar) {
-			w.log = append(w.log, "warm")
-			w.warmups = append(w.warmups, bars)
-		}))
+		w.result, w.runErr = remotestrat.Run(context.Background(), ln.Addr().String(), testRun, onBars, remotestrat.WithWarmup(warm))
 	}()
 	return w
 }
 
-// finish waits for the worker to stop (the trader closed or it hung up) and returns
-// what it was sent.
+// startWorker is startSession with a recording client shaped by o.
+func startWorker(t *testing.T, o workerOpts) *testWorker {
+	t.Helper()
+	var w *testWorker
+	w = startSession(t, func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
+		w.log = append(w.log, "group")
+		w.groups = append(w.groups, bars)
+		w.events = append(w.events, events)
+		n := len(w.groups)
+		if o.dropOn > 0 && n == o.dropOn {
+			return nil, errors.New("hang up")
+		}
+		if o.decide != nil {
+			return o.decide(n, bars, events)
+		}
+		return nil, nil
+	}, func(bars []marketdata.Bar) {
+		w.log = append(w.log, "warm")
+		w.warmups = append(w.warmups, bars)
+	})
+	return w
+}
+
+// client is the session's Client, once the strategy listener has accepted the run.
+func (w *testWorker) client() *remotestrat.Client {
+	return <-w.sessions
+}
+
+// remote is the session as the engine's strategy.
+func (w *testWorker) remote(id string) *remoteStrategy {
+	return newRemote(id, w.client())
+}
+
+// finish ends the session as Trader does when its run is over (the result is sent
+// and the connection closed), waits for the client to stop and returns what it was
+// sent.
 func (w *testWorker) finish() [][]marketdata.Bar {
-	w.done.Wait()
+	w.stop()
 	return w.groups
 }
 
@@ -360,11 +407,9 @@ func TestRemoteStrategy_BacktestMatchesInProcess(t *testing.T) {
 	require.Greater(t, len(ref.groups), 3, "the fixture gives several deliveries")
 
 	w := startWorker(t, workerOpts{})
-	remote, err := dialRemote("remote", w.addr)
-	require.NoError(t, err)
+	remote := w.remote("remote")
 	tr := newRemoteTrader(t, remote)
 	require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
-	require.NoError(t, remote.close())
 
 	assert.Equal(t, jsonOf(t, ref.groups), jsonOf(t, w.finish()), "the worker saw the same groups, in the same order")
 	assert.Empty(t, tr.broker.completed, "no orders, so nothing happened")
@@ -378,51 +423,12 @@ func TestRemoteStrategy_BacktestFailsWhenTheWorkerDisconnects(t *testing.T) {
 	prices := scenarioPrices(t, remoteScenario)
 
 	w := startWorker(t, workerOpts{dropOn: 3})
-	remote, err := dialRemote("remote", w.addr)
-	require.NoError(t, err)
-	defer func() { _ = remote.close() }()
+	remote := w.remote("remote")
 
-	err = (&backtest{}).runSeries(ctx, newRemoteTrader(t, remote), prices)
+	err := (&backtest{}).runSeries(ctx, newRemoteTrader(t, remote), prices)
 	require.Error(t, err, "a dead worker ends the run instead of hanging it")
 	assert.ErrorContains(t, err, "strategy remote")
 	assert.Len(t, w.finish(), 3, "the worker hung up on its third group, which the run never got an answer to")
-}
-
-// TestRemoteStrategy_ExampleWorker runs the real example as a separate process.
-func TestRemoteStrategy_ExampleWorker(t *testing.T) {
-	ctx := context.Background()
-	captureLogs(t)
-	prices := scenarioPrices(t, remoteScenario)
-
-	bin := filepath.Join(t.TempDir(), "remote-strategy")
-	out, err := exec.Command("go", "build", "-o", bin, "./examples/remote-strategy").CombinedOutput()
-	require.NoError(t, err, string(out))
-
-	var stderr bytes.Buffer
-	cmd := exec.Command(bin, "-addr", "127.0.0.1:0")
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	require.NoError(t, err)
-	require.NoError(t, cmd.Start())
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
-
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	require.NoError(t, err)
-	addr := strings.TrimSpace(strings.TrimPrefix(line, "listening on "))
-
-	remote, err := dialRemote("example", addr)
-	require.NoError(t, err)
-	tr := newRemoteTrader(t, remote)
-	require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
-	require.NoError(t, remote.close())
-	require.NoError(t, cmd.Wait(), "the worker exits when the trader closes")
-
-	ref := newRemoteTrader(t, newInProcessRule(ruleStopDistance))
-	require.NoError(t, (&backtest{}).runSeries(ctx, ref, prices))
-	assert.Equal(t, outcomeOf(ref), outcomeOf(tr), "the real example trades like the in-process rule")
-	assert.Equal(t, 1, len(tr.account.trades), "it opened and closed one position")
-	assert.Contains(t, stderr.String(), "done: ")
-	assert.Contains(t, stderr.String(), "event: 2010-01-07 filled open EURUSD strategy ref=\"entry\"", "the example prints what Trader reports")
 }
 
 // The example worker's rule, once as the worker answers it and once as an
@@ -560,11 +566,9 @@ func TestRemoteStrategy_OrdersMatchInProcess(t *testing.T) {
 	assert.NotZero(t, want.orders[0].units, "the trader sized it, the strategy did not")
 
 	w := startWorker(t, workerOpts{decide: ruleWorker(ruleStopDistance)})
-	remote, err := dialRemote("remote", w.addr)
-	require.NoError(t, err)
+	remote := w.remote("remote")
 	tr := newRemoteTrader(t, remote)
 	require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
-	require.NoError(t, remote.close())
 	w.finish()
 
 	got := outcomeOf(tr)
@@ -601,11 +605,9 @@ func TestRemoteStrategy_FeedbackMatchesInProcess(t *testing.T) {
 			require.NoError(t, (&backtest{}).runSeries(ctx, inProc, prices))
 
 			w := startWorker(t, workerOpts{decide: ruleWorker(tt.distance)})
-			remote, err := dialRemote("remote", w.addr)
-			require.NoError(t, err)
+			remote := w.remote("remote")
 			tr := newRemoteTraderWith(t, remote, tt.balance)
 			require.NoError(t, (&backtest{}).runSeries(ctx, tr, prices))
-			require.NoError(t, remote.close())
 			w.finish()
 
 			var told []string
@@ -654,18 +656,15 @@ func TestRemoteStrategy_BadOrdersFailTheRunAndProcessNone(t *testing.T) {
 				}
 				return nil, nil
 			}})
-			remote, err := dialRemote("remote", w.addr)
-			require.NoError(t, err)
-			defer func() { _ = remote.close() }()
+			remote := w.remote("remote")
 			tr := newRemoteTrader(t, remote)
 
-			err = (&backtest{}).runSeries(ctx, tr, prices)
+			err := (&backtest{}).runSeries(ctx, tr, prices)
 			require.ErrorContains(t, err, tt.want)
 			assert.Empty(t, tr.broker.completed, "no order of the failed group was processed")
 			assert.Empty(t, tr.broker.orders["EURUSD"])
 			assert.Empty(t, tr.rejected)
 			assert.Empty(t, tr.account.trades)
-			require.NoError(t, remote.close()) // the worker stops when the trader hangs up
 			assert.Len(t, w.finish(), ruleOpenAt, "the run stopped at the group that failed")
 		})
 	}
@@ -677,26 +676,20 @@ func emaxConfig() emaxworker.Config {
 	return emaxworker.Config{Short: runShort, Long: runLong, StopPct: rateOnePercent, Tick: px(1)}
 }
 
-// serveEMAX serves examples/emax in this process over loopback TCP, through the
-// public SDK only, and returns its address. The worker stops when the trader hangs
-// up, which the run does when it ends; the test waits for that.
-func serveEMAX(t *testing.T, cfg emaxworker.Config) string {
+// serveEMAX is examples/emax as a strategy client, connected to a strategy listener
+// as for a real run, through the public SDK only. It returns the session for
+// RunOptions.Remote. When the test ends the run's result is sent, and the client
+// must end cleanly on it.
+func serveEMAX(t *testing.T, cfg emaxworker.Config) *remotestrat.Client {
 	t.Helper()
 	s, err := emaxworker.New(cfg)
 	require.NoError(t, err)
-
-	addrs := make(chan string, 1)
-	done := make(chan error, 1)
-	go func() {
-		done <- remotestrat.ListenAndServe("127.0.0.1:0",
-			func(a net.Addr) { addrs <- a.String() },
-			func(bars []marketdata.Bar, events []remotestrat.Event) ([]remotestrat.Order, error) {
-				return s.OnBars(bars, events)
-			}, remotestrat.WithWarmup(s.Warm))
-	}()
-	addr := <-addrs
-	t.Cleanup(func() { require.NoError(t, <-done, "the worker ends cleanly when the run closes the connection") })
-	return addr
+	w := startSession(t, s.OnBars, s.Warm)
+	t.Cleanup(func() {
+		w.stop()
+		require.NoError(t, w.runErr, "the client ends cleanly on the run's result")
+	})
+	return w.client()
 }
 
 // parityRun is one run, journaled.
@@ -746,7 +739,7 @@ func TestEMAXParity_RemoteMatchesBuiltInOnTheScenarios(t *testing.T) {
 			prices := scenarioPrices(t, scenario)
 
 			builtin := runParity(t, RunOptions{}, prices)
-			remote := runParity(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, prices)
+			remote := runParity(t, RunOptions{Remote: serveEMAX(t, emaxConfig())}, prices)
 
 			assertParity(t, builtin, remote)
 		})
@@ -779,7 +772,7 @@ func TestEMAXParity_RemoteMatchesBuiltInOnALongTwoInstrumentWalk(t *testing.T) {
 	eur, gbp := randomWalk("EURUSD", 110000, 1500, 1), randomWalk("GBPUSD", 125000, 1500, 2)
 
 	builtin := runParity(t, RunOptions{}, eur, gbp)
-	remote := runParity(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, eur, gbp)
+	remote := runParity(t, RunOptions{Remote: serveEMAX(t, emaxConfig())}, eur, gbp)
 
 	assertParity(t, builtin, remote)
 	// The walk is not a vacuous comparison: it opens, flips and stops out.
@@ -799,7 +792,7 @@ func TestEMAXParity_ADifferentWorkerIsCaught(t *testing.T) {
 	wider.StopPct = num.MustParseRate("0.02")
 
 	builtin := runParity(t, RunOptions{}, walk)
-	other := runParity(t, RunOptions{Worker: serveEMAX(t, wider)}, walk)
+	other := runParity(t, RunOptions{Remote: serveEMAX(t, wider)}, walk)
 
 	assert.NotEqual(t, builtin.journal, other.journal)
 }
@@ -812,7 +805,7 @@ func TestRunSeriesWith_AWorkerIsWarmedWithTheBarsBeforeTradeFrom(t *testing.T) {
 	from := walk.Bars[100].Time
 	w := startWorker(t, workerOpts{})
 
-	res, err := RunSeriesWith(context.Background(), RunOptions{Worker: w.addr}, "x", from, walk)
+	res, err := RunSeriesWith(context.Background(), RunOptions{Remote: w.client()}, "x", from, walk)
 
 	require.NoError(t, err)
 	groups := w.finish()
@@ -836,7 +829,7 @@ func TestEMAXParity_RemoteMatchesBuiltInWhenBothAreWarmed(t *testing.T) {
 	from := walk.Bars[200].Time
 
 	builtin := runParityFrom(t, RunOptions{}, from, walk)
-	remote := runParityFrom(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, from, walk)
+	remote := runParityFrom(t, RunOptions{Remote: serveEMAX(t, emaxConfig())}, from, walk)
 
 	assertParity(t, builtin, remote)
 	cold := walk
@@ -853,27 +846,49 @@ func TestEMAXParity_RemoteMatchesBuiltInWhenBothAreWarmedOnTwoInstruments(t *tes
 	from := eur.Bars[250].Time
 
 	builtin := runParityFrom(t, RunOptions{}, from, eur, gbp)
-	remote := runParityFrom(t, RunOptions{Worker: serveEMAX(t, emaxConfig())}, from, eur, gbp)
+	remote := runParityFrom(t, RunOptions{Remote: serveEMAX(t, emaxConfig())}, from, eur, gbp)
 
 	assertParity(t, builtin, remote)
 	assert.Greater(t, builtin.summary.Orders.Filled, 30)
 }
 
-// A worker that cannot take the warm-up ends the run before anything is traded.
-func TestRunSeriesWith_AWorkerThatDropsDuringWarmupFailsTheRun(t *testing.T) {
+// A client that hangs up as the warm-up begins ends the run before anything is
+// traded.
+func TestRunSeriesWith_AClientThatDropsDuringWarmupFailsTheRun(t *testing.T) {
 	captureLogs(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = ln.Close() })
+	handed := make(chan *remotestrat.Client, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
 	go func() {
-		if conn, err := ln.Accept(); err == nil {
-			_ = conn.Close()
-		}
+		served <- remotestrat.ServeRuns(ctx, ln, func(_ context.Context, _ remotestrat.RunRequest, s *remotestrat.Session) (remotestrat.Result, error) {
+			if err := s.Accept("run_test"); err != nil {
+				return remotestrat.Result{}, err
+			}
+			handed <- s.Client
+			time.Sleep(200 * time.Millisecond) // the engine runs on the session meanwhile
+			return remotestrat.Result{RunID: "run_test", Status: remotestrat.StatusFailed}, nil
+		})
 	}()
+	t.Cleanup(func() { cancel(); <-served })
+
+	// A client by hand: it asks for the run, is accepted and hangs up.
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	require.NoError(t, err)
+	body := `{"run":{"instruments":["EURUSD"],"interval":"h1","from":"2024-01-01T00:00:00Z","to":"2024-02-01T00:00:00Z"}}`
+	_, err = conn.Write(append(binary.BigEndian.AppendUint32(nil, uint32(len(body))), body...))
+	require.NoError(t, err)
+	var prefix [4]byte
+	_, err = io.ReadFull(conn, prefix[:])
+	require.NoError(t, err)
+	_, err = io.ReadFull(conn, make([]byte, binary.BigEndian.Uint32(prefix[:])))
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+
 	walk := randomWalk("EURUSD", 110000, 100, 3)
 	var journal bytes.Buffer
-
-	_, err = RunSeriesWith(context.Background(), RunOptions{Worker: ln.Addr().String(), Journal: &journal}, "x", walk.Bars[50].Time, walk)
+	_, err = RunSeriesWith(context.Background(), RunOptions{Remote: <-handed, Journal: &journal}, "x", walk.Bars[50].Time, walk)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "warm-up")

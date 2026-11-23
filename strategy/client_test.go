@@ -34,21 +34,15 @@ func rawWorker(t *testing.T, handle func(net.Conn)) string {
 
 var oneBar = []marketdata.Bar{{Instrument: "EURUSD", Volume: 1}}
 
-func TestDial_LoopbackOnly(t *testing.T) {
-	for _, addr := range []string{"8.8.8.8:9100", "example.com:9100", "0.0.0.0:9100", "no-port"} {
-		_, err := Dial(addr)
-		assert.Error(t, err, addr)
+// dialClient is Trader's end of a connection to a hand-written peer at addr.
+func dialClient(t *testing.T, addr string) (*Client, error) {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
 	}
-}
-
-func TestDial_NothingListening(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	addr := ln.Addr().String()
-	require.NoError(t, ln.Close())
-
-	_, err = Dial(addr)
-	assert.Error(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return NewClient(conn), nil
 }
 
 // writeRaw sends body as one message, bypassing the types, so a test can send what
@@ -69,9 +63,8 @@ func answerWith(t *testing.T, body string) *Client {
 			writeRaw(c, body)
 		}
 	})
-	r, err := Dial(addr)
+	r, err := dialClient(t, addr)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = r.Close() })
 	return r
 }
 
@@ -118,9 +111,8 @@ func TestClient_OnBars(t *testing.T) {
 				writeRaw(c, `{"orders":[]}`)
 			}
 		})
-		r, err := Dial(addr)
+		r, err := dialClient(t, addr)
 		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
 
 		_, err = r.OnBars(ctx, oneBar, nil)
 		require.NoError(t, err)
@@ -154,9 +146,8 @@ func TestClient_OnBars(t *testing.T) {
 			var in barsMessage
 			_ = readMessage(c, &in)
 		})
-		r, err := Dial(addr)
+		r, err := dialClient(t, addr)
 		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
 		_, err = r.OnBars(ctx, oneBar, nil)
 		assert.ErrorContains(t, err, "reading orders")
 	})
@@ -168,9 +159,8 @@ func TestClient_OnBars(t *testing.T) {
 			_ = readMessage(c, &in)
 			<-release // connected, took the bars, never answers
 		})
-		r, err := Dial(addr)
+		r, err := dialClient(t, addr)
 		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
 		r.Timeout = 50 * time.Millisecond
 
 		start := time.Now()
@@ -186,9 +176,8 @@ func TestClient_OnBars(t *testing.T) {
 			_ = readMessage(c, &in)
 			<-release
 		})
-		r, err := Dial(addr) // default 30 s timeout: only the cancel can end this in time
+		r, err := dialClient(t, addr) // default 30 s timeout: only the cancel can end this in time
 		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
 
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(50*time.Millisecond, cancel)
@@ -205,9 +194,8 @@ func TestClient_OnBars(t *testing.T) {
 			_ = readMessage(c, &in)
 			<-release
 		})
-		r, err := Dial(addr)
+		r, err := dialClient(t, addr)
 		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
 
 		cctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
@@ -230,9 +218,8 @@ func TestClient_Warm(t *testing.T) {
 			got.Warmup, _ = in["warmup"].(bool)
 			writeRaw(c, `{"orders":[]}`)
 		})
-		r, err := Dial(addr)
+		r, err := dialClient(t, addr)
 		require.NoError(t, err)
-		defer func() { _ = r.Close() }()
 
 		require.NoError(t, r.Warm(ctx, oneBar))
 

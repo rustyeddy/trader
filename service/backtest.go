@@ -14,6 +14,7 @@ import (
 	"github.com/rustyeddy/trader/internal/id"
 	"github.com/rustyeddy/trader/internal/results"
 	"github.com/rustyeddy/trader/marketdata"
+	remotestrat "github.com/rustyeddy/trader/strategy"
 )
 
 // DefaultResultsRoot is where a run's results go when nothing else is configured.
@@ -38,10 +39,19 @@ type BacktestRequest struct {
 	AllowBad     bool
 	AllowMissing bool
 
-	// Worker, when not empty, is the loopback host:port of a worker process that
-	// trades instead of the built-in EMAX (see trader.RunOptions.Worker). It is
-	// warmed up from the months before From like the built-in strategy.
-	Worker string
+	// Remote, when not nil, is a strategy client connected to Trader that asked for
+	// this run and trades it instead of the built-in EMAX (see
+	// trader.RunOptions.Remote); RemoteAddr is its address, recorded in run.json. It
+	// is warmed up from the months before From like the built-in strategy. The
+	// connection is the caller's to close.
+	Remote     *remotestrat.Client
+	RemoteAddr string
+
+	// OnStart, when not nil, is called with the RunID as soon as the run exists
+	// (its directory and journal are made) and before anything is loaded or traded.
+	// If it returns an error the run is not carried on: it ends as failed with that
+	// error, and keeps its RunID.
+	OnStart func(runID string) error
 
 	// ResultsRoot is the directory the run's results go under (results.DefaultRoot
 	// unless the transport was told otherwise). It is required: every run is
@@ -49,13 +59,16 @@ type BacktestRequest struct {
 	ResultsRoot string
 }
 
-// BacktestRun is a finished backtest: the engine's summary and where the run's
-// results are.
+// BacktestRun is a backtest: the engine's summary and where the run's results are.
+// RunBacktest also returns one, without a Result, alongside the error of a run that
+// failed or was cancelled after it was made, so the caller can say which run it was.
 type BacktestRun struct {
 	*trader.Result
 	RunID id.RunID
 	// Dir is the run's directory: run.json and events.jsonl.
 	Dir string
+	// Status is how the run ended in run.json: completed, failed or cancelled.
+	Status string
 }
 
 // RunBacktest loads the canonical series for req (LoadSeries) and replays them on
@@ -97,23 +110,31 @@ func RunBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest) (*B
 		Instruments: req.Instruments, From: req.From.UTC(), To: req.To.UTC(), StartedAt: clock.Clock(),
 	}
 	rec.Strategy.Name, rec.Strategy.Transport = trader.StrategyEMAX, "in-process"
-	if req.Worker != "" {
-		rec.Strategy.Name, rec.Strategy.Transport, rec.Strategy.Addr = trader.StrategyRemote, "tcp", req.Worker
+	if req.Remote != nil {
+		rec.Strategy.Name, rec.Strategy.Transport, rec.Strategy.Addr = trader.StrategyRemote, "tcp", req.RemoteAddr
 	}
 	run, err := results.Start(req.ResultsRoot, rec)
 	if err != nil {
 		return nil, fmt.Errorf("backtest: %w", err)
 	}
 
-	res, err := runBacktest(ctx, log, req, source, run.Journal())
+	var res *trader.Result
+	if req.OnStart != nil {
+		err = req.OnStart(runID.String())
+	}
+	if err == nil {
+		res, err = runBacktest(ctx, log, req, source, run.Journal())
+	}
 	var summary any
 	if res != nil {
 		summary = res.Summary()
 	}
-	if err = run.Finish(err, summary); err != nil {
-		return nil, fmt.Errorf("%w (run %s, journal in %s)", err, runID, run.Dir())
+	err = run.Finish(err, summary)
+	done := &BacktestRun{Result: res, RunID: runID, Dir: run.Dir(), Status: run.Status()}
+	if err != nil {
+		return done, fmt.Errorf("%w (run %s, journal in %s)", err, runID, run.Dir())
 	}
-	return &BacktestRun{Result: res, RunID: runID, Dir: run.Dir()}, nil
+	return done, nil
 }
 
 // runBacktest loads and replays, writing the engine's journal to journal.
@@ -155,7 +176,7 @@ func runBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest, sou
 		}
 		series = append(series, s)
 	}
-	res, err := trader.RunSeriesWith(ctx, trader.RunOptions{Journal: journal, Worker: req.Worker}, what, req.From, series...)
+	res, err := trader.RunSeriesWith(ctx, trader.RunOptions{Journal: journal, Remote: req.Remote}, what, req.From, series...)
 	if err != nil {
 		return nil, fmt.Errorf("backtest %s: %w", what, err)
 	}

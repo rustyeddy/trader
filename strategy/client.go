@@ -14,7 +14,7 @@ import (
 // DefaultTimeout is how long Client waits for the worker to answer one group.
 const DefaultTimeout = 30 * time.Second
 
-// Client is the trader's end of a connection to a worker.
+// Client is Trader's end of an accepted connection to a strategy.
 type Client struct {
 	// Timeout is how long OnBars waits for an answer; zero means DefaultTimeout.
 	Timeout time.Duration
@@ -22,21 +22,11 @@ type Client struct {
 	conn net.Conn
 }
 
-// Dial connects to a worker listening at addr, which must be a loopback address:
-// nothing here is authenticated or encrypted.
-func Dial(addr string) (*Client, error) {
-	if err := requireLoopback(addr); err != nil {
-		return nil, err
-	}
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	return &Client{conn: conn}, nil
+// NewClient is Trader's end of an accepted connection: it sends the bars and reads
+// the orders back. The connection's owner closes it.
+func NewClient(conn net.Conn) *Client {
+	return &Client{conn: conn}
 }
-
-// Close ends the session; the worker sees the connection close and stops.
-func (r *Client) Close() error { return r.conn.Close() }
 
 // OnBars sends one group of bars with the events since the last group (none is
 // fine) and waits for the answer: the orders the worker requests, in order,

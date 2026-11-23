@@ -159,10 +159,14 @@ account and broker (`replay.go`, `backtest.go`):
   and the run directory (`internal/results`, the one package that opens those files),
   then `LoadSeries` (the market-data service's policy for missing, bad and stale
   months), then `RunSeriesWith`, then finalizes `run.json`; `trader backtest` only
-  parses flags and prints. `RunOptions.Worker` (`--worker`) swaps the built-in strategy
-  for a remote one (`strategy_remote.go`, the transport in package `strategy`) with
-  everything else unchanged; `examples/emax` is the canonical worker, and its parity
-  with the built-in EMAX is tested (`trader_test.go`, `service/backtest_test.go`).
+  parses flags and prints. `RunOptions.Remote` swaps the built-in strategy
+  for a strategy client that connected to Trader (`strategy_remote.go`, the transport
+  in package `strategy`) with everything else unchanged. `trader serve` accepts those
+  clients (`strategy.ServeRuns`, one connection and one run at a time; its handler,
+  `cmd/trader/strategyserver.go`, calls `service.RunBacktest` with the session as the
+  strategy and `OnStart` sending the RunID); the client side is `strategy.Run`.
+  `examples/emax` is the canonical client, and its parity with the built-in EMAX is
+  tested (`trader_test.go`, `service/backtest_test.go`, `cmd/trader`).
 - Mid prices and ticks (#667). A canonical mid is the exact midpoint of bid and
   ask, so it can sit half a tick from a whole tick (1.100005 for ticks of 0.00001).
   `trader.RunSeries` rounds every bar price to the nearest tick of the market (a
@@ -181,10 +185,10 @@ account and broker (`replay.go`, `backtest.go`):
   bars of the UTC month before `From` when they can be loaded: it uses the loader
   and the run's `AllowBad`, treats a missing month as simply absent, and runs an
   instrument without warm-up (logged) when its earlier months are stale or bad.
-  Only the traded range is strict. A remote worker is a `warmer` too: each warm-up
-  group is sent over the same connection as `{"bars":..., "events":[], "warmup":true}`
-  (`Client.Warm`), the worker's `strategy.WithWarmup` function learns from it, and it
-  answers with no orders; an order in that answer fails the run.
+  Only the traded range is strict. A remote strategy is a `warmer` too: each
+  warm-up group is sent over the same connection as `{"bars":..., "events":[],
+  "warmup":true}` (`Client.Warm`), the client's `strategy.WithWarmup` function learns
+  from it, and it answers with no orders; an order in that answer fails the run.
 
 ## Tests
 

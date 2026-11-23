@@ -290,16 +290,31 @@ positions), then `run <RunID>: <directory>`.
 
 ### An external strategy
 
-`--worker host:port` trades with a strategy running as its own process on a loopback
-address instead of the built-in EMAX. Trader sends each group of completed bars over TCP
-and JSON; the worker answers with the orders it wants (it never says how many units);
-Trader sizes, admits, fills and journals them as it does for the built-in strategy. A
-worker is warmed up like the built-in strategy: the month before `--from` is sent first,
-marked as warm-up, for it to prefill its indicators; nothing is traded on it, and a
-worker that answers it with an order fails the run. [`examples/emax`](../examples/emax/README.md) is the canonical worker (the same
-EMAX, written against the public SDK) and its README says how to run it and read the
-journal. A worker that cannot be reached, disconnects or crashes ends the run as
-`failed`, with the events recorded until then.
+`trader serve` also accepts strategy clients, on by default at `127.0.0.1:9100`
+(`--strategy-listen`; an empty value turns it off; loopback only). A strategy is a
+separate process that connects, asks for one backtest (instruments, interval, range),
+trades it and receives the result, and Trader stays up for the next client.
+
+```sh
+trader serve                                  # terminal 1: Trader, staying up
+go run ./examples/emax -instrument EURUSD,GBPUSD -interval h1 \
+    -from 2024-01-01 -to 2024-04-01           # terminal 2: a strategy client
+```
+
+Trader loads the bars, sends them over TCP and JSON group by group, and the strategy
+answers with the orders it wants (it never says how many units); Trader sizes, admits,
+fills and journals them as it does for the built-in strategy, under the results root
+(`--results-root` on `trader serve`, like `trader backtest`). The strategy is warmed up
+like the built-in one: the month before the range is sent first, marked as warm-up, for
+it to prefill its indicators; nothing is traded on it, and a client that answers it with
+an order fails the run. The client gets the RunID as soon as the run exists and, at the
+end, the result: RunID, status and the summary. Trader runs one backtest at a time: a
+second client waits until the first is done and gives up after its own timeout. A client
+that disconnects, times out or sends something invalid ends only its own run, journaled
+as `failed` with the events recorded until then, and the server goes on. Interrupting
+`trader serve` cancels the run in progress, journals it as `cancelled`, and exits.
+[`examples/emax`](../examples/emax/README.md) is the canonical client (the same EMAX,
+written against the public SDK); its README says how to run it and read the journal.
 
 ### Results
 
