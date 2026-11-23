@@ -67,10 +67,13 @@ func newApp() *app {
 			return a.run(cmd.OutOrStdout())
 		},
 	}
+	a.cmd.Version = version()
+	a.cmd.SetVersionTemplate("trader {{.Version}}\n")
 	a.flags.register(a.cmd)
 	a.cmd.AddCommand(newDataCmd(a))
 	a.cmd.AddCommand(newBacktestCmd(a))
 	a.cmd.AddCommand(newServeCmd(a))
+	a.cmd.AddCommand(newVersionCmd())
 	return a
 }
 
