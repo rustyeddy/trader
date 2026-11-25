@@ -824,6 +824,11 @@ func TestRunBacktest_AccountJournalReconcilesWithTheRecord(t *testing.T) {
 				PeakTime   time.Time `json:"peak_time"`
 				TroughTime time.Time `json:"trough_time"`
 			} `json:"max_drawdown"`
+			MaxPercentDrawdown struct {
+				Pct        string
+				PeakTime   time.Time `json:"peak_time"`
+				TroughTime time.Time `json:"trough_time"`
+			} `json:"max_percent_drawdown"`
 		}
 	}
 	data, err := os.ReadFile(filepath.Join(res.Dir, results.RunFile))
@@ -857,19 +862,29 @@ func TestRunBacktest_AccountJournalReconcilesWithTheRecord(t *testing.T) {
 	}
 	peak, peakAt := rat(lines[0].Equity.Amount), lines[0].Time
 	depth, peakOf, troughAt := new(big.Rat), peakAt, peakAt
+	pct, pctPeakOf, pctTroughAt := new(big.Rat), peakAt, peakAt
 	for _, l := range lines[1:] {
 		e := rat(l.Equity.Amount)
 		if e.Cmp(peak) > 0 {
 			peak, peakAt = e, l.Time
 		}
-		if d := new(big.Rat).Sub(peak, e); d.Cmp(depth) > 0 {
+		d := new(big.Rat).Sub(peak, e)
+		if d.Cmp(depth) > 0 {
 			depth, peakOf, troughAt = d, peakAt, l.Time
+		}
+		if p := new(big.Rat).Quo(d, peak); p.Cmp(pct) > 0 {
+			pct, pctPeakOf, pctTroughAt = p, peakAt, l.Time
 		}
 	}
 	dd := recFile.Result.MaxDrawdown
 	assert.Equal(t, 0, depth.Cmp(rat(dd.Amount.Amount)), "drawdown %s vs run.json %s", depth.FloatString(8), dd.Amount.Amount)
 	assert.True(t, peakOf.Equal(dd.PeakTime))
 	assert.True(t, troughAt.Equal(dd.TroughTime))
+	pctDD := recFile.Result.MaxPercentDrawdown
+	percent := new(big.Rat).Mul(pct, big.NewRat(100, 1))
+	assert.Equal(t, percent.FloatString(6), rat(pctDD.Pct).FloatString(6))
+	assert.True(t, pctPeakOf.Equal(pctDD.PeakTime))
+	assert.True(t, pctTroughAt.Equal(pctDD.TroughTime))
 	assert.Positive(t, depth.Sign(), "the wave loses money at some point, so the check is not vacuous")
 	last := lines[len(lines)-1]
 	assert.Equal(t, 0, rat(last.Equity.Amount).Cmp(rat(recFile.Result.Equity.Amount)))

@@ -125,8 +125,9 @@ type result struct {
 	open                                  []position
 
 	// From the account observations, when the run made them (RunSeriesWith).
-	drawdown     *Drawdown
-	netReturnPct num.Rate
+	drawdown        *Drawdown // largest by amount
+	percentDrawdown *Drawdown // largest by percentage
+	netReturnPct    num.Rate
 }
 
 func newResult(scenario string, bars int, tr *trader) (*result, error) {

@@ -369,6 +369,14 @@ account observations and the run's trade counts (nothing else is measured):
   "trough_equity": {"amount": "9904.80136", "currency": "USD"},
   "peak_time": "2024-01-05T16:00:00Z",
   "trough_time": "2024-01-23T03:00:00Z"
+},
+"max_percent_drawdown": {
+  "amount": {"amount": "218.501", "currency": "USD"},
+  "pct": "2.15839646",
+  "peak_equity": {"amount": "10123.30236", "currency": "USD"},
+  "trough_equity": {"amount": "9904.80136", "currency": "USD"},
+  "peak_time": "2024-01-05T16:00:00Z",
+  "trough_time": "2024-01-23T03:00:00Z"
 }
 ```
 
@@ -376,19 +384,25 @@ account observations and the run's trade counts (nothing else is measured):
   (`1.5` is 1.5%). Equity includes open positions at their latest mark.
 - `win_rate`: `wins / trades` as a fraction, `null` when no trade closed. A trade is
   a closed position; break-even trades count in `trades`, not in `wins`.
-- `max_drawdown`: the deepest mark-to-market equity drawdown, not a balance
-  drawdown, so open-position losses count. Replaying `account.jsonl`: the peak is the
-  highest `equity` so far (the first line takes part, and a later equal equity does not
-  move the peak time), the depth is peak minus `equity`, and `amount` is the largest
-  depth (the first, if two are equal), `pct` that depth as a percentage of the peak it
-  fell from (the episode with the deepest amount, not necessarily the largest
-  percentage), with the peak's and the trough's `time` and equity. A run that never
-  falls (no trades, or only rising equity) reports zero, and the peak and trough are
-  the first line. A fall that never recovers is still the drawdown. It is sampled at
-  frame close, not intrabar: an excursion inside a bar is not seen. Missing marks are
-  never replaced, and an observation that cannot be valued fails the run rather than
-  giving a statistic. The last line equals the summary's final `balance`, `unrealized`
-  and `equity`; the run fails if it does not.
+- `max_drawdown` and `max_percent_drawdown`: mark-to-market equity drawdowns, not
+  balance drawdowns, so open-position losses count. Replaying `account.jsonl`: the
+  peak is the highest `equity` so far (the first line takes part, and a later equal
+  equity does not move the peak time), the depth is peak minus `equity`, and the
+  percentage is the depth over that peak, to eight places.
+  - `max_drawdown` is the fall with the largest `amount`. Its `pct` belongs to that
+    fall and is not necessarily the run's largest percentage.
+  - `max_percent_drawdown` is the fall with the largest `pct`: use it for the maximum
+    percentage drawdown. Its `amount` belongs to that fall.
+
+  For equity `100, 80, 200, 170`, `max_drawdown` is 30 (15%, from 200) and
+  `max_percent_drawdown` is 20% (20, from 100). The two are often the same fall, as
+  above. Each takes the first of equals and has that fall's peak and trough `time`
+  and equity. A run that never falls (no trades, or only rising equity) reports zero,
+  and the peak and trough are the first line. A fall that never recovers still
+  counts. Equity is sampled at frame close, not intrabar: an excursion inside a bar
+  is not seen. Missing marks are never replaced, and an observation that cannot be
+  valued fails the run rather than giving a statistic. The last line equals the
+  summary's final `balance`, `unrealized` and `equity`; the run fails if it does not.
 
 ```sh
 ls /srv/trading/backtest/results                       # one directory per run

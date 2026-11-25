@@ -72,6 +72,26 @@ func replayDrawdown(t *testing.T, obss []obs) (depth, pct *big.Rat, peakAt, trou
 	return depth, pct, peakAt, troughAt
 }
 
+// replayPercentDrawdown is the fall with the largest percentage of its own peak,
+// computed from the persisted lines alone.
+func replayPercentDrawdown(t *testing.T, obss []obs) (depth, pct *big.Rat, peakAt, troughAt time.Time) {
+	t.Helper()
+	require.NotEmpty(t, obss)
+	peak, peakTime := obss[0].Equity.rat(t), obss[0].Time
+	depth, pct, peakAt, troughAt = new(big.Rat), new(big.Rat), peakTime, peakTime
+	for _, o := range obss[1:] {
+		e := o.Equity.rat(t)
+		if e.Cmp(peak) > 0 {
+			peak, peakTime = e, o.Time
+		}
+		d := new(big.Rat).Sub(peak, e)
+		if p := new(big.Rat).Mul(new(big.Rat).Quo(d, peak), big.NewRat(100, 1)); p.Cmp(pct) > 0 {
+			depth, pct, peakAt, troughAt = d, p, peakTime, o.Time
+		}
+	}
+	return depth, pct, peakAt, troughAt
+}
+
 // observed replays the series through a trader running strat with an account log
 // and returns the log, the lines it wrote and the trader.
 func observed(t *testing.T, strat strategy, series ...marketdata.Series) (*accountLog, []obs, *trader) {
@@ -84,19 +104,26 @@ func observed(t *testing.T, strat strategy, series ...marketdata.Series) (*accou
 	return tr.accountLog, readObs(t, buf.String()), tr
 }
 
-// agreesWithReplay checks the drawdown the log tracked against the replay of the
+// agreesWithReplay checks both drawdowns the log tracked against the replay of the
 // lines it wrote, field by field.
 func agreesWithReplay(t *testing.T, l *accountLog, obss []obs) {
 	t.Helper()
 	depth, pct, peakAt, troughAt := replayDrawdown(t, obss)
-	assert.Equal(t, depth.Cmp(ratOf(l.dd.Amount)), 0, "amount: replay %s, tracked %s", depth.FloatString(8), l.dd.Amount)
-	tracked, ok := new(big.Rat).SetString(l.dd.Pct.String())
+	sameDrawdown(t, l.dd, depth, pct, peakAt, troughAt)
+	depth, pct, peakAt, troughAt = replayPercentDrawdown(t, obss)
+	sameDrawdown(t, l.pctDD, depth, pct, peakAt, troughAt)
+}
+
+func sameDrawdown(t *testing.T, got Drawdown, depth, pct *big.Rat, peakAt, troughAt time.Time) {
+	t.Helper()
+	assert.Equal(t, 0, depth.Cmp(ratOf(got.Amount)), "amount: replay %s, tracked %s", depth.FloatString(8), got.Amount)
+	tracked, ok := new(big.Rat).SetString(got.Pct.String())
 	require.True(t, ok)
 	half := big.NewRat(1, 200000000) // the tracked value is rounded to 8 places
 	diff := new(big.Rat).Abs(new(big.Rat).Sub(pct, tracked))
-	assert.LessOrEqual(t, diff.Cmp(half), 0, "percentage: replay %s, tracked %s", pct.FloatString(10), l.dd.Pct)
-	assert.True(t, peakAt.Equal(l.dd.PeakTime), "peak time %s vs %s", peakAt, l.dd.PeakTime)
-	assert.True(t, troughAt.Equal(l.dd.TroughTime), "trough time %s vs %s", troughAt, l.dd.TroughTime)
+	assert.LessOrEqual(t, diff.Cmp(half), 0, "percentage: replay %s, tracked %s", pct.FloatString(10), got.Pct)
+	assert.True(t, peakAt.Equal(got.PeakTime), "peak time %s vs %s", peakAt, got.PeakTime)
+	assert.True(t, troughAt.Equal(got.TroughTime), "trough time %s vs %s", troughAt, got.TroughTime)
 }
 
 func TestAccountLog_FlatEquityWithNoTrades(t *testing.T) {
@@ -120,6 +147,7 @@ func TestAccountLog_FlatEquityWithNoTrades(t *testing.T) {
 	assert.True(t, l.dd.Amount.IsZero())
 	assert.True(t, l.dd.Pct.IsZero())
 	assert.True(t, l.dd.PeakTime.Equal(hour(0)) && l.dd.TroughTime.Equal(hour(0)), "peak and trough are the initial observation")
+	assert.Equal(t, l.dd, l.pctDD)
 	agreesWithReplay(t, l, obss)
 }
 
@@ -166,6 +194,25 @@ func TestAccountLog_UnrecoveredDrawdownIsTheDrawdown(t *testing.T) {
 	assert.Equal(t, usd(50), l.dd.Amount, "from 10030 to 9980 at the last frame")
 	assert.Equal(t, usd(9980), l.dd.TroughEquity)
 	assert.True(t, l.dd.TroughTime.Equal(obss[len(obss)-1].Time), "the trough is the last observation")
+	agreesWithReplay(t, l, obss)
+}
+
+// The largest fall in money and the largest in percent are different episodes:
+// 40 from 10000 (0.4%), then, after a new peak of 10300, 41 (0.39805825%).
+func TestAccountLog_LargestAmountAndLargestPercentageCanDiffer(t *testing.T) {
+	l, obss, _ := observed(t, openOn("EURUSD", "EURUSD", 100000, 99000),
+		wave("EURUSD", 1, 100000, 100000, 99600, 103000, 102590))
+
+	assert.Equal(t, usd(41), l.dd.Amount)
+	assert.Equal(t, "0.39805825", l.dd.Pct.String())
+	assert.Equal(t, usd(10300), l.dd.PeakEquity)
+	assert.True(t, l.dd.PeakTime.Equal(hour(4)) && l.dd.TroughTime.Equal(hour(5)))
+
+	assert.Equal(t, usd(40), l.pctDD.Amount)
+	assert.Equal(t, "0.4", l.pctDD.Pct.String())
+	assert.Equal(t, usd(10000), l.pctDD.PeakEquity)
+	assert.Equal(t, usd(9960), l.pctDD.TroughEquity)
+	assert.True(t, l.pctDD.PeakTime.Equal(hour(0)) && l.pctDD.TroughTime.Equal(hour(3)))
 	agreesWithReplay(t, l, obss)
 }
 
@@ -221,6 +268,22 @@ func TestStaleInstruments_ListsOpenPositionsWithoutABarInTheFrame(t *testing.T) 
 
 	assert.Equal(t, []string{"EURUSD"}, staleInstruments(act, f))
 	assert.Empty(t, staleInstruments(act, pairFrame(hbar("EURUSD", hour(1), 1, 1), hbar("GBPUSD", hour(1), 1, 1))))
+}
+
+// Equity 100, 80, 200, 170: the deepest fall in money is 30 (15%), the deepest in
+// percent is 20%.
+func TestAccountLog_MaximumPercentageIsTrackedOnItsOwn(t *testing.T) {
+	l := &accountLog{}
+	for i, equity := range []int64{100, 80, 200, 170} {
+		l.seq++
+		require.NoError(t, l.track(hour(i), usd(equity)))
+	}
+
+	assert.Equal(t, usd(30), l.dd.Amount)
+	assert.Equal(t, "15", l.dd.Pct.String())
+	assert.Equal(t, usd(20), l.pctDD.Amount)
+	assert.Equal(t, "20", l.pctDD.Pct.String())
+	assert.True(t, l.pctDD.PeakTime.Equal(hour(0)) && l.pctDD.TroughTime.Equal(hour(1)))
 }
 
 func TestAccountLog_RefusesWhatItCannotMeasure(t *testing.T) {
@@ -287,6 +350,9 @@ func TestRunSeriesWith_SummaryDrawdownEqualsTheReplayOfTheAccountJournal(t *test
 	assert.Equal(t, 0, depth.Cmp(ratOf(sum.MaxDrawdown.Amount)))
 	assert.True(t, peakAt.Equal(sum.MaxDrawdown.PeakTime))
 	assert.True(t, troughAt.Equal(sum.MaxDrawdown.TroughTime))
+	require.NotNil(t, sum.MaxPercentDrawdown)
+	pctDepth, pct, pctPeakAt, pctTroughAt := replayPercentDrawdown(t, obss)
+	sameDrawdown(t, *sum.MaxPercentDrawdown, pctDepth, pct, pctPeakAt, pctTroughAt)
 	last := obss[len(obss)-1]
 	assert.Equal(t, sum.Balance.String(), last.Balance.Amount+" USD", "the last line is the final account")
 	assert.Equal(t, sum.Equity.String(), last.Equity.Amount+" USD")
@@ -305,6 +371,7 @@ func TestRunSeriesWith_TheSummaryIsTheSameWithOrWithoutAnAccountWriter(t *testin
 
 	assert.Equal(t, without.Summary(), with.Summary())
 	assert.NotNil(t, without.Summary().MaxDrawdown, "the drawdown does not depend on a writer")
+	assert.NotNil(t, without.Summary().MaxPercentDrawdown)
 }
 
 func TestAccountLog_IsDeterministic(t *testing.T) {

@@ -45,28 +45,34 @@ type Summary struct {
 	// WinRate is Wins / Trades as a fraction, null when no trade closed (a rate over
 	// nothing is not zero). A break-even trade counts in Trades, not in Wins.
 	WinRate *num.Rate `json:"win_rate"`
-	// MaxDrawdown is the maximum equity drawdown; see Drawdown. Absent for a result
-	// that was not observed per frame (the scenario regression).
-	MaxDrawdown *Drawdown `json:"max_drawdown,omitempty"`
+	// MaxDrawdown is the equity drawdown with the largest amount and
+	// MaxPercentDrawdown the one with the largest percentage; they can be different
+	// falls. See Drawdown. Both are absent for a result that was not observed per
+	// frame (the scenario regression).
+	MaxDrawdown        *Drawdown `json:"max_drawdown,omitempty"`
+	MaxPercentDrawdown *Drawdown `json:"max_percent_drawdown,omitempty"`
 }
 
-// Drawdown is the maximum mark-to-market equity drawdown of a run: the deepest
-// fall of equity (balance plus unrealized P&L) below its running peak, among the
-// account observations of account.jsonl (the initial one and one after each traded
-// frame; see accountLine). It is a replay of that file, so a reader gets the same
-// figures from it:
+// Drawdown is one mark-to-market equity drawdown of a run: a fall of equity
+// (balance plus unrealized P&L) below its running peak, among the account
+// observations of account.jsonl (the initial one and one after each traded frame;
+// see accountLine). It is a replay of that file, so a reader gets the same figures
+// from it:
 //
 //	peak = max equity so far (the initial observation counts, and a later equal
-//	       equity does not move the peak time); depth = peak - equity.
+//	       equity does not move the peak time); depth = peak - equity;
+//	pct  = depth / peak, in percent, to eight places.
 //
-// Amount is the largest depth (the first, if two are equal) in the account's
-// currency and Pct is that depth over the peak it fell from, in percent. PeakTime
-// and TroughTime are the times of the observations of that peak and of the trough,
-// and PeakEquity and TroughEquity their equity. A run that never fell (no trades,
-// or equity only rising) has Amount and Pct zero with peak and trough both the
-// initial observation. A fall that has not recovered by the end is still the
-// drawdown; there is no recovery time. Sampling is per completed frame, not
-// intrabar, so an excursion inside a bar is not seen.
+// A summary reports two. In Summary.MaxDrawdown, Amount is the largest depth of the
+// run, in the account's currency, and Pct is that same fall's percentage, which
+// need not be the run's largest. In Summary.MaxPercentDrawdown, Pct is the largest
+// pct of the run and Amount that same fall's depth. Each takes the first of equals.
+// PeakTime and TroughTime are the times of the observations of that fall's peak and
+// trough, and PeakEquity and TroughEquity their equity. A run that never fell (no
+// trades, or equity only rising) has Amount and Pct zero with peak and trough both
+// the initial observation. A fall that has not recovered by the end still counts;
+// there is no recovery time. Sampling is per completed frame, not intrabar, so an
+// excursion inside a bar is not seen.
 type Drawdown struct {
 	Amount       num.Money `json:"amount"`
 	Pct          num.Rate  `json:"pct"`
@@ -114,7 +120,7 @@ func (r *Result) Summary() Summary {
 			s.WinRate = &r
 		}
 	}
-	s.MaxDrawdown = x.drawdown
+	s.MaxDrawdown, s.MaxPercentDrawdown = x.drawdown, x.percentDrawdown
 	for _, p := range x.open {
 		s.Open = append(s.Open, Position{Instrument: p.instrument, Direction: p.direction.String(), Units: p.units,
 			EntryPrice: p.entryPrice, MarkPrice: p.markPrice})
@@ -157,7 +163,7 @@ type RunOptions struct {
 	// Account, when not nil, is written one JSON line for the account before the
 	// first traded frame and one after each traded frame (see accountLine), the
 	// equity the summary's maximum drawdown is read from. Like Journal the engine
-	// opens no file and a failed write stops the run. The drawdown is in the
+	// opens no file and a failed write stops the run. The drawdowns are in the
 	// summary whether or not there is a writer.
 	Account io.Writer
 
@@ -272,8 +278,8 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 		return nil, fmt.Errorf("account journal: last equity %s differs from the final equity %s", alog.last, res.equity)
 	}
 	if alog.seq > 0 {
-		dd := alog.dd
-		res.drawdown = &dd
+		dd, pctDD := alog.dd, alog.pctDD
+		res.drawdown, res.percentDrawdown = &dd, &pctDD
 		pct, _, err := alog.netReturnPct()
 		if err != nil {
 			return nil, fmt.Errorf("net return: %w", err)

@@ -41,7 +41,7 @@ engine trades the instruments it has a market for.
 
 Every run is journaled: it gets a RunID and a directory of that name under the
 results root, holding run.json (what the run was, and how it ended, with the
-summary and its maximum equity drawdown), events.jsonl (every order transition)
+summary and its maximum equity drawdowns), events.jsonl (every order transition)
 and account.jsonl (the account's equity after every frame). The results root is --results-root, then
 ` + envResultsRoot + `, then results.root in ` + defaultConfigPath + `, then the default ` + service.DefaultResultsRoot + `.
 A run that fails or is cancelled is journaled too, with its status and why.

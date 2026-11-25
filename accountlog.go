@@ -43,12 +43,12 @@ type accountLine struct {
 }
 
 // accountLog records the account after each traded frame and, from the same
-// observations, tracks the run's maximum equity drawdown. It is not a second
+// observations, tracks the run's maximum equity drawdowns. It is not a second
 // accounting engine: every figure is read from the account (equity, balance,
-// unrealized P&L) at the moment of the observation. The drawdown is exactly what a
+// unrealized P&L) at the moment of the observation. The drawdowns are exactly what a
 // reader gets by replaying account.jsonl (see Drawdown).
 //
-// The writer is optional: without one the run still has its drawdown, and the
+// The writer is optional: without one the run still has its drawdowns, and the
 // engine opens no file.
 type accountLog struct {
 	w   io.Writer
@@ -58,7 +58,8 @@ type accountLog struct {
 
 	peak     num.Money
 	peakTime time.Time
-	dd       Drawdown
+	dd       Drawdown // the largest by amount
+	pctDD    Drawdown // the largest by percentage of its own peak
 }
 
 // observe records the account at t. stale lists the open instruments the frame did
@@ -92,7 +93,7 @@ func (l *accountLog) observe(kind string, t time.Time, act *account, stale []str
 	return l.track(t, equity)
 }
 
-// track applies one observation's equity to the peak and the drawdown.
+// track applies one observation's equity to the peak and the two drawdowns.
 func (l *accountLog) track(t time.Time, equity num.Money) error {
 	l.last = equity
 	if l.seq == 1 {
@@ -102,6 +103,7 @@ func (l *accountLog) track(t time.Time, equity num.Money) error {
 			return err
 		}
 		l.dd = Drawdown{Amount: zero, PeakEquity: equity, TroughEquity: equity, PeakTime: t, TroughTime: t}
+		l.pctDD = l.dd
 		return nil
 	}
 	if c, err := equity.Cmp(l.peak); err != nil {
@@ -113,10 +115,8 @@ func (l *accountLog) track(t time.Time, equity num.Money) error {
 	if err != nil {
 		return err
 	}
-	if c, err := depth.Cmp(l.dd.Amount); err != nil {
-		return err
-	} else if c <= 0 {
-		return nil // only a strictly deeper drawdown replaces the first one found
+	if sign, err := moneySign(depth); err != nil || sign == 0 {
+		return err // at the peak: nothing has fallen
 	}
 	sign, err := moneySign(l.peak)
 	if err != nil {
@@ -129,7 +129,18 @@ func (l *accountLog) track(t time.Time, equity num.Money) error {
 	if err != nil {
 		return err
 	}
-	l.dd = Drawdown{Amount: depth, Pct: pct, PeakEquity: l.peak, TroughEquity: equity, PeakTime: l.peakTime, TroughTime: t}
+	fall := Drawdown{Amount: depth, Pct: pct, PeakEquity: l.peak, TroughEquity: equity, PeakTime: l.peakTime, TroughTime: t}
+	// Only a strictly larger fall replaces the first one found, in each measure.
+	c, err := depth.Cmp(l.dd.Amount)
+	if err != nil {
+		return err
+	}
+	if c > 0 {
+		l.dd = fall
+	}
+	if pct.Cmp(l.pctDD.Pct) > 0 {
+		l.pctDD = fall
+	}
 	return nil
 }
 
