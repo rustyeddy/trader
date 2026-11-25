@@ -23,22 +23,21 @@ func (r *Result) Write(w io.Writer) error { return r.r.write(w) }
 // Summary is what a finished run came to, as data: the numbers Write prints, exact,
 // for a run record to keep. It is read from the result, not calculated again.
 type Summary struct {
-	Strategy       string    `json:"strategy"`
-	Account        string    `json:"account"`
-	InitialBalance num.Money `json:"initial_balance"`
-	// Settings are the risk and account settings the run used.
-	Settings   Settings   `json:"settings"`
-	Bars       int        `json:"bars"`
-	Orders     OrderCount `json:"orders"`
-	Trades     int        `json:"trades"`
-	Wins       int        `json:"wins"`
-	Losses     int        `json:"losses"`
-	BreakEven  int        `json:"break_even"`
-	Realized   num.Money  `json:"realized"`
-	Unrealized num.Money  `json:"unrealized"`
-	Balance    num.Money  `json:"balance"`
-	Equity     num.Money  `json:"equity"`
-	Open       []Position `json:"open"`
+	Strategy       string     `json:"strategy"`
+	Account        string     `json:"account"`
+	InitialBalance num.Money  `json:"initial_balance"`
+	Settings       Settings   `json:"settings"` // the risk and account settings the run used
+	Bars           int        `json:"bars"`
+	Orders         OrderCount `json:"orders"`
+	Trades         int        `json:"trades"`
+	Wins           int        `json:"wins"`
+	Losses         int        `json:"losses"`
+	BreakEven      int        `json:"break_even"`
+	Realized       num.Money  `json:"realized"`
+	Unrealized     num.Money  `json:"unrealized"`
+	Balance        num.Money  `json:"balance"`
+	Equity         num.Money  `json:"equity"`
+	Open           []Position `json:"open"`
 }
 
 // OrderCount is how many orders ended where, as in Write's orders line.
