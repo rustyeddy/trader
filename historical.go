@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
@@ -37,6 +38,42 @@ type Summary struct {
 	Balance        num.Money  `json:"balance"`
 	Equity         num.Money  `json:"equity"`
 	Open           []Position `json:"open"`
+
+	// NetReturnPct is (final equity - initial equity) / initial equity, in percent
+	// (1.5 is 1.5%). Equity counts open positions at their latest mark.
+	NetReturnPct num.Rate `json:"net_return_pct"`
+	// WinRate is Wins / Trades as a fraction, null when no trade closed (a rate over
+	// nothing is not zero). A break-even trade counts in Trades, not in Wins.
+	WinRate *num.Rate `json:"win_rate"`
+	// MaxDrawdown is the maximum equity drawdown; see Drawdown. Absent for a result
+	// that was not observed per frame (the scenario regression).
+	MaxDrawdown *Drawdown `json:"max_drawdown,omitempty"`
+}
+
+// Drawdown is the maximum mark-to-market equity drawdown of a run: the deepest
+// fall of equity (balance plus unrealized P&L) below its running peak, among the
+// account observations of account.jsonl (the initial one and one after each traded
+// frame; see accountLine). It is a replay of that file, so a reader gets the same
+// figures from it:
+//
+//	peak = max equity so far (the initial observation counts, and a later equal
+//	       equity does not move the peak time); depth = peak - equity.
+//
+// Amount is the largest depth (the first, if two are equal) in the account's
+// currency and Pct is that depth over the peak it fell from, in percent. PeakTime
+// and TroughTime are the times of the observations of that peak and of the trough,
+// and PeakEquity and TroughEquity their equity. A run that never fell (no trades,
+// or equity only rising) has Amount and Pct zero with peak and trough both the
+// initial observation. A fall that has not recovered by the end is still the
+// drawdown; there is no recovery time. Sampling is per completed frame, not
+// intrabar, so an excursion inside a bar is not seen.
+type Drawdown struct {
+	Amount       num.Money `json:"amount"`
+	Pct          num.Rate  `json:"pct"`
+	PeakEquity   num.Money `json:"peak_equity"`
+	TroughEquity num.Money `json:"trough_equity"`
+	PeakTime     time.Time `json:"peak_time"`
+	TroughTime   time.Time `json:"trough_time"`
 }
 
 // OrderCount is how many orders ended where, as in Write's orders line.
@@ -68,6 +105,16 @@ func (r *Result) Summary() Summary {
 		Realized: x.realized, Unrealized: x.unrealized, Balance: x.balance, Equity: x.equity,
 		Open: []Position{},
 	}
+	s.NetReturnPct = x.netReturnPct
+	if x.trades > 0 {
+		// Wins and Trades are counts, so the rate is exact to the scale of num.Rate.
+		w := num.MustParseRate(strconv.Itoa(x.wins))
+		n := num.MustParseRate(strconv.Itoa(x.trades))
+		if r, err := w.DivRate(n); err == nil {
+			s.WinRate = &r
+		}
+	}
+	s.MaxDrawdown = x.drawdown
 	for _, p := range x.open {
 		s.Open = append(s.Open, Position{Instrument: p.instrument, Direction: p.direction.String(), Units: p.units,
 			EntryPrice: p.entryPrice, MarkPrice: p.markPrice})
@@ -106,6 +153,13 @@ type RunOptions struct {
 	// file; the caller owns the writer. If a write fails the run stops with that
 	// error, and what was written before it stays.
 	Journal io.Writer
+
+	// Account, when not nil, is written one JSON line for the account before the
+	// first traded frame and one after each traded frame (see accountLine), the
+	// equity the summary's maximum drawdown is read from. Like Journal the engine
+	// opens no file and a failed write stops the run. The drawdown is in the
+	// summary whether or not there is a writer.
+	Account io.Writer
 
 	// Remote, when not nil, is a strategy client that has connected to Trader and
 	// asked for this run: it trades instead of the built-in EMAX. Trader asks it,
@@ -196,10 +250,12 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 	if opts.Journal != nil {
 		br.journal = newJournal(opts.Journal)
 	}
+	alog := &accountLog{w: opts.Account}
 	tr := &trader{
-		broker:   br,
-		account:  br.addAccount(runAccount, num.MustParseMoney(runBalance, usdCurrency)),
-		strategy: strat,
+		broker:     br,
+		account:    br.addAccount(runAccount, num.MustParseMoney(runBalance, usdCurrency)),
+		strategy:   strat,
+		accountLog: alog,
 	}
 	if err := (&backtest{}).runSeriesFrom(ctx, tr, tradeFrom, run...); err != nil {
 		return nil, err
@@ -210,6 +266,19 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 	res, err := newResult(name, bars, tr)
 	if err != nil {
 		return nil, err
+	}
+	// The last observation is the account the summary reports, or the run is wrong.
+	if alog.seq > 0 && (!alog.last.Equal(res.equity)) {
+		return nil, fmt.Errorf("account journal: last equity %s differs from the final equity %s", alog.last, res.equity)
+	}
+	if alog.seq > 0 {
+		dd := alog.dd
+		res.drawdown = &dd
+		pct, _, err := alog.netReturnPct()
+		if err != nil {
+			return nil, fmt.Errorf("net return: %w", err)
+		}
+		res.netReturnPct = pct
 	}
 	return &Result{r: res}, nil
 }

@@ -79,8 +79,8 @@ type BacktestRun struct {
 //
 // Every run is journaled. A run exists from the moment the request is well formed
 // enough to describe (the source is supported and there is a results root): it gets
-// a RunID and a directory under req.ResultsRoot with run.json and events.jsonl, and
-// it ends there with a status, completed, failed or cancelled, whatever happened
+// a RunID and a directory under req.ResultsRoot with run.json, events.jsonl and
+// account.jsonl, and it ends there with a status, completed, failed or cancelled, whatever happened
 // after: bars that cannot be loaded, a request the engine refuses, a cancellation.
 // Only an unsupported source, a missing results root or a directory that cannot be
 // made stop it before a run exists, since there is then nowhere to record it.
@@ -123,7 +123,7 @@ func RunBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest) (*B
 		err = req.OnStart(runID.String())
 	}
 	if err == nil {
-		res, err = runBacktest(ctx, log, req, source, run.Journal())
+		res, err = runBacktest(ctx, log, req, source, run.Journal(), run.AccountJournal())
 	}
 	var summary any
 	if res != nil {
@@ -138,7 +138,7 @@ func RunBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest) (*B
 }
 
 // runBacktest loads and replays, writing the engine's journal to journal.
-func runBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest, source string, journal io.Writer) (*trader.Result, error) {
+func runBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest, source string, journal, account io.Writer) (*trader.Result, error) {
 	what := fmt.Sprintf("%s %s %s [%s, %s)", source, strings.Join(req.Instruments, ","), req.Interval,
 		req.From.UTC().Format(time.RFC3339), req.To.UTC().Format(time.RFC3339))
 
@@ -176,7 +176,7 @@ func runBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest, sou
 		}
 		series = append(series, s)
 	}
-	res, err := trader.RunSeriesWith(ctx, trader.RunOptions{Journal: journal, Remote: req.Remote}, what, req.From, series...)
+	res, err := trader.RunSeriesWith(ctx, trader.RunOptions{Journal: journal, Account: account, Remote: req.Remote}, what, req.From, series...)
 	if err != nil {
 		return nil, fmt.Errorf("backtest %s: %w", what, err)
 	}

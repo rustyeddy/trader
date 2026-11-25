@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"math/rand/v2"
 	"net"
 	"os"
@@ -800,4 +801,77 @@ func TestRunBacktest_ARefusedRequestReturnsNoRun(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, run)
+}
+
+// The account journal is read as a client reads it, from the files alone: the
+// summary's maximum drawdown in run.json equals a replay of account.jsonl, and the
+// last line is the account run.json reports.
+func TestRunBacktest_AccountJournalReconcilesWithTheRecord(t *testing.T) {
+	storetest.Root(t)
+	month(t, "EURUSD", time.January, 110000, wave...)
+	buildCanonical(t, janToMar("EURUSD"))
+	req := backtestReq(t, "EURUSD")
+
+	res, err := RunBacktest(context.Background(), nil, req)
+	require.NoError(t, err)
+
+	var recFile struct {
+		Result struct {
+			Balance, Equity struct{ Amount string }
+			MaxDrawdown     struct {
+				Amount     struct{ Amount string }
+				Pct        string
+				PeakTime   time.Time `json:"peak_time"`
+				TroughTime time.Time `json:"trough_time"`
+			} `json:"max_drawdown"`
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(res.Dir, results.RunFile))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &recFile))
+
+	f, err := os.Open(filepath.Join(res.Dir, results.AccountFile))
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	type line struct {
+		Time    time.Time `json:"time"`
+		Kind    string    `json:"kind"`
+		Balance struct{ Amount string }
+		Equity  struct{ Amount string }
+	}
+	var lines []line
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var l line
+		require.NoError(t, json.Unmarshal(sc.Bytes(), &l), sc.Text())
+		lines = append(lines, l)
+	}
+	require.NoError(t, sc.Err())
+	require.Greater(t, len(lines), 1)
+	assert.Equal(t, "initial", lines[0].Kind)
+
+	rat := func(s string) *big.Rat {
+		r, ok := new(big.Rat).SetString(s)
+		require.True(t, ok, s)
+		return r
+	}
+	peak, peakAt := rat(lines[0].Equity.Amount), lines[0].Time
+	depth, peakOf, troughAt := new(big.Rat), peakAt, peakAt
+	for _, l := range lines[1:] {
+		e := rat(l.Equity.Amount)
+		if e.Cmp(peak) > 0 {
+			peak, peakAt = e, l.Time
+		}
+		if d := new(big.Rat).Sub(peak, e); d.Cmp(depth) > 0 {
+			depth, peakOf, troughAt = d, peakAt, l.Time
+		}
+	}
+	dd := recFile.Result.MaxDrawdown
+	assert.Equal(t, 0, depth.Cmp(rat(dd.Amount.Amount)), "drawdown %s vs run.json %s", depth.FloatString(8), dd.Amount.Amount)
+	assert.True(t, peakOf.Equal(dd.PeakTime))
+	assert.True(t, troughAt.Equal(dd.TroughTime))
+	assert.Positive(t, depth.Sign(), "the wave loses money at some point, so the check is not vacuous")
+	last := lines[len(lines)-1]
+	assert.Equal(t, 0, rat(last.Equity.Amount).Cmp(rat(recFile.Result.Equity.Amount)))
+	assert.Equal(t, 0, rat(last.Balance.Amount).Cmp(rat(recFile.Result.Balance.Amount)))
 }
