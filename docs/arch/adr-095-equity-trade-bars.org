@@ -1,0 +1,241 @@
+#+TITLE: ADR-095: Trade-price canonical bars and US equity daily semantics
+#+STARTUP: overview indent
+
+* Status
+
+Proposed. Issue #733 (Equities-01). Nothing here is implemented, and no code or
+data changes before the owner accepts it. On acceptance it amends ADR-090 (which
+deferred a persisted trade series to "a separate ADR and schema decision") and
+ADR-088 (which values currency pairs only). ADR-073's finding that Stooq daily
+history is dividend-adjusted is carried over. ADR-047 to ADR-049 describe archived
+code and are inputs, not constraints. (ADR-094 was withdrawn; its number is not
+reused.)
+
+* Context
+
+The goal is one honest backtest of SPY daily bars from Stooq
+(=docs/research/equity-data-inventory.md=, #728).
+
+- =marketdata.Bar= has a =Trade= series, but =canonical-v2= refuses it and has no
+  column for it. Writing trade prices to =Mid= would label them as a midpoint.
+- D1 alignment and availability are FX: open and close at 17:00 New York. The gap
+  calendar is FX.
+- Canonical metadata does not say what a price is, in which currency, or how it
+  was adjusted. Stooq SPY is dividend-adjusted: every ex-dividend date rewrites
+  all earlier prices.
+- The engine values currency pairs only, rounds bars to a tick and puts the
+  result in =Mid=.
+
+Checked read-only on 2026-11-25 in =d_us_txt.zip=
+(sha256 =962aec12a900c9debefbdc1c6f9cffb9dc109a4eaa8aafc8cbf106d97382a52c=):
+
+- Across 27,890,673 daily rows no price has more than 8 decimals, the scale of
+  =num.Price= (ADR-004). Five members hold prices above its maximum of
+  92,233,720,368.54775807 and cannot be represented. SPY has at most 4 decimals
+  and only whole volumes.
+- SPY has 5,418 rows from 2005-02-25 to 2026-09-10 and 202 weekdays without one.
+  Rule-derived NYSE holidays plus five unscheduled closures (2007-01-02,
+  2012-10-29, 2012-10-30, 2018-12-05, 2025-01-09) explain 201. *The other,
+  2011-02-17, looks like a hole in the data:* QQQ, AAPL, MSFT, JPM and XOM have
+  that day; SPY, IWM, DIA and GLD do not. This corrects the inventory's reading
+  that the gaps were consistent with closures. The holiday rules were not checked
+  against an exchange publication.
+
+* Decision
+
+** 1. A second schema, =canonical-trade-v1=
+
+Trade-only data gets its own schema. =canonical-v2= is not changed.
+
+| Source | Schema             | Price series  |
+|--------+--------------------+---------------|
+| oanda  | canonical-v2       | bid, ask, mid |
+| stooq  | canonical-trade-v1 | trade         |
+
+The source fixes the schema; a file whose schema does not match its source is
+malformed. A =canonical-trade-v1= bar has =Trade= set and =Bid=, =Ask= and =Mid=
+absent. No side, midpoint or spread is derived. The path layout is that of
+ADR-089: =stooq/canonical/SPY/2024/03/SPY-2024-03-d1.csv=. Bad records, atomic
+publication and rebuild rules are those of ADR-090. The only interval is =d1=.
+
+Example, March 2024 (two of 20 rows; =<...>= marks a value the build computes):
+
+#+begin_example
+# schema=canonical-trade-v1 provider=stooq symbol=SPY interval=d1 year=2024 month=03
+# meta {"raw_fingerprint":"sha256:<month>","builder_version":"<v>","validator_version":"<v>","availability_policy":"us-equity-close-v1","built_at":"<utc>","bar_count":20,"bad_count":0,"first_bar":"2024-03-01T14:30:00Z","last_bar":"2024-03-28T13:30:00Z","price_basis":"trade","currency":"USD","volume_unit":"shares","adjustment":"total-return","adjustment_evidence":"observed","snapshot_fingerprint":"sha256:54b64bba890d89495bc2108824ba378a3f7f92349d5021595499bbc47696ee6b","snapshot_as_of":"2026-09-10"}
+time,available_at,trade_o,trade_h,trade_l,trade_c,volume
+2024-03-01T14:30:00Z,2024-03-01T21:00:00Z,501.02800000,505.27000000,500.61400000,504.83800000,78064486
+...
+2024-03-28T13:30:00Z,2024-03-28T20:00:00Z,516.63500000,518.01800000,516.21200000,516.49800000,97520245
+#+end_example
+
+** 2. Prices and volume are exact
+
+- Prices are written with exactly 8 decimals, the full scale of =num.Price=. This
+  covers SPY's 4, AAPL's 7 and every value in the bundle without a per-symbol
+  width. A price with more precision or out of range is a bad record (=invalid=),
+  never rounded.
+- Volume is a whole number of shares (=volume_unit=). A fractional volume (some
+  early Stooq rows, such as IWM 2005) is a bad record in this version. Accepting
+  it is a later decision, needed before those symbols, not before SPY.
+- =Bar.Volume='s meaning therefore depends on the source: tick count for OANDA,
+  shares here. Its documentation changes to say so.
+
+** 3. Adjustment and provenance
+
+All of the new metadata fields are required, take part in =SameBuild=, and are set
+by the build, never inferred by a reader.
+
+| Field                  | Meaning                                                        |
+|------------------------+----------------------------------------------------------------|
+| =price_basis=          | =trade=                                                        |
+| =currency=             | quote currency, =USD=                                          |
+| =volume_unit=          | =shares=                                                       |
+| =adjustment=           | =total-return=, =split=, =unadjusted= or =unknown=             |
+| =adjustment_evidence=  | =observed= (inferred by comparing data) or =documented=        |
+| =snapshot_fingerprint= | sha256 of the one whole-history raw file the series came from  |
+| =snapshot_as_of=       | date that file was obtained, declared by the operator          |
+| =raw_fingerprint=      | as ADR-090: the raw rows of this month                         |
+
+- Stooq D1 is =total-return= / =observed= (ADR-073, #728).
+- *A series is one snapshot.* Because adjustment rewrites history, months from two
+  downloads must never be joined. A load whose months differ in schema, currency,
+  adjustment or =snapshot_fingerprint= fails, and no flag allows it. A new
+  download rebuilds the whole series.
+- The Stooq build therefore reads one whole-history file (the bundle member or a
+  loose download), not independently updatable monthly files. A snapshot a run
+  used is kept, so the run can be reproduced. The provider issue fixes the path.
+- Alpaca (split-adjusted by its levels, setting unrecorded, IEX volume) is a
+  different source and series. Nothing merges or splices sources.
+- The loader returns these fields with the bars. =run.json= and the REST bars
+  response gain an additive =data= object with them and the availability policy.
+- *Unknown, and recorded as such rather than filled:* dividend and split events and
+  amounts, the vendor's adjustment method, whether open and close are auction
+  prices, the volume scope beyond "consolidated by observation", and restatements
+  between downloads.
+
+** 4. Daily time, availability and calendar
+
+Policy =us-equity-close-v1=, for the exchange date =D= of a row, in
+America/New_York using the zone bytes already pinned in the repository:
+
+- =Time= is 09:30 on =D=, the scheduled regular open.
+- =AvailableAt= is 16:00 on =D=, or 13:00 when =D= is a listed early close. It is
+  modeled, not observed, as in ADR-090. It is never earlier than the scheduled
+  close: an early close that is not listed only delays availability to 16:00.
+- Unscheduled late openings or intraday halts are not modeled; =Time= stays
+  nominal.
+
+The calendar is a reviewed, embedded table of full closures and early closes,
+=us-equity-calendar-v1=, covering 2005-01-01 to 2026-12-31. It is a list of dates,
+not computed rules and not a =Calendar= interface. An early close is listed only
+when an exchange publication confirms it. A date outside the table fails the
+build. Because the table decides =AvailableAt=, changing it is a new policy name
+and a rebuild.
+
+- A row dated on a closed day is a bad record with a new reason, =non-session=.
+- A trading date with no row is a gap. It fails a strict load unless it is on a
+  reviewed known-holes list, as in ADR-090 section 7. SPY 2011-02-17 is proposed
+  for that list, after one fresh download confirms Stooq still lacks it.
+
+Required test fixtures:
+
+| Date       | Case                         | =Time= (UTC) | =AvailableAt= (UTC) |
+|------------+------------------------------+--------------+---------------------|
+| 2024-03-08 | last day before DST          | 14:30        | 21:00               |
+| 2024-03-11 | first day of DST             | 13:30        | 20:00               |
+| 2024-11-01 | last day of DST              | 13:30        | 20:00               |
+| 2024-11-04 | first day after DST          | 14:30        | 21:00               |
+| 2024-11-27 | normal day                   | 14:30        | 21:00               |
+| 2024-11-28 | Thanksgiving                 | no bar       |                     |
+| 2024-11-29 | early close                  | 14:30        | 18:00               |
+| 2024-03-29 | Good Friday                  | no bar       |                     |
+| 2012-10-29 | unscheduled closure          | no bar       |                     |
+| 2012-10-31 | first day after it           | 13:30        | 20:00               |
+| 2025-01-09 | national day of mourning     | no bar       |                     |
+| 2011-02-17 | trading day, no row          | gap          |                     |
+
+Plus: a row on a closed day, a date outside the table, and a bar refused to a
+consumer one instant before =AvailableAt=.
+
+** 5. First-test execution and scope
+
+Dividend-adjusted prices are accepted for a first backtest *to verify the pipeline
+and to study returns*. They are not evidence of executable performance:
+
+- Past prices are lower than what traded, so share counts, notionals and any
+  price-level rule are not historical. Percentage moves are approximately
+  preserved.
+- There is no bid, ask or spread. No commission, spread or slippage is charged.
+  Results are optimistic by those costs, and =run.json= says =costs: none=.
+- Dividends are already in the prices; the engine credits none.
+
+Engine rules for this source, applied only to runs on it:
+
+| Topic       | Rule                                                                 |
+|-------------+----------------------------------------------------------------------|
+| Instrument  | SPY as an ETF settling in USD, multiplier 1                          |
+| Basis       | the engine's bars keep the series as =Trade=, never relabelled =Mid= |
+| Tick        | 0.00000001, so adjusted prices are never rounded                     |
+| Size        | whole shares, minimum 1                                              |
+| Leverage    | margin rate 1 (cash only); risk per trade unchanged (ADR-093)        |
+| Short       | an opening short is rejected: no borrow, locate or dividend model    |
+| Fills       | existing rules: a decision at the close fills no earlier than the next bar's open; a gap through a stop fills at the open; the intrabar assumption of the broker applies |
+
+Allowed first scope: one instrument, D1, 2005-02-25 to 2026-09-10, one fixed
+long-only strategy with market entries and stops set as a percentage distance. No
+dollar thresholds, no parameter optimisation, no multi-instrument or FX mix.
+
+* Compatibility and migration
+
+- =canonical-v2= files, =scheduled-close-v1=, the FX calendar, the known FX holes,
+  OANDA builder and validator versions and the default source stay as they are. No
+  file is migrated or rebuilt.
+- New: the =canonical-trade-v1= codec, the =non-session= reason (valid only in it),
+  the equity availability policy and calendar, and =stooq= accepted by the build,
+  read and backtest paths.
+- The SPY market is added to the catalog only for =stooq= runs, so the settings
+  recorded for an FX run do not change.
+- The JSON additions are additive; existing fields keep their meaning.
+- Each implementation step keeps the existing FX tests and the EMAX scenario
+  checksum unchanged, and adds a test that an OANDA file encodes byte for byte as
+  before.
+
+* Consequences
+
+- Two codecs share the file rules; the shared parts are factored, not copied.
+- A backtest range on Stooq is all-or-nothing on one snapshot, and old snapshots
+  accumulate.
+- 8-decimal columns are wider than SPY needs.
+- Symbols with fractional volume or out-of-range prices are not fully loadable yet.
+- Follow-up issues, in order: schema and calendar; =provider/stooq= and the SPY
+  build; engine market rules; the first backtest with golden output.
+
+* Alternatives considered
+
+- *Add trade columns to =canonical-v2=, or one new superset schema.* Rejected: the
+  strict reader would force every FX file to be rebuilt or two column sets under
+  one name, to store columns that are always empty.
+- *Write trade prices to =Mid=.* Rejected: it mislabels data (#733).
+- *Decimals per instrument.* Rejected: another property to maintain and a blocker
+  at expansion, for a few bytes saved.
+- *Midnight UTC daily bars (ADR-049).* Rejected: =Time= would precede the session
+  by hours and say nothing about when the bar may be used.
+- *Always make a bar available at 16:00 or later, with no early-close list.* Safe
+  and simpler, but #733 asks for early closes to be handled.
+- *Computed holiday rules.* Rejected: unscheduled closures need a list anyway.
+- *Wait for unadjusted prices with dividend events before any backtest.* Better
+  evidence, but no such data is on hand. It stays the requirement for a result
+  meant to support trading.
+
+* Decisions for the owner
+
+1. Separate =canonical-trade-v1= schema, leaving =canonical-v2= untouched?
+2. 8-decimal prices, and fractional volume rejected for now?
+3. One snapshot per series, with no override?
+4. =Time= 09:30, =AvailableAt= scheduled close, from an embedded date table?
+5. SPY 2011-02-17 as a known hole (recommended), or leave the load failing unless
+   missing data is allowed?
+6. Dividend-adjusted prices acceptable for the first test under the limits above?
+7. Reject opening shorts for equities (recommended), or allow them with the result
+   marked as ignoring borrow costs?
