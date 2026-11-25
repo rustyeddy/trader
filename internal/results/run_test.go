@@ -65,6 +65,29 @@ func TestStart_MakesTheRunDirectoryAndWritesARunningRecord(t *testing.T) {
 	}
 }
 
+// The settings given to Start are in run.json while the run is running and however
+// it ends.
+func TestRun_KeepsTheSettingsHoweverItEnds(t *testing.T) {
+	for name, runErr := range map[string]error{
+		Completed: nil, Failed: errors.New("boom"), Cancelled: context.Canceled,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := newRecord(t)
+			rec.Settings = map[string]string{"risk_per_trade": "0.01"}
+			want := map[string]any{"risk_per_trade": "0.01"}
+
+			run, err := Start(t.TempDir(), rec)
+			require.NoError(t, err)
+			assert.Equal(t, want, readRecord(t, run.Dir())["settings"])
+
+			require.ErrorIs(t, run.Finish(runErr, nil), runErr)
+			m := readRecord(t, run.Dir())
+			assert.Equal(t, name, m["status"])
+			assert.Equal(t, want, m["settings"])
+		})
+	}
+}
+
 func TestStart_Refuses(t *testing.T) {
 	t.Run("no root", func(t *testing.T) {
 		_, err := Start("", newRecord(t))

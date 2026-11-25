@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/examples/emax/emax"
 	"github.com/rustyeddy/trader/internal/id"
 	"github.com/rustyeddy/trader/internal/results"
@@ -429,6 +430,13 @@ func TestRunBacktest_JournalsTheRunInADirectoryNamedByItsRunID(t *testing.T) {
 	// order is submitted once, and no run here amends a stop or trails one.
 	result := run.rec["result"].(map[string]any)
 	assert.Equal(t, "emax", result["strategy"])
+	settings := result["settings"].(map[string]any)
+	assert.Equal(t, run.rec["settings"], result["settings"], "the snapshot from the start is the summary's")
+	assert.Equal(t, "default", settings["margin_policy"])
+	assert.Equal(t, "0.01", settings["risk_per_trade"], "run.json says what sized the orders")
+	assert.Equal(t, "0.5", settings["margin_closeout_level"])
+	assert.Equal(t, map[string]any{"amount": "50000000", "currency": "USD"}, settings["max_order_notional"])
+	assert.Len(t, settings["instruments"], 2)
 	var submitted float64
 	for _, e := range run.events {
 		if e["state"] == "submitted" {
@@ -437,6 +445,18 @@ func TestRunBacktest_JournalsTheRunInADirectoryNamedByItsRunID(t *testing.T) {
 	}
 	assert.Equal(t, result["orders"].(map[string]any)["submitted"], submitted,
 		"every order the engine counts as submitted has one submitted line")
+}
+
+// assertSettings checks a run's record holds the engine's settings.
+func assertSettings(t *testing.T, run runFiles) {
+	t.Helper()
+	settings, err := trader.RunSettings()
+	require.NoError(t, err)
+	data, err := json.Marshal(settings)
+	require.NoError(t, err)
+	got, err := json.Marshal(run.rec["settings"])
+	require.NoError(t, err)
+	assert.JSONEq(t, string(data), string(got))
 }
 
 func TestRunBacktest_ARunThatFailsIsStillJournaledAsFailed(t *testing.T) {
@@ -458,6 +478,7 @@ func TestRunBacktest_ARunThatFailsIsStillJournaledAsFailed(t *testing.T) {
 	assert.Equal(t, "failed", run.rec["status"])
 	assert.Contains(t, run.rec["error"], "EURUSD")
 	assert.NotContains(t, run.rec, "result")
+	assertSettings(t, run)
 	assert.Equal(t, "backtest", run.rec["kind"])
 	assert.NotEmpty(t, run.rec["ended_at"])
 	assert.Empty(t, run.events, "it never got as far as an order")
@@ -474,6 +495,7 @@ func TestRunBacktest_ARequestTheEngineRefusesIsAFailedRunToo(t *testing.T) {
 	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
 	assert.Equal(t, "failed", run.rec["status"])
 	assert.NotEmpty(t, run.rec["error"])
+	assertSettings(t, run)
 }
 
 func TestRunBacktest_ACancelledRunIsJournaledAsCancelled(t *testing.T) {
@@ -489,6 +511,7 @@ func TestRunBacktest_ACancelledRunIsJournaledAsCancelled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	run := readRunDir(t, onlyRun(t, req.ResultsRoot))
 	assert.Equal(t, "cancelled", run.rec["status"])
+	assertSettings(t, run)
 }
 
 func TestRunBacktest_NothingRunsWithoutSomewhereToRecordIt(t *testing.T) {
@@ -664,6 +687,8 @@ func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAX(t *testing.T) {
 	var summary map[string]any
 	require.NoError(t, json.Unmarshal(got.result.Summary, &summary))
 	assert.Equal(t, r.rec["result"].(map[string]any)["balance"], summary["balance"], "the result is the summary run.json holds")
+	require.NotEmpty(t, summary["settings"])
+	assert.Equal(t, r.rec["result"].(map[string]any)["settings"], summary["settings"])
 }
 
 // January is the month before From, so the built-in EMAX is warmed by it and the
@@ -729,6 +754,7 @@ func TestRunBacktest_ARemoteRunThatLosesItsClientKeepsTheRunIDAndThePartialJourn
 	assert.Equal(t, "failed", run.rec["status"])
 	assert.Contains(t, run.rec["error"], "strategy remote: reading orders")
 	assert.NotContains(t, run.rec, "result")
+	assertSettings(t, run) // it failed while replaying
 	assert.Equal(t, map[string]any{"name": "remote", "transport": "tcp", "addr": got.client}, run.rec["strategy"])
 
 	whole := readRunDir(t, full.Dir).events

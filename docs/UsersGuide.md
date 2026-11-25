@@ -316,6 +316,45 @@ as `failed` with the events recorded until then, and the server goes on. Interru
 [`examples/emax`](../examples/emax/README.md) is the canonical client (the same EMAX,
 written against the public SDK); its README says how to run it and read the journal.
 
+### Run settings
+
+`run.json` has a `settings` object from the moment the run exists: the risk and account
+settings the engine sizes and admits the run's orders under. It stays however the run
+ends, so a failed or cancelled run says what it ran under too (one that stopped before
+trading says what it would have traded under). The summary of a completed run, both the
+`summary` a strategy client receives and `result` in `run.json`, repeats it as
+`settings`. They are read-only facts, which no client or flag sets. The starting balance
+and currency are the summary's `initial_balance`.
+
+```json
+"settings": {
+  "risk_per_trade": "0.01",
+  "max_order_notional": {"amount": "50000000", "currency": "USD"},
+  "margin_policy": "default",
+  "margin_closeout_level": "0.5",
+  "instruments": [
+    {"instrument": "EURUSD", "margin_rate": "0.02", "min_units": "1", "unit_step": "1"},
+    {"instrument": "GBPUSD", "margin_rate": "0.05", "min_units": "1", "unit_step": "1"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `risk_per_trade` | fraction of equity an open is sized to lose at its stop; planned risk, not a cap on the loss |
+| `max_order_notional` | largest notional of one opening order |
+| `margin_policy` | `default`: the engine's liquidation rules (below the closeout level, one position at a time, worst loser first); `custom`: any of those replaced. Every run Trader makes is `default`: no option replaces them, only the engine's own code and tests |
+| `margin_closeout_level` | equity as a fraction of margin in use below which positions are liquidated; absent if the broker decides that by a custom policy |
+| `instruments` | every market the engine could size an order for, which can be more than the run asked for |
+| `instruments[].margin_rate` | fraction of notional held as margin |
+| `instruments[].min_units`, `unit_step` | smallest size of an open, and the step a size is rounded down to |
+| `instruments[].max_units` | largest size of one order; absent when there is no limit |
+
+There is no aggregate (portfolio) limit and no risk policy version or settings hash:
+Trader has neither. A strategy's own parameters, such as its stop distance, are not
+settings of the run. Runs made before the field existed have none: treat an absent
+`settings` as unknown.
+
 ### Results
 
 Every run is journaled, whether it completes, fails or is cancelled. It gets a RunID
@@ -325,7 +364,7 @@ name under the results root (`--results-root`, then `TRADER_RESULTS_ROOT`, then
 missing). Three files are enough to read a run:
 
 - `run.json`: the RunID, kind (`backtest`), strategy, source, interval, instruments,
-  range, wall-clock `started_at` and `ended_at`, `status` (`running` while it runs,
+  range, [`settings`](#run-settings), wall-clock `started_at` and `ended_at`, `status` (`running` while it runs,
   then `completed`, `failed` or `cancelled`), `error` and, for a completed run, the
   engine's `result` (orders, trades, balance, equity, open positions, and the
   metrics below). A run that was cut off, say by a crash, still says `running`.
@@ -356,7 +395,8 @@ missing). Three files are enough to read a run:
   instrument is listed in `stale` (omitted when empty), so an unchanged value is told
   from a fresh one; no mark is made up.
 
-The summary in `result` keeps its earlier fields and adds, all computed from the
+The summary in `result` keeps its earlier fields and adds [`settings`](#run-settings)
+and, all computed from the
 account observations and the run's trade counts (nothing else is measured):
 
 ```json
@@ -406,7 +446,7 @@ account observations and the run's trade counts (nothing else is measured):
 
 ```sh
 ls /srv/trading/backtest/results                       # one directory per run
-jq . /srv/trading/backtest/results/run_*/run.json      # status, error, result
+jq . /srv/trading/backtest/results/run_*/run.json      # status, error, settings, result
 jq -c 'select(.state=="filled")' /srv/trading/backtest/results/run_*/events.jsonl
 ```
 

@@ -157,6 +157,8 @@ account and broker (`replay.go`, `backtest.go`):
   the broker's exits included, is written as it happens. `service.RunBacktest` is the
   application service that joins the two and journals every run: it makes the RunID
   and the run directory (`internal/results`, the one package that opens those files),
+  records `trader.RunSettings` (read from a broker and account built as the run builds
+  its own) in `run.json`,
   then `LoadSeries` (the market-data service's policy for missing, bad and stale
   months), then `RunSeriesWith`, then finalizes `run.json`; `trader backtest` only
   parses flags and prints. `RunOptions.Remote` swaps the built-in strategy

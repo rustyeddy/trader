@@ -79,7 +79,8 @@ type BacktestRun struct {
 //
 // Every run is journaled. A run exists from the moment the request is well formed
 // enough to describe (the source is supported and there is a results root): it gets
-// a RunID and a directory under req.ResultsRoot with run.json, events.jsonl and
+// a RunID and a directory under req.ResultsRoot with run.json (which holds the
+// engine's settings from the start), events.jsonl and
 // account.jsonl, and it ends there with a status, completed, failed or cancelled, whatever happened
 // after: bars that cannot be loaded, a request the engine refuses, a cancellation.
 // Only an unsupported source, a missing results root or a directory that cannot be
@@ -105,9 +106,14 @@ func RunBacktest(ctx context.Context, log *slog.Logger, req BacktestRequest) (*B
 	if err != nil {
 		return nil, fmt.Errorf("backtest: run id: %w", err)
 	}
+	settings, err := trader.RunSettings()
+	if err != nil {
+		return nil, fmt.Errorf("backtest: settings: %w", err)
+	}
 	rec := results.Record{
 		RunID: runID, Kind: "backtest", Source: source, Interval: req.Interval,
 		Instruments: req.Instruments, From: req.From.UTC(), To: req.To.UTC(), StartedAt: clock.Clock(),
+		Settings: settings,
 	}
 	rec.Strategy.Name, rec.Strategy.Transport = trader.StrategyEMAX, "in-process"
 	if req.Remote != nil {

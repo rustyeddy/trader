@@ -27,6 +27,7 @@ type Summary struct {
 	Strategy       string     `json:"strategy"`
 	Account        string     `json:"account"`
 	InitialBalance num.Money  `json:"initial_balance"`
+	Settings       Settings   `json:"settings"` // the risk and account settings the run used
 	Bars           int        `json:"bars"`
 	Orders         OrderCount `json:"orders"`
 	Trades         int        `json:"trades"`
@@ -105,9 +106,10 @@ func (r *Result) Summary() Summary {
 	x := r.r
 	s := Summary{
 		Strategy: x.strategy, Account: runAccount, InitialBalance: num.MustParseMoney(runBalance, usdCurrency),
-		Bars:   x.bars,
-		Orders: OrderCount{Submitted: x.submitted, Filled: x.filled, Rejected: x.rejected, Cancelled: x.cancelled, Pending: x.pending},
-		Trades: x.trades, Wins: x.wins, Losses: x.losses, BreakEven: x.breakEven,
+		Settings: x.settings,
+		Bars:     x.bars,
+		Orders:   OrderCount{Submitted: x.submitted, Filled: x.filled, Rejected: x.rejected, Cancelled: x.cancelled, Pending: x.pending},
+		Trades:   x.trades, Wins: x.wins, Losses: x.losses, BreakEven: x.breakEven,
 		Realized: x.realized, Unrealized: x.unrealized, Balance: x.balance, Equity: x.equity,
 		Open: []Position{},
 	}
@@ -202,6 +204,17 @@ func RunSeries(ctx context.Context, name string, tradeFrom time.Time, series ...
 	return RunSeriesWith(ctx, RunOptions{}, name, tradeFrom, series...)
 }
 
+// newRunBroker builds what every RunSeries run trades on: the broker, its markets
+// and the one account.
+func newRunBroker() (*broker, *account, error) {
+	markets, err := defaultCatalog()
+	if err != nil {
+		return nil, nil, err
+	}
+	br := newBroker("sim", markets)
+	return br, br.addAccount(runAccount, num.MustParseMoney(runBalance, usdCurrency)), nil
+}
+
 // RunSeriesWith is RunSeries with options. A run with the zero RunOptions is a
 // RunSeries run, and what it trades does not depend on the options: a journal only
 // records.
@@ -209,10 +222,12 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 	if len(series) == 0 {
 		return nil, errors.New("run: no series")
 	}
-	markets, err := defaultCatalog()
+	br, act, err := newRunBroker()
 	if err != nil {
 		return nil, err
 	}
+	settings := settingsOf(br, act) // as the run starts
+	markets := br.markets
 	run := make([]marketdata.Series, len(series))
 	instruments := make([]string, 0, len(series))
 	bars := 0
@@ -252,14 +267,13 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 		}
 		strat = emax
 	}
-	br := newBroker("sim", markets)
 	if opts.Journal != nil {
 		br.journal = newJournal(opts.Journal)
 	}
 	alog := &accountLog{w: opts.Account}
 	tr := &trader{
 		broker:     br,
-		account:    br.addAccount(runAccount, num.MustParseMoney(runBalance, usdCurrency)),
+		account:    act,
 		strategy:   strat,
 		accountLog: alog,
 	}
@@ -273,6 +287,7 @@ func RunSeriesWith(ctx context.Context, opts RunOptions, name string, tradeFrom 
 	if err != nil {
 		return nil, err
 	}
+	res.settings = settings
 	// The last observation is the account the summary reports, or the run is wrong.
 	if alog.seq > 0 && (!alog.last.Equal(res.equity)) {
 		return nil, fmt.Errorf("account journal: last equity %s differs from the final equity %s", alog.last, res.equity)

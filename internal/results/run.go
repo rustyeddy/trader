@@ -64,6 +64,10 @@ type Record struct {
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at,omitzero"`
 
+	// Settings are the risk and account settings the run is sized and admitted under,
+	// the engine's, copied as they came to Start: every run has them, however it ends.
+	Settings any `json:"settings,omitempty"`
+
 	// Status is Running from the start, so a crash leaves a run that says so, and
 	// then Completed, Failed or Cancelled. Error says why for the last two.
 	Status string `json:"status"`

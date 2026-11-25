@@ -117,6 +117,8 @@ type result struct {
 	strategy string // the name of the strategy that traded
 	bars     int
 
+	settings Settings // what the run was sized and admitted under (RunSeriesWith)
+
 	submitted, filled, rejected, cancelled, pending int
 	trades, wins, losses, breakEven                 int
 
