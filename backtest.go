@@ -117,14 +117,14 @@ type result struct {
 	strategy string // the name of the strategy that traded
 	bars     int
 
+	settings Settings // what the account was sized and admitted under
+
 	submitted, filled, rejected, cancelled, pending int
 	trades, wins, losses, breakEven                 int
 
 	// The money is exact; it is floored to cents only in write (ADR-086).
 	realized, unrealized, balance, equity num.Money
 	open                                  []position
-
-	settings Settings // what the account was sized and admitted under
 }
 
 func newResult(scenario string, bars int, tr *trader) (*result, error) {

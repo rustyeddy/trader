@@ -23,22 +23,22 @@ func (r *Result) Write(w io.Writer) error { return r.r.write(w) }
 // Summary is what a finished run came to, as data: the numbers Write prints, exact,
 // for a run record to keep. It is read from the result, not calculated again.
 type Summary struct {
-	Strategy       string     `json:"strategy"`
-	Account        string     `json:"account"`
-	InitialBalance num.Money  `json:"initial_balance"`
-	Bars           int        `json:"bars"`
-	Orders         OrderCount `json:"orders"`
-	Trades         int        `json:"trades"`
-	Wins           int        `json:"wins"`
-	Losses         int        `json:"losses"`
-	BreakEven      int        `json:"break_even"`
-	Realized       num.Money  `json:"realized"`
-	Unrealized     num.Money  `json:"unrealized"`
-	Balance        num.Money  `json:"balance"`
-	Equity         num.Money  `json:"equity"`
-	Open           []Position `json:"open"`
+	Strategy       string    `json:"strategy"`
+	Account        string    `json:"account"`
+	InitialBalance num.Money `json:"initial_balance"`
 	// Settings are the risk and account settings the run used.
-	Settings Settings `json:"settings"`
+	Settings   Settings   `json:"settings"`
+	Bars       int        `json:"bars"`
+	Orders     OrderCount `json:"orders"`
+	Trades     int        `json:"trades"`
+	Wins       int        `json:"wins"`
+	Losses     int        `json:"losses"`
+	BreakEven  int        `json:"break_even"`
+	Realized   num.Money  `json:"realized"`
+	Unrealized num.Money  `json:"unrealized"`
+	Balance    num.Money  `json:"balance"`
+	Equity     num.Money  `json:"equity"`
+	Open       []Position `json:"open"`
 }
 
 // OrderCount is how many orders ended where, as in Write's orders line.
@@ -64,11 +64,12 @@ func (r *Result) Summary() Summary {
 	x := r.r
 	s := Summary{
 		Strategy: x.strategy, Account: runAccount, InitialBalance: num.MustParseMoney(runBalance, usdCurrency),
-		Bars:   x.bars,
-		Orders: OrderCount{Submitted: x.submitted, Filled: x.filled, Rejected: x.rejected, Cancelled: x.cancelled, Pending: x.pending},
-		Trades: x.trades, Wins: x.wins, Losses: x.losses, BreakEven: x.breakEven,
+		Settings: x.settings,
+		Bars:     x.bars,
+		Orders:   OrderCount{Submitted: x.submitted, Filled: x.filled, Rejected: x.rejected, Cancelled: x.cancelled, Pending: x.pending},
+		Trades:   x.trades, Wins: x.wins, Losses: x.losses, BreakEven: x.breakEven,
 		Realized: x.realized, Unrealized: x.unrealized, Balance: x.balance, Equity: x.equity,
-		Open: []Position{}, Settings: x.settings,
+		Open: []Position{},
 	}
 	for _, p := range x.open {
 		s.Open = append(s.Open, Position{Instrument: p.instrument, Direction: p.direction.String(), Units: p.units,
