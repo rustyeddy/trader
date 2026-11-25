@@ -28,7 +28,7 @@ flowchart LR
     end
 
     MD[("market data store<br/>shared, read only")]
-    OUT[("results root<br/>Trader-owned, written per run:<br/>run.json, events.jsonl")]
+    OUT[("results root<br/>Trader-owned, written per run:<br/>run.json, events.jsonl, account.jsonl")]
 
     C1 <-->|"start run, bars and events, orders, result"| L
     C2 <-.->|"future: concurrent runs"| L

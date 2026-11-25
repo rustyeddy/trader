@@ -1,8 +1,9 @@
 // Package results keeps what a run leaves behind: a directory per run under a
 // results root, named by its RunID, holding run.json (what the run was and how it
-// ended) and events.jsonl (the engine's journal of every order transition). It is
-// the one place that opens those files; the engine only writes to an io.Writer it is
-// handed, and a client such as Investor only reads the two files.
+// ended), events.jsonl (the engine's journal of every order transition) and
+// account.jsonl (the account's equity after every frame). It is the one place that
+// opens those files; the engine only writes to the io.Writers it is handed, and a
+// client such as Investor only reads the files.
 package results
 
 import (
@@ -35,13 +36,15 @@ const (
 
 // File names inside a run directory.
 const (
-	RunFile    = "run.json"     // the Record
-	EventsFile = "events.jsonl" // one JSON line per order transition
+	RunFile     = "run.json"      // the Record
+	EventsFile  = "events.jsonl"  // one JSON line per order transition
+	AccountFile = "account.jsonl" // one JSON line per account observation
 )
 
 // Record is run.json: what a run was and how it ended. It holds no result of its
 // own: Result is the engine's summary, copied as it came, and the orders and fills
-// are events.jsonl, the engine's own record. A reader needs only these two files.
+// are events.jsonl, the engine's own record, and the account's equity over time is
+// account.jsonl. A reader needs only these files.
 type Record struct {
 	RunID    id.RunID `json:"run_id"`
 	Kind     string   `json:"kind"`
@@ -70,12 +73,39 @@ type Record struct {
 	Result any `json:"result,omitempty"`
 }
 
-// Run is a run in progress: its directory, its journal file and its record.
+// journalFile is a run's journal file with its buffer.
+type journalFile struct {
+	f   *os.File
+	buf *bufio.Writer
+}
+
+// createJournal makes the journal file name in dir; it must not exist.
+func createJournal(dir, name string) (*journalFile, error) {
+	f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("run journal %s: %w", name, err)
+	}
+	return &journalFile{f: f, buf: bufio.NewWriter(f)}, nil
+}
+
+// close flushes and closes the file, reporting both failures.
+func (j *journalFile) close(name string) error {
+	var err error
+	if ferr := j.buf.Flush(); ferr != nil {
+		err = fmt.Errorf("journal %s: %w", name, ferr)
+	}
+	if cerr := j.f.Close(); cerr != nil {
+		err = errors.Join(err, fmt.Errorf("journal %s: %w", name, cerr))
+	}
+	return err
+}
+
+// Run is a run in progress: its directory, its journal files and its record.
 type Run struct {
-	dir    string
-	rec    Record
-	events *os.File
-	buf    *bufio.Writer
+	dir     string
+	rec     Record
+	events  *journalFile
+	account *journalFile
 }
 
 // Start makes the run's directory under root, named by the RunID, and opens its
@@ -92,14 +122,20 @@ func Start(root string, rec Record) (*Run, error) {
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("run directory: %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, EventsFile), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	events, err := createJournal(dir, EventsFile)
 	if err != nil {
-		return nil, fmt.Errorf("run journal: %w", err)
+		return nil, err
 	}
-	r := &Run{dir: dir, rec: rec, events: f, buf: bufio.NewWriter(f)}
+	account, err := createJournal(dir, AccountFile)
+	if err != nil {
+		_ = events.f.Close()
+		return nil, err
+	}
+	r := &Run{dir: dir, rec: rec, events: events, account: account}
 	r.rec.Status = Running
 	if err := writeRecord(dir, r.rec); err != nil {
-		_ = f.Close()
+		_ = events.f.Close()
+		_ = account.f.Close()
 		return nil, err
 	}
 	return r, nil
@@ -109,9 +145,12 @@ func Start(root string, rec Record) (*Run, error) {
 func (r *Run) Dir() string { return r.dir }
 
 // Journal is where the engine writes the run's events.
-func (r *Run) Journal() io.Writer { return r.buf }
+func (r *Run) Journal() io.Writer { return r.events.buf }
 
-// Finish ends the run: it flushes and closes the journal and rewrites run.json
+// AccountJournal is where the engine writes the run's account observations.
+func (r *Run) AccountJournal() io.Writer { return r.account.buf }
+
+// Finish ends the run: it flushes and closes the journals and rewrites run.json
 // with the outcome. runErr is how the run ended (nil for completed), result the
 // engine's summary when it completed.
 //
@@ -119,16 +158,10 @@ func (r *Run) Journal() io.Writer { return r.buf }
 // failed. The journal is always flushed and closed, and if that fails too the error
 // is added to the run's, never dropped: a completed run becomes failed, since what it
 // recorded is not all there, and a failed or cancelled one keeps its status and says
-// in its error that events.jsonl may be incomplete. The returned error carries both
+// in its error that the journals may be incomplete. The returned error carries both
 // (errors.Is still finds the run's own).
 func (r *Run) Finish(runErr error, result any) error {
-	var jerr error
-	if err := r.buf.Flush(); err != nil {
-		jerr = fmt.Errorf("journal: %w", err)
-	}
-	if err := r.events.Close(); err != nil {
-		jerr = errors.Join(jerr, fmt.Errorf("journal: %w", err))
-	}
+	jerr := errors.Join(r.events.close(EventsFile), r.account.close(AccountFile))
 
 	status := Completed
 	switch {

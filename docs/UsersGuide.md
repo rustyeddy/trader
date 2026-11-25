@@ -322,13 +322,13 @@ Every run is journaled, whether it completes, fails or is cancelled. It gets a R
 (`run_` and a sortable ULID that carries the time it began) and a directory of that
 name under the results root (`--results-root`, then `TRADER_RESULTS_ROOT`, then
 `results.root`, then `/srv/trading/backtest/results`; the root is created if it is
-missing). Two files are enough to read a run:
+missing). Three files are enough to read a run:
 
 - `run.json`: the RunID, kind (`backtest`), strategy, source, interval, instruments,
   range, wall-clock `started_at` and `ended_at`, `status` (`running` while it runs,
   then `completed`, `failed` or `cancelled`), `error` and, for a completed run, the
-  engine's `result` (orders, trades, balance, equity, open positions). A run that was
-  cut off, say by a crash, still says `running`.
+  engine's `result` (orders, trades, balance, equity, open positions, and the
+  metrics below). A run that was cut off, say by a crash, still says `running`.
 - `events.jsonl`: one JSON line for every order transition, in the order it
   happened: `requested` (what was asked: instrument, action, direction, type, price,
   stop, target), `sized` (the account's size), `submitted` (the broker's id), `filled`
@@ -336,6 +336,73 @@ missing). Two files are enough to read a run:
   reason). The broker's own orders, protective stops, targets and margin closeouts,
   are in it with their `cause`. Lines carry the simulated time only, so two runs that
   trade the same way write the same lines. A failed run keeps the events it had.
+- `account.jsonl`: the account's equity over time, one JSON line per observation, in
+  order. Copy it unchanged to keep the evidence; it needs nothing of Trader to read.
+
+```json
+{"seq":1,"time":"2024-01-01T22:00:00Z","kind":"initial","account":"sim123","balance":{"amount":"10000","currency":"USD"},"unrealized":{"amount":"0","currency":"USD"},"equity":{"amount":"10000","currency":"USD"},"open":0}
+{"seq":3,"time":"2024-01-02T00:00:00Z","kind":"frame","account":"sim123","balance":{"amount":"10000","currency":"USD"},"unrealized":{"amount":"7.06446","currency":"USD"},"equity":{"amount":"10007.06446","currency":"USD"},"open":1}
+```
+
+  The first line (`kind` `initial`) is the account before anything trades, at the
+  opening time of the first traded frame (warm-up bars are not traded and not
+  observed). Every other line (`frame`) is the account after one replayed frame, at
+  that frame's availability time, once its fills, marks and margin rules have settled;
+  with several instruments there is one coherent line per frame, never one per
+  instrument. `balance` is realized cash, `unrealized` the open positions' P&L at their
+  latest mark, `equity` their sum; all are exact amounts in the account's currency,
+  and `open` counts the open positions. A frame holds only the instruments that have a
+  bar then. An open position whose instrument has none is not marked again, and its
+  instrument is listed in `stale` (omitted when empty), so an unchanged value is told
+  from a fresh one; no mark is made up.
+
+The summary in `result` keeps its earlier fields and adds, all computed from the
+account observations and the run's trade counts (nothing else is measured):
+
+```json
+"net_return_pct": "1.5045263",
+"win_rate": "0.32608696",
+"max_drawdown": {
+  "amount": {"amount": "218.501", "currency": "USD"},
+  "pct": "2.15839646",
+  "peak_equity": {"amount": "10123.30236", "currency": "USD"},
+  "trough_equity": {"amount": "9904.80136", "currency": "USD"},
+  "peak_time": "2024-01-05T16:00:00Z",
+  "trough_time": "2024-01-23T03:00:00Z"
+},
+"max_percent_drawdown": {
+  "amount": {"amount": "218.501", "currency": "USD"},
+  "pct": "2.15839646",
+  "peak_equity": {"amount": "10123.30236", "currency": "USD"},
+  "trough_equity": {"amount": "9904.80136", "currency": "USD"},
+  "peak_time": "2024-01-05T16:00:00Z",
+  "trough_time": "2024-01-23T03:00:00Z"
+}
+```
+
+- `net_return_pct`: (final equity - initial equity) / initial equity, in percent
+  (`1.5` is 1.5%). Equity includes open positions at their latest mark.
+- `win_rate`: `wins / trades` as a fraction, `null` when no trade closed. A trade is
+  a closed position; break-even trades count in `trades`, not in `wins`.
+- `max_drawdown` and `max_percent_drawdown`: mark-to-market equity drawdowns, not
+  balance drawdowns, so open-position losses count. Replaying `account.jsonl`: the
+  peak is the highest `equity` so far (the first line takes part, and a later equal
+  equity does not move the peak time), the depth is peak minus `equity`, and the
+  percentage is the depth over that peak, to eight places.
+  - `max_drawdown` is the fall with the largest `amount`. Its `pct` belongs to that
+    fall and is not necessarily the run's largest percentage.
+  - `max_percent_drawdown` is the fall with the largest `pct`: use it for the maximum
+    percentage drawdown. Its `amount` belongs to that fall.
+
+  For equity `100, 80, 200, 170`, `max_drawdown` is 30 (15%, from 200) and
+  `max_percent_drawdown` is 20% (20, from 100). The two are often the same fall, as
+  above. Each takes the first of equals and has that fall's peak and trough `time`
+  and equity. A run that never falls (no trades, or only rising equity) reports zero,
+  and the peak and trough are the first line. A fall that never recovers still
+  counts. Equity is sampled at frame close, not intrabar: an excursion inside a bar
+  is not seen. Missing marks are never replaced, and an observation that cannot be
+  valued fails the run rather than giving a statistic. The last line equals the
+  summary's final `balance`, `unrealized` and `equity`; the run fails if it does not.
 
 ```sh
 ls /srv/trading/backtest/results                       # one directory per run

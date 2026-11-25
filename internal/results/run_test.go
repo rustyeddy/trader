@@ -58,9 +58,11 @@ func TestStart_MakesTheRunDirectoryAndWritesARunningRecord(t *testing.T) {
 	assert.Equal(t, "2024-01-01T00:00:00Z", m["from"])
 	assert.NotContains(t, m, "ended_at")
 	assert.NotContains(t, m, "result")
-	info, err := os.Stat(filepath.Join(run.Dir(), EventsFile))
-	require.NoError(t, err)
-	assert.Zero(t, info.Size(), "the journal is open and empty")
+	for _, name := range []string{EventsFile, AccountFile} {
+		info, err := os.Stat(filepath.Join(run.Dir(), name))
+		require.NoError(t, err)
+		assert.Zero(t, info.Size(), "the journal is open and empty")
+	}
 }
 
 func TestStart_Refuses(t *testing.T) {
@@ -133,6 +135,26 @@ func TestFinish(t *testing.T) {
 		assert.NotContains(t, m, "result")
 		assert.Equal(t, `{"seq":1}`+"\n", events(t, run), "the partial journal is kept")
 	})
+	t.Run("the account journal is kept like the events", func(t *testing.T) {
+		run := start(t)
+		_, err := run.AccountJournal().Write([]byte(`{"seq":1}` + "\n"))
+		require.NoError(t, err)
+		require.NoError(t, run.Finish(nil, nil))
+		data, err := os.ReadFile(filepath.Join(run.Dir(), AccountFile))
+		require.NoError(t, err)
+		assert.Equal(t, `{"seq":1}`+"\n", string(data))
+	})
+	t.Run("an account journal that cannot be flushed fails a run that would have completed", func(t *testing.T) {
+		run := start(t)
+		_, err := run.AccountJournal().Write([]byte("not on disk yet\n"))
+		require.NoError(t, err)
+		require.NoError(t, run.account.f.Close())
+
+		got := run.Finish(nil, nil)
+
+		require.ErrorContains(t, got, AccountFile)
+		assert.Equal(t, "failed", readRecord(t, run.Dir())["status"])
+	})
 	t.Run("a cancelled run is cancelled, not failed", func(t *testing.T) {
 		run := start(t)
 		require.ErrorIs(t, run.Finish(context.Canceled, nil), context.Canceled)
@@ -142,7 +164,7 @@ func TestFinish(t *testing.T) {
 		run := start(t)
 		_, err := run.Journal().Write([]byte("not on disk yet\n"))
 		require.NoError(t, err)
-		require.NoError(t, run.events.Close()) // the disk goes away under the buffer
+		require.NoError(t, run.events.f.Close()) // the disk goes away under the buffer
 
 		got := run.Finish(nil, map[string]int{"trades": 1})
 
@@ -156,7 +178,7 @@ func TestFinish(t *testing.T) {
 		run := start(t)
 		_, err := run.Journal().Write([]byte("not on disk yet\n"))
 		require.NoError(t, err)
-		require.NoError(t, run.events.Close())
+		require.NoError(t, run.events.f.Close())
 		disconnect := errors.New("worker disconnected")
 
 		got := run.Finish(disconnect, nil)
@@ -172,7 +194,7 @@ func TestFinish(t *testing.T) {
 		run := start(t)
 		_, err := run.Journal().Write([]byte("not on disk yet\n"))
 		require.NoError(t, err)
-		require.NoError(t, run.events.Close())
+		require.NoError(t, run.events.f.Close())
 
 		got := run.Finish(context.Canceled, nil)
 
@@ -190,6 +212,6 @@ func TestFinish(t *testing.T) {
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		assert.ElementsMatch(t, []string{RunFile, EventsFile}, names)
+		assert.ElementsMatch(t, []string{RunFile, EventsFile, AccountFile}, names)
 	})
 }

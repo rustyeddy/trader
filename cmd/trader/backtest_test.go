@@ -89,6 +89,7 @@ func TestBacktest_JournalsTheRunAndSaysWhere(t *testing.T) {
 	assert.Contains(t, out, "run "+dirs[0]+": "+filepath.Join(results, dirs[0]), "the summary ends by saying where the run is")
 	assert.FileExists(t, filepath.Join(results, dirs[0], "run.json"))
 	assert.FileExists(t, filepath.Join(results, dirs[0], "events.jsonl"))
+	assert.FileExists(t, filepath.Join(results, dirs[0], "account.jsonl"))
 }
 
 // TestBacktest_ResultsRootIsFlagThenEnvironmentThenFile checks the order the
