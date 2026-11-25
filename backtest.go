@@ -117,7 +117,7 @@ type result struct {
 	strategy string // the name of the strategy that traded
 	bars     int
 
-	settings Settings // what the account was sized and admitted under
+	settings Settings // what the run was sized and admitted under (RunSeriesWith)
 
 	submitted, filled, rejected, cancelled, pending int
 	trades, wins, losses, breakEven                 int
@@ -153,7 +153,7 @@ func newResult(scenario string, bars int, tr *trader) (*result, error) {
 	r := &result{
 		scenario: scenario, strategy: name, bars: bars, rejected: len(tr.rejected),
 		balance: act.balance, unrealized: unrealized, equity: equity,
-		realized: realized, settings: settingsOf(tr.broker, act),
+		realized: realized,
 	}
 
 	for _, o := range tr.broker.completed {

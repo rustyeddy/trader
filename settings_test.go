@@ -23,6 +23,7 @@ func TestRunSeries_SummaryReportsTheSettingsTheRunUsed(t *testing.T) {
 	assert.JSONEq(t, `{
 		"risk_per_trade": "0.01",
 		"max_order_notional": {"amount": "50000000", "currency": "USD"},
+		"margin_policy": "default",
 		"margin_closeout_level": "0.5",
 		"instruments": [
 			{"instrument": "EURUSD", "margin_rate": "0.02", "min_units": "1", "unit_step": "1"},
@@ -31,9 +32,21 @@ func TestRunSeries_SummaryReportsTheSettingsTheRunUsed(t *testing.T) {
 	}`, string(got))
 }
 
+// What a caller records before a run is what the run's summary then says.
+func TestRunSettings_AreTheOnesTheSummaryReports(t *testing.T) {
+	captureLogs(t)
+
+	before, err := RunSettings()
+	require.NoError(t, err)
+	res, err := RunSeries(context.Background(), "x", time.Time{}, wave("EURUSD", 1, upThenDown...))
+	require.NoError(t, err)
+
+	assert.Equal(t, res.Summary().Settings, before)
+}
+
 // Non-default settings are the ones reported, because they are read from what
-// sized the order.
-func TestNewResult_ReportsNonDefaultSettings(t *testing.T) {
+// sizes the order.
+func TestSettingsOf_ReportsNonDefaultSettings(t *testing.T) {
 	captureLogs(t)
 	br := newBroker("sim", testMarkets())
 	act := br.addAccount("a", usd(10000))
@@ -44,9 +57,7 @@ func TestNewResult_ReportsNonDefaultSettings(t *testing.T) {
 	o := brokerOpen("a")
 	require.NoError(t, br.submit(context.Background(), o))
 
-	res, err := newResult("x", 0, &trader{broker: br, account: act})
-	require.NoError(t, err)
-	got := (&Result{r: res}).Summary().Settings
+	got := settingsOf(br, act)
 
 	assert.Equal(t, num.MustParseRate("0.002"), got.RiskPerTrade)
 	assert.Equal(t, usd(1_000_000), got.MaxOrderNotional)
@@ -58,15 +69,33 @@ func TestNewResult_ReportsNonDefaultSettings(t *testing.T) {
 	assert.Equal(t, qty(1818), o.units, "the order was sized by the reported risk")
 }
 
-func TestSettingsOf_ACustomMarginPolicyHasNoCloseoutLevel(t *testing.T) {
-	br := newBroker("sim", testMarkets())
-	act := br.addAccount("a", usd(10000))
-	br.margin = marginLevelPolicy(rateOne, rateOne)
+func TestSettingsOf_NamesTheMarginPolicy(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(*broker)
+		policy string
+		level  bool // the default level is the one applied
+	}{
+		"default":            {func(*broker) {}, MarginPolicyDefault, true},
+		"custom trigger":     {func(br *broker) { br.margin = marginLevelPolicy(rateOne, rateOne) }, MarginPolicyCustom, false},
+		"custom selector":    {func(br *broker) { br.closeout = closeLargestMargin }, MarginPolicyCustom, true},
+		"complete liquidate": {func(br *broker) { br.completeCloseout = true }, MarginPolicyCustom, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			br := newBroker("sim", testMarkets())
+			act := br.addAccount("a", usd(10000))
+			tc.change(br)
 
-	got := settingsOf(br, act)
+			data, err := json.Marshal(settingsOf(br, act))
+			require.NoError(t, err)
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(data, &got))
 
-	assert.Nil(t, got.MarginCloseoutLevel, "the default level would not be the one applied")
-	data, err := json.Marshal(got)
-	require.NoError(t, err)
-	assert.NotContains(t, string(data), "margin_closeout_level")
+			assert.Equal(t, tc.policy, got["margin_policy"])
+			if tc.level {
+				assert.Equal(t, "0.5", got["margin_closeout_level"])
+			} else {
+				assert.NotContains(t, got, "margin_closeout_level", "the default level is not the one applied")
+			}
+		})
+	}
 }
