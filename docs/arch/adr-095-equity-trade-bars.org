@@ -41,20 +41,81 @@ Checked read-only on 2026-11-25 in =d_us_txt.zip=
   that the gaps were consistent with closures. The holiday rules were not checked
   against an exchange publication.
 
+* Universal bar model and consumer contract
+
+Trader has *one* domain bar, =marketdata.Bar=, regardless of source, asset class,
+storage schema or consumer. The existing =Bid=, =Ask=, =Mid= and =Trade= OHLC
+series are optional observations of the *same* bar. What a provider supplies
+determines which series are present; it does not determine the Go bar type.
+
+=Bar.OHLC()= already solves the common strategy/indicator/study case. It returns
+the first available series in the existing, stable priority order:
+
+  =Mid -> Trade -> Bid -> Ask=
+
+General-purpose strategies, indicators, scanners and studies use =OHLC()=
+without branching on a provider or market. Consumers which actually need
+quotes, such as spread-sensitive research and execution logic, explicitly read
+=Bid= and =Ask= and check whether they exist. They *must not* infer a missing
+quote, spread, midpoint or executable price from a trade-only or unknown-basis
+series. Consumers must honor =AvailableAt= and understand that the preferred
+series is for price analysis, not necessarily for executable fills.
+
+There is no separate equity bar, FX bar, strategy bar, or modified
+consumer-specific Bar. The tempting alternative of transforming a =Bar= into a
+different type for each consumer is *rejected*: it moves the same semantic
+questions into conversion code, creates extra models and potential information
+loss, and does not remove consumers' responsibility to understand the data they
+use. The public contract must instead document preferred-price selection,
+presence/absence, availability, source price basis, and execution limitations.
+A specialized derived view may be an explicit algorithmic choice, never a new
+required canonical representation or a silent conversion.
+
+Currently an absent OHLC series is the all-zero value, detected by
+=OHLC.IsZero()=. This is already unambiguous for validated bars (a present
+OHLC must have positive prices). The proposal to make series =*OHLC= pointers
+and/or private fields accessed via getters is *deferred*. It requires an API
+migration and performance analysis: pointers can reduce inline size but can
+introduce allocations, garbage-collector work and indirection. Benchmark real
+single- and multi-instrument histories and profile memory/throughput first.
+Neither change is a prerequisite for SPY D1. Preserve the current =OHLC()=
+signature and priority behavior in this milestone.
+
+Persistence may use versioned encodings for different available series, but
+*every* reader must reconstruct the identical =marketdata.Bar= model and
+presence semantics, without a per-consumer adaptation layer. The schema is
+identified and validated from the file's declared columns/capabilities and
+metadata, *not inherently from the provider's name*. A provider may supply
+trade-only bars, quote bars or both at different times. Preserve every
+available price series in canonical storage. Dataset-level provenance records
+the source, declared/observed price basis, adjustment and snapshot, while
+=OHLC()= selects the preferred populated series within an individual bar.
+
 * Decision
 
-** 1. A second schema, =canonical-trade-v1=
+** 1. A second on-disk schema, =canonical-trade-v1=
 
-Trade-only data gets its own schema. =canonical-v2= is not changed.
+For the initial implementation, trade-only data gets an additional *on-disk
+encoding*, not an additional domain bar or consumer API. Existing
+=canonical-v2= FX files are unchanged. The target layouts for today's known
+datasets are:
 
-| Source | Schema             | Price series  |
-|--------+--------------------+---------------|
-| oanda  | canonical-v2       | bid, ask, mid |
-| stooq  | canonical-trade-v1 | trade         |
+| Observations in file | On-disk schema       | Example source |
+|----------------------+----------------------+----------------|
+| bid, ask, mid        | canonical-v2         | OANDA          |
+| trade                | canonical-trade-v1   | Stooq, Alpaca  |
 
-The source fixes the schema; a file whose schema does not match its source is
-malformed. A =canonical-trade-v1= bar has =Trade= set and =Bid=, =Ask= and =Mid=
-absent. No side, midpoint or spread is derived. The path layout is that of
+The *declared schema and observed columns* must agree; the source is provenance,
+not a permanent schema selector. A future source may provide different series
+without changing the =marketdata.Bar= API. The choice of two on-disk codecs is
+a narrow compatibility decision, not an assertion that different markets need
+different canonical data models. A later common superset encoding can be
+evaluated separately without forcing an FX migration in this milestone.
+
+A =canonical-trade-v1= reader returns a normal =marketdata.Bar= with =Trade=
+present and =Bid=, =Ask=, =Mid= absent. =Bar.OHLC()= consequently chooses =Trade=
+without changing any strategy or indicator. No side, midpoint or spread is
+derived. The path layout is that of
 ADR-089: =stooq/canonical/SPY/2024/03/SPY-2024-03-d1.csv=. Bad records, atomic
 publication and rebuild rules are those of ADR-090. The only interval is =d1=.
 
@@ -107,8 +168,11 @@ by the build, never inferred by a reader.
   used is kept, so the run can be reproduced. The provider issue fixes the path.
 - Alpaca (split-adjusted by its levels, setting unrecorded, IEX volume) is a
   different source and series. Nothing merges or splices sources.
-- The loader returns these fields with the bars. =run.json= and the REST bars
-  response gain an additive =data= object with them and the availability policy.
+- The loader returns these fields alongside the *unchanged*
+  =marketdata.Bar= values. =run.json= and the REST bars response gain an
+  additive =data= object with them and the availability policy. Record the
+  selected price basis and data limitations so a general =OHLC()= consumer's
+  research output can be interpreted correctly.
 - *Unknown, and recorded as such rather than filled:* dividend and split events and
   amounts, the vendor's adjustment method, whether open and close are auction
   prices, the volume scope beyond "consolidated by observation", and restatements
@@ -175,7 +239,7 @@ Engine rules for this source, applied only to runs on it:
 | Topic       | Rule                                                                 |
 |-------------+----------------------------------------------------------------------|
 | Instrument  | SPY as an ETF settling in USD, multiplier 1                          |
-| Basis       | the engine's bars keep the series as =Trade=, never relabelled =Mid= |
+| Basis       | preserve =Trade=; =OHLC()= selects it, never relabel it =Mid=    |
 | Tick        | 0.00000001, so adjusted prices are never rounded                     |
 | Size        | whole shares, minimum 1                                              |
 | Leverage    | margin rate 1 (cash only); risk per trade unchanged (ADR-093)        |
@@ -191,9 +255,12 @@ dollar thresholds, no parameter optimisation, no multi-instrument or FX mix.
 - =canonical-v2= files, =scheduled-close-v1=, the FX calendar, the known FX holes,
   OANDA builder and validator versions and the default source stay as they are. No
   file is migrated or rebuilt.
-- New: the =canonical-trade-v1= codec, the =non-session= reason (valid only in it),
-  the equity availability policy and calendar, and =stooq= accepted by the build,
-  read and backtest paths.
+- New: the =canonical-trade-v1= *storage* codec, the =non-session= reason
+  (valid only in it), the equity availability policy and calendar, and =stooq=
+  accepted by the build, read and backtest paths. Both storage codecs decode
+  into the *same* =marketdata.Bar=. General consumers continue to use
+  =OHLC()=; quote-dependent consumers explicitly check =Bid= and =Ask=.
+  Do not introduce a provider-specific or consumer-specific bar type.
 - The SPY market is added to the catalog only for =stooq= runs, so the settings
   recorded for an FX run do not change.
 - The JSON additions are additive; existing fields keep their meaning.
@@ -203,7 +270,11 @@ dollar thresholds, no parameter optimisation, no multi-instrument or FX mix.
 
 * Consequences
 
-- Two codecs share the file rules; the shared parts are factored, not copied.
+- Two on-disk codecs share the file rules; the shared parts are factored, not
+  copied. There is still one canonical =marketdata.Bar= and one =OHLC()= contract.
+- Keep the existing value fields and their zero/absence semantics for this
+  milestone; investigate pointers/getters only with measurements and a separate
+  API decision.
 - A backtest range on Stooq is all-or-nothing on one snapshot, and old snapshots
   accumulate.
 - 8-decimal columns are wider than SPY needs.
@@ -213,9 +284,19 @@ dollar thresholds, no parameter optimisation, no multi-instrument or FX mix.
 
 * Alternatives considered
 
-- *Add trade columns to =canonical-v2=, or one new superset schema.* Rejected: the
-  strict reader would force every FX file to be rebuilt or two column sets under
-  one name, to store columns that are always empty.
+- *Add trade columns to =canonical-v2=, or one new superset on-disk schema.*
+  Deferred rather than ruled out forever: altering the existing strict reader
+  under the same version would break FX compatibility; a new unified version
+  would need migration/dual readers. A separate trade encoding is a small
+  initial compatibility choice, not a different domain bar.
+- *Convert marketdata.Bar into consumer-selected bar types.* Rejected:
+  unnecessary duplication, implicit conversions, possible loss of available
+  quotes, and unchanged requirements for consumers to understand price basis.
+  Use =OHLC()= for ordinary price calculations and explicit optional series for
+  consumers that need specific data.
+- *Replace optional OHLC values with pointers/private fields now.* Deferred:
+  memory and runtime effects must be benchmarked against the cost of allocations
+  and a public-API migration. Existing =IsZero()= absence semantics suffice.
 - *Write trade prices to =Mid=.* Rejected: it mislabels data (#733).
 - *Decimals per instrument.* Rejected: another property to maintain and a blocker
   at expansion, for a few bytes saved.
@@ -230,7 +311,8 @@ dollar thresholds, no parameter optimisation, no multi-instrument or FX mix.
 
 * Decisions for the owner
 
-1. Separate =canonical-trade-v1= schema, leaving =canonical-v2= untouched?
+1. Add =canonical-trade-v1= as a storage encoding while preserving one
+   =marketdata.Bar=, =OHLC()= selection and the existing =canonical-v2= FX files?
 2. 8-decimal prices, and fractional volume rejected for now?
 3. One snapshot per series, with no override?
 4. =Time= 09:30, =AvailableAt= scheduled close, from an embedded date table?
