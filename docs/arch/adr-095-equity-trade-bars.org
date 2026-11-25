@@ -112,6 +112,13 @@ a narrow compatibility decision, not an assertion that different markets need
 different canonical data models. A later common superset encoding can be
 evaluated separately without forcing an FX migration in this milestone.
 
+The build chooses the encoding from the series observed in its input. A reader
+dispatches on the =schema= in the header and rejects columns that do not match
+it. Neither encoding holds quotes and trade prices together, so a build whose
+input has both fails: it never drops a series to fit a file. Such data needs a
+new encoding first. Which parser and market rules apply to =stooq= is
+configuration for this scope, not a rule that a provider has one schema.
+
 A =canonical-trade-v1= reader returns a normal =marketdata.Bar= with =Trade=
 present and =Bid=, =Ask=, =Mid= absent. =Bar.OHLC()= consequently chooses =Trade=
 without changing any strategy or indicator. No side, midpoint or spread is
@@ -123,7 +130,7 @@ Example, March 2024 (two of 20 rows; =<...>= marks a value the build computes):
 
 #+begin_example
 # schema=canonical-trade-v1 provider=stooq symbol=SPY interval=d1 year=2024 month=03
-# meta {"raw_fingerprint":"sha256:<month>","builder_version":"<v>","validator_version":"<v>","availability_policy":"us-equity-close-v1","built_at":"<utc>","bar_count":20,"bad_count":0,"first_bar":"2024-03-01T14:30:00Z","last_bar":"2024-03-28T13:30:00Z","price_basis":"trade","currency":"USD","volume_unit":"shares","adjustment":"total-return","adjustment_evidence":"observed","snapshot_fingerprint":"sha256:54b64bba890d89495bc2108824ba378a3f7f92349d5021595499bbc47696ee6b","snapshot_as_of":"2026-09-10"}
+# meta {"raw_fingerprint":"sha256:<month>","builder_version":"<v>","validator_version":"<v>","availability_policy":"us-equity-close-v1","calendar":"us-equity-calendar-v1","built_at":"<utc>","bar_count":20,"bad_count":0,"first_bar":"2024-03-01T14:30:00Z","last_bar":"2024-03-28T13:30:00Z","price_basis":"trade","currency":"USD","volume_unit":"shares","adjustment":"total-return","adjustment_evidence":"observed","snapshot_fingerprint":"sha256:54b64bba890d89495bc2108824ba378a3f7f92349d5021595499bbc47696ee6b","snapshot_as_of":"2026-09-10"}
 time,available_at,trade_o,trade_h,trade_l,trade_c,volume
 2024-03-01T14:30:00Z,2024-03-01T21:00:00Z,501.02800000,505.27000000,500.61400000,504.83800000,78064486
 ...
@@ -154,18 +161,35 @@ by the build, never inferred by a reader.
 | =volume_unit=          | =shares=                                                       |
 | =adjustment=           | =total-return=, =split=, =unadjusted= or =unknown=             |
 | =adjustment_evidence=  | =observed= (inferred by comparing data) or =documented=        |
-| =snapshot_fingerprint= | sha256 of the one whole-history raw file the series came from  |
-| =snapshot_as_of=       | date that file was obtained, declared by the operator          |
+| =snapshot_fingerprint= | sha256 of the series' whole-history input bytes (below)        |
+| =snapshot_as_of=       | date those bytes were obtained, declared by the operator       |
+| =calendar=             | version of the date table used (section 4)                     |
 | =raw_fingerprint=      | as ADR-090: the raw rows of this month                         |
 
 - Stooq D1 is =total-return= / =observed= (ADR-073, #728).
 - *A series is one snapshot.* Because adjustment rewrites history, months from two
   downloads must never be joined. A load whose months differ in schema, currency,
-  adjustment or =snapshot_fingerprint= fails, and no flag allows it. A new
-  download rebuilds the whole series.
-- The Stooq build therefore reads one whole-history file (the bundle member or a
-  loose download), not independently updatable monthly files. A snapshot a run
-  used is kept, so the run can be reproduced. The provider issue fixes the path.
+  adjustment, calendar or =snapshot_fingerprint= fails, and no flag
+  allows it. A new download rebuilds the whole series.
+- The Stooq build therefore reads one whole-history file for one symbol, not
+  independently updatable monthly files.
+- *Input bytes.* =snapshot_fingerprint= is the sha256 of exactly that file's
+  bytes: the uncompressed bytes of the symbol's ZIP member, or the bytes of a
+  loose download. Line endings and encoding are not normalized. The ZIP's own
+  name, hash, timestamps and compression are not part of the identity, so
+  repackaging a bundle does not change it. A loose download is the same snapshot
+  only if it is byte-identical. The loose =*_us_d.csv= format differs from the
+  member format, so it is a different snapshot even where every price agrees.
+  For the bundle inspected here, the SPY member
+  (=data/daily/us/nyse etfs/2/spy.us.txt=) is
+  =54b64bba890d89495bc2108824ba378a3f7f92349d5021595499bbc47696ee6b=.
+- *Archive.* Before publishing canonical files, the build stores those bytes
+  unchanged at =stooq/snapshots/SPY/<sha256>.raw= under the data root, with
+  =<sha256>.json= beside it recording =snapshot_as_of=, the original file name
+  and, for a member, the member path and the ZIP's sha256. Neither file is
+  overwritten: a later build of the same bytes verifies them and reuses the
+  recorded =snapshot_as_of=. The archived bytes, builder version and calendar
+  are enough to rebuild the series.
 - Alpaca (split-adjusted by its levels, setting unrecorded, IEX volume) is a
   different source and series. Nothing merges or splices sources.
 - The loader returns these fields alongside the *unchanged*
@@ -192,15 +216,32 @@ America/New_York using the zone bytes already pinned in the repository:
 
 The calendar is a reviewed, embedded table of full closures and early closes,
 =us-equity-calendar-v1=, covering 2005-01-01 to 2026-12-31. It is a list of dates,
-not computed rules and not a =Calendar= interface. An early close is listed only
-when an exchange publication confirms it. A date outside the table fails the
-build. Because the table decides =AvailableAt=, changing it is a new policy name
-and a rebuild.
+not computed rules and not a =Calendar= interface. A date outside the table fails
+the build.
+
+- *Source.* The New York Stock Exchange's published holiday and trading-hours
+  calendars, and its notices for unscheduled closures. Each entry, or each year's
+  group of entries, cites the publication it was checked against.
+- *Not yet verified.* The dates discussed here come from holiday rules and the
+  Stooq rows. The table is not authoritative until every full closure and early
+  close from 2005 to 2026 has been checked, and the issue that adds it is not
+  merged before then. An early close without a confirming publication is not
+  listed.
+- *Updates.* A version is never edited after data has been built with it. Any
+  change to the dates, whether a correction or another year, is a new version,
+  reviewed with its citations, and series are rebuilt to use it.
+- *Pinning.* Each file records =calendar= beside =availability_policy=, both are
+  part of =SameBuild=, and =run.json= records both. The policy name changes only
+  when the timing rules change; the calendar version changes with the dates.
 
 - A row dated on a closed day is a bad record with a new reason, =non-session=.
 - A trading date with no row is a gap. It fails a strict load unless it is on a
-  reviewed known-holes list, as in ADR-090 section 7. SPY 2011-02-17 is proposed
-  for that list, after one fresh download confirms Stooq still lacks it.
+  reviewed known-holes list, as in ADR-090 section 7.
+- SPY 2011-02-17 is *not* on that list. It is added only after an authoritative
+  record confirms SPY traded that day and a fresh Stooq download still lacks it.
+  Until then a strict load covering that day fails, which includes the first
+  test's range. If a fresh download has the row, the new snapshot is used and no
+  exemption is needed.
 
 Required test fixtures:
 
@@ -233,6 +274,21 @@ and to study returns*. They are not evidence of executable performance:
 - There is no bid, ask or spread. No commission, spread or slippage is charged.
   Results are optimistic by those costs, and =run.json= says =costs: none=.
 - Dividends are already in the prices; the engine credits none.
+
+Such a run is marked, and cannot be started by accident:
+
+- A backtest on trade-only or adjusted data is rejected unless the request
+  explicitly accepts a research-only run.
+- The engine, from the data metadata and market rules, records
+  ="evidence": {"class": "research-only", "reasons": [...]}= in =run.json= from
+  run creation, so failed runs keep it, and in the run result returned over
+  REST. The reasons for this scope are =adjusted-prices=, =no-quotes= and
+  =costs-none=. A caller cannot set or clear it.
+- Consumers, Investor included, must not rank or compare a research-only result
+  as equivalent to a run on quote data. Trader cannot enforce that downstream,
+  so Investor needs its own change before it reads these runs.
+- The absence of the field, as on existing FX runs, does not certify that a
+  result is executable.
 
 Engine rules for this source, applied only to runs on it:
 
@@ -316,8 +372,9 @@ dollar thresholds, no parameter optimisation, no multi-instrument or FX mix.
 2. 8-decimal prices, and fractional volume rejected for now?
 3. One snapshot per series, with no override?
 4. =Time= 09:30, =AvailableAt= scheduled close, from an embedded date table?
-5. SPY 2011-02-17 as a known hole (recommended), or leave the load failing unless
-   missing data is allowed?
-6. Dividend-adjusted prices acceptable for the first test under the limits above?
+5. Keep strict loads failing on SPY 2011-02-17 until it is confirmed, and only
+   then consider a known-hole entry?
+6. Dividend-adjusted prices acceptable for the first test under the limits above,
+   as an explicitly requested, marked research-only run?
 7. Reject opening shorts for equities (recommended), or allow them with the result
    marked as ignoring borrow costs?
