@@ -87,6 +87,9 @@ type trader struct {
 	// keeps the rejections that happen at the fill, so no order is in both.
 	rejected []*order
 
+	// accountLog, when not nil, observes the account around every frame.
+	accountLog *accountLog
+
 	// feedbackLog is what a strategy that wants feedback has been told.
 	feedbackLog feedbackLog
 }
@@ -105,6 +108,12 @@ func (tr *trader) onBar(ctx context.Context, b marketdata.Bar) error {
 // the whole frame, so when two compete for margin the first is sized first and the
 // second sees the margin it reserved.
 func (tr *trader) onFrame(ctx context.Context, f frame) error {
+	if tr.accountLog != nil && tr.accountLog.seq == 0 && len(f.bars) > 0 {
+		// Before anything trades: the opening of the first traded frame.
+		if err := tr.accountLog.observe(observeInitial, f.bars[0].Time, tr.account, nil); err != nil {
+			return err
+		}
+	}
 	if err := tr.broker.onFrame(ctx, f); err != nil {
 		if len(f.bars) == 1 {
 			b := f.bars[0]
@@ -127,6 +136,11 @@ func (tr *trader) onFrame(ctx context.Context, f frame) error {
 		o.decidedAt = f.availableAt
 		if err := tr.handleOrder(ctx, o); err != nil {
 			return err
+		}
+	}
+	if tr.accountLog != nil {
+		if err := tr.accountLog.observe(observeFrame, f.availableAt, tr.account, staleInstruments(tr.account, f)); err != nil {
+			return fmt.Errorf("frame at %s: %w", f.availableAt.Format(time.RFC3339), err)
 		}
 	}
 	// The journal could not write: stop at this safe point, after the frame is

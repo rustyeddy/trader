@@ -125,6 +125,11 @@ type result struct {
 	// The money is exact; it is floored to cents only in write (ADR-086).
 	realized, unrealized, balance, equity num.Money
 	open                                  []position
+
+	// From the account observations, when the run made them (RunSeriesWith).
+	drawdown        *Drawdown // largest by amount
+	percentDrawdown *Drawdown // largest by percentage
+	netReturnPct    num.Rate
 }
 
 func newResult(scenario string, bars int, tr *trader) (*result, error) {

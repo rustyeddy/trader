@@ -75,6 +75,8 @@ dir=/srv/trading/backtest/results/run_01KB5Q3V7T2N4XG9YB6HFA1V7Z
 jq .result.settings $dir/run.json                                       # risk and limits the run used
 jq '{status, error, strategy, result: .result.orders}' $dir/run.json   # transport tcp, status completed
 jq -c 'select(.state=="filled")' $dir/events.jsonl                      # every fill, stops included
+jq '.result | {max_drawdown, max_percent_drawdown}' $dir/run.json       # largest falls, with times
+jq -c '[.time, .equity.amount]' $dir/account.jsonl | head               # equity after each frame
 ```
 
 A run whose client disconnects or crashes is journaled too: `run.json` says
