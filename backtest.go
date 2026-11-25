@@ -123,6 +123,8 @@ type result struct {
 	// The money is exact; it is floored to cents only in write (ADR-086).
 	realized, unrealized, balance, equity num.Money
 	open                                  []position
+
+	settings Settings // what the account was sized and admitted under
 }
 
 func newResult(scenario string, bars int, tr *trader) (*result, error) {
@@ -146,7 +148,7 @@ func newResult(scenario string, bars int, tr *trader) (*result, error) {
 	r := &result{
 		scenario: scenario, strategy: name, bars: bars, rejected: len(tr.rejected),
 		balance: act.balance, unrealized: unrealized, equity: equity,
-		realized: realized,
+		realized: realized, settings: settingsOf(tr.broker, act),
 	}
 
 	for _, o := range tr.broker.completed {

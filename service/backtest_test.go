@@ -428,6 +428,11 @@ func TestRunBacktest_JournalsTheRunInADirectoryNamedByItsRunID(t *testing.T) {
 	// order is submitted once, and no run here amends a stop or trails one.
 	result := run.rec["result"].(map[string]any)
 	assert.Equal(t, "emax", result["strategy"])
+	settings := result["settings"].(map[string]any)
+	assert.Equal(t, "0.01", settings["risk_per_trade"], "run.json says what sized the orders")
+	assert.Equal(t, "0.5", settings["margin_closeout_level"])
+	assert.Equal(t, map[string]any{"amount": "50000000", "currency": "USD"}, settings["max_order_notional"])
+	assert.Len(t, settings["instruments"], 2)
 	var submitted float64
 	for _, e := range run.events {
 		if e["state"] == "submitted" {
@@ -663,6 +668,8 @@ func TestRunBacktest_RemoteEMAXMatchesTheBuiltInEMAX(t *testing.T) {
 	var summary map[string]any
 	require.NoError(t, json.Unmarshal(got.result.Summary, &summary))
 	assert.Equal(t, r.rec["result"].(map[string]any)["balance"], summary["balance"], "the result is the summary run.json holds")
+	require.NotEmpty(t, summary["settings"])
+	assert.Equal(t, r.rec["result"].(map[string]any)["settings"], summary["settings"])
 }
 
 // January is the month before From, so the built-in EMAX is warmed by it and the

@@ -272,10 +272,7 @@ func (act *account) sizeOpen(o *order, m *market, reserved num.Money) error {
 		}
 	}
 
-	least := m.rules.minUnits
-	if least.IsZero() {
-		least = oneUnit
-	}
+	least := m.minUnits()
 	if units.Cmp(least) < 0 {
 		if marginLimited {
 			return reject(o, o.Time, "%w: margin covers %s units, minimum %s",

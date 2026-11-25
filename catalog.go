@@ -130,6 +130,15 @@ func newMarket(e marketConfig) (*market, error) {
 	}, nil
 }
 
+// minUnits is the smallest size an open in m may have: the configured minimum,
+// or one unit when there is none.
+func (m *market) minUnits() num.Quantity {
+	if m.rules.minUnits.IsZero() {
+		return oneUnit
+	}
+	return m.rules.minUnits
+}
+
 // lookup is the market under exactly this engine key. There is no fallback to
 // another spelling: a key the catalog does not hold is not an instrument.
 func (c *catalog) lookup(key string) (*market, bool) {

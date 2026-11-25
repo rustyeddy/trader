@@ -46,6 +46,13 @@
 //
 //	{"result":{"run_id":"run_...","status":"completed","summary":{...}}}
 //
+// The summary is Trader's, passed through as JSON. Its "settings" object says what
+// the engine sized and admitted the run's orders under (read-only, never part of a
+// request): risk_per_trade, max_order_notional, margin_closeout_level (absent for a
+// custom margin policy) and instruments, a list of instrument, margin_rate,
+// min_units, unit_step and max_units (absent when unlimited). The starting balance
+// is the summary's initial_balance.
+//
 // Both sides are loopback-only: nothing here is authenticated or encrypted.
 package strategy
 

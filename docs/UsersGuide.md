@@ -316,6 +316,40 @@ as `failed` with the events recorded until then, and the server goes on. Interru
 [`examples/emax`](../examples/emax/README.md) is the canonical client (the same EMAX,
 written against the public SDK); its README says how to run it and read the journal.
 
+### Run settings
+
+The summary of a completed run, both the `summary` a strategy client receives and
+`result` in `run.json`, has a `settings` object: the risk and account settings the
+engine sized and admitted the run's orders under. They are read-only facts, which no
+client or flag sets. The starting balance and currency are `initial_balance`, beside it.
+
+```json
+"settings": {
+  "risk_per_trade": "0.01",
+  "max_order_notional": {"amount": "50000000", "currency": "USD"},
+  "margin_closeout_level": "0.5",
+  "instruments": [
+    {"instrument": "EURUSD", "margin_rate": "0.02", "min_units": "1", "unit_step": "1"},
+    {"instrument": "GBPUSD", "margin_rate": "0.05", "min_units": "1", "unit_step": "1"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `risk_per_trade` | fraction of equity an open is sized to lose at its stop; planned risk, not a cap on the loss |
+| `max_order_notional` | largest notional of one opening order |
+| `margin_closeout_level` | equity as a fraction of margin in use below which positions are liquidated; absent if the broker ran another margin policy |
+| `instruments` | every market the engine could size an order for, which can be more than the run asked for |
+| `instruments[].margin_rate` | fraction of notional held as margin |
+| `instruments[].min_units`, `unit_step` | smallest size of an open, and the step a size is rounded down to |
+| `instruments[].max_units` | largest size of one order; absent when there is no limit |
+
+There is no aggregate (portfolio) limit and no risk policy version or settings hash:
+Trader has neither. A strategy's own parameters, such as its stop distance, are not
+settings of the run. A failed or cancelled run has no summary, so no settings, and
+neither do runs made before the field existed: treat an absent `settings` as unknown.
+
 ### Results
 
 Every run is journaled, whether it completes, fails or is cancelled. It gets a RunID

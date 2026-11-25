@@ -37,6 +37,8 @@ type Summary struct {
 	Balance        num.Money  `json:"balance"`
 	Equity         num.Money  `json:"equity"`
 	Open           []Position `json:"open"`
+	// Settings are the risk and account settings the run used.
+	Settings Settings `json:"settings"`
 }
 
 // OrderCount is how many orders ended where, as in Write's orders line.
@@ -66,7 +68,7 @@ func (r *Result) Summary() Summary {
 		Orders: OrderCount{Submitted: x.submitted, Filled: x.filled, Rejected: x.rejected, Cancelled: x.cancelled, Pending: x.pending},
 		Trades: x.trades, Wins: x.wins, Losses: x.losses, BreakEven: x.breakEven,
 		Realized: x.realized, Unrealized: x.unrealized, Balance: x.balance, Equity: x.equity,
-		Open: []Position{},
+		Open: []Position{}, Settings: x.settings,
 	}
 	for _, p := range x.open {
 		s.Open = append(s.Open, Position{Instrument: p.instrument, Direction: p.direction.String(), Units: p.units,
