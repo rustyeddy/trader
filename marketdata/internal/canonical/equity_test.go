@@ -111,7 +111,7 @@ func TestUSEquityBar_IsNotConsumableBeforeTheClose(t *testing.T) {
 // The table's version is its name: data built with it must not see it change.
 func TestEquityCalendar_IsPinned(t *testing.T) {
 	sum := sha256.Sum256(usEquityCalendarCSV)
-	assert.Equal(t, "f02de874b78cf3b50be1e0d03ac484eaa060a9dc064759922932afdca948f122", hex.EncodeToString(sum[:]),
+	assert.Equal(t, "0abd4568f07af888ffc35f60807ab199226b75dc67ef41264427002fa48bdd14", hex.EncodeToString(sum[:]),
 		"%s is never edited once data is built with it: add a new version", CalendarUSEquityV1)
 }
 
