@@ -20,7 +20,7 @@ go run ./cmd/trader   # or run without building
 |---|---|
 | `trader` | Backtests the six EMAX scenarios in `testdata/emax` and prints a summary of each. Deterministic: the output is the same every run. |
 | `trader data download` | Downloads OANDA bid/ask candles into the raw store. Needs a token and the network. |
-| `trader data build` | Builds canonical bars from the raw store. Needs no token and makes no network call. |
+| `trader data build` | Builds canonical bars from the raw store, or SPY daily bars from a Stooq file. Needs no token and makes no network call. |
 | `trader data status` | Shows which canonical months a range can load (loaded, bad, missing, stale) without changing anything. Needs no token and makes no network call. |
 | `trader backtest` | Backtests canonical bars from the data store: EMAX on each instrument, one shared account. Needs no token and makes no network call. |
 
@@ -128,6 +128,9 @@ Builds canonical-v2 files for `h1` or `d1` (ADR-090). For each month:
 Output: one line per month (`<path>: built|unchanged|replaced, good N, bad N`, or
 `no raw partition` / `failed: ...`), then `total: built N, unchanged N, replaced N,
 missing raw N, failed N; good bars N, bad records N`.
+
+`--source stooq` builds SPY daily trade bars from a Stooq file instead, with its own
+options and no date range: see [Stooq SPY daily bars](stooq-spy.md).
 
 ### trader data status
 

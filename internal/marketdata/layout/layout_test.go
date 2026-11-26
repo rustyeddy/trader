@@ -2,6 +2,7 @@ package layout_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,4 +175,19 @@ func TestUnzippedStage_ResolvesAndParsesLikeTheOthers(t *testing.T) {
 	assert.Equal(t, "stooq/unzipped", filepath.ToSlash(dir))
 	_, err = layout.StageDir("stooq", layout.Stage("unzip"))
 	assert.ErrorIs(t, err, layout.ErrInvalidComponent)
+}
+
+func TestSnapshot_PathsAndRefusals(t *testing.T) {
+	hash := strings.Repeat("0a", 32)
+
+	raw, record, err := layout.Snapshot("stooq", "SPY", hash)
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join("stooq", "snapshots", "SPY", hash+".raw"), raw)
+	assert.Equal(t, filepath.Join("stooq", "snapshots", "SPY", hash+".json"), record)
+	for _, bad := range [][3]string{{"", "SPY", hash}, {"stooq", "..", hash}, {"stooq", "SPY", "abc"},
+		{"stooq", "SPY", strings.Repeat("0A", 32)}, {"stooq", "SPY", strings.Repeat("g", 64)}} {
+		_, _, err := layout.Snapshot(bad[0], bad[1], bad[2])
+		assert.ErrorIs(t, err, layout.ErrInvalidComponent, "%q", bad)
+	}
 }

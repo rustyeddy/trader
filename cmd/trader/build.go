@@ -27,8 +27,14 @@ type buildFlags struct {
 	from, to    string
 }
 
+// stooqFlags are the options only `trader data build --source stooq` takes.
+type stooqFlags struct {
+	source, input, member, asOf string
+}
+
 func newBuildCmd(a *app) *cobra.Command {
 	var f buildFlags
+	var s stooqFlags
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Build canonical bars from the raw store",
@@ -48,10 +54,37 @@ replaced. Raw is only read. The command needs no token and makes no network call
 The data root is --data-root, then ` + envDataRoot + `, then marketdata.root in
 ` + defaultConfigPath + `, then the default ` + store.DefaultRoot + `; --instrument and
 --interval also fall back to that file.
-h1 and d1 only.`,
+h1 and d1 only.
+
+With --source stooq it builds the whole history of SPY daily trade bars
+(canonical-trade-v1, ADR-095) from Stooq's own daily format:
+
+  trader data build --source stooq --instrument SPY \
+    --input stooq/raw/d_us_txt.zip --member 'data/daily/us/nyse etfs/2/spy.us.txt' \
+    --snapshot-as-of 2026-09-10
+
+--input is relative to the data root: the bundle ZIP, with --member naming the
+symbol's file, or that file extracted. The bytes are archived unchanged under
+stooq/snapshots/SPY/ and every month of the series is published; there is no
+--from or --to, since a series is one snapshot. --snapshot-as-of is the date the
+input was obtained, required the first time its bytes are built. A row that is not
+a good bar is kept as a bad record, and the command then fails after publishing.
+--instrument must be given; --interval is d1.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.runBuild(cmd, f)
+			switch s.source {
+			case "oanda":
+				for _, name := range []string{"input", "member", "snapshot-as-of"} {
+					if cmd.Flags().Changed(name) {
+						return fmt.Errorf("--%s applies only to --source stooq", name)
+					}
+				}
+				return a.runBuild(cmd, f)
+			case "stooq":
+				return a.runBuildStooq(cmd, f, s)
+			default:
+				return fmt.Errorf("--source %q is not oanda or stooq", s.source)
+			}
 		},
 	}
 	fl := cmd.Flags()
@@ -61,6 +94,10 @@ h1 and d1 only.`,
 	fl.StringVar(&f.interval, "interval", "", "h1 or d1 (default: marketdata.interval)")
 	fl.StringVar(&f.from, "from", "", "first instant, UTC: YYYY-MM-DD or RFC 3339 (required)")
 	fl.StringVar(&f.to, "to", "", "end of the range, exclusive, UTC: YYYY-MM-DD or RFC 3339 (required)")
+	fl.StringVar(&s.source, "source", "oanda", "where the raw data came from: oanda or stooq")
+	fl.StringVar(&s.input, "input", "", "stooq: the file to read, relative to the data root (required)")
+	fl.StringVar(&s.member, "member", "", "stooq: the symbol's file inside a ZIP input")
+	fl.StringVar(&s.asOf, "snapshot-as-of", "", "stooq: the date the input was obtained, YYYY-MM-DD (required for new bytes)")
 	return cmd
 }
 

@@ -140,6 +140,22 @@ func Move(ctx context.Context, oldDir, newDir string) error {
 	return nil
 }
 
+// Open opens the file at the root-relative path for reading, for a caller that
+// needs random access to a file too large to read whole, such as an archive. The
+// caller closes it. A missing file is an error satisfying
+// errors.Is(err, fs.ErrNotExist).
+func Open(path string) (*os.File, error) {
+	abs, err := resolve(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	return f, nil
+}
+
 // Checksum returns the SHA-256 of the file at the root-relative path, as lower-case
 // hex, reading it in a stream. It stops with the context's error if ctx is
 // cancelled between reads.

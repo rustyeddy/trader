@@ -22,6 +22,31 @@ var ErrIncomplete = errors.New("service: series not loadable")
 // ErrInvalidRequest reports a LoadRequest that cannot be run.
 var ErrInvalidRequest = errors.New("service: invalid request")
 
+// ErrMixedSeries reports months of one range that are not one series: they differ
+// in schema or in what a trade file says about its data (snapshot, currency,
+// adjustment, calendar and the rest). No request option allows it (ADR-095);
+// rebuild the series from one snapshot.
+var ErrMixedSeries = errors.New("service: the months are not one series")
+
+// DataInfo is what the files of a trade-price series say about their data
+// (ADR-095). Every month of a loaded series shares it.
+type DataInfo struct {
+	AvailabilityPolicy string
+	Calendar           string
+	// PriceBasis is "trade": the bars have no bid, ask or midpoint.
+	PriceBasis string
+	Currency   string
+	VolumeUnit string
+	// Adjustment says how past prices were rewritten for corporate actions, and
+	// AdjustmentEvidence how that is known ("observed" or "documented").
+	Adjustment         string
+	AdjustmentEvidence string
+	// SnapshotFingerprint and SnapshotAsOf identify the one input the series was
+	// built from and the date it was obtained.
+	SnapshotFingerprint string
+	SnapshotAsOf        string
+}
+
 // MonthState is what one month's canonical file came to.
 type MonthState string
 
@@ -37,7 +62,7 @@ const (
 	// caller allows a gap.
 	Missing MonthState = "missing"
 	// Stale: the file is not from the build in force (another availability policy,
-	// builder or validator version) or is not readable as canonical-v2. It is
+	// builder or validator version) or is not readable as a canonical file. It is
 	// reported and never used: rebuild it.
 	Stale MonthState = "stale"
 )
@@ -116,6 +141,9 @@ type LoadResult struct {
 	Series marketdata.Series
 	Months []MonthStatus
 	Gaps   []Gap
+	// Data describes a trade-price series, from its files; nil for quote data and
+	// when no file was read. It is set on a failure after the files agreed.
+	Data *DataInfo
 }
 
 // IncompleteError is the ErrIncomplete error: the months or the gaps that stopped
@@ -157,7 +185,15 @@ func (e *IncompleteError) Is(target error) bool { return target == ErrIncomplete
 // stored in its file, never recomputed. Only a Loaded month, and a Bad month when
 // allowed, contribute bars.
 //
-// Between its first and last bar the series must have every bar the market calendar
+// All the files read must be of one series (ErrMixedSeries): one schema, and for
+// trade data one snapshot with one description, which is returned as Data.
+//
+// A trade-price series (canonical-trade-v1) must have every session its calendar
+// lists between its first and last bar (canonical.USEquityGaps): weekends and
+// listed closures are not gaps and are not reported, and a missing session is
+// Unexplained.
+//
+// Between its first and last bar a quote series must have every bar the FX market calendar
 // expects (canonical.ClosureAt): a missing interior bar is a gap, and an
 // Unexplained one fails the load like a missing month unless the request allows
 // missing data. Weekends are not reported, year-end holidays are reported as
@@ -184,6 +220,7 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 	result := LoadResult{Series: marketdata.Series{Source: req.Source, Instrument: req.Instrument, Interval: req.Interval}}
 	var bars []marketdata.Bar
 	var stopped []MonthStatus
+	var first *canonical.File // the first file read: the series the others must be
 	for ms := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC); ms.Before(to); ms = ms.AddDate(0, 1, 0) {
 		if err := ctx.Err(); err != nil {
 			return LoadResult{}, err
@@ -193,6 +230,15 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 			return LoadResult{}, err
 		}
 		result.Months = append(result.Months, st)
+		if f.Meta.AvailabilityPolicy != "" { // a file was read
+			if first == nil {
+				read := f
+				first, result.Data = &read, dataInfo(f.Meta)
+			} else if diff := seriesDifference(first.Meta, f.Meta); diff != "" {
+				return LoadResult{}, fmt.Errorf("%w: %s %04d-%02d and %04d-%02d differ in %s", ErrMixedSeries, req.Instrument,
+					first.Key.Year, int(first.Key.Month), ms.Year(), int(ms.Month()), diff)
+			}
+		}
 		usable := st.State == Loaded || (st.State == Bad && req.AllowBad)
 		gapAllowed := (st.State == Missing && req.AllowMissing) || (st.State == Stale && req.SkipStale)
 		if !usable && !gapAllowed {
@@ -210,11 +256,17 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 	if len(stopped) > 0 {
 		return result, &IncompleteError{Instrument: req.Instrument, Months: stopped}
 	}
-	gaps, err := canonical.GapsWith(interval, bars, func(open time.Time) (bool, error) {
-		return canonical.InKnownHole(req.Source, req.Instrument, interval, open)
-	})
+	var gaps []canonical.Gap
+	var err error
+	if result.Data != nil {
+		gaps, err = canonical.USEquityGaps(bars)
+	} else {
+		gaps, err = canonical.GapsWith(interval, bars, func(open time.Time) (bool, error) {
+			return canonical.InKnownHole(req.Source, req.Instrument, interval, open)
+		})
+	}
 	if err != nil {
-		return LoadResult{Months: result.Months}, err
+		return LoadResult{Months: result.Months, Data: result.Data}, err
 	}
 	var unexplained []Gap
 	for _, g := range gaps {
@@ -238,8 +290,47 @@ func Load(ctx context.Context, req LoadRequest) (LoadResult, error) {
 	return result, nil
 }
 
-// loadMonth reads and classifies one month. Only a failure to read that is not
-// about the file's content (an I/O error, cancellation) is an error.
+// dataInfo describes a trade file's data, or nil for a quote file.
+func dataInfo(m canonical.Meta) *DataInfo {
+	t := m.Trade
+	if t == nil {
+		return nil
+	}
+	return &DataInfo{
+		AvailabilityPolicy: m.AvailabilityPolicy, Calendar: t.Calendar, PriceBasis: t.PriceBasis, Currency: t.Currency,
+		VolumeUnit: t.VolumeUnit, Adjustment: string(t.Adjustment), AdjustmentEvidence: string(t.AdjustmentEvidence),
+		SnapshotFingerprint: t.SnapshotFingerprint, SnapshotAsOf: t.SnapshotAsOf,
+	}
+}
+
+// seriesDifference names what makes two files parts of different series, or ""
+// when they can be joined.
+func seriesDifference(a, b canonical.Meta) string {
+	if (a.Trade == nil) != (b.Trade == nil) {
+		return "schema"
+	}
+	if a.Trade == nil {
+		return ""
+	}
+	x, y := *a.Trade, *b.Trade
+	switch {
+	case x.SnapshotFingerprint != y.SnapshotFingerprint:
+		return "snapshot"
+	case x.Currency != y.Currency:
+		return "currency"
+	case x.Adjustment != y.Adjustment:
+		return "adjustment"
+	case x.Calendar != y.Calendar:
+		return "calendar"
+	case x != y:
+		return "data description"
+	}
+	return ""
+}
+
+// loadMonth reads and classifies one month. The file is returned whenever one was
+// read, usable or not. Only a failure to read that is not about the file's content
+// (an I/O error, cancellation) is an error.
 func loadMonth(ctx context.Context, req LoadRequest, interval canonical.Interval, ms time.Time) (MonthStatus, canonical.File, error) {
 	key := canonical.Key{Source: req.Source, Symbol: req.Instrument, Interval: interval, Year: ms.Year(), Month: ms.Month()}
 	st := MonthStatus{Year: ms.Year(), Month: ms.Month()}
@@ -254,7 +345,11 @@ func loadMonth(ctx context.Context, req LoadRequest, interval canonical.Interval
 		st.State = Missing
 		return st, canonical.File{}, nil
 	case errors.Is(err, canonical.ErrMalformedData):
-		st.State, st.Reason = Stale, "not readable as canonical-v2: "+firstLine(err)
+		schema := canonical.Schema
+		if req.Source == "stooq" {
+			schema = canonical.SchemaTrade
+		}
+		st.State, st.Reason = Stale, "not readable as "+schema+": "+firstLine(err)
 		return st, canonical.File{}, nil
 	case err != nil:
 		return st, canonical.File{}, err
@@ -262,7 +357,7 @@ func loadMonth(ctx context.Context, req LoadRequest, interval canonical.Interval
 	st.Good, st.Bad = len(f.Bars), len(f.Bad)
 	if reason := staleReason(f.Meta); reason != "" {
 		st.State, st.Reason = Stale, reason
-		return st, canonical.File{}, nil
+		return st, f, nil
 	}
 	if st.Bad > 0 {
 		st.State, st.Reason = Bad, fmt.Sprintf("%d bad records", st.Bad)
@@ -272,15 +367,20 @@ func loadMonth(ctx context.Context, req LoadRequest, interval canonical.Interval
 	return st, f, nil
 }
 
-// staleReason says why a file's build is not the one in force, or "" when it is.
+// staleReason says why a file's build is not the one in force for its schema, or
+// "" when it is.
 func staleReason(m canonical.Meta) string {
+	policy, builder, validator := canonical.PolicyScheduledCloseV1, BuilderVersion, ValidatorVersion
+	if m.Trade != nil {
+		policy, builder, validator = canonical.PolicyUSEquityCloseV1, TradeBuilderVersion, TradeValidatorVersion
+	}
 	switch {
-	case m.AvailabilityPolicy != canonical.PolicyScheduledCloseV1:
-		return fmt.Sprintf("availability policy %q, in force %q", m.AvailabilityPolicy, canonical.PolicyScheduledCloseV1)
-	case m.BuilderVersion != BuilderVersion:
-		return fmt.Sprintf("builder %q, in force %q", m.BuilderVersion, BuilderVersion)
-	case m.ValidatorVersion != ValidatorVersion:
-		return fmt.Sprintf("validator %q, in force %q", m.ValidatorVersion, ValidatorVersion)
+	case m.AvailabilityPolicy != policy:
+		return fmt.Sprintf("availability policy %q, in force %q", m.AvailabilityPolicy, policy)
+	case m.BuilderVersion != builder:
+		return fmt.Sprintf("builder %q, in force %q", m.BuilderVersion, builder)
+	case m.ValidatorVersion != validator:
+		return fmt.Sprintf("validator %q, in force %q", m.ValidatorVersion, validator)
 	}
 	return ""
 }

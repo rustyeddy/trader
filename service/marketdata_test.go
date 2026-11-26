@@ -224,7 +224,7 @@ func TestBuildCanonical_BuiltAtDefaultsToNow(t *testing.T) {
 // other file may.
 func TestService_ImportsOnlyTheDomainServiceAndProviders(t *testing.T) {
 	const mod = "github.com/rustyeddy/trader"
-	allowed := map[string]bool{mod: true, mod + "/marketdata": true, mod + "/marketdata/service": true, mod + "/provider/oanda": true,
+	allowed := map[string]bool{mod: true, mod + "/marketdata": true, mod + "/marketdata/service": true, mod + "/provider/oanda": true, mod + "/provider/stooq": true,
 		mod + "/internal/clock": true, mod + "/internal/id": true, mod + "/internal/results": true,
 		mod + "/strategy": true} // foundational: the run's id, its clock and where its results are kept; the public strategy transport a run can trade through
 	foundational := map[string]bool{"migrate.go": true}

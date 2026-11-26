@@ -75,8 +75,9 @@ Details, every flag and what each report means are in the [User's Guide](docs/Us
 | `service` | application services that coordinate providers and domain services |
 | `marketdata` | public market-data model: `Bar`, `OHLC`, `SourcePartition` |
 | `marketdata/service` | the market-data domain service: classification, availability, publishing |
-| `marketdata/internal/canonical` | the canonical-v2 file format (private to `marketdata`) |
+| `marketdata/internal/canonical` | the canonical file formats and calendars (private to `marketdata`) |
 | `provider/oanda` | OANDA: raw store, REST client, raw-to-source mapping |
+| `provider/stooq` | Stooq daily files: snapshot reading and source mapping |
 | `internal/store` | the one place data files are read and written; internal, so no other module can import it |
 | `num`, `instrument` | exact numeric values; instrument identity |
 | `internal/logging`, `internal/marketdata/layout` | structured logging; the data path resolver |

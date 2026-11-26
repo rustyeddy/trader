@@ -83,6 +83,32 @@ type barsJSON struct {
 	// same other parameters, for the next page.
 	NextCursor string       `json:"next_cursor,omitempty"`
 	Coverage   coverageJSON `json:"coverage"`
+	Data       *dataJSON    `json:"data,omitempty"`
+}
+
+// dataJSON describes a trade-price series. It is absent for quote data.
+type dataJSON struct {
+	// PriceBasis is "trade": the bars have no bid, ask or mid.
+	PriceBasis         string `json:"price_basis"`
+	Currency           string `json:"currency"`
+	VolumeUnit         string `json:"volume_unit"`
+	Adjustment         string `json:"adjustment"`
+	AdjustmentEvidence string `json:"adjustment_evidence"`
+	AvailabilityPolicy string `json:"availability_policy"`
+	Calendar           string `json:"calendar"`
+	// SnapshotFingerprint and SnapshotAsOf identify the one input of the series:
+	// pages with different fingerprints must not be joined.
+	SnapshotFingerprint string `json:"snapshot_fingerprint"`
+	SnapshotAsOf        string `json:"snapshot_as_of"`
+}
+
+func dataOf(d *service.DataInfo) *dataJSON {
+	if d == nil {
+		return nil
+	}
+	return &dataJSON{PriceBasis: d.PriceBasis, Currency: d.Currency, VolumeUnit: d.VolumeUnit, Adjustment: d.Adjustment,
+		AdjustmentEvidence: d.AdjustmentEvidence, AvailabilityPolicy: d.AvailabilityPolicy, Calendar: d.Calendar,
+		SnapshotFingerprint: d.SnapshotFingerprint, SnapshotAsOf: d.SnapshotAsOf}
 }
 
 type errorJSON struct {
