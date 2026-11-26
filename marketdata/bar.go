@@ -60,10 +60,13 @@ type Bar struct {
 	// AvailableAt is the earliest time the completed bar may be consumed. The
 	// zero value means availability has not been established, which a stored
 	// bar never has. It is modeled under a named policy (canonical's
-	// PolicyScheduledCloseV1), not an observed provider timestamp.
+	// PolicyScheduledCloseV1 or PolicyUSEquityCloseV1), not an observed provider
+	// timestamp.
 	AvailableAt time.Time
 
-	// Volume is the provider's activity (tick) count, not a tradable quantity.
+	// Volume is the provider's activity measure, and its unit depends on the data:
+	// a tick count for FX quotes, whole shares for equity trade data. Canonical
+	// trade files record the unit.
 	Volume int64
 
 	Bid OHLC
@@ -74,8 +77,8 @@ type Bar struct {
 	Mid OHLC
 
 	// Trade is the series of traded prices, for sources that give trades. It is
-	// part of the API model; whether and how it is persisted is a separate
-	// decision (canonical-v2 stores bid, ask and mid only).
+	// stored by canonical-trade-v1; canonical-v2 stores bid, ask and mid only
+	// (ADR-095).
 	Trade OHLC
 }
 

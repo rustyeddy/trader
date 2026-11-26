@@ -85,7 +85,7 @@ const (
 	// and availability policy) was already there, so nothing was written.
 	Unchanged Outcome = "unchanged"
 	// Replaced: a file was there that came from a different build, or could not
-	// be read as canonical-v2, and it was replaced.
+	// be read as canonical, and it was replaced.
 	Replaced Outcome = "replaced"
 )
 
@@ -93,7 +93,7 @@ const (
 // Under the file's lock it compares the file on disk with f: when the build is
 // the same (Meta.SameBuild, which ignores BuiltAt) it writes nothing; when there
 // is none it writes one; when the file is from another build, or is not readable
-// as canonical-v2 (an old canonical-v1 file, say), it replaces it. Canonical is
+// as either schema (an old canonical-v1 file, say), it replaces it. Canonical is
 // derived data, so replacing is safe and raw is never touched. The write is the
 // store's atomic one; a cancellation before the commit leaves any file as it was.
 func Publish(ctx context.Context, f File) (Outcome, error) {

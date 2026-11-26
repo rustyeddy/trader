@@ -1,0 +1,301 @@
+# us-equity-calendar-v1
+#
+# Full closures and 1:00 pm closes of the New York Stock Exchange, 2005-01-01 to
+# 2026-12-31 (ADR-095 section 4). Every other Monday to Friday is a regular
+# session. Unscheduled late openings and intraday halts are not listed.
+#
+# Each row names the publication it was checked against (2026-11-26). For the
+# full holidays of 2005 and 2006 no dated NYSE list was found: they follow the
+# standard holidays and observance rules of the NYSE history (history-2011).
+# The two 2012 closures rest on a republished copy of the NYSE statement.
+#
+# A version is never edited once data has been built with it: a correction or
+# another year is a new version.
+#
+# source history-2011 https://web.archive.org/web/20111216084459/http://www.nyse.com:80/pdfs/closings.pdf
+#   NYSE, History of New York Stock Exchange Holidays, revised January 2011 (standard holidays and their observance; dated special closings and 1:00 pm closes)
+# source page-2007 https://web.archive.org/web/20070430231733/http://www.nyse.com:80/about/newsevents/1176373643795.html
+#   NYSE Euronext Holidays and Hours page, 2007
+# source page-2008 https://web.archive.org/web/20080122194742/http://www.nyse.com/about/newsevents/1176373643795.html
+#   NYSE holidays page, 2008 and 2009
+# source page-2010 https://web.archive.org/web/20100604014301/http://www.nyse.com/about/newsevents/1176373643795.html
+#   NYSE holidays page, 2010 and 2011
+# source page-2011 https://web.archive.org/web/20110628080544/http://www.nyse.com/about/newsevents/1176373643795.html
+#   NYSE holidays page, 2011 to 2013
+# source page-2013 https://web.archive.org/web/20130318124007/http://www.nyx.com/en/holidays-and-hours/nyse
+#   NYSE Euronext holidays and hours page, 2013 and 2014
+# source release-2015 https://s2.q4cdn.com/154085107/files/doc_news/archive/b97d77df-0ecb-4db0-9ced-75bdb9b218ba.pdf
+#   NYSE Euronext, 2015 Holiday Calendar and Early Closings (20 Dec 2013; also states 2014)
+# source release-2016 https://s2.q4cdn.com/154085107/files/doc_news/archive/442a7c75-b606-4b5d-9853-2efa7d6634c3.pdf
+#   NYSE Group, 2016 Holiday Calendar and Early Closings (8 Dec 2014; also states 2015)
+# source page-2016 https://web.archive.org/web/20161201002002/https://www.nyse.com/markets/hours-calendars
+#   NYSE Holidays and Trading Hours page, 2016 and 2017
+# source release-2018 https://s2.q4cdn.com/154085107/files/doc_news/archive/27aaa58b-ebcb-4f53-b505-aee992f54968.pdf
+#   NYSE Group, 2018, 2019 and 2020 Holiday and Early Closings Calendar (27 Nov 2017)
+# source release-2020 https://s2.q4cdn.com/154085107/files/doc_news/archive/91a5230f-7233-4a93-b30a-79c9411ebdbe.pdf
+#   NYSE Group, 2020, 2021 and 2022 Holiday and Early Closings Calendar (9 Dec 2019)
+# source release-2022 https://s2.q4cdn.com/154085107/files/doc_news/NYSE-Group-Announces-2022-2023-and-2024-Holiday-and-Early-Closings-Calendar-2021.pdf
+#   NYSE Group, 2022, 2023 and 2024 Holiday and Early Closings Calendar (27 Dec 2021)
+# source release-2023 https://s2.q4cdn.com/154085107/files/doc_news/NYSE-Group-Announces-2023-2024-and-2025-Holiday-and-Early-Closings-Calendar-2022.pdf
+#   NYSE Group, 2023, 2024 and 2025 Holiday and Early Closings Calendar (21 Dec 2022)
+# source release-2025 https://s2.q4cdn.com/154085107/files/doc_news/NYSE-Group-Announces-2025-2026-and-2027-Holiday-and-Early-Closings-Calendar-2024.pdf
+#   NYSE Group, 2025, 2026 and 2027 Holiday and Early Closings Calendar (8 Nov 2024)
+# source sandy-2012 https://www.yahoo.com/news/2012-10-29-nyse-euronext-statement-on-closure-of-us-markets-o.html
+#   NYSE Euronext statement of 29 Oct 2012 on the closure of 30 Oct, stating the closure of 29 Oct (Business Wire, republished)
+# source bush-2018 https://ir.theice.com/press/news-details/2018/New-York-Stock-Exchange-to-Honor-President-George-H-W-Bush/default.aspx
+#   ICE, New York Stock Exchange to Honor President George H. W. Bush (1 Dec 2018)
+# source carter-2025 https://s2.q4cdn.com/154085107/files/doc_news/The-New-York-Stock-Exchange-Will-Close-Markets-on-January-9-to-Honor-the-Passing-of-Former-President-Jimmy-Carter-on-National-Day-of--IGCRS.pdf
+#   NYSE, markets closed January 9 on the National Day of Mourning (30 Dec 2024)
+date,kind,source
+2005-01-17,closed,history-2011
+2005-02-21,closed,history-2011
+2005-03-25,closed,history-2011
+2005-05-30,closed,history-2011
+2005-07-04,closed,history-2011
+2005-09-05,closed,history-2011
+2005-11-24,closed,history-2011
+2005-11-25,early,history-2011
+2005-12-26,closed,history-2011
+2006-01-02,closed,history-2011
+2006-01-16,closed,history-2011
+2006-02-20,closed,history-2011
+2006-04-14,closed,history-2011
+2006-05-29,closed,history-2011
+2006-07-03,early,history-2011
+2006-07-04,closed,history-2011
+2006-09-04,closed,history-2011
+2006-11-23,closed,history-2011
+2006-11-24,early,history-2011
+2006-12-25,closed,history-2011
+2007-01-01,closed,page-2007
+2007-01-02,closed,page-2007
+2007-01-15,closed,page-2007
+2007-02-19,closed,page-2007
+2007-04-06,closed,page-2007
+2007-05-28,closed,page-2007
+2007-07-03,early,history-2011
+2007-07-04,closed,page-2007
+2007-09-03,closed,page-2007
+2007-11-22,closed,page-2007
+2007-11-23,early,history-2011
+2007-12-24,early,history-2011
+2007-12-25,closed,page-2007
+2008-01-01,closed,page-2008
+2008-01-21,closed,page-2008
+2008-02-18,closed,page-2008
+2008-03-21,closed,page-2008
+2008-05-26,closed,page-2008
+2008-07-03,early,history-2011
+2008-07-04,closed,page-2008
+2008-09-01,closed,page-2008
+2008-11-27,closed,page-2008
+2008-11-28,early,history-2011
+2008-12-24,early,history-2011
+2008-12-25,closed,page-2008
+2009-01-01,closed,page-2008
+2009-01-19,closed,page-2008
+2009-02-16,closed,page-2008
+2009-04-10,closed,page-2008
+2009-05-25,closed,page-2008
+2009-07-03,closed,page-2008
+2009-09-07,closed,page-2008
+2009-11-26,closed,page-2008
+2009-11-27,early,history-2011
+2009-12-24,early,history-2011
+2009-12-25,closed,page-2008
+2010-01-01,closed,page-2010
+2010-01-18,closed,page-2010
+2010-02-15,closed,page-2010
+2010-04-02,closed,page-2010
+2010-05-31,closed,page-2010
+2010-07-05,closed,page-2010
+2010-09-06,closed,page-2010
+2010-11-25,closed,page-2010
+2010-11-26,early,history-2011
+2010-12-24,closed,page-2010
+2011-01-17,closed,page-2011
+2011-02-21,closed,page-2011
+2011-04-22,closed,page-2011
+2011-05-30,closed,page-2011
+2011-07-04,closed,page-2011
+2011-09-05,closed,page-2011
+2011-11-24,closed,page-2011
+2011-11-25,early,page-2011
+2011-12-26,closed,page-2011
+2012-01-02,closed,page-2011
+2012-01-16,closed,page-2011
+2012-02-20,closed,page-2011
+2012-04-06,closed,page-2011
+2012-05-28,closed,page-2011
+2012-07-03,early,page-2011
+2012-07-04,closed,page-2011
+2012-09-03,closed,page-2011
+2012-10-29,closed,sandy-2012
+2012-10-30,closed,sandy-2012
+2012-11-22,closed,page-2011
+2012-11-23,early,page-2011
+2012-12-24,early,page-2011
+2012-12-25,closed,page-2011
+2013-01-01,closed,page-2013
+2013-01-21,closed,page-2013
+2013-02-18,closed,page-2013
+2013-03-29,closed,page-2013
+2013-05-27,closed,page-2013
+2013-07-03,early,page-2013
+2013-07-04,closed,page-2013
+2013-09-02,closed,page-2013
+2013-11-28,closed,page-2013
+2013-11-29,early,page-2013
+2013-12-24,early,page-2013
+2013-12-25,closed,page-2013
+2014-01-01,closed,release-2015
+2014-01-20,closed,release-2015
+2014-02-17,closed,release-2015
+2014-04-18,closed,release-2015
+2014-05-26,closed,release-2015
+2014-07-03,early,release-2015
+2014-07-04,closed,release-2015
+2014-09-01,closed,release-2015
+2014-11-27,closed,release-2015
+2014-11-28,early,release-2015
+2014-12-24,early,release-2015
+2014-12-25,closed,release-2015
+2015-01-01,closed,release-2015
+2015-01-19,closed,release-2015
+2015-02-16,closed,release-2015
+2015-04-03,closed,release-2015
+2015-05-25,closed,release-2015
+2015-07-03,closed,release-2015
+2015-09-07,closed,release-2015
+2015-11-26,closed,release-2015
+2015-11-27,early,release-2015
+2015-12-24,early,release-2015
+2015-12-25,closed,release-2015
+2016-01-01,closed,release-2016
+2016-01-18,closed,release-2016
+2016-02-15,closed,release-2016
+2016-03-25,closed,release-2016
+2016-05-30,closed,release-2016
+2016-07-04,closed,release-2016
+2016-09-05,closed,release-2016
+2016-11-24,closed,release-2016
+2016-11-25,early,release-2016
+2016-12-26,closed,release-2016
+2017-01-02,closed,page-2016
+2017-01-16,closed,page-2016
+2017-02-20,closed,page-2016
+2017-04-14,closed,page-2016
+2017-05-29,closed,page-2016
+2017-07-03,early,page-2016
+2017-07-04,closed,page-2016
+2017-09-04,closed,page-2016
+2017-11-23,closed,page-2016
+2017-11-24,early,page-2016
+2017-12-25,closed,page-2016
+2018-01-01,closed,release-2018
+2018-01-15,closed,release-2018
+2018-02-19,closed,release-2018
+2018-03-30,closed,release-2018
+2018-05-28,closed,release-2018
+2018-07-03,early,release-2018
+2018-07-04,closed,release-2018
+2018-09-03,closed,release-2018
+2018-11-22,closed,release-2018
+2018-11-23,early,release-2018
+2018-12-05,closed,bush-2018
+2018-12-24,early,release-2018
+2018-12-25,closed,release-2018
+2019-01-01,closed,release-2018
+2019-01-21,closed,release-2018
+2019-02-18,closed,release-2018
+2019-04-19,closed,release-2018
+2019-05-27,closed,release-2018
+2019-07-03,early,release-2018
+2019-07-04,closed,release-2018
+2019-09-02,closed,release-2018
+2019-11-28,closed,release-2018
+2019-11-29,early,release-2018
+2019-12-24,early,release-2018
+2019-12-25,closed,release-2018
+2020-01-01,closed,release-2020
+2020-01-20,closed,release-2020
+2020-02-17,closed,release-2020
+2020-04-10,closed,release-2020
+2020-05-25,closed,release-2020
+2020-07-03,closed,release-2020
+2020-09-07,closed,release-2020
+2020-11-26,closed,release-2020
+2020-11-27,early,release-2020
+2020-12-24,early,release-2020
+2020-12-25,closed,release-2020
+2021-01-01,closed,release-2020
+2021-01-18,closed,release-2020
+2021-02-15,closed,release-2020
+2021-04-02,closed,release-2020
+2021-05-31,closed,release-2020
+2021-07-05,closed,release-2020
+2021-09-06,closed,release-2020
+2021-11-25,closed,release-2020
+2021-11-26,early,release-2020
+2021-12-24,closed,release-2020
+2022-01-17,closed,release-2022
+2022-02-21,closed,release-2022
+2022-04-15,closed,release-2022
+2022-05-30,closed,release-2022
+2022-06-20,closed,release-2022
+2022-07-04,closed,release-2022
+2022-09-05,closed,release-2022
+2022-11-24,closed,release-2022
+2022-11-25,early,release-2022
+2022-12-26,closed,release-2022
+2023-01-02,closed,release-2023
+2023-01-16,closed,release-2023
+2023-02-20,closed,release-2023
+2023-04-07,closed,release-2023
+2023-05-29,closed,release-2023
+2023-06-19,closed,release-2023
+2023-07-03,early,release-2023
+2023-07-04,closed,release-2023
+2023-09-04,closed,release-2023
+2023-11-23,closed,release-2023
+2023-11-24,early,release-2023
+2023-12-25,closed,release-2023
+2024-01-01,closed,release-2023
+2024-01-15,closed,release-2023
+2024-02-19,closed,release-2023
+2024-03-29,closed,release-2023
+2024-05-27,closed,release-2023
+2024-06-19,closed,release-2023
+2024-07-03,early,release-2023
+2024-07-04,closed,release-2023
+2024-09-02,closed,release-2023
+2024-11-28,closed,release-2023
+2024-11-29,early,release-2023
+2024-12-24,early,release-2023
+2024-12-25,closed,release-2023
+2025-01-01,closed,release-2025
+2025-01-09,closed,carter-2025
+2025-01-20,closed,release-2025
+2025-02-17,closed,release-2025
+2025-04-18,closed,release-2025
+2025-05-26,closed,release-2025
+2025-06-19,closed,release-2025
+2025-07-03,early,release-2025
+2025-07-04,closed,release-2025
+2025-09-01,closed,release-2025
+2025-11-27,closed,release-2025
+2025-11-28,early,release-2025
+2025-12-24,early,release-2025
+2025-12-25,closed,release-2025
+2026-01-01,closed,release-2025
+2026-01-19,closed,release-2025
+2026-02-16,closed,release-2025
+2026-04-03,closed,release-2025
+2026-05-25,closed,release-2025
+2026-06-19,closed,release-2025
+2026-07-03,closed,release-2025
+2026-09-07,closed,release-2025
+2026-11-26,closed,release-2025
+2026-11-27,early,release-2025
+2026-12-24,early,release-2025
+2026-12-25,closed,release-2025
