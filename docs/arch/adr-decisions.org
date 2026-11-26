@@ -219,7 +219,7 @@ the original decided, use full supersession instead.
 | 091 | Domain-owned services and shared market-data model (in adr-091-domain-services-and-shared-marketdata.org) | Accepted; implemented (#657, #663, #667, #641) |
 | 092 | Provider packages, the store and root-less data APIs (in adr-092-provider-packages-and-store.org) | Accepted (#687); amends parts of 089 |
 | 093 | Trader is the sole risk authority for all requested orders (in adr-093-trader-is-the-risk-authority.org) | Accepted (owner approval, #686) |
-| 095 | Trade-price canonical bars and US equity daily semantics (in adr-095-equity-trade-bars.org) | Proposed (#733) |
+| 095 | Trade-price canonical bars and US equity daily semantics (in adr-095-equity-trade-bars.org) | Accepted (owner approval, #733) |
 
 ADR-065 partially amends public-boundary sub-decisions in ADR-002, 007, 008,
 015, 017, 019, 020, 022, 023, 031, 035, 036, 038, 039, 043, 058, and 062.

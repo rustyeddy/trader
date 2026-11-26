@@ -3,8 +3,9 @@
 
 * Status
 
-Proposed. Issue #733 (Equities-01). Nothing here is implemented, and no code or
-data changes before the owner accepts it. On acceptance it amends ADR-090 (which
+Accepted (owner approval 2026-11-26, #733). Nothing here is implemented yet. The
+calendar verification and 2011-02-17 conditions in section 4 still apply. It
+amends ADR-090 (which
 deferred a persisted trade series to "a separate ADR and schema decision") and
 ADR-088 (which values currency pairs only). ADR-073's finding that Stooq daily
 history is dividend-adjusted is carried over. ADR-047 to ADR-049 describe archived
@@ -73,7 +74,7 @@ required canonical representation or a silent conversion.
 
 Currently an absent OHLC series is the all-zero value, detected by
 =OHLC.IsZero()=. This is already unambiguous for validated bars (a present
-OHLC must have positive prices). The proposal to make series =*OHLC= pointers
+OHLC must have positive prices). The idea of making series =*OHLC= pointers
 and/or private fields accessed via getters is *deferred*. It requires an API
 migration and performance analysis: pointers can reduce inline size but can
 introduce allocations, garbage-collector work and indirection. Benchmark real
@@ -365,16 +366,18 @@ dollar thresholds, no parameter optimisation, no multi-instrument or FX mix.
   evidence, but no such data is on hand. It stays the requirement for a result
   meant to support trading.
 
-* Decisions for the owner
+* Owner decisions
 
-1. Add =canonical-trade-v1= as a storage encoding while preserving one
-   =marketdata.Bar=, =OHLC()= selection and the existing =canonical-v2= FX files?
-2. 8-decimal prices, and fractional volume rejected for now?
-3. One snapshot per series, with no override?
-4. =Time= 09:30, =AvailableAt= scheduled close, from an embedded date table?
-5. Keep strict loads failing on SPY 2011-02-17 until it is confirmed, and only
-   then consider a known-hole entry?
-6. Dividend-adjusted prices acceptable for the first test under the limits above,
-   as an explicitly requested, marked research-only run?
-7. Reject opening shorts for equities (recommended), or allow them with the result
-   marked as ignoring borrow costs?
+Approved 2026-11-26:
+
+1. =canonical-trade-v1= is added as a storage encoding, preserving one
+   =marketdata.Bar=, =OHLC()= selection and the existing =canonical-v2= FX files.
+2. Prices have 8 decimals; fractional volume is rejected for now.
+3. A series is one snapshot, with no override.
+4. =Time= is 09:30 and =AvailableAt= the scheduled close, from an embedded date
+   table.
+5. Strict loads keep failing on SPY 2011-02-17 until it is confirmed; only then
+   is a known-hole entry considered.
+6. Dividend-adjusted prices are accepted for the first test under the limits
+   above, as an explicitly requested, marked research-only run.
+7. Opening shorts in equities are rejected.
