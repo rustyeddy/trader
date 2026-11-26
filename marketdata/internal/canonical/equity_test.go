@@ -115,8 +115,8 @@ func TestEquityCalendar_IsPinned(t *testing.T) {
 		"%s is never edited once data is built with it: add a new version", CalendarUSEquityV1)
 }
 
-// Every full holiday year has nine or ten closures plus the listed unscheduled
-// ones, so a dropped or doubled row shows.
+// Closures per year, scheduled and unscheduled, and the number of early closes, so
+// a dropped or doubled row shows.
 func TestEquityCalendar_YearlyCounts(t *testing.T) {
 	days, err := usEquityCalendar()
 	require.NoError(t, err)
