@@ -56,6 +56,75 @@ func parseTime(s string) (time.Time, error) {
 	return t, nil
 }
 
+// tradeColumns are the canonical-trade-v1 column names, in order.
+var tradeColumns = []string{"time", "available_at", "trade_o", "trade_h", "trade_l", "trade_c", "volume"}
+
+// tradeDecimals is the number of decimals trade prices are written with: the full
+// scale of num.Price (ADR-095).
+const tradeDecimals = 8
+
+// tradeMetaJSON is the "# meta" line of canonical-trade-v1: the fields of
+// metaJSON and those of TradeMeta.
+type tradeMetaJSON struct {
+	RawFingerprint      string `json:"raw_fingerprint"`
+	BuilderVersion      string `json:"builder_version"`
+	ValidatorVersion    string `json:"validator_version"`
+	AvailabilityPolicy  string `json:"availability_policy"`
+	Calendar            string `json:"calendar"`
+	BuiltAt             string `json:"built_at"`
+	BarCount            *int   `json:"bar_count"`
+	BadCount            *int   `json:"bad_count"`
+	FirstBar            string `json:"first_bar,omitempty"`
+	LastBar             string `json:"last_bar,omitempty"`
+	PriceBasis          string `json:"price_basis"`
+	Currency            string `json:"currency"`
+	VolumeUnit          string `json:"volume_unit"`
+	Adjustment          string `json:"adjustment"`
+	AdjustmentEvidence  string `json:"adjustment_evidence"`
+	SnapshotFingerprint string `json:"snapshot_fingerprint"`
+	SnapshotAsOf        string `json:"snapshot_as_of"`
+}
+
+func withTrade(m metaJSON, t TradeMeta) tradeMetaJSON {
+	return tradeMetaJSON{
+		RawFingerprint: m.RawFingerprint, BuilderVersion: m.BuilderVersion, ValidatorVersion: m.ValidatorVersion,
+		AvailabilityPolicy: m.AvailabilityPolicy, Calendar: t.Calendar, BuiltAt: m.BuiltAt,
+		BarCount: m.BarCount, BadCount: m.BadCount, FirstBar: m.FirstBar, LastBar: m.LastBar,
+		PriceBasis: t.PriceBasis, Currency: t.Currency, VolumeUnit: t.VolumeUnit,
+		Adjustment: string(t.Adjustment), AdjustmentEvidence: string(t.AdjustmentEvidence),
+		SnapshotFingerprint: t.SnapshotFingerprint, SnapshotAsOf: t.SnapshotAsOf,
+	}
+}
+
+// split separates the build fields from the data description.
+func (m tradeMetaJSON) split() (metaJSON, *TradeMeta) {
+	return metaJSON{
+			RawFingerprint: m.RawFingerprint, BuilderVersion: m.BuilderVersion, ValidatorVersion: m.ValidatorVersion,
+			AvailabilityPolicy: m.AvailabilityPolicy, BuiltAt: m.BuiltAt,
+			BarCount: m.BarCount, BadCount: m.BadCount, FirstBar: m.FirstBar, LastBar: m.LastBar,
+		}, &TradeMeta{
+			PriceBasis: m.PriceBasis, Currency: m.Currency, VolumeUnit: m.VolumeUnit,
+			Adjustment: Adjustment(m.Adjustment), AdjustmentEvidence: Evidence(m.AdjustmentEvidence),
+			SnapshotFingerprint: m.SnapshotFingerprint, SnapshotAsOf: m.SnapshotAsOf, Calendar: m.Calendar,
+		}
+}
+
+// series is one price series a schema stores and the decimals it is written with.
+type series struct {
+	name     string
+	ohlc     *marketdata.OHLC
+	decimals int
+}
+
+// layoutOf returns the column names of a schema and the series of b it stores, in
+// column order.
+func layoutOf(schema string, b *marketdata.Bar) ([]string, []series) {
+	if schema == SchemaTrade {
+		return tradeColumns, []series{{"trade", &b.Trade, tradeDecimals}}
+	}
+	return columns, []series{{"bid", &b.Bid, priceDecimals}, {"ask", &b.Ask, priceDecimals}, {"mid", &b.Mid, midDecimals}}
+}
+
 // formatOHLC writes the four prices of one series, or four empty fields when the
 // series is absent.
 func formatOHLC(o marketdata.OHLC, decimals int) ([]string, error) {
@@ -98,7 +167,8 @@ func parseOHLC(fields []string, decimals int) (marketdata.OHLC, error) {
 	return marketdata.OHLC{Open: p[0], High: p[1], Low: p[2], Close: p[3]}, nil
 }
 
-// Encode writes f in canonical-v2 form after validating it: the schema comment,
+// Encode writes f in the form of its schema (File.Schema) after validating it: the
+// schema comment,
 // the "# meta" line, one "# bad" line per rejected record, the column header and
 // one row per bar.
 func Encode(ctx context.Context, w io.Writer, f File) error {
@@ -113,7 +183,7 @@ func Encode(ctx context.Context, w io.Writer, f File) error {
 	bw := bufio.NewWriter(w)
 	k := f.Key
 	_, _ = fmt.Fprintf(bw, "# schema=%s provider=%s symbol=%s interval=%s year=%04d month=%02d\n",
-		Schema, k.Source, k.Symbol, string(k.Interval), k.Year, int(k.Month))
+		f.Schema(), k.Source, k.Symbol, string(k.Interval), k.Year, int(k.Month))
 
 	barCount, badCount := len(f.Bars), len(f.Bad)
 	meta := metaJSON{
@@ -124,7 +194,11 @@ func Encode(ctx context.Context, w io.Writer, f File) error {
 	if n := len(f.Bars); n > 0 {
 		meta.FirstBar, meta.LastBar = formatTime(f.Bars[0].Time), formatTime(f.Bars[n-1].Time)
 	}
-	js, err := json.Marshal(meta)
+	var line any = meta
+	if t := f.Meta.Trade; t != nil {
+		line = withTrade(meta, *t)
+	}
+	js, err := json.Marshal(line)
 	if err != nil {
 		return fmt.Errorf("canonical: encode meta: %w", err)
 	}
@@ -132,17 +206,16 @@ func Encode(ctx context.Context, w io.Writer, f File) error {
 	for _, b := range f.Bad {
 		_, _ = fmt.Fprintf(bw, "# bad time=%s reason=%s raw_row=%d\n", formatTime(b.Time), string(b.Reason), b.RawRow)
 	}
-	_, _ = fmt.Fprintln(bw, strings.Join(columns, ","))
+	names, _ := layoutOf(f.Schema(), &marketdata.Bar{})
+	_, _ = fmt.Fprintln(bw, strings.Join(names, ","))
 	for _, b := range f.Bars {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		row := []string{formatTime(b.Time), formatTime(b.AvailableAt)}
-		for _, s := range []struct {
-			o        marketdata.OHLC
-			decimals int
-		}{{b.Bid, priceDecimals}, {b.Ask, priceDecimals}, {b.Mid, midDecimals}} {
-			fields, err := formatOHLC(s.o, s.decimals)
+		_, stored := layoutOf(f.Schema(), &b)
+		for _, s := range stored {
+			fields, err := formatOHLC(*s.ohlc, s.decimals)
 			if err != nil {
 				return err
 			}
@@ -161,7 +234,8 @@ func malformed(line int, format string, args ...any) error {
 	return fmt.Errorf("%w: line %d: %s", ErrMalformedData, line, fmt.Sprintf(format, args...))
 }
 
-// Decode reads one canonical-v2 file. It is strict: an unknown or missing header
+// Decode reads one canonical file of either schema, as its first line names it. It
+// is strict: an unknown or missing header
 // field, an unknown comment line, a row that does not parse, counts that
 // disagree with the metadata, or any breach of File.Validate is ErrMalformedData.
 // The returned File carries the good bars and the bad records both.
@@ -184,13 +258,14 @@ func Decode(r io.Reader) (File, error) {
 	if err != nil {
 		return File{}, err
 	}
-	key, err := parseSchemaLine(first)
+	schema, key, err := parseSchemaLine(first)
 	if err != nil {
 		return File{}, malformed(1, "%v", err)
 	}
 
 	f := File{Key: key}
 	var meta metaJSON
+	var trade *TradeMeta
 	haveMeta := false
 	var header string
 	for {
@@ -209,7 +284,16 @@ func Decode(r io.Reader) (File, error) {
 			}
 			dec := json.NewDecoder(strings.NewReader(strings.TrimPrefix(line, "# meta ")))
 			dec.DisallowUnknownFields()
-			if err := dec.Decode(&meta); err != nil {
+			var err error
+			if schema == SchemaTrade {
+				var tm tradeMetaJSON
+				if err = dec.Decode(&tm); err == nil {
+					meta, trade = tm.split()
+				}
+			} else {
+				err = dec.Decode(&meta)
+			}
+			if err != nil {
 				return File{}, malformed(n, "meta: %v", err)
 			}
 			if _, err := dec.Token(); !errors.Is(err, io.EOF) {
@@ -229,18 +313,19 @@ func Decode(r io.Reader) (File, error) {
 	if !haveMeta {
 		return File{}, malformed(n, "no meta line before the column header")
 	}
-	if header != strings.Join(columns, ",") {
-		return File{}, malformed(n, "columns %q, want %q", header, strings.Join(columns, ","))
+	names, _ := layoutOf(schema, &marketdata.Bar{})
+	if header != strings.Join(names, ",") {
+		return File{}, malformed(n, "columns %q, want %q", header, strings.Join(names, ","))
 	}
 	builtAt, err := parseTime(meta.BuiltAt)
 	if err != nil {
 		return File{}, malformed(2, "meta built_at: %v", err)
 	}
 	f.Meta = Meta{RawFingerprint: meta.RawFingerprint, BuilderVersion: meta.BuilderVersion,
-		ValidatorVersion: meta.ValidatorVersion, AvailabilityPolicy: meta.AvailabilityPolicy, BuiltAt: builtAt}
+		ValidatorVersion: meta.ValidatorVersion, AvailabilityPolicy: meta.AvailabilityPolicy, BuiltAt: builtAt, Trade: trade}
 
 	cr := csv.NewReader(br)
-	cr.FieldsPerRecord = len(columns)
+	cr.FieldsPerRecord = len(names)
 	for {
 		rec, err := cr.Read()
 		if errors.Is(err, io.EOF) {
@@ -257,7 +342,7 @@ func Decode(r io.Reader) (File, error) {
 			return File{}, malformed(n+line, "%v", err)
 		}
 		line, _ := cr.FieldPos(0)
-		b, err := parseBar(rec)
+		b, err := parseBar(schema, rec)
 		if err != nil {
 			return File{}, malformed(n+line, "%v", err)
 		}
@@ -292,33 +377,35 @@ func checkMetaCounts(m metaJSON, f File) error {
 	return nil
 }
 
-// parseSchemaLine reads "# schema=canonical-v2 provider=... symbol=... interval=...
-// year=... month=..." and requires exactly those fields.
-func parseSchemaLine(line string) (Key, error) {
+// parseSchemaLine reads "# schema=... provider=... symbol=... interval=...
+// year=... month=...", requires exactly those fields and a known schema, and
+// returns the schema and key.
+func parseSchemaLine(line string) (string, Key, error) {
 	rest, ok := strings.CutPrefix(line, "# ")
 	if !ok {
-		return Key{}, fmt.Errorf("first line %q is not a schema comment", line)
+		return "", Key{}, fmt.Errorf("first line %q is not a schema comment", line)
 	}
 	got := map[string]string{}
 	for _, f := range strings.Fields(rest) {
 		k, v, ok := strings.Cut(f, "=")
 		if !ok || got[k] != "" {
-			return Key{}, fmt.Errorf("schema field %q is malformed or repeated", f)
+			return "", Key{}, fmt.Errorf("schema field %q is malformed or repeated", f)
 		}
 		got[k] = v
 	}
-	if got["schema"] != Schema {
-		return Key{}, fmt.Errorf("schema %q, want %s", got["schema"], Schema)
+	schema := got["schema"]
+	if schema != Schema && schema != SchemaTrade {
+		return "", Key{}, fmt.Errorf("schema %q, want %s or %s", schema, Schema, SchemaTrade)
 	}
 	if len(got) != 6 {
-		return Key{}, fmt.Errorf("schema line needs exactly schema, provider, symbol, interval, year and month")
+		return "", Key{}, fmt.Errorf("schema line needs exactly schema, provider, symbol, interval, year and month")
 	}
 	year, err1 := strconv.Atoi(got["year"])
 	month, err2 := strconv.Atoi(got["month"])
 	if err1 != nil || err2 != nil || got["provider"] == "" || got["symbol"] == "" {
-		return Key{}, fmt.Errorf("schema line has a missing or non-numeric field")
+		return "", Key{}, fmt.Errorf("schema line has a missing or non-numeric field")
 	}
-	return Key{Source: got["provider"], Symbol: got["symbol"], Interval: Interval(got["interval"]),
+	return schema, Key{Source: got["provider"], Symbol: got["symbol"], Interval: Interval(got["interval"]),
 		Year: year, Month: time.Month(month)}, nil
 }
 
@@ -346,7 +433,7 @@ func parseBadLine(s string) (BadRecord, error) {
 	return BadRecord{Time: t, Reason: Reason(got["reason"]), RawRow: row}, nil
 }
 
-func parseBar(rec []string) (marketdata.Bar, error) {
+func parseBar(schema string, rec []string) (marketdata.Bar, error) {
 	t, err := parseTime(rec[0])
 	if err != nil {
 		return marketdata.Bar{}, err
@@ -355,21 +442,17 @@ func parseBar(rec []string) (marketdata.Bar, error) {
 	if err != nil {
 		return marketdata.Bar{}, err
 	}
-	bid, err := parseOHLC(rec[2:6], priceDecimals)
-	if err != nil {
-		return marketdata.Bar{}, fmt.Errorf("bid: %w", err)
+	b := marketdata.Bar{Time: t, AvailableAt: avail}
+	_, stored := layoutOf(schema, &b)
+	for i, s := range stored {
+		at := 2 + 4*i
+		if *s.ohlc, err = parseOHLC(rec[at:at+4], s.decimals); err != nil {
+			return marketdata.Bar{}, fmt.Errorf("%s: %w", s.name, err)
+		}
 	}
-	ask, err := parseOHLC(rec[6:10], priceDecimals)
-	if err != nil {
-		return marketdata.Bar{}, fmt.Errorf("ask: %w", err)
+	vol := rec[len(rec)-1]
+	if b.Volume, err = strconv.ParseInt(vol, 10, 64); err != nil {
+		return marketdata.Bar{}, fmt.Errorf("volume %q: %v", vol, err)
 	}
-	mid, err := parseOHLC(rec[10:14], midDecimals)
-	if err != nil {
-		return marketdata.Bar{}, fmt.Errorf("mid: %w", err)
-	}
-	vol, err := strconv.ParseInt(rec[14], 10, 64)
-	if err != nil {
-		return marketdata.Bar{}, fmt.Errorf("volume %q: %v", rec[14], err)
-	}
-	return marketdata.Bar{Time: t, AvailableAt: avail, Bid: bid, Ask: ask, Mid: mid, Volume: vol}, nil
+	return b, nil
 }

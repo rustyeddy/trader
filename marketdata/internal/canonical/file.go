@@ -11,13 +11,19 @@ import (
 )
 
 // ErrMalformedData reports a canonical file, or a File value, that breaks the
-// canonical-v2 rules: a bad header, a row that does not parse, bars out of order
+// rules of its schema: a bad header, a row that does not parse, bars out of order
 // or outside the partition's month, counts that disagree with the metadata, an
 // availability time the policy does not give.
 var ErrMalformedData = errors.New("canonical: malformed data")
 
-// Schema is the canonical file schema this package reads and writes.
-const Schema = "canonical-v2"
+// The canonical file schemas. Both decode to marketdata.Bar; a file is one or the
+// other according to the price series it holds (ADR-095).
+const (
+	// Schema holds bid, ask and mid (ADR-090).
+	Schema = "canonical-v2"
+	// SchemaTrade holds the trade series only (ADR-095).
+	SchemaTrade = "canonical-trade-v1"
+)
 
 // Key identifies one monthly canonical partition. Source is the provider
 // (for example "oanda") and Symbol the instrument as spelled in the path.
@@ -60,8 +66,8 @@ func (k Key) Path() (string, error) {
 	return p, nil
 }
 
-// Meta is what a canonical file records about how it was built. Together the
-// first four fields decide whether a rebuild would change anything (SameBuild).
+// Meta is what a canonical file records about how it was built. Every field but
+// BuiltAt decides whether a rebuild would change anything (SameBuild).
 type Meta struct {
 	// RawFingerprint identifies the raw bytes the file was built from.
 	RawFingerprint string
@@ -76,11 +82,18 @@ type Meta struct {
 	// BuiltAt is when the file was built. It is provenance and is not part of
 	// SameBuild.
 	BuiltAt time.Time
+	// Trade describes the data of a canonical-trade-v1 file. It is required there
+	// and nil in a canonical-v2 file; its presence decides the schema.
+	Trade *TradeMeta
 }
 
 // SameBuild reports whether m and o describe the same build: the same raw
-// bytes, builder, validator and availability policy. BuiltAt is ignored.
+// bytes, builder, validator, availability policy and, for trade data, the same
+// TradeMeta. BuiltAt is ignored.
 func (m Meta) SameBuild(o Meta) bool {
+	if (m.Trade == nil) != (o.Trade == nil) || (m.Trade != nil && *m.Trade != *o.Trade) {
+		return false
+	}
 	return m.RawFingerprint == o.RawFingerprint && m.BuilderVersion == o.BuilderVersion &&
 		m.ValidatorVersion == o.ValidatorVersion && m.AvailabilityPolicy == o.AvailabilityPolicy
 }
@@ -103,12 +116,16 @@ const (
 	ReasonOutOfOrder Reason = "out-of-order"
 	// ReasonMisaligned: not on the interval's boundary.
 	ReasonMisaligned Reason = "misaligned"
+	// ReasonNonSession: dated on a day the exchange was closed. Only a
+	// canonical-trade-v1 file may hold it.
+	ReasonNonSession Reason = "non-session"
 )
 
 // Valid reports whether r is one of the defined reasons.
 func (r Reason) Valid() bool {
 	switch r {
-	case ReasonIncomplete, ReasonCrossed, ReasonInvalid, ReasonDuplicate, ReasonOutOfOrder, ReasonMisaligned:
+	case ReasonIncomplete, ReasonCrossed, ReasonInvalid, ReasonDuplicate, ReasonOutOfOrder, ReasonMisaligned,
+		ReasonNonSession:
 		return true
 	}
 	return false
@@ -138,12 +155,27 @@ type File struct {
 // not clean may be missing data and must not be treated as complete (ADR-090).
 func (f File) Clean() bool { return len(f.Bad) == 0 }
 
+// Schema returns the schema the file is written in: SchemaTrade when its metadata
+// describes trade data, Schema otherwise.
+func (f File) Schema() string {
+	if f.Meta.Trade != nil {
+		return SchemaTrade
+	}
+	return Schema
+}
+
 // Validate reports ErrMalformedData (or the key's error) unless the file obeys
-// the canonical-v2 rules: a valid key; build metadata present; bars valid,
-// aligned, strictly ascending and inside the partition's UTC month; availability
-// times as the named policy gives when it is PolicyScheduledCloseV1; an
-// instrument that is empty or the key's symbol; bad records
-// with valid reasons, times inside the month and strictly ascending raw rows.
+// the rules of its schema. Both need: a valid key; build metadata present; bars
+// valid, strictly ascending, inside the partition's UTC month and of an
+// instrument that is empty or the key's symbol; bad records with valid reasons,
+// times inside the month and strictly ascending raw rows.
+//
+// canonical-v2 also needs bars with no trade series, aligned to the interval, with
+// availability times as the policy gives when it is PolicyScheduledCloseV1.
+//
+// canonical-trade-v1 also needs daily bars with the trade series only, complete
+// TradeMeta, the policy PolicyUSEquityCloseV1, and each bar's opening and
+// availability times as that policy and the file's calendar give them.
 func (f File) Validate() error {
 	if err := f.Key.Validate(); err != nil {
 		return err
@@ -155,15 +187,25 @@ func (f File) Validate() error {
 	if m.BuiltAt.IsZero() {
 		return fmt.Errorf("%w: metadata has no build time", ErrMalformedData)
 	}
+	check := f.checkQuoteBar
+	if m.Trade != nil {
+		if err := f.checkTradeMeta(); err != nil {
+			return err
+		}
+		check = f.checkTradeBar
+	}
 	for i, b := range f.Bars {
 		if err := f.checkBar(i, b); err != nil {
+			return err
+		}
+		if err := check(b); err != nil {
 			return err
 		}
 	}
 	prevRow := 0
 	for _, bad := range f.Bad {
 		switch {
-		case !bad.Reason.Valid():
+		case !bad.Reason.Valid() || (m.Trade == nil && bad.Reason == ReasonNonSession):
 			return fmt.Errorf("%w: bad record at %s has reason %q", ErrMalformedData, bad.Time.UTC().Format(time.RFC3339), string(bad.Reason))
 		case bad.RawRow < 1 || bad.RawRow <= prevRow:
 			return fmt.Errorf("%w: bad record raw rows must be positive and ascending, got %d after %d", ErrMalformedData, bad.RawRow, prevRow)
@@ -180,6 +222,7 @@ func (f File) inMonth(t time.Time) bool {
 	return u.Year() == f.Key.Year && u.Month() == f.Key.Month
 }
 
+// checkBar holds the rules both schemas share.
 func (f File) checkBar(i int, b marketdata.Bar) error {
 	at := b.Time.UTC().Format(time.RFC3339)
 	if err := b.Validate(); err != nil {
@@ -188,14 +231,20 @@ func (f File) checkBar(i int, b marketdata.Bar) error {
 	if b.Instrument != "" && b.Instrument != f.Key.Symbol {
 		return fmt.Errorf("%w: bar %s is of %q, the file's key names %q", ErrMalformedData, at, b.Instrument, f.Key.Symbol)
 	}
-	if !b.Trade.IsZero() {
-		return fmt.Errorf("%w: bar %s has a trade series, which canonical-v2 does not store", ErrMalformedData, at)
-	}
 	if !f.inMonth(b.Time) {
 		return fmt.Errorf("%w: bar %s is not in %04d-%02d", ErrMalformedData, at, f.Key.Year, int(f.Key.Month))
 	}
 	if i > 0 && !b.Time.After(f.Bars[i-1].Time) {
 		return fmt.Errorf("%w: bar %s is not after %s", ErrMalformedData, at, f.Bars[i-1].Time.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+// checkQuoteBar holds the rules of canonical-v2 alone.
+func (f File) checkQuoteBar(b marketdata.Bar) error {
+	at := b.Time.UTC().Format(time.RFC3339)
+	if !b.Trade.IsZero() {
+		return fmt.Errorf("%w: bar %s has a trade series, which canonical-v2 does not store", ErrMalformedData, at)
 	}
 	ok, err := Aligned(f.Key.Interval, b.Time)
 	if err != nil {
