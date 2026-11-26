@@ -216,7 +216,7 @@ func convertSeries(ctx context.Context, id seriesID, partitions []marketdata.Sou
 		files[i] = canonical.File{
 			Key: canonical.Key{Source: id.source, Symbol: id.instrument, Interval: canonical.Interval(id.interval), Year: p.Year, Month: p.Month},
 			Meta: canonical.Meta{RawFingerprint: p.Fingerprint, BuilderVersion: TradeBuilderVersion,
-				ValidatorVersion: TradeValidatorVersion, AvailabilityPolicy: canonical.PolicyUSEquityCloseV1},
+				ValidatorVersion: TradeValidatorVersion, AvailabilityPolicy: canonical.PolicyUSEquityCloseV2},
 		}
 		for _, r := range p.Rows {
 			rows = append(rows, placed{r, i})
@@ -282,7 +282,7 @@ func classifyTrade(symbol string, r marketdata.SourceRow, date time.Time) (marke
 		return marketdata.Bar{}, canonical.ReasonIncomplete, nil
 	}
 	b := r.Bar
-	b.Instrument, b.Time, b.AvailableAt = symbol, session.Open, session.Close
+	b.Instrument, b.Time, b.AvailableAt = symbol, session.Open, session.Available
 	if r.Unrepresentable || !b.Bid.IsZero() || !b.Ask.IsZero() || !b.Mid.IsZero() || b.Trade.IsZero() || b.Validate() != nil {
 		return marketdata.Bar{}, canonical.ReasonInvalid, nil
 	}

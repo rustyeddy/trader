@@ -78,14 +78,26 @@ Running the command again leaves every month `unchanged`.
 - **Rebuilding from the archive** is the same command with
   `--input stooq/snapshots/<SYM>/<sha256>.raw` and no `--member`.
 
+## After upgrading
+
+A new calendar or availability policy makes files built earlier stale: they are reported,
+never served, until rebuilt. With the new binary:
+
+1. Run the build command for **SPY** and for **QQQ**. Each can also be built from its
+   archived snapshot (`--input stooq/snapshots/<SYM>/<sha256>.raw`, no `--member`) once it
+   has been archived. The input files and snapshots are only read.
+2. Restart `trader serve`: an older server cannot read the new files.
+
 ## What the data is
 
 - **Prices are dividend- and split-adjusted** (total return), observed by comparison, not
   documented by Stooq. They are not what traded on the day.
 - **Times are modeled** from the NYSE calendar for both symbols: open 09:30, available at
-  16:00 or the 13:00 early close. QQQ traded on the American Stock Exchange until
-  December 2004, where funds could trade after 16:00; whether Stooq's close of those years
-  includes that is not verified.
+  16:00 or the 13:00 early close (`us-equity-close-v2`).
+- **Before 2009-03-01 a bar is available 15 minutes later**, at 16:15 or 13:15. QQQ (until
+  December 2004) and SPY (until late February 2009) were on the American Stock Exchange,
+  where they traded until 16:15, and which close Stooq records for those years is not
+  established.
 
 ## Read
 

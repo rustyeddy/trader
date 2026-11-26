@@ -74,14 +74,15 @@ An unknown or repeated parameter is a `400`, so a typo is never silently ignored
 
 `source=stooq` serves SPY and QQQ daily **trade** bars (ADR-095; [how to build them](stooq-daily.md)).
 Each bar has `trade` and no `bid`, `ask` or `mid`. `time` is 09:30 New York and
-`available_at` the scheduled close, 16:00 or 13:00 on an early close. `volume` counts
+`available_at` the scheduled close, 16:00 or 13:00 on an early close; before 2009-03-01
+it is 15 minutes later (16:15 or 13:15), when these funds stopped trading then. `volume` counts
 shares. The response also carries:
 
 ```json
 "data": {
   "price_basis": "trade", "currency": "USD", "volume_unit": "shares",
   "adjustment": "total-return", "adjustment_evidence": "observed",
-  "availability_policy": "us-equity-close-v1", "calendar": "us-equity-calendar-v2",
+  "availability_policy": "us-equity-close-v2", "calendar": "us-equity-calendar-v2",
   "snapshot_fingerprint": "sha256:54b6...ee6b", "snapshot_as_of": "2026-09-10"
 }
 ```

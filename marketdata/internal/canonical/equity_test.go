@@ -47,12 +47,37 @@ func TestUSEquitySession_ADRFixtures(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			s, err := USEquitySession(c.year, c.month, c.day)
 			require.NoError(t, err)
-			assert.Equal(t, Session{Open: c.open, Close: c.close, Early: c.early}, s)
+			available := c.close
+			if c.year < 2009 {
+				available = c.close.Add(15 * time.Minute)
+			}
+			assert.Equal(t, Session{Open: c.open, Close: c.close, Available: available, Early: c.early}, s)
 
 			at, err := USEquitySessionAt(c.open)
 			require.NoError(t, err)
 			assert.Equal(t, s, at)
 		})
+	}
+}
+
+// Funds traded until 16:15 on the American Stock Exchange, so a session before
+// 2009-03-01 is available 15 minutes after the stock close.
+func TestUSEquitySession_IsAvailableAfterTheLateFundCloseBefore2009March(t *testing.T) {
+	for name, c := range map[string]struct {
+		day       time.Time
+		available time.Time
+	}{
+		"a 2000 session":          {utc(2000, 3, 1, 0), minute(2000, 3, 1, 21, 15)},
+		"a 2000 session in DST":   {utc(2000, 6, 1, 0), minute(2000, 6, 1, 20, 15)},
+		"an early close":          {utc(1999, 11, 26, 0), minute(1999, 11, 26, 18, 15)},
+		"after QQQ left Amex":     {utc(2005, 1, 3, 0), minute(2005, 1, 3, 21, 15)},
+		"the last delayed day":    {utc(2009, 2, 27, 0), minute(2009, 2, 27, 21, 15)},
+		"the first day on time":   {utc(2009, 3, 2, 0), minute(2009, 3, 2, 21, 0)},
+		"an early close, on time": {utc(2009, 11, 27, 0), minute(2009, 11, 27, 18, 0)},
+	} {
+		s, err := USEquitySession(c.day.Year(), c.day.Month(), c.day.Day())
+		require.NoError(t, err, name)
+		assert.Equal(t, c.available, s.Available, name)
 	}
 }
 
@@ -112,8 +137,8 @@ func TestUSEquityBar_IsNotConsumableBeforeTheClose(t *testing.T) {
 	require.NoError(t, err)
 	b := tradeBar(t, 2024, 11, 29)
 
-	assert.False(t, b.IsAvailable(s.Close.Add(-time.Nanosecond)))
-	assert.True(t, b.IsAvailable(s.Close))
+	assert.False(t, b.IsAvailable(s.Available.Add(-time.Nanosecond)))
+	assert.True(t, b.IsAvailable(s.Available))
 }
 
 // The table's version is its name: data built with it must not see it change.

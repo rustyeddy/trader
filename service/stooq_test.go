@@ -153,3 +153,28 @@ func TestBuildStooq_QQQFromItsFirstYearAndAnOldCalendarIsRebuilt(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, Replaced, got[0].Action)
 }
+
+// A replay just after the 16:00 stock close of a 2000 session must not see that
+// day's bar: the fund still traded (#741 review).
+func TestReadBars_A2000BarIsNotAvailableAtTheStockClose(t *testing.T) {
+	storetest.Root(t)
+	ctx := context.Background()
+	rows := "QQQ.US,D,20000301,000000,100,101,99,100.5,10,0\nQQQ.US,D,20000302,000000,100,101,99,100.5,10,0\n"
+	require.NoError(t, store.Write(ctx, "stooq/raw/qqq.us.txt", []byte(stooqHeader+rows)))
+	_, err := BuildStooq(ctx, nil, StooqBuildRequest{Instrument: "QQQ", Interval: "d1", Input: "stooq/raw/qqq.us.txt", SnapshotAsOf: "2026-09-10"}, nil)
+	require.NoError(t, err)
+	req := BarsRequest{Source: "stooq", Instrument: "QQQ", Interval: "d1", From: utc(2000, 3, 1, 0), To: utc(2000, 4, 1, 0)}
+	stockClose := utc(2000, 3, 2, 21) // 16:00 New York on the second session
+
+	for asOf, bars := range map[time.Time]int{
+		stockClose.Add(time.Minute):                      1,
+		stockClose.Add(15*time.Minute - time.Nanosecond): 1,
+		stockClose.Add(15 * time.Minute):                 2,
+	} {
+		req.AsOf = asOf
+		page, err := ReadBars(ctx, nil, req)
+		require.NoError(t, err)
+		assert.Len(t, page.Bars, bars, asOf.Format(time.RFC3339Nano))
+		assert.Equal(t, "us-equity-close-v2", page.Data.AvailabilityPolicy)
+	}
+}

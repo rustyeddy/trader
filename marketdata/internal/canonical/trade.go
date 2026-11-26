@@ -81,8 +81,8 @@ func (f File) checkTradeMeta() error {
 	if f.Key.Interval != D1 {
 		return bad("only d1 is supported, not %q", string(f.Key.Interval))
 	}
-	if f.Meta.AvailabilityPolicy != PolicyUSEquityCloseV1 {
-		return bad("availability policy %q, want %s", f.Meta.AvailabilityPolicy, PolicyUSEquityCloseV1)
+	if f.Meta.AvailabilityPolicy != PolicyUSEquityCloseV2 {
+		return bad("availability policy %q, want %s", f.Meta.AvailabilityPolicy, PolicyUSEquityCloseV2)
 	}
 	if m.Calendar != CalendarUSEquityV2 {
 		return bad("calendar %q, want %s", m.Calendar, CalendarUSEquityV2)
@@ -126,9 +126,9 @@ func (f File) checkTradeBar(b marketdata.Bar) error {
 	if err != nil {
 		return fmt.Errorf("%w: bar %s: %w", ErrMalformedData, at, err)
 	}
-	if !b.AvailableAt.Equal(s.Close) {
+	if !b.AvailableAt.Equal(s.Available) {
 		return fmt.Errorf("%w: bar %s is available at %s, but %s gives %s", ErrMalformedData, at,
-			b.AvailableAt.UTC().Format(time.RFC3339), PolicyUSEquityCloseV1, s.Close.Format(time.RFC3339))
+			b.AvailableAt.UTC().Format(time.RFC3339), PolicyUSEquityCloseV2, s.Available.Format(time.RFC3339))
 	}
 	return nil
 }

@@ -372,7 +372,7 @@ func loadMonth(ctx context.Context, req LoadRequest, interval canonical.Interval
 func staleReason(m canonical.Meta) string {
 	policy, builder, validator := canonical.PolicyScheduledCloseV1, BuilderVersion, ValidatorVersion
 	if m.Trade != nil {
-		policy, builder, validator = canonical.PolicyUSEquityCloseV1, TradeBuilderVersion, TradeValidatorVersion
+		policy, builder, validator = canonical.PolicyUSEquityCloseV2, TradeBuilderVersion, TradeValidatorVersion
 	}
 	switch {
 	case m.AvailabilityPolicy != policy:

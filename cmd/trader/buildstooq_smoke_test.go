@@ -103,8 +103,12 @@ func (c stooqSmoke) run(t *testing.T) {
 			require.Equal(t, f[2], b.Time.In(ny).Format("20060102"))
 			require.Equal(t, "09:30", b.Time.In(ny).Format("15:04"))
 			closes := b.AvailableAt.In(ny).Format("20060102 15:04")
-			require.Contains(t, []string{f[2] + " 16:00", f[2] + " 13:00"}, closes)
-			if closes == f[2]+" 13:00" {
+			minute := "00"
+			if f[2] < "20090301" { // the late close of funds on the American Stock Exchange
+				minute = "15"
+			}
+			require.Contains(t, []string{f[2] + " 16:" + minute, f[2] + " 13:" + minute}, closes)
+			if closes == f[2]+" 13:"+minute {
 				early++
 			}
 			require.Equal(t, []num.Price{num.MustParsePrice(f[4]), num.MustParsePrice(f[5]), num.MustParsePrice(f[6]), num.MustParsePrice(f[7])},

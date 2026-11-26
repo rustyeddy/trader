@@ -80,7 +80,7 @@ func TestBuildSeries_WritesSessionTimesProvenanceAndTheArchive(t *testing.T) {
 
 	march := spyFile(t, time.March)
 	assert.Equal(t, canonical.Meta{RawFingerprint: "one3", BuilderVersion: TradeBuilderVersion, ValidatorVersion: TradeValidatorVersion,
-		AvailabilityPolicy: "us-equity-close-v1", BuiltAt: builtAt, Trade: &canonical.TradeMeta{
+		AvailabilityPolicy: "us-equity-close-v2", BuiltAt: builtAt, Trade: &canonical.TradeMeta{
 			PriceBasis: "trade", Currency: "USD", VolumeUnit: "shares", Adjustment: "total-return", AdjustmentEvidence: "observed",
 			SnapshotFingerprint: got.Fingerprint, SnapshotAsOf: "2026-09-10", Calendar: "us-equity-calendar-v2",
 		}}, march.Meta)

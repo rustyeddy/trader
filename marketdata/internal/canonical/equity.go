@@ -13,13 +13,25 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 )
 
-// PolicyUSEquityCloseV1 names the availability rule of US equity daily bars
+// PolicyUSEquityCloseV2 names the availability rule of US equity daily bars
 // (ADR-095): a bar opens at 09:30 America/New_York on its exchange date and is
-// available at the scheduled regular close, 16:00, or 13:00 on a day the
-// calendar lists as an early close. Both are modeled, not observed; unscheduled
-// late openings and halts are not modeled. Changing the times means a new policy
-// name; changing the dates means a new calendar version.
-const PolicyUSEquityCloseV1 = "us-equity-close-v1"
+// available at the scheduled stock close, 16:00, or 13:00 on a day the calendar
+// lists as an early close, except that a session before 2009-03-01 is available
+// 15 minutes after that close. The funds built here traded until 16:15 on the
+// American Stock Exchange (QQQ until December 2004, SPY until late February 2009),
+// and which close a source's bar of those years holds is not established, so the
+// later one is assumed: a bar is never usable before its prices could exist. v1,
+// which had no delay, is retired. All times are modeled, not observed;
+// unscheduled late openings and halts are not modeled. Changing the times means a
+// new policy name; changing the dates means a new calendar version.
+const PolicyUSEquityCloseV2 = "us-equity-close-v2"
+
+// lateFundCloseDelay is how long after the stock close a session before
+// lateFundCloseEnd is available.
+const lateFundCloseDelay = 15 * time.Minute
+
+// lateFundCloseEnd is the first exchange date (UTC midnight) without the delay.
+var lateFundCloseEnd = time.Date(2009, time.March, 1, 0, 0, 0, 0, time.UTC)
 
 // CalendarUSEquityV2 names the embedded table of full closures and early closes,
 // 1999-01-01 to 2026-12-31. It carries the dates of v1 (2005 on) unchanged and
@@ -44,8 +56,11 @@ var (
 type Session struct {
 	// Open is when the session opens: the Time of its daily bar.
 	Open time.Time
-	// Close is when it is scheduled to close: the AvailableAt of its daily bar.
+	// Close is when the stock session is scheduled to close.
 	Close time.Time
+	// Available is the AvailableAt of its daily bar under PolicyUSEquityCloseV2:
+	// Close, or 15 minutes after it for a session before 2009-03-01.
+	Available time.Time
 	// Early reports a 13:00 close.
 	Early bool
 }
@@ -139,7 +154,7 @@ func isWeekend(t time.Time) bool {
 }
 
 // USEquitySession returns the session of the exchange date year-month-day under
-// PolicyUSEquityCloseV1 and CalendarUSEquityV2. It reports ErrOutsideCalendar
+// PolicyUSEquityCloseV2 and CalendarUSEquityV2. It reports ErrOutsideCalendar
 // for a date the calendar does not cover, including one that does not exist, and
 // ErrNonSession for a weekend or full closure.
 func USEquitySession(year int, month time.Month, day int) (Session, error) {
@@ -166,6 +181,10 @@ func USEquitySession(year int, month time.Month, day int) (Session, error) {
 		closeHour = 13
 	}
 	s.Close = time.Date(year, month, day, closeHour, 0, 0, 0, ny).UTC()
+	s.Available = s.Close
+	if date.Before(lateFundCloseEnd) {
+		s.Available = s.Close.Add(lateFundCloseDelay)
+	}
 	return s, nil
 }
 

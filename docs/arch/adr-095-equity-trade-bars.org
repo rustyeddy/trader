@@ -4,7 +4,7 @@
 * Status
 
 Accepted (owner approval 2026-11-26, #733). The =canonical-trade-v1= encoding,
-the availability policy and the calendar are implemented (#734), as are the Stooq SPY
+the availability policy (now =us-equity-close-v2=, amended in section 4) and the calendar are implemented (#734), as are the Stooq SPY
 build and bar reads (#735, =docs/stooq-daily.md=); the engine rules and first
 backtest are not. The calendar's sources are cited in
 =us_equity_calendar_v2.csv= (see the amendment in section 4). The 2011-02-17 condition in section 4 still
@@ -209,6 +209,9 @@ by the build, never inferred by a reader.
 
 ** 4. Daily time, availability and calendar
 
+(Amended below: the calendar is now =us-equity-calendar-v2= and the policy
+=us-equity-close-v2=.)
+
 Policy =us-equity-close-v1=, for the exchange date =D= of a row, in
 America/New_York using the zone bytes already pinned in the repository:
 
@@ -274,20 +277,36 @@ The owner asked for the entire QQQ history, which starts on 1999-03-10, so the
 table is extended to 1999-01-01 through 2026-12-31 as
 =us-equity-calendar-v2=. It replaces v1: its rows from 2005 are unchanged, the
 1999 to 2004 rows cite NYSE publications, and series built under v1 are stale
-and are rebuilt. The timing rules, and so =us-equity-close-v1=, are unchanged.
+and are rebuilt.
 
 - QQQ was not listed on the NYSE (the American Stock Exchange, then Nasdaq from
   2004-12-01). The NYSE table is applied to it; every date of the Stooq rows
   agrees with it except the hole below.
-- Exchange-traded funds on the American Stock Exchange could trade after 16:00.
-  The policy still makes a bar available at the 16:00 (or 13:00) stock close, and
-  whether Stooq's close of those years is that of the later session is *not
-  verified*. Fills at the next bar's open are unaffected; anything that acts at
-  the close must not assume the price was known then.
 - Stooq QQQ has no row for *1999-11-16*, a trading day (the NYSE lists no
   closure; the Federal Reserve announced a rate rise during it). Other long Stooq
   histories lack it too. As with SPY 2011-02-17 it is not a known hole, and a
   strict load covering it fails.
+
+*** Amendment: =us-equity-close-v2= (#741 review)
+
+QQQ and SPY did not stop trading at the stock close in their earlier years.
+Transactions in the Nasdaq-100 Trust could be made on the American Stock
+Exchange until 16:15 (SEC Release 34-41119, Federal Register, 1999-03-09); an
+Amex notice gives 09:30 to 16:15 for funds in 2005 (70 FR 22932); NYSE Arca held its fund closing
+auction at 16:15 until 2008-01-01 (SEC Release 34-56888). QQQ moved to Nasdaq on
+2004-12-01, and SPY from Amex to NYSE Arca on or about 2009-02-24 (SPDR Trust
+supplement, February 2009). Whether Stooq's daily bar of those years holds the
+16:00 or the 16:15 prices is not established, so a bar usable at 16:00 could
+leak the future to any =AsOf= reader.
+
+=us-equity-close-v2= replaces v1: =Time= is unchanged, and =AvailableAt= is the
+scheduled stock close, *plus 15 minutes for every session before 2009-03-01*
+(16:15, or 13:15 on an early close). One date applies to every equity series.
+It delays some bars that need no delay (QQQ on Nasdaq, December 2004 to
+February 2009); late is safe, early is not. The 13:15 early-close time is the
+same conservative assumption, not separately sourced. Files built under v1 are
+stale and are rebuilt. The fixtures in the table above are all after the cutoff
+and unchanged. A new equity series must check that this rule covers its venue.
 
 ** 5. First-test execution and scope
 
