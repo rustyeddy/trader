@@ -42,9 +42,19 @@ type seriesProfile struct {
 type seriesID struct{ source, instrument, interval string }
 
 // profiles lists the supported series (ADR-095). Stooq's daily history is
-// dividend-adjusted, as observed by comparison (ADR-073, #728).
+// dividend-adjusted, as observed by comparison with unadjusted-for-dividends
+// prices of each symbol (ADR-073, #728, #740).
 var profiles = map[seriesID]seriesProfile{
-	{"stooq", "SPY", "d1"}: {currency: "USD", adjustment: canonical.AdjustmentTotalReturn, evidence: canonical.EvidenceObserved},
+	{"stooq", "QQQ", "d1"}: stooqTotalReturn,
+	{"stooq", "SPY", "d1"}: stooqTotalReturn,
+}
+
+var stooqTotalReturn = seriesProfile{currency: "USD", adjustment: canonical.AdjustmentTotalReturn, evidence: canonical.EvidenceObserved}
+
+// SupportsSeries reports whether BuildSeries has the market rules of a series.
+func SupportsSeries(source, instrument, interval string) bool {
+	_, ok := profiles[seriesID{source, instrument, interval}]
+	return ok
 }
 
 // Snapshot is the whole history of one series from one input, as BuildSeries
@@ -123,7 +133,7 @@ func BuildSeries(ctx context.Context, s Snapshot, builtAt time.Time) (SeriesBuil
 	meta := canonical.TradeMeta{
 		PriceBasis: canonical.PriceBasisTrade, Currency: profile.currency, VolumeUnit: canonical.VolumeShares,
 		Adjustment: profile.adjustment, AdjustmentEvidence: profile.evidence,
-		SnapshotFingerprint: fingerprint, SnapshotAsOf: asOf, Calendar: canonical.CalendarUSEquityV1,
+		SnapshotFingerprint: fingerprint, SnapshotAsOf: asOf, Calendar: canonical.CalendarUSEquityV2,
 	}
 	for i := range files {
 		trade := meta
@@ -206,7 +216,7 @@ func convertSeries(ctx context.Context, id seriesID, partitions []marketdata.Sou
 		files[i] = canonical.File{
 			Key: canonical.Key{Source: id.source, Symbol: id.instrument, Interval: canonical.Interval(id.interval), Year: p.Year, Month: p.Month},
 			Meta: canonical.Meta{RawFingerprint: p.Fingerprint, BuilderVersion: TradeBuilderVersion,
-				ValidatorVersion: TradeValidatorVersion, AvailabilityPolicy: canonical.PolicyUSEquityCloseV1},
+				ValidatorVersion: TradeValidatorVersion, AvailabilityPolicy: canonical.PolicyUSEquityCloseV2},
 		}
 		for _, r := range p.Rows {
 			rows = append(rows, placed{r, i})
@@ -272,7 +282,7 @@ func classifyTrade(symbol string, r marketdata.SourceRow, date time.Time) (marke
 		return marketdata.Bar{}, canonical.ReasonIncomplete, nil
 	}
 	b := r.Bar
-	b.Instrument, b.Time, b.AvailableAt = symbol, session.Open, session.Close
+	b.Instrument, b.Time, b.AvailableAt = symbol, session.Open, session.Available
 	if r.Unrepresentable || !b.Bid.IsZero() || !b.Ask.IsZero() || !b.Mid.IsZero() || b.Trade.IsZero() || b.Validate() != nil {
 		return marketdata.Bar{}, canonical.ReasonInvalid, nil
 	}

@@ -1,15 +1,27 @@
-# us-equity-calendar-v1
+# us-equity-calendar-v2
 #
-# Full closures and 1:00 pm closes of the New York Stock Exchange, 2005-01-01 to
+# Full closures and 1:00 pm closes of the New York Stock Exchange, 1999-01-01 to
 # 2026-12-31 (ADR-095 section 4). Every other Monday to Friday is a regular
 # session. Unscheduled late openings and intraday halts are not listed.
 #
 # Each row names the publication it was checked against (2026-11-26): the New
 # York Stock Exchange's own pages and releases, or those of its parent company.
+# The rows from 2005 are those of us-equity-calendar-v1, unchanged; v2 adds 1999
+# to 2004.
 #
 # A version is never edited once data has been built with it: a correction or
 # another year is a new version.
 #
+# source page-1999 https://web.archive.org/web/19991128072223/http://www.nyse.com:80/about/holidayclosings.html
+#   NYSE Hours and Holiday Schedule page, 1999 to 2001, with the 1999 1:00 pm closes
+# source page-2000 https://web.archive.org/web/20001215234600/http://www.nyse.com:80/about/holidayclosings.html
+#   NYSE Hours and Holiday Schedule page, 2000 to 2004, with the 2000 1:00 pm closes
+# source page-2001 https://web.archive.org/web/20011020134447/http://www.nyse.com:80/about/holidayclosings.html
+#   NYSE Hours and Holiday Schedule page, 2001 to 2004, with the 2001 1:00 pm closes
+# source page-2002 https://web.archive.org/web/20020124200251/http://www.nyse.com:80/about/holidayclosings.html
+#   NYSE Hours and Holiday Schedule page, 2002 to 2004
+# source page-2003 https://web.archive.org/web/20030425015823/http://www.nyse.com:80/about/1022963613686.html
+#   NYSE Holiday Schedule page, 2003 and 2004
 # source history-2011 https://web.archive.org/web/20111216084459/http://www.nyse.com:80/pdfs/closings.pdf
 #   NYSE, History of New York Stock Exchange Holidays, revised January 2011 (standard holidays and their observance; dated special closings and 1:00 pm closes)
 # source page-2005 https://web.archive.org/web/20051216071410/http://www.nyse.com:80/about/1022963613686.html
@@ -49,6 +61,79 @@
 # source carter-2025 https://s2.q4cdn.com/154085107/files/doc_news/The-New-York-Stock-Exchange-Will-Close-Markets-on-January-9-to-Honor-the-Passing-of-Former-President-Jimmy-Carter-on-National-Day-of--IGCRS.pdf
 #   NYSE, markets closed January 9 on the National Day of Mourning (30 Dec 2024)
 date,kind,source
+1999-01-01,closed,page-1999
+1999-01-18,closed,page-1999
+1999-02-15,closed,page-1999
+1999-04-02,closed,page-1999
+1999-05-31,closed,page-1999
+1999-07-05,closed,page-1999
+1999-09-06,closed,page-1999
+1999-11-25,closed,page-1999
+1999-11-26,early,page-1999
+1999-12-24,closed,page-1999
+1999-12-31,early,page-1999
+2000-01-17,closed,page-2000
+2000-02-21,closed,page-2000
+2000-04-21,closed,page-2000
+2000-05-29,closed,page-2000
+2000-07-03,early,page-2000
+2000-07-04,closed,page-2000
+2000-09-04,closed,page-2000
+2000-11-23,closed,page-2000
+2000-11-24,early,page-2000
+2000-12-25,closed,page-2000
+2001-01-01,closed,page-2001
+2001-01-15,closed,page-2001
+2001-02-19,closed,page-2001
+2001-04-13,closed,page-2001
+2001-05-28,closed,page-2001
+2001-07-03,early,page-2001
+2001-07-04,closed,page-2001
+2001-09-03,closed,page-2001
+2001-09-11,closed,history-2011
+2001-09-12,closed,history-2011
+2001-09-13,closed,history-2011
+2001-09-14,closed,history-2011
+2001-11-22,closed,page-2001
+2001-11-23,early,page-2001
+2001-12-24,early,page-2001
+2001-12-25,closed,page-2001
+2002-01-01,closed,page-2002
+2002-01-21,closed,page-2002
+2002-02-18,closed,page-2002
+2002-03-29,closed,page-2002
+2002-05-27,closed,page-2002
+2002-07-04,closed,page-2002
+2002-07-05,early,history-2011
+2002-09-02,closed,page-2002
+2002-11-28,closed,page-2002
+2002-11-29,early,history-2011
+2002-12-24,early,history-2011
+2002-12-25,closed,page-2002
+2003-01-01,closed,page-2003
+2003-01-20,closed,page-2003
+2003-02-17,closed,page-2003
+2003-04-18,closed,page-2003
+2003-05-26,closed,page-2003
+2003-07-03,early,history-2011
+2003-07-04,closed,page-2003
+2003-09-01,closed,page-2003
+2003-11-27,closed,page-2003
+2003-11-28,early,history-2011
+2003-12-24,early,history-2011
+2003-12-25,closed,page-2003
+2003-12-26,early,history-2011
+2004-01-01,closed,page-2003
+2004-01-19,closed,page-2003
+2004-02-16,closed,page-2003
+2004-04-09,closed,page-2003
+2004-05-31,closed,page-2003
+2004-06-11,closed,history-2011
+2004-07-05,closed,page-2003
+2004-09-06,closed,page-2003
+2004-11-25,closed,page-2003
+2004-11-26,early,history-2011
+2004-12-24,closed,page-2003
 2005-01-17,closed,page-2005
 2005-02-21,closed,page-2005
 2005-03-25,closed,page-2005

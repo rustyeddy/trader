@@ -18,7 +18,7 @@ func tradeBar(t *testing.T, y int, m time.Month, d int) marketdata.Bar {
 	t.Helper()
 	s, err := USEquitySession(y, m, d)
 	require.NoError(t, err)
-	return marketdata.Bar{Time: s.Open, AvailableAt: s.Close, Volume: 78064486,
+	return marketdata.Bar{Time: s.Open, AvailableAt: s.Available, Volume: 78064486,
 		Trade: marketdata.OHLC{Open: px("501.028"), High: px("505.27"), Low: px("500.614"), Close: px("504.838")}}
 }
 
@@ -32,16 +32,16 @@ func tradeFile(t *testing.T) File {
 	return File{
 		Key: Key{Source: "stooq", Symbol: "SPY", Interval: D1, Year: 2024, Month: time.March},
 		Meta: Meta{RawFingerprint: "sha256:month", BuilderVersion: "builder-v1", ValidatorVersion: "validator-v1",
-			AvailabilityPolicy: PolicyUSEquityCloseV1, BuiltAt: utc(2026, 11, 26, 12),
+			AvailabilityPolicy: PolicyUSEquityCloseV2, BuiltAt: utc(2026, 11, 26, 12),
 			Trade: &TradeMeta{PriceBasis: PriceBasisTrade, Currency: "USD", VolumeUnit: VolumeShares,
 				Adjustment: AdjustmentTotalReturn, AdjustmentEvidence: EvidenceObserved,
-				SnapshotFingerprint: testSnapshot, SnapshotAsOf: "2026-09-10", Calendar: CalendarUSEquityV1}},
+				SnapshotFingerprint: testSnapshot, SnapshotAsOf: "2026-09-10", Calendar: CalendarUSEquityV2}},
 		Bars: []marketdata.Bar{tradeBar(t, 2024, 3, 1), last},
 	}
 }
 
 const tradeText = `# schema=canonical-trade-v1 provider=stooq symbol=SPY interval=d1 year=2024 month=03
-# meta {"raw_fingerprint":"sha256:month","builder_version":"builder-v1","validator_version":"validator-v1","availability_policy":"us-equity-close-v1","calendar":"us-equity-calendar-v1","built_at":"2026-11-26T12:00:00Z","bar_count":2,"bad_count":1,"first_bar":"2024-03-01T14:30:00Z","last_bar":"2024-03-28T13:30:00Z","price_basis":"trade","currency":"USD","volume_unit":"shares","adjustment":"total-return","adjustment_evidence":"observed","snapshot_fingerprint":"sha256:54b64bba890d89495bc2108824ba378a3f7f92349d5021595499bbc47696ee6b","snapshot_as_of":"2026-09-10"}
+# meta {"raw_fingerprint":"sha256:month","builder_version":"builder-v1","validator_version":"validator-v1","availability_policy":"us-equity-close-v2","calendar":"us-equity-calendar-v2","built_at":"2026-11-26T12:00:00Z","bar_count":2,"bad_count":1,"first_bar":"2024-03-01T14:30:00Z","last_bar":"2024-03-28T13:30:00Z","price_basis":"trade","currency":"USD","volume_unit":"shares","adjustment":"total-return","adjustment_evidence":"observed","snapshot_fingerprint":"sha256:54b64bba890d89495bc2108824ba378a3f7f92349d5021595499bbc47696ee6b","snapshot_as_of":"2026-09-10"}
 # bad time=2024-03-29T13:30:00Z reason=non-session raw_row=21
 time,available_at,trade_o,trade_h,trade_l,trade_c,volume
 2024-03-01T14:30:00Z,2024-03-01T21:00:00Z,501.02800000,505.27000000,500.61400000,504.83800000,78064486
@@ -128,7 +128,7 @@ func TestTradeFile_RequiresCompleteMetadata(t *testing.T) {
 	for name, change := range map[string]func(*File){
 		"interval h1":        func(f *File) { f.Key.Interval = H1 },
 		"FX policy":          func(f *File) { f.Meta.AvailabilityPolicy = PolicyScheduledCloseV1 },
-		"unknown calendar":   func(f *File) { f.Meta.Trade.Calendar = "us-equity-calendar-v2" },
+		"retired calendar":   func(f *File) { f.Meta.Trade.Calendar = "us-equity-calendar-v1" },
 		"price basis":        func(f *File) { f.Meta.Trade.PriceBasis = "mid" },
 		"no currency":        func(f *File) { f.Meta.Trade.Currency = "" },
 		"bad currency":       func(f *File) { f.Meta.Trade.Currency = "usd" },

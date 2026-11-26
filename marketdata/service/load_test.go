@@ -439,7 +439,7 @@ func TestLoad_ATradeSeriesComesWithItsDataAndNoGapForClosures(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got.Series.Bars, 2)
 	assert.Empty(t, got.Gaps)
-	assert.Equal(t, &DataInfo{AvailabilityPolicy: "us-equity-close-v1", Calendar: "us-equity-calendar-v1", PriceBasis: "trade",
+	assert.Equal(t, &DataInfo{AvailabilityPolicy: "us-equity-close-v2", Calendar: "us-equity-calendar-v2", PriceBasis: "trade",
 		Currency: "USD", VolumeUnit: "shares", Adjustment: "total-return", AdjustmentEvidence: "observed",
 		SnapshotFingerprint: canonical.Fingerprint([]byte("one")), SnapshotAsOf: "2026-09-10"}, got.Data)
 	require.NoError(t, got.Series.Validate())

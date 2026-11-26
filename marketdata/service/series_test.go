@@ -80,9 +80,9 @@ func TestBuildSeries_WritesSessionTimesProvenanceAndTheArchive(t *testing.T) {
 
 	march := spyFile(t, time.March)
 	assert.Equal(t, canonical.Meta{RawFingerprint: "one3", BuilderVersion: TradeBuilderVersion, ValidatorVersion: TradeValidatorVersion,
-		AvailabilityPolicy: "us-equity-close-v1", BuiltAt: builtAt, Trade: &canonical.TradeMeta{
+		AvailabilityPolicy: "us-equity-close-v2", BuiltAt: builtAt, Trade: &canonical.TradeMeta{
 			PriceBasis: "trade", Currency: "USD", VolumeUnit: "shares", Adjustment: "total-return", AdjustmentEvidence: "observed",
-			SnapshotFingerprint: got.Fingerprint, SnapshotAsOf: "2026-09-10", Calendar: "us-equity-calendar-v1",
+			SnapshotFingerprint: got.Fingerprint, SnapshotAsOf: "2026-09-10", Calendar: "us-equity-calendar-v2",
 		}}, march.Meta)
 	assert.Equal(t, utc(2024, 3, 8, 14).Add(30*time.Minute), march.Bars[0].Time, "09:30 New York, standard time")
 	assert.Equal(t, utc(2024, 3, 8, 21), march.Bars[0].AvailableAt)
@@ -188,7 +188,7 @@ func TestBuildSeries_RefusalsWriteNothing(t *testing.T) {
 	}{
 		"no bytes":               {func(s *Snapshot) { s.Data = nil }, ErrInvalidRequest},
 		"no partitions":          {func(s *Snapshot) { s.Partitions = nil }, ErrInvalidRequest},
-		"another symbol":         {func(s *Snapshot) { s.Partitions[0].Instrument = "QQQ" }, ErrUnsupportedSeries},
+		"another symbol":         {func(s *Snapshot) { s.Partitions[0].Instrument = "IWM" }, ErrUnsupportedSeries},
 		"another source":         {func(s *Snapshot) { s.Partitions[0].Source = "alpaca" }, ErrUnsupportedSeries},
 		"mixed series":           {func(s *Snapshot) { s.Partitions[1].Interval = "h1" }, marketdata.ErrInvalidSource},
 		"months unordered":       {func(s *Snapshot) { s.Partitions[0], s.Partitions[1] = s.Partitions[1], s.Partitions[0] }, marketdata.ErrInvalidSource},

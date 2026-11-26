@@ -60,7 +60,7 @@ type Bar struct {
 	// AvailableAt is the earliest time the completed bar may be consumed. The
 	// zero value means availability has not been established, which a stored
 	// bar never has. It is modeled under a named policy (canonical's
-	// PolicyScheduledCloseV1 or PolicyUSEquityCloseV1), not an observed provider
+	// PolicyScheduledCloseV1 or PolicyUSEquityCloseV2), not an observed provider
 	// timestamp.
 	AvailableAt time.Time
 

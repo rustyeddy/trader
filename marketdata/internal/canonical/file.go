@@ -174,7 +174,7 @@ func (f File) Schema() string {
 // availability times as the policy gives when it is PolicyScheduledCloseV1.
 //
 // canonical-trade-v1 also needs daily bars with the trade series only, complete
-// TradeMeta, the policy PolicyUSEquityCloseV1, and each bar's opening and
+// TradeMeta, the policy PolicyUSEquityCloseV2, and each bar's opening and
 // availability times as that policy and the file's calendar give them.
 func (f File) Validate() error {
 	if err := f.Key.Validate(); err != nil {

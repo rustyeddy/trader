@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"io/fs"
 	"testing"
@@ -68,8 +69,8 @@ func TestBuildStooq_Errors(t *testing.T) {
 		want   string
 		is     error
 	}{
-		"another instrument": {mutate: func(r *StooqBuildRequest) { r.Instrument = "QQQ" }, want: "only SPY d1"},
-		"another interval":   {mutate: func(r *StooqBuildRequest) { r.Interval = "h1" }, want: "only SPY d1"},
+		"another instrument": {mutate: func(r *StooqBuildRequest) { r.Instrument = "IWM" }, want: "only SPY and QQQ d1"},
+		"another interval":   {mutate: func(r *StooqBuildRequest) { r.Interval = "h1" }, want: "only SPY and QQQ d1"},
 		"no input":           {mutate: func(r *StooqBuildRequest) { r.Input = "" }, want: "no input"},
 		"missing input":      {mutate: func(r *StooqBuildRequest) { r.Input = "stooq/raw/none" }, is: fs.ErrNotExist},
 		"no date":            {mutate: func(r *StooqBuildRequest) { r.SnapshotAsOf = "" }, is: mdservice.ErrSnapshotDate},
@@ -97,7 +98,7 @@ func TestReadBars_RefusesOtherStooqSeriesAndMixedSnapshots(t *testing.T) {
 	ctx := context.Background()
 	req := BarsRequest{Source: "stooq", Instrument: "SPY", Interval: "d1", From: utc(2024, 3, 1, 0), To: utc(2024, 5, 1, 0)}
 	for _, mutate := range []func(*BarsRequest){
-		func(r *BarsRequest) { r.Instrument = "QQQ" }, func(r *BarsRequest) { r.Interval = "h1" },
+		func(r *BarsRequest) { r.Instrument = "IWM" }, func(r *BarsRequest) { r.Interval = "h1" },
 		func(r *BarsRequest) { r.Source = "alpaca" },
 	} {
 		other := req
@@ -118,4 +119,62 @@ func TestReadBars_RefusesOtherStooqSeriesAndMixedSnapshots(t *testing.T) {
 	_, err = ReadBars(ctx, nil, req)
 
 	assert.ErrorIs(t, err, ErrBarsMixed)
+}
+
+func TestBuildStooq_QQQFromItsFirstYearAndAnOldCalendarIsRebuilt(t *testing.T) {
+	storetest.Root(t)
+	ctx := context.Background()
+	row := "QQQ.US,D,19990310,000000,43.3466,43.3734,42.6342,43.2932,12341014,0\n"
+	require.NoError(t, store.Write(ctx, "stooq/raw/qqq.us.txt", []byte(stooqHeader+row)))
+	req := StooqBuildRequest{Instrument: "QQQ", Interval: "d1", Input: "stooq/raw/qqq.us.txt", SnapshotAsOf: "2026-09-10"}
+	_, err := BuildStooq(ctx, nil, req, nil)
+	require.NoError(t, err)
+	read := BarsRequest{Source: "stooq", Instrument: "QQQ", Interval: "d1", From: utc(1999, 3, 1, 0), To: utc(1999, 4, 1, 0)}
+	page, err := ReadBars(ctx, nil, read)
+	require.NoError(t, err)
+	require.Len(t, page.Bars, 1)
+	assert.Equal(t, "total-return", page.Data.Adjustment)
+
+	// A file of the retired calendar is never served, and a build replaces it.
+	path := "stooq/canonical/QQQ/1999/03/QQQ-1999-03-d1.csv"
+	data, err := store.Read(path)
+	require.NoError(t, err)
+	old := bytes.Replace(data, []byte("us-equity-calendar-v2"), []byte("us-equity-calendar-v1"), 1)
+	require.NotEqual(t, data, old)
+	require.NoError(t, store.Write(ctx, path, old))
+
+	page, err = ReadBars(ctx, nil, read)
+	require.NoError(t, err)
+	assert.Empty(t, page.Bars)
+	assert.Equal(t, 1, page.Coverage.Summary.Stale)
+	var got []PartitionResult
+	_, err = BuildStooq(ctx, nil, req, func(r PartitionResult) { got = append(got, r) })
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, Replaced, got[0].Action)
+}
+
+// A replay just after the 16:00 stock close of a 2000 session must not see that
+// day's bar: the fund still traded (#741 review).
+func TestReadBars_A2000BarIsNotAvailableAtTheStockClose(t *testing.T) {
+	storetest.Root(t)
+	ctx := context.Background()
+	rows := "QQQ.US,D,20000301,000000,100,101,99,100.5,10,0\nQQQ.US,D,20000302,000000,100,101,99,100.5,10,0\n"
+	require.NoError(t, store.Write(ctx, "stooq/raw/qqq.us.txt", []byte(stooqHeader+rows)))
+	_, err := BuildStooq(ctx, nil, StooqBuildRequest{Instrument: "QQQ", Interval: "d1", Input: "stooq/raw/qqq.us.txt", SnapshotAsOf: "2026-09-10"}, nil)
+	require.NoError(t, err)
+	req := BarsRequest{Source: "stooq", Instrument: "QQQ", Interval: "d1", From: utc(2000, 3, 1, 0), To: utc(2000, 4, 1, 0)}
+	stockClose := utc(2000, 3, 2, 21) // 16:00 New York on the second session
+
+	for asOf, bars := range map[time.Time]int{
+		stockClose.Add(time.Minute):                      1,
+		stockClose.Add(15*time.Minute - time.Nanosecond): 1,
+		stockClose.Add(15 * time.Minute):                 2,
+	} {
+		req.AsOf = asOf
+		page, err := ReadBars(ctx, nil, req)
+		require.NoError(t, err)
+		assert.Len(t, page.Bars, bars, asOf.Format(time.RFC3339Nano))
+		assert.Equal(t, "us-equity-close-v2", page.Data.AvailabilityPolicy)
+	}
 }
