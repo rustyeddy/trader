@@ -62,7 +62,7 @@ type TradeMeta struct {
 	// SnapshotAsOf is the date those bytes were obtained, as YYYY-MM-DD.
 	SnapshotAsOf string
 	// Calendar names the date table the bar times come from, such as
-	// CalendarUSEquityV1.
+	// CalendarUSEquityV2.
 	Calendar string
 }
 
@@ -84,8 +84,8 @@ func (f File) checkTradeMeta() error {
 	if f.Meta.AvailabilityPolicy != PolicyUSEquityCloseV1 {
 		return bad("availability policy %q, want %s", f.Meta.AvailabilityPolicy, PolicyUSEquityCloseV1)
 	}
-	if m.Calendar != CalendarUSEquityV1 {
-		return bad("calendar %q, want %s", m.Calendar, CalendarUSEquityV1)
+	if m.Calendar != CalendarUSEquityV2 {
+		return bad("calendar %q, want %s", m.Calendar, CalendarUSEquityV2)
 	}
 	if m.PriceBasis != PriceBasisTrade {
 		return bad("price basis %q, want %s", m.PriceBasis, PriceBasisTrade)

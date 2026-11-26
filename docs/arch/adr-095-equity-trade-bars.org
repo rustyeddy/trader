@@ -5,9 +5,9 @@
 
 Accepted (owner approval 2026-11-26, #733). The =canonical-trade-v1= encoding,
 the availability policy and the calendar are implemented (#734), as are the Stooq SPY
-build and bar reads (#735, =docs/stooq-spy.md=); the engine rules and first
+build and bar reads (#735, =docs/stooq-daily.md=); the engine rules and first
 backtest are not. The calendar's sources are cited in
-=us_equity_calendar_v1.csv=. The 2011-02-17 condition in section 4 still
+=us_equity_calendar_v2.csv= (see the amendment in section 4). The 2011-02-17 condition in section 4 still
 applies. It
 amends ADR-090 (which
 deferred a persisted trade series to "a separate ADR and schema decision") and
@@ -267,6 +267,27 @@ Required test fixtures:
 
 Plus: a row on a closed day, a date outside the table, and a bar refused to a
 consumer one instant before =AvailableAt=.
+
+*** Amendment: =us-equity-calendar-v2= (owner decision, 2026-11-26, #740)
+
+The owner asked for the entire QQQ history, which starts on 1999-03-10, so the
+table is extended to 1999-01-01 through 2026-12-31 as
+=us-equity-calendar-v2=. It replaces v1: its rows from 2005 are unchanged, the
+1999 to 2004 rows cite NYSE publications, and series built under v1 are stale
+and are rebuilt. The timing rules, and so =us-equity-close-v1=, are unchanged.
+
+- QQQ was not listed on the NYSE (the American Stock Exchange, then Nasdaq from
+  2004-12-01). The NYSE table is applied to it; every date of the Stooq rows
+  agrees with it except the hole below.
+- Exchange-traded funds on the American Stock Exchange could trade after 16:00.
+  The policy still makes a bar available at the 16:00 (or 13:00) stock close, and
+  whether Stooq's close of those years is that of the later session is *not
+  verified*. Fills at the next bar's open are unaffected; anything that acts at
+  the close must not assume the price was known then.
+- Stooq QQQ has no row for *1999-11-16*, a trading day (the NYSE lists no
+  closure; the Federal Reserve announced a rate rise during it). Other long Stooq
+  histories lack it too. As with SPY 2011-02-17 it is not a known hole, and a
+  strict load covering it fails.
 
 ** 5. First-test execution and scope
 

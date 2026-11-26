@@ -67,7 +67,7 @@ func TestDataBuildStooq_Refusals(t *testing.T) {
 		"--from and --to do not apply":      with("--from", "2024-01-01"),
 		"exactly one --instrument":          stooqArgs(t, root, "--input", stooqInput),
 		"needs --input":                     stooqArgs(t, root, "--instrument", "SPY"),
-		"only SPY d1":                       with("--interval", "h1"),
+		"only SPY and QQQ d1":               with("--interval", "h1"),
 		"is not a ZIP":                      with("--member", "x"),
 		"is not oanda or stooq":             {"data", "build", "--source", "alpaca"},
 		"--input applies only to --source ": {"data", "build", "--input", "x"},

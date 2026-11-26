@@ -21,13 +21,14 @@ import (
 // name; changing the dates means a new calendar version.
 const PolicyUSEquityCloseV1 = "us-equity-close-v1"
 
-// CalendarUSEquityV1 names the embedded table of full closures and early closes,
-// 2005-01-01 to 2026-12-31.
-const CalendarUSEquityV1 = "us-equity-calendar-v1"
+// CalendarUSEquityV2 names the embedded table of full closures and early closes,
+// 1999-01-01 to 2026-12-31. It carries the dates of v1 (2005 on) unchanged and
+// adds the earlier years; files built under v1 are stale and are rebuilt.
+const CalendarUSEquityV2 = "us-equity-calendar-v2"
 
-// The years CalendarUSEquityV1 covers, inclusive.
+// The years CalendarUSEquityV2 covers, inclusive.
 const (
-	equityFirstYear = 2005
+	equityFirstYear = 1999
 	equityLastYear  = 2026
 )
 
@@ -49,7 +50,7 @@ type Session struct {
 	Early bool
 }
 
-//go:embed us_equity_calendar_v1.csv
+//go:embed us_equity_calendar_v2.csv
 var usEquityCalendarCSV []byte
 
 // dayKind is what the calendar says about a listed date.
@@ -138,7 +139,7 @@ func isWeekend(t time.Time) bool {
 }
 
 // USEquitySession returns the session of the exchange date year-month-day under
-// PolicyUSEquityCloseV1 and CalendarUSEquityV1. It reports ErrOutsideCalendar
+// PolicyUSEquityCloseV1 and CalendarUSEquityV2. It reports ErrOutsideCalendar
 // for a date the calendar does not cover, including one that does not exist, and
 // ErrNonSession for a weekend or full closure.
 func USEquitySession(year int, month time.Month, day int) (Session, error) {
@@ -146,7 +147,7 @@ func USEquitySession(year int, month time.Month, day int) (Session, error) {
 	text := date.Format(time.DateOnly)
 	if date.Year() != year || date.Month() != month || date.Day() != day || year < equityFirstYear || year > equityLastYear {
 		return Session{}, fmt.Errorf("%w: %04d-%02d-%02d, %s covers %d to %d", ErrOutsideCalendar,
-			year, int(month), day, CalendarUSEquityV1, equityFirstYear, equityLastYear)
+			year, int(month), day, CalendarUSEquityV2, equityFirstYear, equityLastYear)
 	}
 	days, err := usEquityCalendar()
 	if err != nil {

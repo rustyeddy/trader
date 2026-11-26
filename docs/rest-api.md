@@ -22,7 +22,7 @@ trader serve --listen 127.0.0.1:9000 --data-root /srv/data
 | `interval` | yes | `h1` or `d1` |
 | `from` | yes | start, **inclusive**, by the bar's *opening* time. RFC 3339 (any offset is converted to UTC) or a `YYYY-MM-DD` UTC date |
 | `to` | yes | end, **exclusive**, by opening time; same formats |
-| `source` | no | where the bars come from: `oanda` (default) or `stooq`, which has only `SPY` `d1` (see [Trade-price data](#trade-price-data)) |
+| `source` | no | where the bars come from: `oanda` (default) or `stooq`, which has only `SPY` and `QQQ`, `d1` (see [Trade-price data](#trade-price-data)) |
 | `limit` | no | page size, 1 to 10000, default 1000 |
 | `cursor` | no | `next_cursor` of the previous page; keep every other parameter (except `limit`) the same |
 | `as_of` | no | RFC 3339; keep only the bars that were available at that instant (see Look-ahead) |
@@ -72,7 +72,7 @@ An unknown or repeated parameter is a `400`, so a typo is never silently ignored
 
 ## Trade-price data
 
-`source=stooq` serves SPY daily **trade** bars (ADR-095; [how to build them](stooq-spy.md)).
+`source=stooq` serves SPY and QQQ daily **trade** bars (ADR-095; [how to build them](stooq-daily.md)).
 Each bar has `trade` and no `bid`, `ask` or `mid`. `time` is 09:30 New York and
 `available_at` the scheduled close, 16:00 or 13:00 on an early close. `volume` counts
 shares. The response also carries:
@@ -81,7 +81,7 @@ shares. The response also carries:
 "data": {
   "price_basis": "trade", "currency": "USD", "volume_unit": "shares",
   "adjustment": "total-return", "adjustment_evidence": "observed",
-  "availability_policy": "us-equity-close-v1", "calendar": "us-equity-calendar-v1",
+  "availability_policy": "us-equity-close-v1", "calendar": "us-equity-calendar-v2",
   "snapshot_fingerprint": "sha256:54b6...ee6b", "snapshot_as_of": "2026-09-10"
 }
 ```

@@ -28,12 +28,12 @@
 // and columns, and prices with eight decimals:
 //
 //	# schema=canonical-trade-v1 provider=stooq symbol=SPY interval=d1 year=2024 month=03
-//	# meta {"raw_fingerprint":"sha256:...",...,"calendar":"us-equity-calendar-v1",...,"price_basis":"trade","currency":"USD",...}
+//	# meta {"raw_fingerprint":"sha256:...",...,"calendar":"us-equity-calendar-v2",...,"price_basis":"trade","currency":"USD",...}
 //	time,available_at,trade_o,trade_h,trade_l,trade_c,volume
 //	2024-03-01T14:30:00Z,2024-03-01T21:00:00Z,501.02800000,505.27000000,500.61400000,504.83800000,78064486
 //
 // Its bars open at 09:30 New York and are available at the scheduled close
-// (PolicyUSEquityCloseV1), on the dates of the embedded CalendarUSEquityV1.
+// (PolicyUSEquityCloseV1), on the dates of the embedded CalendarUSEquityV2.
 //
 // The path is authoritative (a header naming another partition is an error), and
 // writes are atomic. Nothing here reads the environment or the clock; the build

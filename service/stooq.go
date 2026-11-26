@@ -14,7 +14,7 @@ import (
 // StooqBuildRequest is what one Stooq build asks for. The values come from the
 // transport.
 type StooqBuildRequest struct {
-	// Instrument and Interval name the series; only SPY d1 is supported.
+	// Instrument and Interval name the series; SPY and QQQ d1 are supported.
 	Instrument, Interval string
 	// Input is the file to read, relative to the data root: Stooq's daily bundle
 	// ZIP, or one symbol's file in the same format.
@@ -47,8 +47,8 @@ func BuildStooq(ctx context.Context, log *slog.Logger, req StooqBuildRequest, re
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	if req.Instrument != "SPY" || req.Interval != "d1" {
-		return StooqBuild{}, fmt.Errorf("build: stooq supports only SPY d1, not %q %q", req.Instrument, req.Interval)
+	if !mdservice.SupportsSeries(stooq.Source, req.Instrument, req.Interval) {
+		return StooqBuild{}, fmt.Errorf("build: stooq supports only SPY and QQQ d1, not %q %q", req.Instrument, req.Interval)
 	}
 	if req.Input == "" {
 		return StooqBuild{}, errors.New("build: no input file")

@@ -56,7 +56,7 @@ The data root is --data-root, then ` + envDataRoot + `, then marketdata.root in
 --interval also fall back to that file.
 h1 and d1 only.
 
-With --source stooq it builds the whole history of SPY daily trade bars
+With --source stooq it builds the whole history of SPY or QQQ daily trade bars
 (canonical-trade-v1, ADR-095) from Stooq's own daily format:
 
   trader data build --source stooq --instrument SPY \

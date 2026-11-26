@@ -42,7 +42,7 @@ var (
 // time is in [From, To), in ascending order of opening time.
 type BarsRequest struct {
 	// Source names where the bars come from: "oanda" (the default when empty) or
-	// "stooq", which has only SPY d1.
+	// "stooq", which has only SPY and QQQ d1.
 	Source     string
 	Instrument string
 	// Interval is the lower-case token, h1 or d1.
@@ -130,8 +130,8 @@ func ReadBars(ctx context.Context, log *slog.Logger, req BarsRequest) (BarsPage,
 	switch {
 	case source != "oanda" && source != "stooq":
 		return BarsPage{}, fmt.Errorf("%w: source %q (oanda or stooq)", ErrInvalidBarsRequest, req.Source)
-	case source == "stooq" && (req.Instrument != "SPY" || req.Interval != "d1"):
-		return BarsPage{}, fmt.Errorf("%w: stooq has only SPY d1", ErrInvalidBarsRequest)
+	case source == "stooq" && !mdservice.SupportsSeries(source, req.Instrument, req.Interval):
+		return BarsPage{}, fmt.Errorf("%w: stooq has only SPY and QQQ d1", ErrInvalidBarsRequest)
 	case req.Limit < 0 || req.Limit > MaxBarsLimit:
 		return BarsPage{}, fmt.Errorf("%w: limit %d is not between 1 and %d", ErrInvalidBarsRequest, req.Limit, MaxBarsLimit)
 	case !req.To.After(req.From):
