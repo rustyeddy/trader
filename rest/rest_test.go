@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"net/http"
@@ -467,4 +468,29 @@ func TestRest_ImportsOnlyTheServiceAndThePublicModel(t *testing.T) {
 		}
 	}
 	assert.Positive(t, checked)
+}
+
+func TestBars_TradeDataIsDescribedAndQuoteDataIsNot(t *testing.T) {
+	page := samplePage()
+	plain := decode[map[string]any](t, serve(t, Config{ReadBars: (&fake{page: page}).read}, goodQuery))
+	assert.NotContains(t, plain, "data")
+
+	page.Data = &service.DataInfo{AvailabilityPolicy: "p", Calendar: "c", PriceBasis: "trade", Currency: "USD", VolumeUnit: "shares",
+		Adjustment: "total-return", AdjustmentEvidence: "observed", SnapshotFingerprint: "sha256:ab", SnapshotAsOf: "2026-09-10"}
+	got := decode[map[string]any](t, serve(t, Config{ReadBars: (&fake{page: page}).read}, goodQuery))
+
+	assert.Equal(t, map[string]any{"availability_policy": "p", "calendar": "c", "price_basis": "trade", "currency": "USD",
+		"volume_unit": "shares", "adjustment": "total-return", "adjustment_evidence": "observed",
+		"snapshot_fingerprint": "sha256:ab", "snapshot_as_of": "2026-09-10"}, got["data"])
+}
+
+func TestBars_AMixedSeriesIsItsOwnError(t *testing.T) {
+	f := &fake{do: func(context.Context, service.BarsRequest) (service.BarsPage, error) {
+		return service.BarsPage{}, fmt.Errorf("%w: two snapshots", service.ErrBarsMixed)
+	}}
+
+	rec := serve(t, Config{ReadBars: f.read}, goodQuery)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	assert.Equal(t, "mixed_series", decode[errorBody](t, rec).Error.Code)
 }

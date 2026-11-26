@@ -423,3 +423,103 @@ func TestLoad_SkipStaleServesTheOtherMonthsAndStillReportsTheStaleOne(t *testing
 	assert.Len(t, skipped.Series.Bars, 2, "only the January bars: a stale month's bars are never used")
 	assert.Equal(t, utc(2024, 1, 31, 23), skipped.Series.Bars[1].Time)
 }
+
+func spyLoad(from, to time.Time) LoadRequest {
+	return LoadRequest{Source: "stooq", Instrument: "SPY", Interval: "d1", From: from, To: to}
+}
+
+func TestLoad_ATradeSeriesComesWithItsDataAndNoGapForClosures(t *testing.T) {
+	storetest.Root(t)
+	// 28 March, Good Friday the 29th, a weekend, then 1 April.
+	_, err := BuildSeries(context.Background(), days("one", day(time.March, 28), day(time.April, 1)), builtAt)
+	require.NoError(t, err)
+
+	got, err := Load(context.Background(), spyLoad(day(time.March, 1), day(time.May, 1)))
+
+	require.NoError(t, err)
+	require.Len(t, got.Series.Bars, 2)
+	assert.Empty(t, got.Gaps)
+	assert.Equal(t, &DataInfo{AvailabilityPolicy: "us-equity-close-v1", Calendar: "us-equity-calendar-v1", PriceBasis: "trade",
+		Currency: "USD", VolumeUnit: "shares", Adjustment: "total-return", AdjustmentEvidence: "observed",
+		SnapshotFingerprint: canonical.Fingerprint([]byte("one")), SnapshotAsOf: "2026-09-10"}, got.Data)
+	require.NoError(t, got.Series.Validate())
+}
+
+func TestLoad_AMissingSessionIsAnUnexplainedGap(t *testing.T) {
+	storetest.Root(t)
+	_, err := BuildSeries(context.Background(), days("one", day(time.March, 4), day(time.March, 6)), builtAt)
+	require.NoError(t, err)
+	req := spyLoad(day(time.March, 1), day(time.April, 1))
+
+	got, err := Load(context.Background(), req)
+
+	assert.ErrorIs(t, err, ErrIncomplete)
+	assert.NotNil(t, got.Data)
+	require.Len(t, got.Gaps, 1)
+	assert.Equal(t, Gap{Kind: Unexplained, Start: utc(2024, 3, 5, 14).Add(30 * time.Minute),
+		End: utc(2024, 3, 6, 14).Add(30 * time.Minute), Bars: 1}, got.Gaps[0])
+	req.AllowMissing = true
+	got, err = Load(context.Background(), req)
+	require.NoError(t, err)
+	assert.Len(t, got.Series.Bars, 2)
+}
+
+func TestLoad_MonthsOfDifferentSeriesNeverLoadWhateverIsAllowed(t *testing.T) {
+	april := canonical.Key{Source: "stooq", Symbol: "SPY", Interval: canonical.D1, Year: 2024, Month: time.April}
+	for name, mutate := range map[string]func(*canonical.Meta){
+		"snapshot":         func(m *canonical.Meta) { m.Trade.SnapshotFingerprint = canonical.Fingerprint([]byte("two")) },
+		"currency":         func(m *canonical.Meta) { m.Trade.Currency = "EUR" },
+		"adjustment":       func(m *canonical.Meta) { m.Trade.Adjustment = canonical.AdjustmentSplit },
+		"data description": func(m *canonical.Meta) { m.Trade.SnapshotAsOf = "2026-09-11" },
+		"stale as well": func(m *canonical.Meta) {
+			m.BuilderVersion, m.Trade.SnapshotFingerprint = "old", canonical.Fingerprint([]byte("two"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			storetest.Root(t)
+			ctx := context.Background()
+			_, err := BuildSeries(ctx, days("one", day(time.March, 28), day(time.April, 1)), builtAt)
+			require.NoError(t, err)
+			f, err := canonical.Read(ctx, april)
+			require.NoError(t, err)
+			mutate(&f.Meta)
+			require.NoError(t, canonical.Write(ctx, f))
+			req := spyLoad(day(time.March, 1), day(time.May, 1))
+			req.AllowBad, req.AllowMissing, req.SkipStale = true, true, true
+
+			got, err := Load(ctx, req)
+
+			assert.ErrorIs(t, err, ErrMixedSeries)
+			assert.Empty(t, got.Series.Bars)
+		})
+	}
+}
+
+func TestLoad_ATradeFileFromAnotherBuildIsStale(t *testing.T) {
+	storetest.Root(t)
+	ctx := context.Background()
+	_, err := BuildSeries(ctx, days("one", day(time.March, 4)), builtAt)
+	require.NoError(t, err)
+	req := spyLoad(day(time.March, 1), day(time.April, 1))
+	for want, mutate := range map[string]func(*canonical.Meta){
+		`builder "builder-v1"`:     func(m *canonical.Meta) { m.BuilderVersion = BuilderVersion },
+		`validator "validator-v1"`: func(m *canonical.Meta) { m.ValidatorVersion = ValidatorVersion },
+	} {
+		f := spyFile(t, time.March)
+		original := f.Meta
+		mutate(&f.Meta)
+		require.NoError(t, canonical.Write(ctx, f))
+
+		got, err := Load(ctx, req)
+
+		assert.ErrorIs(t, err, ErrIncomplete)
+		assert.Equal(t, Stale, got.Months[0].State)
+		assert.Contains(t, got.Months[0].Reason, want)
+		f.Meta = original
+		require.NoError(t, canonical.Write(ctx, f))
+	}
+	require.NoError(t, store.Write(ctx, "stooq/canonical/SPY/2024/03/SPY-2024-03-d1.csv", []byte("junk")))
+	got, err := Load(ctx, req)
+	assert.ErrorIs(t, err, ErrIncomplete)
+	assert.Contains(t, got.Months[0].Reason, "not readable as canonical-trade-v1")
+}

@@ -210,3 +210,23 @@ func TestIsTemp_RecognisesTheStoresOwnTemporaryFiles(t *testing.T) {
 	assert.False(t, store.IsTemp("x.tmp-1"), "a visible file is not the store's")
 	assert.False(t, store.IsTemp(""))
 }
+
+func TestOpen_ReadsTheFileAndReportsAMissingOrOutsidePath(t *testing.T) {
+	storetest.Root(t)
+	require.NoError(t, store.Write(context.Background(), "a/b.zip", []byte("0123")))
+
+	f, err := store.Open("a/b.zip")
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	got := make([]byte, 2)
+	_, err = f.ReadAt(got, 2)
+	require.NoError(t, err)
+	assert.Equal(t, "23", string(got))
+	_, err = f.Write([]byte("x"))
+	assert.Error(t, err, "opened for reading only")
+
+	_, err = store.Open("a/none")
+	assert.ErrorIs(t, err, fs.ErrNotExist)
+	_, err = store.Open("../x")
+	assert.ErrorIs(t, err, store.ErrInvalidPath)
+}

@@ -20,11 +20,18 @@ type SourceRow struct {
 	// Row is the row's position in the raw file: 1-based, counting data rows
 	// only (the schema comment and column header are not counted).
 	Row int
-	// Bar holds Time, Volume, Bid and Ask as the provider gave them. Its
-	// Instrument is the partition's, or empty.
+	// Bar holds Time, Volume and the price series (Bid and Ask, or Trade) as the
+	// provider gave them. A provider that dates its daily rows without a time of
+	// day gives Time as midnight UTC of that date. Its Instrument is the
+	// partition's, or empty.
 	Bar Bar
 	// Complete is the provider's own flag that the candle had closed.
 	Complete bool
+	// Unrepresentable reports a row the provider could read and date but whose
+	// prices or volume cannot be held exactly: more precision than a num.Price
+	// carries, a value out of range, or a fractional volume. Bar then holds no
+	// prices or volume, and the row can only be a bad record.
+	Unrepresentable bool
 }
 
 // SourcePartition is one provider raw partition (one month, one instrument, one

@@ -4,8 +4,9 @@
 * Status
 
 Accepted (owner approval 2026-11-26, #733). The =canonical-trade-v1= encoding,
-the availability policy and the calendar are implemented (#734); the Stooq build,
-engine rules and first backtest are not. The calendar's sources are cited in
+the availability policy and the calendar are implemented (#734), as are the Stooq SPY
+build and bar reads (#735, =docs/stooq-spy.md=); the engine rules and first
+backtest are not. The calendar's sources are cited in
 =us_equity_calendar_v1.csv=. The 2011-02-17 condition in section 4 still
 applies. It
 amends ADR-090 (which

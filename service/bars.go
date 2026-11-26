@@ -33,12 +33,16 @@ var (
 	// the calendar nor the list of known provider holes explains. The page returned
 	// with it holds what could be read, and its coverage lists what is missing.
 	ErrBarsIncomplete = errors.New("service: the bars are incomplete")
+	// ErrBarsMixed reports months of the range that are not one series, such as two
+	// snapshots of trade data. Nothing is served until the series is rebuilt.
+	ErrBarsMixed = errors.New("service: the range mixes series")
 )
 
 // BarsRequest asks for one page of one instrument's canonical bars whose opening
 // time is in [From, To), in ascending order of opening time.
 type BarsRequest struct {
-	// Source names where the bars come from; empty means "oanda", the only source.
+	// Source names where the bars come from: "oanda" (the default when empty) or
+	// "stooq", which has only SPY d1.
 	Source     string
 	Instrument string
 	// Interval is the lower-case token, h1 or d1.
@@ -85,6 +89,10 @@ type BarsCoverage struct {
 	Gaps []Gap
 }
 
+// DataInfo describes a trade-price series, as the domain service defines it: its
+// price basis, adjustment, snapshot and availability policy.
+type DataInfo = mdservice.DataInfo
+
 // BarsPage is one page of bars with the coverage of its window.
 type BarsPage struct {
 	Source, Instrument, Interval string
@@ -96,6 +104,9 @@ type BarsPage struct {
 	// (pass it as After for the next page), and zero on the last page.
 	NextAfter time.Time
 	Coverage  BarsCoverage
+	// Data describes a trade-price series; nil for quote data (oanda). Compare it
+	// between pages: a rebuild between requests changes the snapshot.
+	Data *DataInfo
 }
 
 // ReadBars returns one page of canonical bars for the request, with the coverage of
@@ -117,8 +128,10 @@ func ReadBars(ctx context.Context, log *slog.Logger, req BarsRequest) (BarsPage,
 		source = "oanda"
 	}
 	switch {
-	case source != "oanda":
-		return BarsPage{}, fmt.Errorf("%w: source %q (only oanda)", ErrInvalidBarsRequest, req.Source)
+	case source != "oanda" && source != "stooq":
+		return BarsPage{}, fmt.Errorf("%w: source %q (oanda or stooq)", ErrInvalidBarsRequest, req.Source)
+	case source == "stooq" && (req.Instrument != "SPY" || req.Interval != "d1"):
+		return BarsPage{}, fmt.Errorf("%w: stooq has only SPY d1", ErrInvalidBarsRequest)
 	case req.Limit < 0 || req.Limit > MaxBarsLimit:
 		return BarsPage{}, fmt.Errorf("%w: limit %d is not between 1 and %d", ErrInvalidBarsRequest, req.Limit, MaxBarsLimit)
 	case !req.To.After(req.From):
@@ -145,6 +158,9 @@ func ReadBars(ctx context.Context, log *slog.Logger, req BarsRequest) (BarsPage,
 		if errors.Is(err, mdservice.ErrInvalidRequest) || errors.Is(err, mdservice.ErrUnsupportedInterval) {
 			return BarsPage{}, fmt.Errorf("%w: %w", ErrInvalidBarsRequest, err)
 		}
+		if errors.Is(err, mdservice.ErrMixedSeries) {
+			return BarsPage{}, fmt.Errorf("%w: %w", ErrBarsMixed, err)
+		}
 		return BarsPage{}, err
 	}
 
@@ -165,7 +181,7 @@ func ReadBars(ctx context.Context, log *slog.Logger, req BarsRequest) (BarsPage,
 		bars = bars[:n]
 	}
 
-	page := BarsPage{Source: source, Instrument: req.Instrument, Interval: req.Interval, From: from, To: to, AsOf: req.AsOf.UTC()}
+	page := BarsPage{Source: source, Instrument: req.Instrument, Interval: req.Interval, From: from, To: to, AsOf: req.AsOf.UTC(), Data: got.Data}
 	end := to // the window of this page is [lo, end)
 	if len(bars) > limit {
 		page.NextAfter = bars[limit-1].Time

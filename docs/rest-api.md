@@ -22,7 +22,7 @@ trader serve --listen 127.0.0.1:9000 --data-root /srv/data
 | `interval` | yes | `h1` or `d1` |
 | `from` | yes | start, **inclusive**, by the bar's *opening* time. RFC 3339 (any offset is converted to UTC) or a `YYYY-MM-DD` UTC date |
 | `to` | yes | end, **exclusive**, by opening time; same formats |
-| `source` | no | where the bars come from; default and only value `oanda` |
+| `source` | no | where the bars come from: `oanda` (default) or `stooq`, which has only `SPY` `d1` (see [Trade-price data](#trade-price-data)) |
 | `limit` | no | page size, 1 to 10000, default 1000 |
 | `cursor` | no | `next_cursor` of the previous page; keep every other parameter (except `limit`) the same |
 | `as_of` | no | RFC 3339; keep only the bars that were available at that instant (see Look-ahead) |
@@ -69,6 +69,28 @@ An unknown or repeated parameter is a `400`, so a typo is never silently ignored
   the last page. Treat the cursor as an opaque string.
 - Nothing provider-specific appears: no credentials, no provider records, no provider
   identifiers beyond the plain source name.
+
+## Trade-price data
+
+`source=stooq` serves SPY daily **trade** bars (ADR-095; [how to build them](stooq-spy.md)).
+Each bar has `trade` and no `bid`, `ask` or `mid`. `time` is 09:30 New York and
+`available_at` the scheduled close, 16:00 or 13:00 on an early close. `volume` counts
+shares. The response also carries:
+
+```json
+"data": {
+  "price_basis": "trade", "currency": "USD", "volume_unit": "shares",
+  "adjustment": "total-return", "adjustment_evidence": "observed",
+  "availability_policy": "us-equity-close-v1", "calendar": "us-equity-calendar-v1",
+  "snapshot_fingerprint": "sha256:54b6...ee6b", "snapshot_as_of": "2026-09-10"
+}
+```
+
+The prices are dividend-adjusted: they are not what traded on the day and are rewritten
+by every later dividend. A series is one snapshot. Check that every page has the same
+`snapshot_fingerprint`; a rebuild between two requests changes it. Weekends and listed
+exchange closures are not gaps; any other missing session is an `unexplained` gap.
+`data` is absent for `oanda`.
 
 ## Pages never repeat or skip
 
@@ -119,6 +141,7 @@ Every error is `{"error": {"code": "...", "message": "..."}}`, and `no_data` and
 | 404 | `no_data` / `not_found` | no canonical file exists for any month of the range; or no such endpoint |
 | 405 | `method_not_allowed` | anything but `GET` |
 | 422 | `incomplete` | `partial=false` and the range is not complete |
+| 422 | `mixed_series` | months of the range come from different snapshots or descriptions; rebuild the series |
 | 499 | `cancelled` | the request was cancelled |
 | 500 | `internal` | an unexpected failure (its detail is logged, never returned) |
 | 504 | `timeout` | the request took longer than `--request-timeout` |

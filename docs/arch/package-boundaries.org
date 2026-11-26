@@ -11,11 +11,12 @@ the rule is broken.
 |---------+------+--------------------------------|
 | =cmd/trader= | transport: flags, environment, config file | =trader= (the engine, for the backtest run), =service=, =store=, =internal/logging=; it imports no provider (a test enforces this, #641): download runs through =service.Download=, which builds the OANDA client from the base URL, the request gap and the =service.Credential= the command hands it, and then =service.DownloadRaw= and =oanda.DownloadPartition= (#663). =build.go=, =status.go=, =verify.go=, =audit.go=, =migrate.go=, =serve.go= (also =rest=) and =backtest.go= may import only the service, the store and logging (test) |
 | =rest= | HTTP transport for =trader serve= (#680): normalizes query parameters, calls =service.ReadBars=, writes JSON | =service=, =marketdata= (public model) only (a test enforces it; no provider) |
-| =service= | application services | =trader= (the engine, for =RunBacktest=), =marketdata=, =marketdata/service=, =provider/oanda= only (test); reads no environment, flags or credentials (test) |
+| =service= | application services | =trader= (the engine, for =RunBacktest=), =marketdata=, =marketdata/service=, =provider/oanda= and =provider/stooq= only (test); reads no environment, flags or credentials (test) |
 | =marketdata/service= | market-data domain service | =marketdata=, =marketdata/internal/canonical=, =num=, =internal/marketdata/layout=, =store=; never a provider or another domain service |
 | =marketdata/internal/canonical= | canonical-v2 format and availability rule | =marketdata=, =num=, =layout=, =store=; importable only from =marketdata/= (compiler and test) |
 | =marketdata= | public model: =Bar=, =OHLC=, =SourcePartition= | =num= only for the model; the tree may import only =num=, =layout=, =store= and itself (test) |
 | =provider/oanda= | raw store, REST client, raw-to-source mapping | =marketdata=, =instrument=, =num=, =internal/logging=, =internal/marketdata/layout=, =store= only (test); never =marketdata/service= |
+| =provider/stooq= | Stooq daily files: reads one snapshot (file or ZIP member) and maps it to source partitions (#735) | =marketdata=, =num=, =store= only (test); never =marketdata/service= |
 | =store= | the only data-file I/O | standard library only; no other package calls file functions on data paths (test) |
 | =internal/marketdata/layout= | the one data path resolver | standard library only |
 | =internal/logging= | structured logging on =log/slog= | standard library; =slog='s global logger is used only by the root engine and =cmd= (test) |

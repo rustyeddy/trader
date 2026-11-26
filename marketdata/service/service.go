@@ -1,5 +1,7 @@
 // Package service is the market-data domain service (ADR-091). Its capabilities
-// are Build, Load and Verify. Build turns a provider's raw partition, handed over as
+// are Build, BuildSeries, Load and Verify. BuildSeries turns one whole-history
+// snapshot of a trade-price daily series into canonical-trade-v1 files (ADR-095).
+// Build turns a provider's raw partition, handed over as
 // a marketdata.SourcePartition, into a canonical-v2 file and publishes it under
 // the store's data root (ADR-090); Load reads canonical files back as a series
 // and checks it against the market calendar; Verify checks a canonical file against

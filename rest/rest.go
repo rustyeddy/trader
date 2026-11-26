@@ -122,6 +122,9 @@ func (h *handler) bars(w http.ResponseWriter, r *http.Request) {
 		cov := coverageOf(page.Coverage)
 		writeError(w, http.StatusUnprocessableEntity, "incomplete", err.Error(), &cov)
 		return
+	case errors.Is(err, service.ErrBarsMixed):
+		writeError(w, http.StatusUnprocessableEntity, "mixed_series", err.Error(), nil)
+		return
 	case errors.Is(err, context.DeadlineExceeded):
 		writeError(w, http.StatusGatewayTimeout, "timeout", "the request took too long", nil)
 		return
@@ -135,7 +138,7 @@ func (h *handler) bars(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := barsJSON{Source: page.Source, Instrument: page.Instrument, Interval: page.Interval,
-		From: page.From.UTC(), To: page.To.UTC(), Bars: make([]barJSON, 0, len(page.Bars)), Coverage: coverageOf(page.Coverage)}
+		From: page.From.UTC(), To: page.To.UTC(), Bars: make([]barJSON, 0, len(page.Bars)), Coverage: coverageOf(page.Coverage), Data: dataOf(page.Data)}
 	if !page.AsOf.IsZero() {
 		asOf := page.AsOf.UTC()
 		out.AsOf = &asOf

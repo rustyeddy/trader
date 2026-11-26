@@ -7,6 +7,6 @@
 // service, the store or the layout; a test enforces that.
 //
 // The one endpoint is GET /v1/marketdata/bars, documented in docs/UsersGuide.md. The
-// schema is provider-neutral: the source is a plain name ("oanda"), and nothing about
+// schema is provider-neutral: the source is a plain name ("oanda" or "stooq"), and nothing about
 // credentials or provider records appears in a request or a response.
 package rest

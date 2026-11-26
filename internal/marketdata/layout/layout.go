@@ -112,6 +112,28 @@ func (p Partition) Path() (string, error) {
 	return filepath.Join(dir, name), nil
 }
 
+// snapshotDir is the directory of a source that keeps the exact input bytes its
+// canonical series were built from (ADR-095). It is not a Stage: its files are not
+// monthly partitions.
+const snapshotDir = "snapshots"
+
+// Snapshot returns the paths, relative to the data root, of an archived input
+// snapshot and of the record beside it: <source>/snapshots/<instrument>/<hash>.raw
+// and .json. hash is the 64 lower-case hex digits of the bytes' SHA-256.
+func Snapshot(source, instrument, hash string) (raw, record string, err error) {
+	if err := validComponent("source", source); err != nil {
+		return "", "", err
+	}
+	if err := validComponent("instrument", instrument); err != nil {
+		return "", "", err
+	}
+	if len(hash) != 64 || !allOf(hash, func(c byte) bool { return isDigit(c) || c >= 'a' && c <= 'f' }) {
+		return "", "", fmt.Errorf("%w: snapshot hash %q is not 64 lower-case hex digits", ErrInvalidComponent, hash)
+	}
+	base := filepath.Join(source, snapshotDir, instrument, hash)
+	return base + ".raw", base + ".json", nil
+}
+
 // StageDir returns the directory that holds every instrument of one source and
 // stage, relative to the data root: <source>/<stage>.
 func StageDir(source string, stage Stage) (string, error) {
