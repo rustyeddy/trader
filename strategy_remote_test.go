@@ -195,8 +195,11 @@ func TestRemoteStrategy_Feedback(t *testing.T) {
 // #743: the reference price an order is sized from is the strategy's own claim.
 // Nothing compares it with the market, so a reference placed next to the stop
 // sizes a position whose loss at that stop, from the real fill, is far over 1%.
-// Pins today's behaviour; see docs/reviews/risk-audit-743.org.
-func TestToOrder_Risk743_TheReferencePriceIsNotCheckedAgainstTheMarket(t *testing.T) {
+// See docs/reviews/risk-audit-743.org.
+//
+// KNOWN DEFECT, not a safety invariant: these assertions pin unsafe behaviour and
+// must be replaced by tests of the safe behaviour when #745 is fixed.
+func TestToOrder_KnownDefect743_TheReferencePriceIsNotCheckedAgainstTheMarket(t *testing.T) {
 	captureLogs(t)
 	br, act := newFillBroker()
 	ctx := context.Background()

@@ -46,18 +46,45 @@ A research consumer such as Investor reads results and submits no order.
 | F7  | Applied limit and planned risk are not recorded; excess loss not shown  | Medium   |
 | F8  | Margin closeout looks only at closing prices                            | Medium   |
 | F9  | =docs/account-risk.md= describes archived code                          | Low      |
+| F10 | Stops trigger on the mid even when the data has bid and ask             | Medium   |
 
-| ID | Existing protection                             | Test (=Risk743= tests are new)                                          | Gap and recommended remedy                                          |
+| ID | Existing protection                             | Test (=KnownDefect743= pins unsafe behaviour)                           | Gap and recommended remedy                                          |
 |----+-------------------------------------------------+------------------------------------------------------------------------+---------------------------------------------------------------------|
-| F1 | Stop must be beyond the reference; on tick      | =TestToOrder_Risk743_TheReferencePriceIsNotCheckedAgainstTheMarket=   | Size a market order from a price Trader knows, not the claim (D1)   |
-| F2 | Margin and notional rechecked at the fill       | =..._AFillAwayFromTheReferenceExceedsOnePercentAtTheStop=              | Owner choice (D2)                                                   |
-| F3 | Gap fills at the open and is journaled          | =..._AGapThroughTheStopScalesWithPositionSize=, =TestBroker_OnBar_GapThroughTheStopFillsAtTheOpen= | Cannot be prevented; limit size (D3) and report it (F7) |
+| F1 | Stop must be beyond the reference; on tick      | =TestToOrder_KnownDefect743_TheReferencePriceIsNotCheckedAgainstTheMarket=   | Size a market order from a price Trader knows, not the claim (D1)   |
+| F2 | Margin and notional rechecked at the fill       | =..._KnownDefect743_AFillAwayFromTheReferenceExceedsOnePercentAtTheStop=              | Owner choice (D2)                                                   |
+| F3 | Gap fills at the open and is journaled          | =..._KnownDefect743_AGapThroughTheStopScalesWithPositionSize=, =TestBroker_OnBar_GapThroughTheStopFillsAtTheOpen= | Cannot be prevented; limit size (D3) and report it (F7) |
 | F4 | Margin limit; USD 50m per order                 | =TestAccount_Size_Open_PlannedLossAcrossStopDistances=                 | Owner-set exposure cap independent of the stop (D3)                 |
-| F5 | Pending opens reserve margin                    | =..._PlannedRiskAddsUpAcrossInstruments=, =TestBroker_Submit_ReservedMarginShrinksTheNextOrder= | Aggregate planned-loss limit, listed as not yet in ADR-093 (D4) |
+| F5 | Pending opens reserve margin                    | =..._KnownDefect743_PlannedRiskAddsUpAcrossInstruments=, =TestBroker_Submit_ReservedMarginShrinksTheNextOrder= | Aggregate planned-loss limit, listed as not yet in ADR-093 (D4) |
 | F6 | None                                            | None                                                                   | State it in results; model costs in its own issue                   |
 | F7 | Run settings; rejection reasons in =events.jsonl= | None                                                                 | Record binding limit, planned risk and risk at fill per order       |
 | F8 | Closeout cancels opens and blocks same-frame ones | =margin_test.go=; the F1 test shows a closeout at 80% of the account | Document; consider the adverse extreme                              |
 | F9 | n/a                                             | n/a                                                                    | Rewrite for the live engine                                         |
+| F10 | Bar high and low are tested, not only the close | =..._KnownDefect743_AStopIgnoresTheBidAndAskItWouldTradeOn=                           | Trigger on the exit side where the data has it (D5)                 |
+
+* Stops on bid and ask (F10)
+A protective stop is tested against each bar's range, at the stop price or at the
+open when the bar gaps past it; it does not wait for the close. The range is the
+mid's. A long is closed by selling at the bid and a short by buying at the ask,
+so a real stop can trigger when the simulated one does not, earlier than it does,
+or gap further.
+
+Recommended, *only for bars that carry both bid and ask* (OANDA FX):
+- a long's protective stop triggers on the bid's open and low and fills on the
+  bid; a short's on the ask's open and high, and fills on the ask;
+- the engine must keep bid and ask: today =RunSeriesWith= keeps one series per
+  bar (the mid for FX);
+- the run records which price basis its stops used;
+- financial results of existing FX runs are expected to change.
+
+Data without quotes (such as Stooq trade-price bars) keeps today's behaviour on
+its trade series. A bid or ask is never invented from a trade or mid price, and
+such a run's stops stay approximate.
+
+Limits of the remedy: bar extremes show that a price was reached, not the path
+between extremes or the slippage of a fill; those need finer data. Changing only
+stop exits leaves entries, strategy closes, take profits and marks on the mid, so
+spread cost (F6) stays only partly modelled. Whether those move too belongs to
+D5.
 
 * The boundary table
 USD 10,000, EURUSD at 1.10000, margin rate 2%, fill at the reference.
@@ -116,12 +143,14 @@ No policy numbers are proposed here.
   strategy's price as ignored, or reject a reference that differs from it.
   *Suggested: size from the close.* The built-in EMAX already sends the close, so
   its results should not change. Limit and stop entries keep their trigger.
-- D2 (F2) :: (a) accept and report; (b) size with an owner-set buffer, which
-  lowers but cannot guarantee the loss; (c) reduce units at the fill to the
-  budget, never increase; (d) reject at the fill when risk exceeds the budget.
-  *Suggested: (c) for simulation only if the owner accepts that a live broker
-  cannot know its fill in advance; otherwise (b).* (c) changes the rule that an
-  order is never resized, and changes existing results.
+- D2 (F2) :: Choose one explicit policy: (a) accept and report; (b) size with a
+  realistic owner-set buffer, which lowers but cannot guarantee the loss; (c)
+  reject at the fill when risk exceeds the budget. *Suggested: (b) or (c), with
+  the same order semantics in simulation and live.* Reducing units at the fill in
+  the simulator alone is not proposed: it changes order semantics and makes
+  backtests diverge from live trading. A live broker cannot know a market fill in
+  advance, so a rejection rule must say how it applies there. Owner approval
+  before implementation.
 - D3 (F3, F4) :: Add a cap on position or gross notional as a multiple of equity,
   independent of stop distance and of broker margin. *Suggested: yes*, per order
   and account-wide, with no default until the owner sets one; per ADR-093 an
@@ -129,16 +158,33 @@ No policy numbers are proposed here.
 - D4 (F5) :: Add an aggregate planned-loss limit across positions and pending
   opens. Needed before trading several instruments or paper trading.
 
+- D5 (F10) :: Trigger and fill protective stops on the exit side where bars have
+  bid and ask. *Suggested: yes.* Decide whether entries, strategy closes, take
+  profits, resting entries and margin marks change in the same step or later;
+  mixing bases should be stated in the run record.
+
 Related: a proposal to allow opens without a stop (discussion #742) would remove
 the risk limit for those opens; D3 should be settled first.
 
-* Proposed follow-up issues
-1. Size from a price Trader knows (D1).
-2. Record binding limit, planned risk and risk at fill (F7).
-3. Fill-price risk (D2).
-4. Exposure cap, then aggregate risk (D3, D4).
-5. Trading costs (F6).
-6. Rewrite =docs/account-risk.md= (F9).
+* Follow-up issues
+| Finding | Decision | Issue | Known-defect test to replace                     |
+|---------+----------+-------+--------------------------------------------------|
+| F1      | D1       | #745  | =..._TheReferencePriceIsNotCheckedAgainstTheMarket= |
+| F2      | D2       | #746  | =..._AFillAwayFromTheReference...=               |
+| F3, F4  | D3       | #747  | =..._AGapThroughTheStop...= (margin-capped case) |
+| F5      | D4       | #748  | =..._PlannedRiskAddsUpAcrossInstruments=         |
+| F7      | -        | #749  | none; an unmet acceptance item of #743           |
+| F10     | D5       | #750  | =..._AStopIgnoresTheBidAndAsk...=                |
+
+Spread and cost budgeting and quote-currency limits are to be verified in #746.
+Not yet filed: modelling trading costs (F6) and rewriting
+=docs/account-risk.md= (F9).
+
+** Known defects and invariants
+A test named =KnownDefect743= asserts unsafe behaviour as it is today. It is not
+a requirement: the fix replaces its assertions with the safe behaviour. The other
+boundary tests (planned loss within budget, margin-capped refusal, closes without
+margin) are invariants a fix must keep.
 
 * Not done here
 No correlated-exposure test (no control exists to test). No measurement on real
