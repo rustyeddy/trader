@@ -1,0 +1,145 @@
+#+TITLE: Risk audit: sizing, admission and simulated fills
+#+SUBTITLE: Issue #743
+#+DATE: [2026-11-26 Thu]
+#+STARTUP: overview indent
+
+* Verdict
+The rule audited: a new position's stop, filled at its own price, loses at most
+1% of the account's equity at sizing.
+
+*Trader does not guarantee this today.* It holds for the /plan/, computed from the
+order's reference price. It does not hold for the /position/, because the entry
+can fill elsewhere, and the reference price itself is not checked.
+
+No behaviour is changed by this audit. It adds findings and tests; fixes need
+the owner's decisions below and separate issues. Findings describe the live root
+engine at =2175c45=, not =_archive/=.
+
+Planned risk is never a maximum realized loss: gaps, spread, slippage and closed
+markets can make any exit worse.
+
+* How an open is sized and admitted
+1. The strategy proposes side, reference price and stop. It cannot name units.
+   =order.validate= requires a stop on the losing side of the reference.
+2. =account.sizeOpen= takes the smallest of: risk (=equity x 1% / |reference -
+   stop|=), margin (equity less used margin and the margin reserved by pending
+   opens), order notional (USD 50,000,000) and the instrument maximum; it rounds
+   down to the unit step and rechecks with =overBudget=.
+3. The broker fills on a later bar. =account.applyFill= rechecks margin and order
+   notional at the fill price. *It does not recheck risk, and never resizes.*
+4. A filled open places its stop. Closes need no margin.
+5. After each frame the margin policy values positions at the bar's close and
+   liquidates below a margin level of 50%.
+
+Precedence: the strategy proposes; Trader sizes, admits and executes (ADR-093).
+A research consumer such as Investor reads results and submits no order.
+
+* Findings
+| ID  | Finding                                                                 | Severity |
+|-----+-------------------------------------------------------------------------+----------|
+| F1  | The reference price is the strategy's unchecked claim                   | High     |
+| F2  | A fill away from the reference changes the loss at the stop             | High     |
+| F3  | A gap through the stop is unbounded by the plan, worst for large sizes  | High     |
+| F4  | No leverage or notional cap tied to equity; tight stops reach 50x       | High     |
+| F5  | Planned risk adds up without limit across instruments                   | Medium   |
+| F6  | Spread, commission and slippage are not modelled                        | Medium   |
+| F7  | Applied limit and planned risk are not recorded; excess loss not shown  | Medium   |
+| F8  | Margin closeout looks only at closing prices                            | Medium   |
+| F9  | =docs/account-risk.md= describes archived code                          | Low      |
+
+| ID | Existing protection                             | Test (=Risk743= tests are new)                                          | Gap and recommended remedy                                          |
+|----+-------------------------------------------------+------------------------------------------------------------------------+---------------------------------------------------------------------|
+| F1 | Stop must be beyond the reference; on tick      | =TestToOrder_Risk743_TheReferencePriceIsNotCheckedAgainstTheMarket=   | Size a market order from a price Trader knows, not the claim (D1)   |
+| F2 | Margin and notional rechecked at the fill       | =..._AFillAwayFromTheReferenceExceedsOnePercentAtTheStop=              | Owner choice (D2)                                                   |
+| F3 | Gap fills at the open and is journaled          | =..._AGapThroughTheStopScalesWithPositionSize=, =TestBroker_OnBar_GapThroughTheStopFillsAtTheOpen= | Cannot be prevented; limit size (D3) and report it (F7) |
+| F4 | Margin limit; USD 50m per order                 | =TestAccount_Size_Open_PlannedLossAcrossStopDistances=                 | Owner-set exposure cap independent of the stop (D3)                 |
+| F5 | Pending opens reserve margin                    | =..._PlannedRiskAddsUpAcrossInstruments=, =TestBroker_Submit_ReservedMarginShrinksTheNextOrder= | Aggregate planned-loss limit, listed as not yet in ADR-093 (D4) |
+| F6 | None                                            | None                                                                   | State it in results; model costs in its own issue                   |
+| F7 | Run settings; rejection reasons in =events.jsonl= | None                                                                 | Record binding limit, planned risk and risk at fill per order       |
+| F8 | Closeout cancels opens and blocks same-frame ones | =margin_test.go=; the F1 test shows a closeout at 80% of the account | Document; consider the adverse extreme                              |
+| F9 | n/a                                             | n/a                                                                    | Rewrite for the live engine                                         |
+
+* The boundary table
+USD 10,000, EURUSD at 1.10000, margin rate 2%, fill at the reference.
+
+| Stop distance |   Units | Notional USD | x equity | Loss at stop USD | Binding limit |
+|---------------+---------+--------------+----------+------------------+---------------|
+| 2%            |   4,545 |        4,999 |      0.5 |            99.99 | risk          |
+| 1%            |   9,090 |        9,999 |      1.0 |            99.99 | risk          |
+| 0.5%          |  18,181 |       19,999 |      2.0 |            99.99 | risk          |
+| 0.2%          |  45,454 |       49,999 |      5.0 |            99.99 | risk          |
+| 0.1%          |  90,909 |       99,999 |     10.0 |            99.99 | risk          |
+| 0.01%         | 454,545 |      499,999 |     50.0 |            49.99 | margin        |
+
+Instrument maximum is unset and the notional limit does not bind on this account.
+
+* Excess loss, as tested
+| Scenario                                                              | Planned | Result              |
+|-----------------------------------------------------------------------+---------+---------------------|
+| 0.5% stop; entry fills 0.5% adversely; stop fills at its price        |    1.0% | loses 2.0%          |
+| 0.5% stop; fill at reference; 1% gap                                  |    1.0% | loses 2.0%          |
+| 0.01% stop (margin capped); same 1% gap                               |    0.5% | loses 50%           |
+| Claimed reference far from the market, next to the stop (F1)          |    1.0% | 200% at the stop; closeout ends it at 80% |
+| Margin-capped long; fill one point higher                             |       - | rejected, not opened |
+| Fill already beyond the stop                                          |       - | closed at the same price, no loss |
+
+* Required checks
+** Side, spread, fees, rounding
+- The engine trades one price series, the mid for FX; bid and ask are dropped as
+  bars enter it (=RunSeriesWith=). A long's stop triggers and fills on the mid,
+  a real one on the bid; a short's on the ask. The spread at admission is not
+  used, and no commission, financing or slippage exists.
+- Illustration, not a measurement: a 1.3 pip round-trip spread adds about 2% to
+  the planned loss of a 0.5% stop at 1.10000, and about 12% for a 0.1% stop.
+- Units round down. Money is exact to 1e-8 with a pinned tolerance of 0.5e-8
+  (=TestAccount_Size_Open_RiskToleranceIsPinned=). Off-tick order prices are
+  refused. Bar prices are rounded to the tick. Trader never moves a stop when
+  sizing.
+** Account-wide margin
+Used margin is at the latest mark; pending opens reserve it at their reference
+price; each fill rechecks it. A later fill is refused if capacity is gone
+(=TestAccount_ApplyFill_OpenChecksMarginAtTheFillPrice=). An instrument with no
+bar in a frame keeps its old mark, so equity at sizing can be stale. Correlated
+and shared-currency exposure is not limited. Stops only tighten
+(=TestBroker_Amend_NeverLoosensAStop=). A close is admitted with no margin
+available (=..._ACloseNeedsNoMargin=).
+** Instruments and conversion
+Backtests price EURUSD and GBPUSD only. Another symbol, or a quote currency other
+than USD, stops the run with an error; nothing converts or assumes
+(=TestAccount_Size_RejectsAnInstrumentQuotedInAnotherCurrency=,
+=TestAccount_Size_UnknownInstrumentIsAnErrorNotARejection=).
+
+* Owner decisions
+No policy numbers are proposed here.
+
+- D1 (F1) :: Size a market open from the decision bar's close and treat the
+  strategy's price as ignored, or reject a reference that differs from it.
+  *Suggested: size from the close.* The built-in EMAX already sends the close, so
+  its results should not change. Limit and stop entries keep their trigger.
+- D2 (F2) :: (a) accept and report; (b) size with an owner-set buffer, which
+  lowers but cannot guarantee the loss; (c) reduce units at the fill to the
+  budget, never increase; (d) reject at the fill when risk exceeds the budget.
+  *Suggested: (c) for simulation only if the owner accepts that a live broker
+  cannot know its fill in advance; otherwise (b).* (c) changes the rule that an
+  order is never resized, and changes existing results.
+- D3 (F3, F4) :: Add a cap on position or gross notional as a multiple of equity,
+  independent of stop distance and of broker margin. *Suggested: yes*, per order
+  and account-wide, with no default until the owner sets one; per ADR-093 an
+  unset required control must block, not mean unlimited.
+- D4 (F5) :: Add an aggregate planned-loss limit across positions and pending
+  opens. Needed before trading several instruments or paper trading.
+
+Related: a proposal to allow opens without a stop (discussion #742) would remove
+the risk limit for those opens; D3 should be settled first.
+
+* Proposed follow-up issues
+1. Size from a price Trader knows (D1).
+2. Record binding limit, planned risk and risk at fill (F7).
+3. Fill-price risk (D2).
+4. Exposure cap, then aggregate risk (D3, D4).
+5. Trading costs (F6).
+6. Rewrite =docs/account-risk.md= (F9).
+
+* Not done here
+No correlated-exposure test (no control exists to test). No measurement on real
+data in this document. Paper and live modes do not exist in the live tree.

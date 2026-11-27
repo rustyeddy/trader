@@ -191,3 +191,35 @@ func TestRemoteStrategy_Feedback(t *testing.T) {
 	assert.Empty(t, w.events[1][2].Ref, "the broker's own stop was not the worker's order")
 	assert.Equal(t, "stop loss", w.events[1][2].Cause)
 }
+
+// #743: the reference price an order is sized from is the strategy's own claim.
+// Nothing compares it with the market, so a reference placed next to the stop
+// sizes a position whose loss at that stop, from the real fill, is far over 1%.
+// Pins today's behaviour; see docs/reviews/risk-audit-743.org.
+func TestToOrder_Risk743_TheReferencePriceIsNotCheckedAgainstTheMarket(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	ctx := context.Background()
+	// The market is at 1.10000; the worker claims 1.00050 with a stop at 1.00000.
+	o, err := toOrder(remotestrat.Order{Instrument: "EURUSD", Action: "open", Direction: "long",
+		Price: px(100050), StopLoss: px(100000)}, testStart)
+	require.NoError(t, err)
+	o.accountID = "a"
+	require.NoError(t, br.submit(ctx, o))
+	require.Equal(t, qty(200000), o.units, "plans 100 from the claimed price")
+
+	require.NoError(t, br.onBar(ctx, riskBar(1, 110000, 110000, 110000, 110000)))
+	require.Equal(t, stateFilled, o.state)
+
+	// Units x (fill - stop) is 20,000: twice the whole account.
+	loss, err := act.positions["EURUSD"].pnlAt(o.stopLoss, usdCurrency)
+	require.NoError(t, err)
+	assert.Equal(t, mneg(usd(20000)), loss)
+
+	// Only margin closeout intervenes, long before the stop: it values the
+	// position at a bar's close and liquidates below half the margin in use.
+	require.NoError(t, br.onBar(ctx, riskBar(2, 110000, 110000, 106000, 106000)))
+	require.Empty(t, act.positions)
+	require.Equal(t, reasonMarginCloseout, br.completed[len(br.completed)-2].reason)
+	assert.Equal(t, usd(2000), act.balance, "80% of the account")
+}
