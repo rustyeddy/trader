@@ -87,6 +87,34 @@ type orderEvent struct {
 	reason string // why, for rejections
 }
 
+// orderRisk is the risk record of an order. A field that was never worked out is
+// left unset (an invalid Money or an empty string), which is not zero. Planned
+// risk and risk at fill are what a stop-out at a price plans to lose, never a
+// maximum loss: a gap, spread, slippage or a closed market can make an exit lose
+// more. No amount here includes spread, commission, financing or slippage.
+type orderRisk struct {
+	// bindingLimit is the sizing limit that allowed the fewest units, before
+	// rounding to the unit step: "instrument", "risk", "margin" or "notional",
+	// the first of equals in that order. Set on a sized open, on an open refused
+	// for being below the minimum size, and "margin" on one refused because no
+	// margin was left at all.
+	bindingLimit string
+	// planned is the planned risk of a sized open: its units times the distance
+	// from the price it was sized from to its stop.
+	planned num.Money
+	// atFill is a filled open's risk at fill: its units times the distance from
+	// the fill price to its stop on the losing side, zero when it filled at or
+	// beyond the stop.
+	atFill num.Money
+	// openOrder is, on a filled close, the id of the open that made the position
+	// it closed.
+	openOrder string
+	// excess is, on a filled close, the amount by which the realized loss is more
+	// than that open's planned risk. It is positive, or unset when the loss is not
+	// more than planned or nothing was planned.
+	excess num.Money
+}
+
 // order carries a request from the strategy through sizing, the broker and
 // back to the trader. A strategy fills in what it wants (instrument, action,
 // direction); later stages fill in units and prices. A nil *order from a
@@ -110,6 +138,10 @@ type order struct {
 	// ratcheting toward profit and never back. 0 is a fixed stop.
 	// On the broker's stop order it is the distance the stop keeps.
 	trail num.Price
+
+	// risk is what sizing and the fill found out about the order's risk. It is
+	// kept for the journal and decides nothing.
+	risk orderRisk
 
 	// expires is the first bar time at which a waiting entry is no longer live:
 	// the broker cancels it instead of executing it on that bar or any later

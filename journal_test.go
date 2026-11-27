@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -246,4 +247,251 @@ func TestJournal_ATargetAddedByAnAmendIsJournaledFromItsFirstLine(t *testing.T) 
 	require.NotNil(t, target, "the broker's new target order has a journal line")
 	assert.Equal(t, "requested", target.str("state"), "its first line, not a later one")
 	assert.Equal(t, "limit", target.str("type"))
+}
+
+// riskRun is a trader on a 10,000 USD account whose orders are journaled.
+func riskRun(t *testing.T) (*trader, *bytes.Buffer) {
+	t.Helper()
+	captureLogs(t)
+	br, act := newFillBroker()
+	var buf bytes.Buffer
+	br.journal = newJournal(&buf)
+	return &trader{broker: br, account: act}, &buf
+}
+
+// riskEntry is a EURUSD open from 1.10000 decided on day 0.
+func riskEntry(d direction, stop int64) *order {
+	return &order{Time: testStart, instrument: "EURUSD", action: open, direction: d, orderType: marketOrder,
+		price: eurusd1_10, stopLoss: px(stop)}
+}
+
+// amount is the USD amount of a journal line's money field, or "" when the field
+// is absent.
+func (l line) amount(t *testing.T, k string) string {
+	t.Helper()
+	v, ok := l[k]
+	if !ok {
+		return ""
+	}
+	m, ok := v.(map[string]any)
+	require.True(t, ok, "%s is money: %v", k, v)
+	require.Equal(t, "USD", m["currency"])
+	s, ok := m["amount"].(string)
+	require.True(t, ok, "%s amount is a decimal string", k)
+	return s
+}
+
+// only is the one line that match accepts.
+func only(t *testing.T, lines []line, match func(line) bool) line {
+	t.Helper()
+	var found []line
+	for _, l := range lines {
+		if match(l) {
+			found = append(found, l)
+		}
+	}
+	require.Len(t, found, 1)
+	return found[0]
+}
+
+// riskKeys are the journal's risk record fields.
+var riskKeys = []string{"binding_limit", "planned_risk", "risk_at_fill", "open_order", "excess_loss"}
+
+// assertRiskKeys asserts that of the risk record l has exactly the fields named.
+func assertRiskKeys(t *testing.T, l line, want ...string) {
+	t.Helper()
+	var got []string
+	for _, k := range riskKeys {
+		if _, ok := l[k]; ok {
+			got = append(got, k)
+		}
+	}
+	assert.ElementsMatch(t, want, got, "%s %s %s", l.str("state"), l.str("action"), l.str("cause"))
+}
+
+func TestJournal_RecordsRiskFromSizingToExit(t *testing.T) {
+	flat := riskBar(1, 110000, 110000, 110000, 110000)
+	for _, tc := range []struct {
+		name   string
+		dir    direction
+		stop   int64
+		bars   []marketdata.Bar
+		atFill string
+		excess string // "" when the exit lost no more than planned
+	}{
+		{"a stop at its price loses what was planned", long, 109450,
+			[]marketdata.Bar{flat, riskBar(2, 110000, 110000, 109400, 109450)}, "99.9955", ""},
+		{"long, adverse entry fill", long, 109450,
+			[]marketdata.Bar{riskBar(1, 110550, 110600, 110500, 110550), riskBar(2, 110500, 110500, 109400, 109450)}, "199.991", "99.9955"},
+		{"short, adverse entry fill", short, 110550,
+			[]marketdata.Bar{riskBar(1, 109450, 109500, 109400, 109450), riskBar(2, 109500, 110600, 109500, 110550)}, "199.991", "99.9955"},
+		{"long, favourable entry fill", long, 109450,
+			[]marketdata.Bar{riskBar(1, 109725, 109725, 109700, 109725), riskBar(2, 109700, 109700, 109400, 109450)}, "49.99775", ""},
+		{"long, gap through the stop", long, 109450,
+			[]marketdata.Bar{flat, riskBar(2, 108900, 108900, 108900, 108900)}, "99.9955", "99.9955"},
+		{"short, gap through the stop", short, 110550,
+			[]marketdata.Bar{flat, riskBar(2, 111100, 111100, 111100, 111100)}, "99.9955", "99.9955"},
+		// The stop is due at once and fills at the same open: nothing is lost.
+		{"long, filled beyond the stop", long, 109450,
+			[]marketdata.Bar{riskBar(1, 109400, 109400, 109400, 109400)}, "0", ""},
+		{"short, filled beyond the stop", short, 110550,
+			[]marketdata.Bar{riskBar(1, 110600, 110600, 110600, 110600)}, "0", ""},
+		{"long, filled at the stop", long, 109450,
+			[]marketdata.Bar{riskBar(1, 109450, 109450, 109450, 109450)}, "0", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, buf := riskRun(t)
+			ctx := context.Background()
+			o := riskEntry(tc.dir, tc.stop)
+			require.NoError(t, tr.handleOrder(ctx, o))
+			for _, b := range tc.bars {
+				require.NoError(t, tr.broker.onBar(ctx, b))
+			}
+			require.Empty(t, tr.account.positions)
+
+			lines := readJournal(t, buf)
+			entry := byOrder(lines)[1]
+			require.Len(t, entry, 4)
+			assertRiskKeys(t, entry[0])
+			assertRiskKeys(t, entry[1], "binding_limit", "planned_risk")
+			assertRiskKeys(t, entry[2])
+			assertRiskKeys(t, entry[3], "risk_at_fill")
+			assert.Equal(t, "risk", entry[1].str("binding_limit"))
+			assert.Equal(t, "99.9955", entry[1].amount(t, "planned_risk"))
+			assert.Equal(t, tc.atFill, entry[3].amount(t, "risk_at_fill"))
+
+			exit := only(t, lines, func(l line) bool { return l.str("state") == "filled" && l.str("action") == "close" })
+			if tc.excess == "" {
+				assertRiskKeys(t, exit, "open_order")
+			} else {
+				assertRiskKeys(t, exit, "open_order", "excess_loss")
+				assert.Equal(t, tc.excess, exit.amount(t, "excess_loss"))
+			}
+			assert.Equal(t, o.id, exit.str("open_order"), "the exit names the open, and so its sized line")
+			assert.Equal(t, o.id, entry[3].str("id"))
+		})
+	}
+}
+
+// The record is of the sizing: a stop that trailed or was amended since changes
+// neither the planned risk nor what an exit is compared with.
+func TestJournal_ExcessLossIsAgainstThePlanNotAMovedStop(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		trail  int64 // points; 0: the stop is amended to 1.09900 instead
+		gap    int64 // the open that gaps through the moved stop
+		excess string
+	}{
+		{"trailed, lost less than planned", 500, 109750, ""},
+		{"trailed, lost more than planned", 500, 109300, "27.2715"},
+		{"amended, lost less than planned", 0, 109750, ""},
+		{"amended, lost more than planned", 0, 109300, "27.2715"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, buf := riskRun(t)
+			ctx := context.Background()
+			o := riskEntry(long, 109450)
+			if tc.trail != 0 {
+				o.trail = px(tc.trail)
+			}
+			require.NoError(t, tr.handleOrder(ctx, o))
+			// A high of 1.10300 trails the stop up to 1.09800.
+			require.NoError(t, tr.broker.onBar(ctx, riskBar(1, 110000, 110300, 109900, 110000)))
+			if tc.trail == 0 {
+				require.NoError(t, tr.handleOrder(ctx, &order{Time: testStart.AddDate(0, 0, 1), instrument: "EURUSD",
+					action: amend, orderType: marketOrder, stopLoss: px(109900)}))
+			}
+			require.NoError(t, tr.broker.onBar(ctx, riskBar(2, tc.gap, tc.gap, tc.gap, tc.gap)))
+			require.Empty(t, tr.account.positions)
+
+			lines := readJournal(t, buf)
+			assert.Equal(t, "99.9955", byOrder(lines)[1][3].amount(t, "risk_at_fill"), "from the stop the open carried")
+			exit := only(t, lines, func(l line) bool { return l.str("state") == "filled" && l.str("action") == "close" })
+			assert.Equal(t, tc.excess, exit.amount(t, "excess_loss"))
+			for _, l := range lines {
+				closeFill := l.str("state") == "filled" && l.str("action") == "close"
+				if l["order"].(float64) != 1 && !closeFill {
+					assertRiskKeys(t, l) // exits, amends and their moves carry no record
+				}
+			}
+		})
+	}
+}
+
+func TestJournal_ExcessLossOfAStrategyCloseAndAMarginCloseout(t *testing.T) {
+	// Filled 0.5% adversely, then closed at 1.09500 before the stop triggers.
+	entry := riskBar(1, 110550, 110600, 110500, 110550)
+	t.Run("strategy close", func(t *testing.T) {
+		tr, buf := riskRun(t)
+		ctx := context.Background()
+		require.NoError(t, tr.handleOrder(ctx, riskEntry(long, 109450)))
+		require.NoError(t, tr.broker.onBar(ctx, entry))
+		require.NoError(t, tr.handleOrder(ctx, &order{Time: entry.Time, instrument: "EURUSD", action: close, orderType: marketOrder}))
+		require.NoError(t, tr.broker.onBar(ctx, riskBar(2, 109500, 109500, 109500, 109500)))
+
+		exit := only(t, readJournal(t, buf), func(l line) bool {
+			return l.str("state") == "filled" && l.str("action") == "close"
+		})
+		assert.Equal(t, "strategy", exit.str("cause"))
+		assert.Equal(t, "90.905", exit.amount(t, "excess_loss"))
+	})
+	t.Run("margin closeout", func(t *testing.T) {
+		tr, buf := riskRun(t)
+		tr.broker.margin = func(a *account) (marginStatus, error) {
+			if len(a.positions) > 0 {
+				return marginLiquidate, nil
+			}
+			return marginHealthy, nil
+		}
+		ctx := context.Background()
+		o := riskEntry(long, 109450)
+		require.NoError(t, tr.handleOrder(ctx, o))
+		require.NoError(t, tr.broker.onBar(ctx, riskBar(1, 110550, 110550, 109500, 109500)))
+
+		exit := only(t, readJournal(t, buf), func(l line) bool {
+			return l.str("state") == "filled" && l.str("action") == "close"
+		})
+		assert.Equal(t, "margin closeout", exit.str("cause"))
+		assert.Equal(t, o.id, exit.str("open_order"))
+		assert.Equal(t, "90.905", exit.amount(t, "excess_loss"))
+	})
+}
+
+func TestJournal_RiskRecordOfARefusedOpen(t *testing.T) {
+	t.Run("below the minimum at sizing", func(t *testing.T) {
+		tr, buf := riskRun(t)
+		tr.account.balance = num.MustParseMoney("0.001", usdCurrency)
+		require.NoError(t, tr.handleOrder(context.Background(), riskEntry(long, 109450)))
+
+		refused := only(t, readJournal(t, buf), func(l line) bool { return l.str("state") == "rejected" })
+		assertRiskKeys(t, refused, "binding_limit")
+		assert.Equal(t, "risk", refused.str("binding_limit"))
+	})
+	t.Run("no margin left", func(t *testing.T) {
+		tr, buf := riskRun(t)
+		tr.account.balance = usd(0)
+		require.NoError(t, tr.handleOrder(context.Background(), riskEntry(long, 109450)))
+
+		refused := only(t, readJournal(t, buf), func(l line) bool { return l.str("state") == "rejected" })
+		assertRiskKeys(t, refused, "binding_limit")
+		assert.Equal(t, "margin", refused.str("binding_limit"))
+	})
+	t.Run("at the fill", func(t *testing.T) {
+		tr, buf := riskRun(t)
+		ctx := context.Background()
+		require.NoError(t, tr.handleOrder(ctx, riskEntry(long, 109989))) // margin capped
+		require.NoError(t, tr.broker.onBar(ctx, riskBar(1, 110001, 110001, 110001, 110001)))
+
+		lines := readJournal(t, buf)
+		refused := only(t, lines, func(l line) bool { return l.str("state") == "rejected" })
+		assertRiskKeys(t, refused, "binding_limit")
+		assert.Equal(t, "margin", refused.str("binding_limit"))
+		assert.Equal(t, "49.99995", byOrder(lines)[1][1].amount(t, "planned_risk"))
+	})
+}
+
+func TestKnownMoney(t *testing.T) {
+	assert.Nil(t, knownMoney(num.Money{}), "unset")
+	zero := usd(0)
+	assert.Equal(t, &zero, knownMoney(zero), "zero is known")
 }

@@ -205,7 +205,8 @@ func TestBroker_OnBar_MarketOrderFillsAtTheNextBarsOpen(t *testing.T) {
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.Time, "stamped with the fill bar")
 	assert.Equal(t, stateFilled, o.history[len(o.history)-1].state)
 	assert.Equal(t, testStart.AddDate(0, 0, 1), o.history[len(o.history)-1].time)
-	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: px(111500), entryTime: o.Time, markPrice: px(111600)}, act.positions["EURUSD"])
+	assert.Equal(t, &position{instrument: "EURUSD", direction: long, units: o.units, entryPrice: px(111500), entryTime: o.Time, markPrice: px(111600),
+		openOrder: o.id, plannedRisk: o.risk.planned}, act.positions["EURUSD"])
 	require.Len(t, br.orders["EURUSD"], 1, "the filled open left the queue; only its stop waits")
 	assert.Equal(t, reasonStopLoss, br.orders["EURUSD"][0].reason)
 }

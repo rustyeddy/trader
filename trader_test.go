@@ -1098,6 +1098,34 @@ func TestTrader_HandleOrder_AnUndecidedMarketOpenIsJudgedAgainstItsPrice(t *test
 	assert.Contains(t, o.history[len(o.history)-1].reason, errStopBeyondClose.Error())
 }
 
+// Planned risk is measured from the price the order was sized from, the decision
+// close, while the requested line keeps the price the strategy asked.
+func TestTrader_OnFrame_PlannedRiskUsesTheDecisionClose(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		dir         direction
+		claim, stop int64
+	}{
+		{"long", long, 109451, 109450},
+		{"short", short, 110549, 110550},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			o := marketOpen(tc.dir, tc.claim, tc.stop)
+
+			decided(t, func(tr *trader) { tr.broker.journal = newJournal(&buf) }, o)
+
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			require.Len(t, lines, 3)
+			assert.Contains(t, lines[0], `"price":"`+px(tc.claim).String()+`"`)
+			assert.NotContains(t, lines[0], `"planned_risk"`)
+			assert.Contains(t, lines[1], `"price":"1.1"`)
+			// 18181 units x 0.00550, not x the claim's 0.00001.
+			assert.Contains(t, lines[1], `"binding_limit":"risk","planned_risk":{"amount":"99.9955","currency":"USD"}`)
+		})
+	}
+}
+
 // fixedAnswer answers every frame with one order, as it is.
 type fixedAnswer struct{ o *order }
 

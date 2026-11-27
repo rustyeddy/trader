@@ -180,6 +180,10 @@ the risk limit for those opens; D3 should be settled first.
 | F10     | D5       | #750  | =..._AStopIgnoresTheBidAndAsk...=                |
 
 Spread and cost budgeting and quote-currency limits are to be verified in #746.
+F7: since #749 =events.jsonl= records the binding limit, planned risk, risk at
+fill and excess loss (see "Order risk record" in =docs/UsersGuide.md=). The
+findings above describe =2175c45=.
+
 Not yet filed: modelling trading costs (F6) and rewriting
 =docs/account-risk.md= (F9).
 

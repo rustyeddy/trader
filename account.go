@@ -206,6 +206,7 @@ func (act *account) sizeOpen(o *order, m *market, reserved num.Money) error {
 	if sign, err := moneySign(margin); err != nil {
 		return fmt.Errorf("size open: %w", err)
 	} else if sign <= 0 {
+		o.risk.bindingLimit = "margin" // it allows nothing, whatever the others would
 		return reject(o, o.Time, "%w", errInsufficientMargin)
 	}
 
@@ -255,6 +256,7 @@ func (act *account) sizeOpen(o *order, m *market, reserved num.Money) error {
 			units, binding = l.units, l.name
 		}
 	}
+	o.risk.bindingLimit = binding
 	marginLimited := binding == "margin"
 	step := m.unitStep
 	if units, err = units.RoundDown(step); err != nil {
@@ -282,7 +284,11 @@ func (act *account) sizeOpen(o *order, m *market, reserved num.Money) error {
 		return reject(o, o.Time, "%w: %s units, minimum %s", errOrderTooSmall, units, least)
 	}
 
-	o.units = units
+	planned, err := dist.MulQuantity(units, act.currency)
+	if err != nil {
+		return fmt.Errorf("size open: planned risk: %w", err)
+	}
+	o.units, o.risk.planned = units, planned
 	return nil
 }
 
@@ -381,13 +387,23 @@ func (a *account) applyFill(o *order, p num.Price, at time.Time) error {
 			return rejected("%w: %s is %s at the fill, the limit is %s",
 				errOrderTooLarge, o.instrument, notional, a.maxOrderNotional)
 		}
+		// Recorded, not admitted on: the fill is never refused for its risk.
+		var atFill num.Money // unset without a stop; order.validate requires one
+		if !o.stopLoss.IsZero() {
+			if atFill, err = riskToStop(o.direction, o.units, p, o.stopLoss, a.currency); err != nil {
+				return fmt.Errorf("risk at fill of %s: %w", o.instrument, err)
+			}
+		}
+		o.risk.atFill = atFill
 		a.positions[o.instrument] = &position{
-			instrument: o.instrument,
-			direction:  o.direction,
-			units:      o.units,
-			entryPrice: p,
-			entryTime:  at,
-			markPrice:  p,
+			instrument:  o.instrument,
+			direction:   o.direction,
+			units:       o.units,
+			entryPrice:  p,
+			entryTime:   at,
+			markPrice:   p,
+			openOrder:   o.id,
+			plannedRisk: o.risk.planned,
 		}
 	case close:
 		if pos == nil {
@@ -401,6 +417,11 @@ func (a *account) applyFill(o *order, p num.Price, at time.Time) error {
 		if err != nil {
 			return err
 		}
+		excess, err := excessLoss(pnl, pos.plannedRisk)
+		if err != nil {
+			return fmt.Errorf("excess loss of %s: %w", o.instrument, err)
+		}
+		o.risk.openOrder, o.risk.excess = pos.openOrder, excess
 		a.balance = balance
 		o.units = pos.units
 		a.trades = append(a.trades, trade{
@@ -419,6 +440,39 @@ func (a *account) applyFill(o *order, p num.Price, at time.Time) error {
 		return fmt.Errorf("fill %s: %w", o.action, errUnsupportedAction)
 	}
 	return nil
+}
+
+// riskToStop is what units entered at entry, in direction d, lose if closed at
+// stop: units times the distance from entry down to the stop for a long, up to it
+// for a short. It is zero when entry is at or beyond the stop, where no such
+// distance is left. It is not a maximum loss: an exit can be worse than the stop.
+func riskToStop(d direction, units num.Quantity, entry, stop num.Price, currency num.Currency) (num.Money, error) {
+	dist, above, err := priceDiff(entry, stop)
+	if err != nil {
+		return num.Money{}, err
+	}
+	if above != (d == long) {
+		return zeroMoneyOf(currency)
+	}
+	return dist.MulQuantity(units, currency)
+}
+
+// excessLoss is the amount by which a realized pnl loses more than planned. It is
+// unset (an invalid Money) when the loss is not more than planned, a profit
+// included, and when planned is unset: nothing known to compare with.
+func excessLoss(pnl, planned num.Money) (num.Money, error) {
+	if !planned.IsValid() {
+		return num.Money{}, nil
+	}
+	loss, err := pnl.Neg()
+	if err != nil {
+		return num.Money{}, err
+	}
+	more, err := loss.Cmp(planned)
+	if err != nil || more <= 0 {
+		return num.Money{}, err
+	}
+	return loss.Sub(planned)
 }
 
 // unrealizedPnL is the profit or loss of the position at its latest mark.
