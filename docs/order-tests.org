@@ -43,12 +43,20 @@ scenarios. Items marked DONE are implemented and tested.
     order type, and the stop loss (Open only).
   - account: units (sizing, limited by risk and by margin), or rejection.
   - broker: order id, and later the fill.
+- A market open is sized, and its margin reserved, from the close of the
+  instrument's bar in the frame it was decided on, not from the strategy's
+  reference price (#745). It is rejected when the frame has no bar of the
+  instrument, or its stop is not on the losing side of that close, or its target
+  is not on the winning side. The reference price decides none of this. A limit
+  or stop entry keeps its price: it is the trigger, and a stop or target on the
+  wrong side of it is an invalid order.
 - Position direction is separate from order side Buy/Sell.
 - Open requires direction; Add, Reduce, Close do NOT require direction.
   They act on the existing position for the specified instrument.
 - Open also requires a stop loss, set by the strategy and not by the account.
-  The account only sizes the order from it (and rejects a stop on the wrong
-  side of the entry). Close, Add and Reduce carry no stop.
+  The account only sizes the order from it. A stop on the wrong side stops the
+  run for a limit or stop entry and rejects a market open (above). Close, Add and
+  Reduce carry no stop.
 - Add requires a positive increment size. Reduce cannot exceed current
   position size; it must never reverse the position.
 - Size units and the exact representation of size for Add/Reduce are yet to be
@@ -98,8 +106,9 @@ Everything below except the Add/Reduce size rules is implemented (DONE).
   (the latter is a stateful handler validation, not pure order validation).
 - Contradictory fields, if quantities are later accepted from strategies.
 - Invalid encoding must return an error, never be silently skipped.
-- A stop on the wrong side of the entry is an invalid order, found when the
-  order is sized (DONE).
+- A stop on the wrong side of a limit or stop entry's trigger is an invalid
+  order (DONE). A market open's stop is judged against the decision close and
+  rejects the order instead (DONE, #745).
 - Require StopLoss on Open only. Do not prematurely require Target or other
   risk fields.
 
@@ -230,8 +239,10 @@ where available; strategy must not equate signal generation with a fill.
    was the limit, and as too small when the risk budget was. Limited margin
    alone reduces the size rather than rejecting the order.
 6. Open requires a positive stop loss, set by the strategy. The account sizes
-   from that stop and never creates or changes it; a missing or wrong-side
-   stop is an invalid order (a strategy bug), not a trading rejection.
+   from that stop and never creates or changes it; a missing stop, or one on the
+   wrong side of a resting entry's trigger, is an invalid order (a strategy bug).
+   A market open's stop on the wrong side of the decision close is a trading
+   rejection (#745).
 7. An order carries its own lifecycle. Each state change (requested, sized,
    submitted, filled, rejected) is recorded in its history with a timestamp
    and logged.

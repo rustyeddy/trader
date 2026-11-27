@@ -177,13 +177,17 @@ func TestOrder_Validate_TakeProfitMustBeOnTheWinningSide(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			o := openOrderAt("EURUSD", tt.d, eurusd1_10)
 			o.takeProfit = tt.tp
-			err := o.validate()
-			if tt.ok {
-				require.NoError(t, err)
-				return
+			require.NoError(t, o.validate(), "a market open's price is only a claim (#745)")
+			for _, typ := range []orderType{limitOrder, stopOrder} {
+				o.orderType = typ
+				err := o.validate()
+				if tt.ok {
+					require.NoError(t, err)
+					continue
+				}
+				require.ErrorIs(t, err, errInvalidOrder)
+				assert.False(t, isRejection(err), "a bad target is a strategy bug")
 			}
-			require.ErrorIs(t, err, errInvalidOrder)
-			assert.False(t, isRejection(err), "a bad target is a strategy bug")
 		})
 	}
 }

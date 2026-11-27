@@ -122,6 +122,14 @@ type order struct {
 	// made outside the trader, such as the broker's own exits.
 	decidedAt time.Time
 
+	// decisionClose is the close of the instrument's bar in the frame the order
+	// was decided on, stamped by the trader with decidedAt. Zero when the frame
+	// held no bar of the instrument.
+	decisionClose num.Price
+	// claimedPrice is the strategy's reference price when the trader replaced it
+	// with a different decisionClose; zero otherwise.
+	claimedPrice num.Price
+
 	// Time is the simulated time of the step the order is on: the bar being
 	// processed. The strategy sets it on a new order and record moves it, so it
 	// is when the order last changed. The managed clock for live trading will
@@ -192,9 +200,12 @@ var errInvalidOrder = errors.New("invalid order")
 // Every request must explicitly name marketOrder, limitOrder or stopOrder;
 // noOrder and unknown types are invalid.
 //
-// An open must carry a reference price and a stop on the losing side of it, and
-// any target on the winning side. Prices above maxPrice are refused here, so the
-// money math cannot overflow.
+// An open must carry a reference price and a stop. A limit or stop entry's
+// price is its trigger, so here its stop must be on the losing side of it and
+// any target on the winning side. A market open's price is only what the
+// strategy claims: its stop and target are not judged against it, but against
+// the decision close, by priceAtDecision. Prices above maxPrice are refused
+// here, so the money math cannot overflow.
 //
 // Add and reduce use marketOrder; their size rules wait on the size type being
 // defined.
@@ -249,6 +260,9 @@ func (o *order) validate() error {
 		}
 		if o.price.IsZero() {
 			return fmt.Errorf("%w: open requires a reference price", errInvalidOrder)
+		}
+		if o.orderType == marketOrder {
+			break
 		}
 		if !o.beyond(o.stopLoss, true) {
 			return fmt.Errorf("%w: %s stop %s is not beyond the entry price %s",

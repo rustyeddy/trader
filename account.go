@@ -162,8 +162,9 @@ func (act *account) size(o *order, reserved num.Money) error {
 	return nil
 }
 
-// sizeOpen sets o.units for an opening order. order.validate has already checked
-// its prices. Two limits apply, and the smaller one wins:
+// sizeOpen sets o.units for an opening order. Its stop is already known to be on
+// the losing side of its price: order.validate checks a resting entry and
+// trader.priceAtDecision a market open. Two limits apply, and the smaller one wins:
 //
 //	riskUnits   = (equity * riskPct) / stopDistance
 //	marginUnits = (marginAvailable / marginRate) / price

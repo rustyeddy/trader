@@ -79,7 +79,7 @@ func TestToOrder(t *testing.T) {
 		}{
 			{"missing stop", func(q *remotestrat.Order) { q.StopLoss = num.Price{} }, "stop loss"},
 			{"missing price", func(q *remotestrat.Order) { q.Price = num.Price{} }, "reference price"},
-			{"stop on the wrong side", func(q *remotestrat.Order) { q.StopLoss = px(111000) }, "not beyond"},
+			{"limit stop on the wrong side", func(q *remotestrat.Order) { q.Type, q.StopLoss = "limit", px(111000) }, "not beyond"},
 			{"open without a direction", func(q *remotestrat.Order) { q.Direction = "" }, "direction"},
 			{"open without an instrument", func(q *remotestrat.Order) { q.Instrument = "" }, "instrument"},
 			{"close with a direction", func(q *remotestrat.Order) { q.Action, q.StopLoss = "close", num.Price{} }, "direction"},
@@ -190,39 +190,4 @@ func TestRemoteStrategy_Feedback(t *testing.T) {
 	assert.Equal(t, "entry", w.events[1][1].Ref)
 	assert.Empty(t, w.events[1][2].Ref, "the broker's own stop was not the worker's order")
 	assert.Equal(t, "stop loss", w.events[1][2].Cause)
-}
-
-// #743: the reference price an order is sized from is the strategy's own claim.
-// Nothing compares it with the market, so a reference placed next to the stop
-// sizes a position whose loss at that stop, from the real fill, is far over 1%.
-// See docs/reviews/risk-audit-743.org.
-//
-// KNOWN DEFECT, not a safety invariant: these assertions pin unsafe behaviour and
-// must be replaced by tests of the safe behaviour when #745 is fixed.
-func TestToOrder_KnownDefect743_TheReferencePriceIsNotCheckedAgainstTheMarket(t *testing.T) {
-	captureLogs(t)
-	br, act := newFillBroker()
-	ctx := context.Background()
-	// The market is at 1.10000; the worker claims 1.00050 with a stop at 1.00000.
-	o, err := toOrder(remotestrat.Order{Instrument: "EURUSD", Action: "open", Direction: "long",
-		Price: px(100050), StopLoss: px(100000)}, testStart)
-	require.NoError(t, err)
-	o.accountID = "a"
-	require.NoError(t, br.submit(ctx, o))
-	require.Equal(t, qty(200000), o.units, "plans 100 from the claimed price")
-
-	require.NoError(t, br.onBar(ctx, riskBar(1, 110000, 110000, 110000, 110000)))
-	require.Equal(t, stateFilled, o.state)
-
-	// Units x (fill - stop) is 20,000: twice the whole account.
-	loss, err := act.positions["EURUSD"].pnlAt(o.stopLoss, usdCurrency)
-	require.NoError(t, err)
-	assert.Equal(t, mneg(usd(20000)), loss)
-
-	// Only margin closeout intervenes, long before the stop: it values the
-	// position at a bar's close and liquidates below half the margin in use.
-	require.NoError(t, br.onBar(ctx, riskBar(2, 110000, 110000, 106000, 106000)))
-	require.Empty(t, act.positions)
-	require.Equal(t, reasonMarginCloseout, br.completed[len(br.completed)-2].reason)
-	assert.Equal(t, usd(2000), act.balance, "80% of the account")
 }

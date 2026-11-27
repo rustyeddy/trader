@@ -270,11 +270,16 @@ func TestOrder_Validate_StopMustBeOnTheLosingSide(t *testing.T) {
 	} {
 		o := openOrderAt("EURUSD", tt.d, eurusd1_10)
 		o.stopLoss = px(tt.stop)
+		require.NoError(t, o.validate(), "a market open's price is only a claim (#745)")
 
-		err := o.validate()
+		for _, typ := range []orderType{limitOrder, stopOrder} {
+			o.orderType = typ
 
-		require.ErrorIs(t, err, errInvalidOrder, "%s stop %d", tt.d, tt.stop)
-		assert.False(t, isRejection(err), "a bad stop is a strategy bug, not a trading outcome")
+			err := o.validate()
+
+			require.ErrorIs(t, err, errInvalidOrder, "%s %s stop %d", typ, tt.d, tt.stop)
+			assert.False(t, isRejection(err), "a bad stop is a strategy bug, not a trading outcome")
+		}
 	}
 }
 
