@@ -43,6 +43,11 @@ scenarios. Items marked DONE are implemented and tested.
     order type, and the stop loss (Open only).
   - account: units (sizing, limited by risk and by margin), or rejection.
   - broker: order id, and later the fill.
+- A market open is sized, and its margin reserved, from the close of the
+  instrument's bar in the frame it was decided on, not from the strategy's
+  reference price (#745). It is rejected when the frame has no bar of the
+  instrument, or its stop is not on the losing side of that close. A limit or
+  stop entry keeps its price: it is the trigger.
 - Position direction is separate from order side Buy/Sell.
 - Open requires direction; Add, Reduce, Close do NOT require direction.
   They act on the existing position for the specified instrument.

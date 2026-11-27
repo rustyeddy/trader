@@ -35,6 +35,7 @@ Precedence: the strategy proposes; Trader sizes, admits and executes (ADR-093).
 A research consumer such as Investor reads results and submits no order.
 
 * Findings
+F1 is fixed by #745; its row and scenario below describe the audited code.
 | ID  | Finding                                                                 | Severity |
 |-----+-------------------------------------------------------------------------+----------|
 | F1  | The reference price is the strategy's unchecked claim                   | High     |
@@ -50,7 +51,7 @@ A research consumer such as Investor reads results and submits no order.
 
 | ID | Existing protection                             | Test (=KnownDefect743= pins unsafe behaviour)                           | Gap and recommended remedy                                          |
 |----+-------------------------------------------------+------------------------------------------------------------------------+---------------------------------------------------------------------|
-| F1 | Stop must be beyond the reference; on tick      | =TestToOrder_KnownDefect743_TheReferencePriceIsNotCheckedAgainstTheMarket=   | Size a market order from a price Trader knows, not the claim (D1)   |
+| F1 | Stop must be beyond the reference; on tick      | =TestTrader_OnFrame_AClaimedPriceCannotEnlargeAMarketOpen=                  | Fixed (#745): sized from the decision close                         |
 | F2 | Margin and notional rechecked at the fill       | =..._KnownDefect743_AFillAwayFromTheReferenceExceedsOnePercentAtTheStop=              | Owner choice (D2)                                                   |
 | F3 | Gap fills at the open and is journaled          | =..._KnownDefect743_AGapThroughTheStopScalesWithPositionSize=, =TestBroker_OnBar_GapThroughTheStopFillsAtTheOpen= | Cannot be prevented; limit size (D3) and report it (F7) |
 | F4 | Margin limit; USD 50m per order                 | =TestAccount_Size_Open_PlannedLossAcrossStopDistances=                 | Owner-set exposure cap independent of the stop (D3)                 |
@@ -139,10 +140,11 @@ than USD, stops the run with an error; nothing converts or assumes
 * Owner decisions
 No policy numbers are proposed here.
 
-- D1 (F1) :: Size a market open from the decision bar's close and treat the
-  strategy's price as ignored, or reject a reference that differs from it.
-  *Suggested: size from the close.* The built-in EMAX already sends the close, so
-  its results should not change. Limit and stop entries keep their trigger.
+- D1 (F1) :: *Decided 2026-11-26, implemented in #745.* A market open is sized,
+  and its margin reserved, from the decision bar's close; the strategy's price is
+  recorded as asked. It is rejected when the frame has no bar of the instrument or
+  the stop is not on the losing side of the close. Limit and stop entries keep
+  their trigger.
 - D2 (F2) :: Choose one explicit policy: (a) accept and report; (b) size with a
   realistic owner-set buffer, which lowers but cannot guarantee the loss; (c)
   reject at the fill when risk exceeds the budget. *Suggested: (b) or (c), with
@@ -169,7 +171,7 @@ the risk limit for those opens; D3 should be settled first.
 * Follow-up issues
 | Finding | Decision | Issue | Known-defect test to replace                     |
 |---------+----------+-------+--------------------------------------------------|
-| F1      | D1       | #745  | =..._TheReferencePriceIsNotCheckedAgainstTheMarket= |
+| F1      | D1       | #745  | replaced (fixed)                                 |
 | F2      | D2       | #746  | =..._AFillAwayFromTheReference...=               |
 | F3, F4  | D3       | #747  | =..._AGapThroughTheStop...= (margin-capped case) |
 | F5      | D4       | #748  | =..._PlannedRiskAddsUpAcrossInstruments=         |

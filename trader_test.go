@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -893,4 +894,176 @@ func TestRunSeriesWith_AClientThatDropsDuringWarmupFailsTheRun(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "warm-up")
 	assert.Empty(t, journal.String())
+}
+
+// decided is a trader on 10,000 that has been handed one frame at 1.10000 and
+// the orders a strategy answered it with.
+func decided(t *testing.T, opts func(*trader), orders ...*order) *trader {
+	t.Helper()
+	captureLogs(t)
+	tr := newTestTraderWithBalance(usd(10000))
+	tr.strategy = &scriptStrategy{orders: orders}
+	if opts != nil {
+		opts(tr)
+	}
+	require.NoError(t, tr.onFrame(context.Background(), frameOf(riskBar(0, 110000, 110000, 110000, 110000))))
+	return tr
+}
+
+func frameOf(b marketdata.Bar) frame {
+	return frame{availableAt: b.AvailableAt, bars: []marketdata.Bar{b}}
+}
+
+func marketOpen(d direction, claim, stop int64) *order {
+	return &order{instrument: "EURUSD", direction: d, action: open, orderType: marketOrder, price: px(claim), stopLoss: px(stop)}
+}
+
+// Issue #745: a market open is sized from the close of the decision bar, so the
+// price the strategy claims changes nothing.
+func TestTrader_OnFrame_AMarketOpenIsSizedFromTheDecisionClose(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		dir   direction
+		claim int64
+		stop  int64
+	}{
+		{"long, true claim", long, 110000, 109450},
+		{"long, claim next to the stop", long, 109451, 109450},
+		{"long, claim far above", long, 150000, 109450},
+		{"short, claim next to the stop", short, 110549, 110550},
+		{"short, claim far below", short, 50000, 110550},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := marketOpen(tc.dir, tc.claim, tc.stop)
+
+			tr := decided(t, nil, o)
+
+			require.Equal(t, stateSubmitted, o.state)
+			assert.Equal(t, qty(18181), o.units, "100 over a 0.00550 stop")
+			assert.Equal(t, px(110000), o.price)
+			reserved := reservedOf(t, tr.broker, tr.account.id)
+			assert.Equal(t, num.MustParseMoney("399.982", usdCurrency), reserved, "margin is reserved at the close too")
+		})
+	}
+}
+
+// The crafted order of the #743 audit: a claimed 1.00050 over a stop at 1.00000
+// while the market is at 1.10000 used to stand to lose twice the account.
+func TestTrader_OnFrame_AClaimedPriceCannotEnlargeAMarketOpen(t *testing.T) {
+	o := marketOpen(long, 100050, 100000)
+
+	tr := decided(t, nil, o)
+	require.NoError(t, tr.broker.onFrame(context.Background(), frameOf(riskBar(1, 110000, 110000, 110000, 110000))))
+
+	require.Equal(t, stateFilled, o.state)
+	loss, err := tr.account.positions["EURUSD"].pnlAt(o.stopLoss, usdCurrency)
+	require.NoError(t, err)
+	assert.Equal(t, mneg(usd(100)), loss, "1% at the stop from this fill, not 200%")
+}
+
+func TestTrader_OnFrame_AStopNotBeyondTheCloseRejectsAMarketOpen(t *testing.T) {
+	for name, o := range map[string]*order{
+		"long, stop above the close":  marketOpen(long, 120000, 111000),
+		"long, stop at the close":     marketOpen(long, 120000, 110000),
+		"short, stop below the close": marketOpen(short, 100000, 109000),
+		"short, stop at the close":    marketOpen(short, 100000, 110000),
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := decided(t, nil, o)
+
+			assert.Equal(t, stateRejected, o.state)
+			assert.Contains(t, o.history[len(o.history)-1].reason, errStopBeyondClose.Error())
+			assert.Equal(t, []*order{o}, tr.rejected)
+			assert.Empty(t, tr.broker.orders["EURUSD"])
+		})
+	}
+}
+
+func TestTrader_OnFrame_AMarketOpenWithNoBarOfItsInstrumentIsRejected(t *testing.T) {
+	o := marketOpen(long, 110000, 109450)
+	o.instrument = "GBPUSD"
+	// A strategy outside the frame stamps its own time.
+	o.Time = testStart.AddDate(0, 0, 1)
+
+	tr := decided(t, func(tr *trader) { tr.strategy = &fixedAnswer{o} }, nil...)
+
+	assert.Equal(t, stateRejected, o.state)
+	assert.Contains(t, o.history[len(o.history)-1].reason, errNoDecisionPrice.Error())
+	assert.Equal(t, []*order{o}, tr.rejected)
+}
+
+// fixedAnswer answers every frame with one order, as it is.
+type fixedAnswer struct{ o *order }
+
+func (*fixedAnswer) name() string { return "fixed" }
+func (*fixedAnswer) init() error  { return nil }
+func (s *fixedAnswer) onBars(context.Context, []marketdata.Bar) ([]*order, error) {
+	return []*order{s.o}, nil
+}
+
+// An unknown instrument stays a fatal error, not a missing price.
+func TestTrader_OnFrame_AnUnknownInstrumentIsStillAnError(t *testing.T) {
+	captureLogs(t)
+	o := marketOpen(long, 110000, 109450)
+	o.instrument, o.Time = "USDJPY", testStart
+	tr := newTestTraderWithBalance(usd(10000))
+	tr.strategy = &fixedAnswer{o}
+
+	err := tr.onFrame(context.Background(), frameOf(riskBar(0, 110000, 110000, 110000, 110000)))
+
+	require.ErrorIs(t, err, errUnknownInstrument)
+}
+
+// A limit or stop entry's price is its trigger and is kept.
+func TestTrader_OnFrame_ARestingEntryKeepsItsTrigger(t *testing.T) {
+	for _, typ := range []orderType{limitOrder, stopOrder} {
+		t.Run(typ.String(), func(t *testing.T) {
+			o := marketOpen(long, 109000, 108450)
+			o.orderType = typ
+
+			decided(t, nil, o)
+
+			require.Equal(t, stateSubmitted, o.state)
+			assert.Equal(t, px(109000), o.price)
+			assert.Equal(t, qty(18181), o.units)
+		})
+	}
+}
+
+// The journal keeps what was asked on the requested line and says on the sized
+// line which price replaced it; a true claim adds nothing.
+func TestTrader_OnFrame_TheJournalShowsTheAskedAndTheSizingPrice(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		claim int64
+		sized string
+	}{{"replaced", 109451, `"price":"1.1"`}, {"unchanged", 110000, ""}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			o := marketOpen(long, tc.claim, 109450)
+
+			decided(t, func(tr *trader) { tr.broker.journal = newJournal(&buf) }, o)
+
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			require.Len(t, lines, 3)
+			assert.Contains(t, lines[0], `"price":"`+px(tc.claim).String()+`"`)
+			if tc.sized == "" {
+				assert.NotContains(t, lines[1], `"price"`)
+			} else {
+				assert.Contains(t, lines[1], tc.sized)
+			}
+			assert.NotContains(t, lines[2], `"price"`)
+		})
+	}
+}
+
+func TestCloseOf(t *testing.T) {
+	gbp := riskBar(0, 130000, 130000, 130000, 130000)
+	gbp.Instrument = "GBPUSD"
+	bars := []marketdata.Bar{riskBar(0, 110000, 110000, 110000, 110000), gbp}
+
+	assert.Equal(t, px(130000), closeOf(bars, "GBPUSD"))
+	assert.Equal(t, px(110000), closeOf(bars, "EURUSD"))
+	assert.True(t, closeOf(bars, "USDJPY").IsZero())
+	assert.True(t, closeOf(nil, "EURUSD").IsZero())
 }

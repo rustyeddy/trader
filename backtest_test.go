@@ -88,7 +88,7 @@ func seq(bars []marketdata.Bar, errAt int, err error) iter.Seq2[marketdata.Bar, 
 
 func TestBacktestRun_AcceptedRequests(t *testing.T) {
 	captureLogs(t)
-	bars := eurBars(1, 2, 3)
+	bars := eurBars(1.1, 1.2, 1.3)
 	o1 := openOrder()
 	o3 := &order{Time: testStart, instrument: "EURUSD", action: close, orderType: marketOrder}
 	strat := &scriptStrategy{orders: []*order{o1, nil, o3}}
@@ -106,7 +106,7 @@ func TestBacktestRun_NoOrderNothingSubmitted(t *testing.T) {
 	strat := &scriptStrategy{} // returns nil on every bar
 	tr := newTestTrader()
 
-	require.NoError(t, runTrader(context.Background(), tr, strat, seq(eurBars(1, 2, 3), -1, nil)))
+	require.NoError(t, runTrader(context.Background(), tr, strat, seq(eurBars(1.1, 1.2, 1.3), -1, nil)))
 	assert.Len(t, strat.seen, 3)
 	assert.Zero(t, tr.broker.seq, "nothing reached the broker")
 }
@@ -122,7 +122,7 @@ func TestBacktestRun_RecordsLifecycleInHistory(t *testing.T) {
 	captureLogs(t)
 	o := openOrder()
 	strat := &scriptStrategy{orders: []*order{nil, o}}
-	bars := eurBars(1, 2)
+	bars := eurBars(1.1, 1.2)
 
 	require.NoError(t, runTrader(context.Background(), newTestTrader(), strat, seq(bars, -1, nil)))
 
@@ -139,7 +139,7 @@ func TestBacktestRun_FatalHandlerErrorStopsRun(t *testing.T) {
 	strat := &scriptStrategy{orders: opens(4)}
 	tr := &trader{broker: newBroker("t", testMarkets()), account: newAccount("ghost", usd(1000), testMarkets())} // the broker has no such account
 
-	err := runTrader(context.Background(), tr, strat, seq(eurBars(1, 2, 3, 4), -1, nil))
+	err := runTrader(context.Background(), tr, strat, seq(eurBars(1.1, 1.2, 1.3, 1.4), -1, nil))
 
 	require.ErrorIs(t, err, errUnknownAccount)
 	assert.Len(t, strat.seen, 1, "no bars processed after the failure")
@@ -150,7 +150,7 @@ func TestBacktestRun_FatalHandlerErrorHasInstrumentAndTimeContext(t *testing.T) 
 	strat := &scriptStrategy{orders: []*order{nil, openOrder()}}
 	tr := &trader{broker: newBroker("t", testMarkets()), account: newAccount("ghost", usd(1000), testMarkets())}
 
-	err := runTrader(context.Background(), tr, strat, seq(eurBars(1, 2, 3), -1, nil))
+	err := runTrader(context.Background(), tr, strat, seq(eurBars(1.1, 1.2, 1.3), -1, nil))
 
 	require.ErrorIs(t, err, errUnknownAccount, "cause preserved")
 	assert.Contains(t, err.Error(), "EURUSD")
@@ -162,7 +162,7 @@ func TestBacktestRun_FatalErrorIsNotLoggedAsRejection(t *testing.T) {
 	o := openOrder()
 	tr := &trader{broker: newBroker("t", testMarkets()), account: newAccount("ghost", usd(1000), testMarkets())}
 
-	err := runTrader(context.Background(), tr, &scriptStrategy{orders: []*order{o}}, seq(eurBars(1, 2), -1, nil))
+	err := runTrader(context.Background(), tr, &scriptStrategy{orders: []*order{o}}, seq(eurBars(1.1, 1.2), -1, nil))
 
 	require.Error(t, err)
 	assert.NotContains(t, logs.String(), "order rejected")
@@ -173,7 +173,7 @@ func TestBacktestRun_DataErrorStopsRun(t *testing.T) {
 	boom := errors.New("bad data")
 	strat := &scriptStrategy{}
 
-	err := runTrader(context.Background(), newTestTrader(), strat, seq(eurBars(1, 2, 3), 2, boom))
+	err := runTrader(context.Background(), newTestTrader(), strat, seq(eurBars(1.1, 1.2, 1.3), 2, boom))
 
 	require.ErrorIs(t, err, boom)
 	assert.Len(t, strat.seen, 2, "bars before the error are processed, none after")
@@ -183,11 +183,11 @@ func TestBacktestRun_DataErrorHasContext(t *testing.T) {
 	boom := errors.New("bad data")
 
 	// error on the first bar: nothing processed yet
-	err := runTrader(context.Background(), newTestTrader(), &scriptStrategy{}, seq(eurBars(1, 2), 0, boom))
+	err := runTrader(context.Background(), newTestTrader(), &scriptStrategy{}, seq(eurBars(1.1, 1.2), 0, boom))
 	require.ErrorIs(t, err, boom)
 
 	// error after bars were processed: mentions the last good bar
-	err = runTrader(context.Background(), newTestTrader(), &scriptStrategy{}, seq(eurBars(1, 2, 3), 2, boom))
+	err = runTrader(context.Background(), newTestTrader(), &scriptStrategy{}, seq(eurBars(1.1, 1.2, 1.3), 2, boom))
 	require.ErrorIs(t, err, boom)
 	assert.Contains(t, err.Error(), "EURUSD")
 	assert.Contains(t, err.Error(), "2010-01-05", "last successfully processed bar")
@@ -209,7 +209,7 @@ func (s *cancelStrategy) onBars(ctx context.Context, bars []marketdata.Bar) ([]*
 }
 
 func TestBacktestRun_ContextCancelled(t *testing.T) {
-	md := marketdata.Series{Bars: eurBars(1, 2, 3, 4)}
+	md := marketdata.Series{Bars: eurBars(1.1, 1.2, 1.3, 1.4)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	strat := &cancelStrategy{cancel: cancel}
@@ -235,7 +235,7 @@ func TestBacktestRun_ExpectedRejectionIsRecordedLoggedAndRunContinues(t *testing
 	o := openOrder()
 	strat := &scriptStrategy{orders: []*order{o}}
 
-	err := runTrader(context.Background(), newTestTraderWithBalance(usd(0)), strat, seq(eurBars(1, 2, 3), -1, nil))
+	err := runTrader(context.Background(), newTestTraderWithBalance(usd(0)), strat, seq(eurBars(1.1, 1.2, 1.3), -1, nil))
 
 	require.NoError(t, err, "a margin rejection must not stop the run")
 	assert.Len(t, strat.seen, 3, "bars after the rejection are still processed")
@@ -263,7 +263,7 @@ func TestBacktestRun_OrderTooSmallIsARejectionToo(t *testing.T) {
 	// A balance of 1 buys less than one unit: a rejection, not a failure.
 	o := openOrder()
 
-	err := runTrader(context.Background(), newTestTraderWithBalance(usd(1)), &scriptStrategy{orders: []*order{o, nil}}, seq(eurBars(1, 2), -1, nil))
+	err := runTrader(context.Background(), newTestTraderWithBalance(usd(1)), &scriptStrategy{orders: []*order{o, nil}}, seq(eurBars(1.1, 1.2), -1, nil))
 
 	require.NoError(t, err)
 	assert.Equal(t, stateRejected, o.state)
@@ -274,7 +274,7 @@ func TestBacktestRun_InvalidOrderStopsRunBeforeSizing(t *testing.T) {
 	strat := &scriptStrategy{orders: []*order{nil, bad, openOrder()}}
 	tr := newTestTrader()
 
-	err := runTrader(context.Background(), tr, strat, seq(eurBars(1, 2, 3, 4), -1, nil))
+	err := runTrader(context.Background(), tr, strat, seq(eurBars(1.1, 1.2, 1.3, 1.4), -1, nil))
 
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "EURUSD")
@@ -289,7 +289,7 @@ func TestBacktestRun_OpenWithoutAStopStopsRunBeforeSizing(t *testing.T) {
 	noStop := &order{Time: testStart, instrument: "EURUSD", direction: long, action: open, orderType: marketOrder, price: eurusd1_10}
 	strat := &scriptStrategy{orders: []*order{nil, noStop, openOrder()}}
 
-	err := runTrader(context.Background(), newTestTrader(), strat, seq(eurBars(1, 2, 3, 4), -1, nil))
+	err := runTrader(context.Background(), newTestTrader(), strat, seq(eurBars(1.1, 1.2, 1.3, 1.4), -1, nil))
 
 	require.ErrorIs(t, err, errInvalidOrder)
 	assert.Contains(t, err.Error(), "stop loss")

@@ -373,7 +373,8 @@ missing). Three files are enough to read a run:
   metrics below). A run that was cut off, say by a crash, still says `running`.
 - `events.jsonl`: one JSON line for every order transition, in the order it
   happened: `requested` (what was asked: instrument, action, direction, type, price,
-  stop, target), `sized` (the account's size), `submitted` (the broker's id), `filled`
+  stop, target), `sized` (the account's size; for a market open whose `price` differs
+  from the decision bar's close, which it is sized from, that close as `price`), `submitted` (the broker's id), `filled`
   (units, fill price, and what the order was), `rejected` or `cancelled` (with the
   reason). The broker's own orders, protective stops, targets and margin closeouts,
   are in it with their `cause`. Lines carry the simulated time only, so two runs that

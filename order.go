@@ -122,6 +122,14 @@ type order struct {
 	// made outside the trader, such as the broker's own exits.
 	decidedAt time.Time
 
+	// decisionClose is the close of the instrument's bar in the frame the order
+	// was decided on, stamped by the trader with decidedAt. Zero when the frame
+	// held no bar of the instrument.
+	decisionClose num.Price
+	// claimedPrice is the strategy's reference price when the trader replaced it
+	// with a different decisionClose; zero otherwise.
+	claimedPrice num.Price
+
 	// Time is the simulated time of the step the order is on: the bar being
 	// processed. The strategy sets it on a new order and record moves it, so it
 	// is when the order last changed. The managed clock for live trading will

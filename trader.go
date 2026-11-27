@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 )
 
 // errInsufficientMargin is an expected trading outcome, not a runtime
@@ -62,6 +63,14 @@ var errLoosensStop = errors.New("amend does not tighten")
 // errStopWrongSide is an expected outcome: an amended stop or target is not on
 // its side of the latest price, so it would trigger at once or is meaningless.
 var errStopWrongSide = errors.New("amend is on the wrong side of the price")
+
+// errNoDecisionPrice is an expected outcome: a market open names an instrument
+// with no bar in the frame it was decided on, so there is no close to size from.
+var errNoDecisionPrice = errors.New("no price to size from")
+
+// errStopBeyondClose is an expected outcome: a market open's stop is not on the
+// losing side of its decision close, so there is no risk distance to size from.
+var errStopBeyondClose = errors.New("stop is not on the losing side of the close")
 
 // errNoPosition is also an expected outcome: a close arrives when there is no
 // position, because its open was rejected or a stop has already closed it.
@@ -134,6 +143,7 @@ func (tr *trader) onFrame(ctx context.Context, f frame) error {
 			continue
 		}
 		o.decidedAt = f.availableAt
+		o.decisionClose = closeOf(f.bars, o.instrument)
 		if err := tr.handleOrder(ctx, o); err != nil {
 			return err
 		}
@@ -174,12 +184,59 @@ func (tr *trader) handleOrder(ctx context.Context, o *order) error {
 	tr.watch(o)
 	o.journal = tr.broker.journal // before the first record, so the requested line is kept
 	o.record(stateRequested, o.Time, "")
-	if err := tr.broker.submit(ctx, o); err != nil {
+	err := tr.priceAtDecision(o)
+	if err == nil {
+		err = tr.broker.submit(ctx, o)
+	}
+	if err != nil {
 		if !isRejection(err) {
 			return fmt.Errorf("handling %s %s at %s: %w",
 				o.action, o.instrument, o.Time.Format(time.DateOnly), err)
 		}
 		tr.rejected = append(tr.rejected, o)
+	}
+	return nil
+}
+
+// closeOf is the close of the instrument's bar among bars, or zero when none of
+// them is the instrument's.
+func closeOf(bars []marketdata.Bar, instrument string) num.Price {
+	for _, b := range bars {
+		if b.Instrument == instrument {
+			return b.OHLC().Close
+		}
+	}
+	return num.Price{}
+}
+
+// priceAtDecision makes a market open's reference price the close of the bar it
+// was decided on, so that the account sizes it, and reserves its margin, from a
+// price Trader knows. The strategy's own price is only what it asked: it stays
+// on the requested journal line and cannot change the size. The order is
+// rejected when the frame had no bar of its instrument, or when its stop is not
+// on the losing side of the close.
+//
+// Other orders keep their price: a limit or stop entry's price is its trigger.
+// An order the trader did not decide on a frame has no decision close and is
+// left alone, as is one for an unknown instrument, which sizing refuses as an
+// error.
+func (tr *trader) priceAtDecision(o *order) error {
+	if o.action != open || o.orderType != marketOrder || o.decidedAt.IsZero() {
+		return nil
+	}
+	if _, ok := tr.account.markets.lookup(o.instrument); !ok {
+		return nil
+	}
+	if o.decisionClose.IsZero() {
+		return reject(o, o.Time, "%w: no %s bar at %s", errNoDecisionPrice, o.instrument, o.decidedAt.Format(time.RFC3339))
+	}
+	if o.price.Equal(o.decisionClose) {
+		return nil
+	}
+	o.claimedPrice, o.price = o.price, o.decisionClose
+	if !o.beyond(o.stopLoss, true) {
+		return reject(o, o.Time, "%w: %s stop %s, close %s",
+			errStopBeyondClose, o.direction, o.stopLoss, o.price)
 	}
 	return nil
 }
