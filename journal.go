@@ -100,6 +100,9 @@ func (j *journal) record(o *order, e orderEvent) {
 	case stateSized, stateSubmitted, stateFilled, stateRejected, stateCancelled:
 		l.Units = o.units
 	}
+	if e.state == stateSized && !o.claimedPrice.IsZero() {
+		l.Price = o.price // the decision close it was sized from, not the price asked
+	}
 	switch e.state {
 	case stateSized:
 		l.BindingLimit, l.PlannedRisk = o.risk.bindingLimit, knownMoney(o.risk.planned)

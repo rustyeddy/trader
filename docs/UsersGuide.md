@@ -373,7 +373,10 @@ missing). Three files are enough to read a run:
   metrics below). A run that was cut off, say by a crash, still says `running`.
 - `events.jsonl`: one JSON line for every order transition, in the order it
   happened: `requested` (what was asked: instrument, action, direction, type, price,
-  stop, target), `sized` (the account's size), `submitted` (the broker's id), `filled`
+  stop, target), `sized` (the account's size; for a market open whose `price` differs
+  from the decision bar's close, which it is sized from, that close as `price`; so the
+  `requested` line holds the price the strategy asked and the `filled` line's
+  `fill_price` the price it got), `submitted` (the broker's id), `filled`
   (units, fill price, and what the order was), `rejected` or `cancelled` (with the
   reason). The broker's own orders, protective stops, targets and margin closeouts,
   are in it with their `cause`. Lines carry the simulated time only, so two runs that
@@ -408,8 +411,8 @@ order is sized, admitted or filled.
 
 | Field | On | Meaning |
 |---|---|---|
-| `binding_limit` | an open's `sized` line; the `rejected` line of an open refused by sizing for margin or minimum size, or refused at the fill | the limit that allowed the fewest units, before rounding down to the unit step: `instrument` (maximum units), `risk`, `margin` or `notional`; the first of equals in that order. It also names the limit of an order refused as below the minimum size, and is `margin` when no margin was left at all. An order refused before sizing (a pending open or the closeout guard) has none |
-| `planned_risk` | an open's `sized` line | units x distance from the price the order was sized from (its `price`: the reference, or a resting order's trigger) to its `stop_loss` |
+| `binding_limit` | an open's `sized` line; the `rejected` line of an open refused by sizing for margin or minimum size, or refused at the fill | the limit that allowed the fewest units, before rounding down to the unit step: `instrument` (maximum units), `risk`, `margin` or `notional`; the first of equals in that order. It also names the limit of an order refused as below the minimum size, and is `margin` when no margin was left at all. An order refused before sizing (a pending open, the closeout guard, or a market open with no decision close or a wrong-side stop or target) has none. It records what limited the size, which on a fill-time rejection need not be why the order was refused: see `reason` |
+| `planned_risk` | an open's `sized` line | units x distance from the price the order was sized from to its `stop_loss`. That price is the `sized` line's `price` if it has one (a market open whose decision close differs from the price asked), else the `requested` line's `price` (equal to the close, or a resting order's trigger) |
 | `risk_at_fill` | an open's `filled` line | units x distance from `fill_price` down to the stop (long) or up to it (short). Zero when the fill is at or beyond the stop, as after a gap: the stop is then due at once. It uses the stop the open carried; it is not recomputed when the stop is amended or trails |
 | `open_order` | every `filled` close | the `id` of the open that made the closed position |
 | `excess_loss` | a `filled` close that lost more than planned | realized loss minus that open's `planned_risk`, always positive. Absent when the loss is not more than planned (equal, smaller, or a profit) |
