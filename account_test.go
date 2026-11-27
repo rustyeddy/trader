@@ -978,3 +978,36 @@ func TestAccount_Size_Open_InstrumentMaximumSizesWhenEveryOtherLimitOverflows(t 
 
 	assert.Equal(t, qty(100_000), o.units)
 }
+
+// The #743 boundary table: on 10,000 at 1.10000, a stop from 2% to 0.1% away is
+// sized by the risk limit and plans to lose at most 100 at the stop price. At
+// 0.01% the margin limit binds first, and the plan is smaller.
+func TestAccount_Size_Open_PlannedLossAcrossStopDistances(t *testing.T) {
+	captureLogs(t)
+	for _, tc := range []struct {
+		name         string
+		stop         int64 // points below 1.10000
+		units        int64
+		plannedCents int64 // units x distance, rounded down
+	}{
+		{"2%", 2200, 4545, 9999},
+		{"1%", 1100, 9090, 9999},
+		{"0.5%", 550, 18181, 9999},
+		{"0.2%", 220, 45454, 9999},
+		{"0.1%", 110, 90909, 9999},
+		{"0.01%, margin binds", 11, 454545, 4999},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := openOrderAt("EURUSD", long, eurusd1_10)
+			o.stopLoss = px(110000 - tc.stop)
+
+			require.NoError(t, newAccount("a", usd(10000), testMarkets()).size(o, cents(0)))
+
+			assert.Equal(t, qty(tc.units), o.units)
+			planned := tc.units * tc.stop // thousandths of a cent: a point on one unit
+			assert.Equal(t, tc.plannedCents, planned/1000)
+			assert.LessOrEqual(t, planned, int64(100*100_000), "at most 1% of equity")
+			assert.LessOrEqual(t, tc.units*110000*2/100, int64(10000*100_000), "margin within equity")
+		})
+	}
+}

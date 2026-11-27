@@ -1003,3 +1003,195 @@ func TestBroker_Amend_ExitHistoryRebuildsTheStopAtEveryChange(t *testing.T) {
 	}, reasons, "each change names the amend and both values")
 	assert.NotEqual(t, first.id, second.id)
 }
+
+// The #743 audit tests. A name with KnownDefect743 characterizes unsafe current
+// behaviour and links the issue that will replace its assertions; the others are
+// safety invariants that a fix must keep. See docs/reviews/risk-audit-743.org.
+
+// riskOpen submits a EURUSD market or resting open on 10,000, decided on day 0.
+func riskOpen(t *testing.T, br *broker, d direction, typ orderType, ref, stop int64) *order {
+	t.Helper()
+	o := &order{Time: testStart, accountID: "a", instrument: "EURUSD", direction: d, action: open,
+		orderType: typ, price: px(ref), stopLoss: px(stop)}
+	require.NoError(t, br.submit(context.Background(), o))
+	return o
+}
+
+// riskBar is a EURUSD bar on day d.
+func riskBar(d int, o, h, l, c int64) marketdata.Bar {
+	return daily(marketdata.Bar{Instrument: "EURUSD", Time: testStart.AddDate(0, 0, d),
+		Mid: marketdata.OHLC{Open: px(o), High: px(h), Low: px(l), Close: px(c)}})
+}
+
+// Units come from the reference price and are never resized, so an entry that
+// fills further from its stop than the reference loses more than 1% there.
+//
+// KNOWN DEFECT, not a safety invariant: these assertions pin unsafe behaviour and
+// must be replaced by tests of the safe behaviour when #746 is fixed.
+func TestBroker_KnownDefect743_AFillAwayFromTheReferenceExceedsOnePercentAtTheStop(t *testing.T) {
+	captureLogs(t)
+	for _, tc := range []struct {
+		name      string
+		dir       direction
+		typ       orderType
+		ref, stop int64
+		entry     marketdata.Bar
+		exit      marketdata.Bar
+		fill      int64
+		balance   money
+	}{
+		{"long market, higher open", long, marketOrder, 110000, 109450,
+			riskBar(1, 110550, 110600, 110500, 110550), riskBar(2, 110500, 110500, 109400, 109450),
+			110550, num.MustParseMoney("9800.009", usdCurrency)},
+		{"short market, lower open", short, marketOrder, 110000, 110550,
+			riskBar(1, 109450, 109500, 109400, 109450), riskBar(2, 109500, 110600, 109500, 110550),
+			109450, num.MustParseMoney("9800.009", usdCurrency)},
+		{"long stop entry gapped past its trigger", long, stopOrder, 110000, 109450,
+			riskBar(1, 110550, 110600, 110500, 110550), riskBar(2, 110500, 110500, 109400, 109450),
+			110550, num.MustParseMoney("9800.009", usdCurrency)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			br, act := newFillBroker()
+			ctx := context.Background()
+			o := riskOpen(t, br, tc.dir, tc.typ, tc.ref, tc.stop)
+			require.Equal(t, qty(18181), o.units, "plans 99.9955 from the reference")
+
+			require.NoError(t, br.onBar(ctx, tc.entry))
+			require.Equal(t, px(tc.fill), o.fillPrice)
+			require.NoError(t, br.onBar(ctx, tc.exit))
+
+			require.Empty(t, act.positions)
+			assert.Equal(t, px(tc.stop), br.completed[len(br.completed)-1].fillPrice, "the stop filled at its own price")
+			assert.Equal(t, tc.balance, act.balance, "twice the planned loss")
+		})
+	}
+}
+
+// A stop gapped through fills at the open: the loss has no bound from the plan.
+// The tighter the stop, the larger the position and the worse the same gap.
+//
+// KNOWN DEFECT, not a safety invariant: these assertions pin unsafe behaviour and
+// must be replaced by tests of the safe behaviour when #747 is fixed.
+// The cap changes the margin-capped case; a gap itself cannot be prevented.
+func TestBroker_KnownDefect743_AGapThroughTheStopScalesWithPositionSize(t *testing.T) {
+	captureLogs(t)
+	for _, tc := range []struct {
+		name    string
+		stop    int64
+		units   int64
+		balance string
+	}{
+		{"0.5% stop", 109450, 18181, "9800.009"},
+		{"0.01% stop, margin capped", 109989, 454545, "5000.005"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			br, act := newFillBroker()
+			ctx := context.Background()
+			o := riskOpen(t, br, long, marketOrder, 110000, tc.stop)
+			require.Equal(t, qty(tc.units), o.units)
+			require.NoError(t, br.onBar(ctx, riskBar(1, 110000, 110000, 110000, 110000)))
+
+			// The same 1% gap: the next bar opens at 1.08900.
+			require.NoError(t, br.onBar(ctx, riskBar(2, 108900, 108900, 108900, 108900)))
+
+			require.Empty(t, act.positions)
+			assert.Equal(t, num.MustParseMoney(tc.balance, usdCurrency), act.balance)
+		})
+	}
+}
+
+// A margin-capped order that fills at a worse price is refused, not admitted
+// over the margin.
+func TestBroker_AMarginCappedOpenIsRefusedAtAHigherFill(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	o := riskOpen(t, br, long, marketOrder, 110000, 109989)
+
+	require.NoError(t, br.onBar(context.Background(), riskBar(1, 110001, 110001, 110001, 110001)))
+
+	assert.Equal(t, stateRejected, o.state)
+	assert.Empty(t, act.positions)
+}
+
+// The 1% budget is per order: nothing limits the sum across instruments.
+//
+// KNOWN DEFECT, not a safety invariant: these assertions pin unsafe behaviour and
+// must be replaced by tests of the safe behaviour when #748 is fixed.
+func TestBroker_KnownDefect743_PlannedRiskAddsUpAcrossInstruments(t *testing.T) {
+	captureLogs(t)
+	br, _ := newFillBroker()
+	ctx := context.Background()
+	first := brokerOpen("a")
+	second := brokerOpen("a")
+	second.instrument = "GBPUSD"
+
+	require.NoError(t, br.submit(ctx, first))
+	require.NoError(t, br.submit(ctx, second))
+
+	// 1.10000 to 1.08900 is 1100 points; each order plans just under 100.
+	assert.Equal(t, qty(9090), first.units)
+	assert.Equal(t, qty(9090), second.units)
+}
+
+// With no margin available a new open is refused, and the position that used it
+// can still be closed.
+func TestBroker_ACloseNeedsNoMargin(t *testing.T) {
+	captureLogs(t)
+	br, act := newFillBroker()
+	ctx := context.Background()
+	act.positions["EURUSD"] = &position{instrument: "EURUSD", direction: long, units: qty(1_000_000),
+		entryPrice: eurusd1_10, markPrice: eurusd1_10} // 22,000 of margin on 10,000
+
+	other := brokerOpen("a")
+	other.instrument = "GBPUSD"
+	require.ErrorIs(t, br.submit(ctx, other), errInsufficientMargin)
+
+	cl := &order{Time: testStart, accountID: "a", instrument: "EURUSD", action: close, orderType: marketOrder}
+	require.NoError(t, br.submit(ctx, cl))
+	// Margin is not consulted at the fill either; the bar stays above liquidation.
+	require.NoError(t, br.onBar(ctx, riskBar(1, 110000, 110000, 110000, 110000)))
+
+	assert.Equal(t, stateFilled, cl.state)
+	assert.Empty(t, act.positions)
+}
+
+// A protective stop is tested against the bar's mid even when the bar has bid
+// and ask: a long's stop that the bid reached, or a short's that the ask
+// reached, stays open.
+//
+// KNOWN DEFECT, not a safety invariant: these assertions pin unsafe behaviour and
+// must be replaced by tests of the safe behaviour when #750 is fixed.
+func TestBroker_KnownDefect743_AStopIgnoresTheBidAndAskItWouldTradeOn(t *testing.T) {
+	captureLogs(t)
+	for _, tc := range []struct {
+		name string
+		dir  direction
+		stop int64
+		bar  marketdata.Bar // mid stays 5 points inside the stop; the exit side passes it
+	}{
+		{"long, bid below the stop", long, 109450, quotedBar(2, 109460, 109455)},
+		{"short, ask above the stop", short, 110550, quotedBar(2, 110540, 110545)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			br, act := newFillBroker()
+			ctx := context.Background()
+			riskOpen(t, br, tc.dir, marketOrder, 110000, tc.stop)
+			require.NoError(t, br.onBar(ctx, riskBar(1, 110000, 110000, 110000, 110000)))
+
+			require.NoError(t, br.onBar(ctx, tc.bar))
+
+			assert.Len(t, act.positions, 1, "still open: only the mid is tested")
+		})
+	}
+}
+
+// quotedBar is a EURUSD bar on day d with a 20 point spread: mid opens at
+// 1.10000 and reaches extreme, closing at last.
+func quotedBar(d int, extreme, last int64) marketdata.Bar {
+	side := func(off int64) marketdata.OHLC {
+		o, e, c := 110000+off, extreme+off, last+off
+		return marketdata.OHLC{Open: px(o), High: px(max(o, e, c)), Low: px(min(o, e, c)), Close: px(c)}
+	}
+	return daily(marketdata.Bar{Instrument: "EURUSD", Time: testStart.AddDate(0, 0, d),
+		Bid: side(-10), Mid: side(0), Ask: side(10)})
+}
