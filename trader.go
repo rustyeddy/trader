@@ -72,6 +72,10 @@ var errNoDecisionPrice = errors.New("no price to size from")
 // losing side of its decision close, so there is no risk distance to size from.
 var errStopBeyondClose = errors.New("stop is not on the losing side of the close")
 
+// errTargetBeyondClose is an expected outcome too: a market open's target is not
+// on the winning side of its decision close.
+var errTargetBeyondClose = errors.New("take profit is not on the winning side of the close")
+
 // errNoPosition is also an expected outcome: a close arrives when there is no
 // position, because its open was rejected or a stop has already closed it.
 var errNoPosition = errors.New("no position to close")
@@ -212,31 +216,37 @@ func closeOf(bars []marketdata.Bar, instrument string) num.Price {
 // priceAtDecision makes a market open's reference price the close of the bar it
 // was decided on, so that the account sizes it, and reserves its margin, from a
 // price Trader knows. The strategy's own price is only what it asked: it stays
-// on the requested journal line and cannot change the size. The order is
-// rejected when the frame had no bar of its instrument, or when its stop is not
-// on the losing side of the close.
+// on the requested journal line and changes neither the size nor whether the
+// order is legal. The order is rejected when the frame had no bar of its
+// instrument, or when its stop is not on the losing side of the close or its
+// target not on the winning side.
 //
-// Other orders keep their price: a limit or stop entry's price is its trigger.
-// An order the trader did not decide on a frame has no decision close and is
-// left alone, as is one for an unknown instrument, which sizing refuses as an
-// error.
+// Other orders keep their price: a limit or stop entry's price is its trigger,
+// which validate has checked. A market open the trader did not decide on a frame
+// has no decision close: its stop and target are checked against its own price.
+// One for an unknown instrument is left to sizing, which refuses it as an error.
 func (tr *trader) priceAtDecision(o *order) error {
-	if o.action != open || o.orderType != marketOrder || o.decidedAt.IsZero() {
+	if o.action != open || o.orderType != marketOrder {
 		return nil
 	}
 	if _, ok := tr.account.markets.lookup(o.instrument); !ok {
 		return nil
 	}
-	if o.decisionClose.IsZero() {
-		return reject(o, o.Time, "%w: no %s bar at %s", errNoDecisionPrice, o.instrument, o.decidedAt.Format(time.RFC3339))
+	if !o.decidedAt.IsZero() {
+		if o.decisionClose.IsZero() {
+			return reject(o, o.Time, "%w: no %s bar at %s", errNoDecisionPrice, o.instrument, o.decidedAt.Format(time.RFC3339))
+		}
+		if !o.price.Equal(o.decisionClose) {
+			o.claimedPrice, o.price = o.price, o.decisionClose
+		}
 	}
-	if o.price.Equal(o.decisionClose) {
-		return nil
-	}
-	o.claimedPrice, o.price = o.price, o.decisionClose
 	if !o.beyond(o.stopLoss, true) {
 		return reject(o, o.Time, "%w: %s stop %s, close %s",
 			errStopBeyondClose, o.direction, o.stopLoss, o.price)
+	}
+	if !o.takeProfit.IsZero() && !o.beyond(o.takeProfit, false) {
+		return reject(o, o.Time, "%w: %s take profit %s, close %s",
+			errTargetBeyondClose, o.direction, o.takeProfit, o.price)
 	}
 	return nil
 }

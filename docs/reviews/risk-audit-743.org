@@ -143,7 +143,8 @@ No policy numbers are proposed here.
 - D1 (F1) :: *Decided 2026-11-26, implemented in #745.* A market open is sized,
   and its margin reserved, from the decision bar's close; the strategy's price is
   recorded as asked. It is rejected when the frame has no bar of the instrument or
-  the stop is not on the losing side of the close. Limit and stop entries keep
+  the stop is not on the losing side of the close or the target not on the
+  winning side; the recorded price decides neither. Limit and stop entries keep
   their trigger.
 - D2 (F2) :: Choose one explicit policy: (a) accept and report; (b) size with a
   realistic owner-set buffer, which lowers but cannot guarantee the loss; (c)

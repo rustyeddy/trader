@@ -79,7 +79,7 @@ func TestToOrder(t *testing.T) {
 		}{
 			{"missing stop", func(q *remotestrat.Order) { q.StopLoss = num.Price{} }, "stop loss"},
 			{"missing price", func(q *remotestrat.Order) { q.Price = num.Price{} }, "reference price"},
-			{"stop on the wrong side", func(q *remotestrat.Order) { q.StopLoss = px(111000) }, "not beyond"},
+			{"limit stop on the wrong side", func(q *remotestrat.Order) { q.Type, q.StopLoss = "limit", px(111000) }, "not beyond"},
 			{"open without a direction", func(q *remotestrat.Order) { q.Direction = "" }, "direction"},
 			{"open without an instrument", func(q *remotestrat.Order) { q.Instrument = "" }, "instrument"},
 			{"close with a direction", func(q *remotestrat.Order) { q.Action, q.StopLoss = "close", num.Price{} }, "direction"},

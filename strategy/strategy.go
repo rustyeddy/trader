@@ -174,8 +174,10 @@ type Order struct {
 	// Price is the trigger of a limit or stop order, or the reference price of a
 	// market order. An open requires it. Trader sizes a market open from the close
 	// of the instrument's bar in the group being answered, not from this price,
-	// which is recorded as asked; the open is rejected if the group has no bar of
-	// the instrument or its stop is not on the losing side of that close.
+	// which is recorded as asked; a market open is rejected if the group has no bar
+	// of the instrument, or its stop is not on the losing side of that close or its
+	// target not on the winning side. A limit or stop order's stop and target are
+	// checked against its trigger, and a wrong side there stops the run.
 	Price      num.Price `json:"price,omitzero"`
 	StopLoss   num.Price `json:"stop_loss,omitzero"` // StopLoss is where the protective stop goes; an open requires it.
 	TakeProfit num.Price `json:"take_profit,omitzero"`

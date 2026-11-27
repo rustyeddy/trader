@@ -200,9 +200,12 @@ var errInvalidOrder = errors.New("invalid order")
 // Every request must explicitly name marketOrder, limitOrder or stopOrder;
 // noOrder and unknown types are invalid.
 //
-// An open must carry a reference price and a stop on the losing side of it, and
-// any target on the winning side. Prices above maxPrice are refused here, so the
-// money math cannot overflow.
+// An open must carry a reference price and a stop. A limit or stop entry's
+// price is its trigger, so here its stop must be on the losing side of it and
+// any target on the winning side. A market open's price is only what the
+// strategy claims: its stop and target are not judged against it, but against
+// the decision close, by priceAtDecision. Prices above maxPrice are refused
+// here, so the money math cannot overflow.
 //
 // Add and reduce use marketOrder; their size rules wait on the size type being
 // defined.
@@ -257,6 +260,9 @@ func (o *order) validate() error {
 		}
 		if o.price.IsZero() {
 			return fmt.Errorf("%w: open requires a reference price", errInvalidOrder)
+		}
+		if o.orderType == marketOrder {
+			break
 		}
 		if !o.beyond(o.stopLoss, true) {
 			return fmt.Errorf("%w: %s stop %s is not beyond the entry price %s",

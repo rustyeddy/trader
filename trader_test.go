@@ -992,6 +992,112 @@ func TestTrader_OnFrame_AMarketOpenWithNoBarOfItsInstrumentIsRejected(t *testing
 	assert.Equal(t, []*order{o}, tr.rejected)
 }
 
+// The stop and target of a market open are judged against the decision close,
+// 1.10000, and never against the claim: a claim cannot make a good order illegal.
+func TestTrader_OnFrame_AClaimCannotInvalidateAGoodMarketOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		direction                 string
+		claim, stop, target, size int64
+	}{
+		{"long, stop above the claim", "long", 108000, 109000, 112000, 10000},
+		{"long, target below the claim", "long", 115000, 109000, 112000, 10000},
+		{"short, stop below the claim", "short", 112000, 111000, 108000, 10000},
+		{"short, target above the claim", "short", 105000, 111000, 108000, 10000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			// Mapped as a worker's request is, which validates it first.
+			o, err := toOrder(remotestrat.Order{
+				Instrument: "EURUSD", Action: "open", Direction: tc.direction,
+				Price: px(tc.claim), StopLoss: px(tc.stop), TakeProfit: px(tc.target),
+			}, testStart)
+			require.NoError(t, err)
+
+			decided(t, func(tr *trader) { tr.broker.journal = newJournal(&buf) }, o)
+
+			require.Equal(t, stateSubmitted, o.state)
+			assert.Equal(t, qty(tc.size), o.units, "100 over a 0.01000 stop")
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			require.Len(t, lines, 3)
+			assert.Contains(t, lines[0], `"price":"`+px(tc.claim).String()+`"`, "requested keeps the claim")
+			assert.Contains(t, lines[1], `"price":"1.1"`, "sized says the decision close")
+		})
+	}
+}
+
+// A stop or target the claim makes look right, but the close does not, is a
+// recorded rejection: the run goes on and no exit is ever placed.
+func TestTrader_OnFrame_AClaimCannotHideAWrongSideStopOrTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		direction           string
+		claim, stop, target int64
+		want                error
+	}{
+		{"long, target below the close", "long", 108000, 107000, 109000, errTargetBeyondClose},
+		{"long, target at the close", "long", 108000, 107000, 110000, errTargetBeyondClose},
+		{"short, target above the close", "short", 112000, 113000, 111000, errTargetBeyondClose},
+		{"short, target at the close", "short", 112000, 113000, 110000, errTargetBeyondClose},
+		{"long, stop above the close", "long", 112000, 111000, 113000, errStopBeyondClose},
+		{"short, stop below the close", "short", 108000, 109000, 107000, errStopBeyondClose},
+		{"long, claim true and target wrong", "long", 110000, 109000, 109500, errTargetBeyondClose},
+		{"long, claim true and stop wrong", "long", 110000, 111000, 0, errStopBeyondClose},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The claim is not judged, so even the last two are accepted here.
+			o, err := toOrder(remotestrat.Order{
+				Instrument: "EURUSD", Action: "open", Direction: tc.direction,
+				Price: px(tc.claim), StopLoss: px(tc.stop), TakeProfit: px(tc.target),
+			}, testStart)
+			require.NoError(t, err)
+
+			tr := decided(t, nil, o)
+
+			require.Equal(t, stateRejected, o.state)
+			assert.Contains(t, o.history[len(o.history)-1].reason, tc.want.Error())
+			assert.Equal(t, []*order{o}, tr.rejected)
+			assert.Empty(t, tr.broker.orders["EURUSD"])
+		})
+	}
+}
+
+// A resting entry is judged against its trigger, wherever the market is.
+func TestTrader_OnFrame_ARestingEntryIsJudgedAgainstItsTrigger(t *testing.T) {
+	for _, typ := range []string{"limit", "stop"} {
+		t.Run(typ, func(t *testing.T) {
+			q := remotestrat.Order{
+				Instrument: "EURUSD", Action: "open", Direction: "long", Type: typ,
+				Price: px(108000), StopLoss: px(107000), TakeProfit: px(109000),
+			}
+			o, err := toOrder(q, testStart)
+			require.NoError(t, err)
+
+			decided(t, nil, o)
+
+			assert.Equal(t, stateSubmitted, o.state, "target below the close but above the trigger")
+
+			q.StopLoss = px(108500) // below the close, above the trigger
+			_, err = toOrder(q, testStart)
+			assert.ErrorIs(t, err, errInvalidOrder)
+		})
+	}
+}
+
+// A market open made outside a frame has no decision close: its own price is
+// all there is to judge it by.
+func TestTrader_HandleOrder_AnUndecidedMarketOpenIsJudgedAgainstItsPrice(t *testing.T) {
+	captureLogs(t)
+	o := marketOpen(long, 110000, 111000)
+	o.Time = testStart
+	tr := newTestTraderWithBalance(usd(10000))
+
+	require.NoError(t, tr.handleOrder(context.Background(), o))
+
+	assert.Equal(t, stateRejected, o.state)
+	assert.Contains(t, o.history[len(o.history)-1].reason, errStopBeyondClose.Error())
+}
+
 // fixedAnswer answers every frame with one order, as it is.
 type fixedAnswer struct{ o *order }
 
