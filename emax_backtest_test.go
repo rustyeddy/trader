@@ -154,6 +154,8 @@ func snapshotState(t *testing.T, r emaxRun) emaxState {
 	}
 	if p := r.account.positions["EURUSD"]; p != nil {
 		held := *p // a copy: the account keeps marking its own
+		// The approved states are financial; the risk record has its own tests.
+		held.openOrder, held.plannedRisk = "", num.Money{}
 		f.position = &held
 	}
 	return f

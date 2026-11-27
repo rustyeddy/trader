@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -1010,4 +1011,211 @@ func TestAccount_Size_Open_PlannedLossAcrossStopDistances(t *testing.T) {
 			assert.LessOrEqual(t, tc.units*110000*2/100, int64(10000*100_000), "margin within equity")
 		})
 	}
+}
+
+// usdText is an exact amount of USD from its decimal text.
+func usdText(s string) num.Money { return num.MustParseMoney(s, usdCurrency) }
+
+func TestAccount_Size_Open_RecordsTheBindingLimitAndPlannedRisk(t *testing.T) {
+	captureLogs(t)
+	for _, tc := range []struct {
+		name     string
+		balance  money
+		dir      direction
+		stop     int64
+		maxUnits int64 // 0: no instrument maximum
+		notional string
+		limit    string
+		units    int64
+		planned  string
+	}{
+		{name: "risk", balance: usd(10000), dir: long, stop: 109450, limit: "risk", units: 18181, planned: "99.9955"},
+		{name: "risk, short", balance: usd(10000), dir: short, stop: 110550, limit: "risk", units: 18181, planned: "99.9955"},
+		{name: "margin", balance: usd(10000), dir: long, stop: 109989, limit: "margin", units: 454545, planned: "49.99995"},
+		{name: "notional", balance: usd(10000), dir: long, stop: 108900, notional: "5500", limit: "notional", units: 5000, planned: "55"},
+		{name: "instrument", balance: usd(10000), dir: long, stop: 108900, maxUnits: 100, limit: "instrument", units: 100, planned: "1.1"},
+		// 110 / 0.011 is exactly 10,000 units: equal to the instrument maximum.
+		{name: "a tie names the instrument first", balance: usd(11000), dir: long, stop: 108900, maxUnits: 10000, limit: "instrument", units: 10000, planned: "110"},
+		// 110 / 0.011 and 11,000 / 1.1 are both 10,000 units.
+		{name: "a tie names risk before notional", balance: usd(11000), dir: long, stop: 108900, notional: "11000", limit: "risk", units: 10000, planned: "110"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testInstrument("EURUSD")
+			if tc.maxUnits != 0 {
+				m.maxUnits = qty(tc.maxUnits)
+			}
+			a := newAccount("a", tc.balance, withMarket(t, testMarkets(), m))
+			if tc.notional != "" {
+				a.maxOrderNotional = usdText(tc.notional)
+			}
+			o := openOrderAt("EURUSD", tc.dir, eurusd1_10)
+			o.stopLoss = px(tc.stop)
+
+			require.NoError(t, a.size(o, cents(0)))
+
+			assert.Equal(t, qty(tc.units), o.units)
+			assert.Equal(t, orderRisk{bindingLimit: tc.limit, planned: usdText(tc.planned)}, o.risk,
+				"planned risk is of the rounded units, and nothing else is known yet")
+		})
+	}
+}
+
+func TestAccount_Size_RecordsNoPlannedRiskWithoutASize(t *testing.T) {
+	captureLogs(t)
+	t.Run("below the minimum names the limit", func(t *testing.T) {
+		a := newAccount("a", num.MustParseMoney("0.001", usdCurrency), testMarkets())
+		o := openOrderAt("EURUSD", long, eurusd1_10)
+
+		require.ErrorIs(t, a.size(o, cents(0)), errOrderTooSmall)
+
+		assert.Equal(t, orderRisk{bindingLimit: "risk"}, o.risk)
+	})
+	t.Run("no margin left names margin", func(t *testing.T) {
+		a := newAccount("a", usd(100), testMarkets())
+		o := openOrderAt("EURUSD", long, eurusd1_10)
+
+		require.ErrorIs(t, a.size(o, usd(100)), errInsufficientMargin)
+
+		assert.Equal(t, orderRisk{bindingLimit: "margin"}, o.risk)
+	})
+	t.Run("a close", func(t *testing.T) {
+		a := newAccount("a", usd(100), testMarkets())
+		o := &order{Time: testStart, instrument: "EURUSD", action: close, orderType: marketOrder}
+
+		require.NoError(t, a.size(o, cents(0)))
+
+		assert.Equal(t, orderRisk{}, o.risk)
+	})
+}
+
+func TestRiskToStop(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		dir         direction
+		entry, stop int64
+		want        string
+	}{
+		{"long above its stop", long, 110000, 109450, "55"},
+		{"long at its stop", long, 109450, 109450, "0"},
+		{"long beyond its stop", long, 109400, 109450, "0"},
+		{"short below its stop", short, 110000, 110550, "55"},
+		{"short at its stop", short, 110550, 110550, "0"},
+		{"short beyond its stop", short, 110600, 110550, "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := riskToStop(tc.dir, qty(10000), px(tc.entry), px(tc.stop), usdCurrency)
+
+			require.NoError(t, err)
+			assert.Equal(t, usdText(tc.want), got, "known, even when zero")
+		})
+	}
+	t.Run("an amount too large is an error", func(t *testing.T) {
+		_, err := riskToStop(long, qty(90_000_000_000), maxPrice, px(0), usdCurrency)
+		assert.ErrorIs(t, err, num.ErrOverflow)
+	})
+	t.Run("no currency is an error", func(t *testing.T) {
+		for _, entry := range []int64{110000, 109000} { // with distance left, and with none
+			_, err := riskToStop(long, qty(1), px(entry), px(109450), num.Currency{})
+			assert.ErrorIs(t, err, num.ErrMissingCurrency)
+		}
+	})
+}
+
+func TestExcessLoss(t *testing.T) {
+	planned := usdText("100")
+	for _, tc := range []struct {
+		name         string
+		pnl, planned money
+		want         money
+	}{
+		{"a profit", usdText("250"), planned, money{}},
+		{"flat", usdText("0"), planned, money{}},
+		{"less than planned", usdText("-99.99999999"), planned, money{}},
+		{"exactly as planned", usdText("-100"), planned, money{}},
+		{"the smallest amount more", usdText("-100.00000001"), planned, usdText("0.00000001")},
+		{"twice as planned", usdText("-200"), planned, usdText("100")},
+		{"planned nothing, lost something", usdText("-1"), usdText("0"), usdText("1")},
+		{"nothing planned is not zero planned", usdText("-1"), money{}, money{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := excessLoss(tc.pnl, tc.planned)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+	t.Run("another currency is an error", func(t *testing.T) {
+		_, err := excessLoss(usdText("-1"), num.MustParseMoney("1", num.MustParseCurrency("EUR")))
+		assert.ErrorIs(t, err, num.ErrCurrencyMismatch)
+	})
+	t.Run("a pnl with no currency is an error", func(t *testing.T) {
+		_, err := excessLoss(money{}, planned)
+		assert.ErrorIs(t, err, num.ErrMissingCurrency)
+	})
+}
+
+func TestAccount_ApplyFill_RecordsRiskAndExcessLoss(t *testing.T) {
+	captureLogs(t)
+	opening := func() *order {
+		o := openOrderAt("EURUSD", long, eurusd1_10)
+		o.id, o.units, o.stopLoss = "t-1", qty(10000), px(109450)
+		o.risk.planned = usdText("55")
+		return o
+	}
+	closing := func() *order { return &order{instrument: "EURUSD", action: close} }
+
+	t.Run("the open's risk at fill, and the close's excess against the plan", func(t *testing.T) {
+		a := newAccount("a", usd(10000), testMarkets())
+		o, c := opening(), closing()
+		require.NoError(t, a.applyFill(o, px(110100), testStart))
+		assert.Equal(t, usdText("65"), o.risk.atFill)
+		assert.Equal(t, "t-1", a.positions["EURUSD"].openOrder)
+		assert.Equal(t, usdText("55"), a.positions["EURUSD"].plannedRisk)
+
+		require.NoError(t, a.applyFill(c, px(109450), testStart.Add(time.Hour)))
+
+		assert.Equal(t, orderRisk{openOrder: "t-1", excess: usdText("10")}, c.risk)
+		assert.Equal(t, usdText("9935"), a.balance, "the loss itself is unchanged")
+	})
+	t.Run("an open without a stop or a plan records neither, and its close no excess", func(t *testing.T) {
+		a := newAccount("a", usd(10000), testMarkets())
+		o := &order{id: "t-2", instrument: "EURUSD", action: open, direction: long, units: qty(10000)}
+		c := closing()
+		require.NoError(t, a.applyFill(o, px(110000), testStart))
+		require.NoError(t, a.applyFill(c, px(100000), testStart))
+
+		assert.Equal(t, orderRisk{}, o.risk)
+		assert.Equal(t, orderRisk{openOrder: "t-2"}, c.risk)
+	})
+	t.Run("a refused open records no risk at fill", func(t *testing.T) {
+		a := newAccount("a", usd(1), testMarkets())
+		o := opening()
+
+		require.ErrorIs(t, a.applyFill(o, px(110000), testStart), errInsufficientMargin)
+
+		assert.Equal(t, money{}, o.risk.atFill)
+	})
+	t.Run("a risk at fill that cannot be worked out changes nothing", func(t *testing.T) {
+		a := newAccount("a", usd(10000), testMarkets())
+		o := opening()
+		o.stopLoss = num.MustParsePrice("90000000000") // a long's stop above the fill leaves no distance
+		o.direction = short                            // for a short it is an enormous one
+
+		require.ErrorIs(t, a.applyFill(o, px(110000), testStart), num.ErrOverflow)
+
+		assert.Empty(t, a.positions)
+	})
+	t.Run("an excess that cannot be worked out changes nothing", func(t *testing.T) {
+		a := newAccount("a", usd(10000), testMarkets())
+		require.NoError(t, a.applyFill(opening(), px(110000), testStart))
+		a.positions["EURUSD"].plannedRisk = num.MustParseMoney("1", num.MustParseCurrency("EUR"))
+		c := closing()
+
+		require.ErrorIs(t, a.applyFill(c, px(109000), testStart), num.ErrCurrencyMismatch)
+
+		assert.Contains(t, a.positions, "EURUSD")
+		assert.Equal(t, usd(10000), a.balance)
+		assert.Empty(t, a.trades)
+		assert.Equal(t, orderRisk{}, c.risk)
+	})
 }

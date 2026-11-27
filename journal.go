@@ -15,7 +15,8 @@ import (
 // in it too, whether or not any strategy was ever told of them.
 //
 // A line carries simulated time only, never the wall clock, so two runs that trade
-// the same way write the same lines. Prices and sizes are decimal strings.
+// the same way write the same lines. Prices and sizes are decimal strings, and
+// amounts of money are an amount and a currency, as in the account journal.
 //
 // The engine opens no file: the journal writes to an io.Writer its caller gives it.
 // order.record has no way to return an error and must not change what the engine
@@ -60,6 +61,14 @@ type journalLine struct {
 	Units     num.Quantity `json:"units,omitzero"`
 	FillPrice num.Price    `json:"fill_price,omitzero"`
 	Reason    string       `json:"reason,omitempty"` // why, for a rejection, a cancellation or an amendment
+
+	// The risk record (see orderRisk). An amount is absent when it was not worked
+	// out, never because it is zero. Planned risk is not a maximum loss.
+	BindingLimit string     `json:"binding_limit,omitempty"` // sized, or rejected by sizing or after it
+	PlannedRisk  *num.Money `json:"planned_risk,omitempty"`  // an open's sized line
+	RiskAtFill   *num.Money `json:"risk_at_fill,omitempty"`  // an open's filled line
+	OpenOrder    string     `json:"open_order,omitempty"`    // a close's filled line: the id of the open it closed
+	ExcessLoss   *num.Money `json:"excess_loss,omitempty"`   // a close's filled line, only when it lost more than planned
 }
 
 // record writes the transition e, which order.record has just applied to o.
@@ -91,8 +100,15 @@ func (j *journal) record(o *order, e orderEvent) {
 	case stateSized, stateSubmitted, stateFilled, stateRejected, stateCancelled:
 		l.Units = o.units
 	}
-	if e.state == stateFilled {
+	switch e.state {
+	case stateSized:
+		l.BindingLimit, l.PlannedRisk = o.risk.bindingLimit, knownMoney(o.risk.planned)
+	case stateRejected:
+		l.BindingLimit = o.risk.bindingLimit
+	case stateFilled:
 		l.FillPrice = o.fillPrice
+		l.RiskAtFill = knownMoney(o.risk.atFill)
+		l.OpenOrder, l.ExcessLoss = o.risk.openOrder, knownMoney(o.risk.excess)
 	}
 	line, err := json.Marshal(l)
 	if err == nil {
@@ -106,6 +122,15 @@ func (j *journal) record(o *order, e orderEvent) {
 	if err != nil {
 		j.failed = err
 	}
+}
+
+// knownMoney is m for a journal line, or nil when m is unset. A zero amount is
+// known and is written.
+func knownMoney(m num.Money) *num.Money {
+	if !m.IsValid() {
+		return nil
+	}
+	return &m
 }
 
 // err is the first error the journal met, or nil.

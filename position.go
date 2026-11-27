@@ -13,6 +13,12 @@ type position struct {
 	entryPrice num.Price
 	entryTime  time.Time // the bar the open filled on
 	markPrice  num.Price // latest price the position was valued at: the fill, then each bar's close
+
+	// openOrder is the id of the open that made the position and plannedRisk what
+	// that order planned to lose when it was sized (see orderRisk); a later amend
+	// or trail of the stop changes neither. They are only recorded.
+	openOrder   string
+	plannedRisk num.Money
 }
 
 // trade is a position that actually closed. An open position is not a trade

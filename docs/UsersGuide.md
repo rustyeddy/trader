@@ -378,6 +378,7 @@ missing). Three files are enough to read a run:
   reason). The broker's own orders, protective stops, targets and margin closeouts,
   are in it with their `cause`. Lines carry the simulated time only, so two runs that
   trade the same way write the same lines. A failed run keeps the events it had.
+  Some lines also carry the order's [risk record](#order-risk-record).
 - `account.jsonl`: the account's equity over time, one JSON line per observation, in
   order. Copy it unchanged to keep the evidence; it needs nothing of Trader to read.
 
@@ -397,6 +398,43 @@ missing). Three files are enough to read a run:
   bar then. An open position whose instrument has none is not marked again, and its
   instrument is listed in `stale` (omitted when empty), so an unchanged value is told
   from a fresh one; no mark is made up.
+
+#### Order risk record
+
+`events.jsonl` records why an open got its size, what it planned to lose and whether an
+exit lost more. **Planned risk and risk at fill are not a maximum loss**: a gap, spread,
+slippage or a closed market can make any exit lose more. Nothing here changes how an
+order is sized, admitted or filled.
+
+| Field | On | Meaning |
+|---|---|---|
+| `binding_limit` | an open's `sized` line; the `rejected` line of an open refused by sizing for margin or minimum size, or refused at the fill | the limit that allowed the fewest units, before rounding down to the unit step: `instrument` (maximum units), `risk`, `margin` or `notional`; the first of equals in that order. It also names the limit of an order refused as below the minimum size, and is `margin` when no margin was left at all. An order refused before sizing (a pending open or the closeout guard) has none |
+| `planned_risk` | an open's `sized` line | units x distance from the price the order was sized from (its `price`: the reference, or a resting order's trigger) to its `stop_loss` |
+| `risk_at_fill` | an open's `filled` line | units x distance from `fill_price` down to the stop (long) or up to it (short). Zero when the fill is at or beyond the stop, as after a gap: the stop is then due at once. It uses the stop the open carried; it is not recomputed when the stop is amended or trails |
+| `open_order` | every `filled` close | the `id` of the open that made the closed position |
+| `excess_loss` | a `filled` close that lost more than planned | realized loss minus that open's `planned_risk`, always positive. Absent when the loss is not more than planned (equal, smaller, or a profit) |
+
+The amounts are exact money (`{"amount": "...", "currency": "USD"}`), rounded only as
+units x price distance is (to 1e-8, ties to even), and leave out spread, commission,
+financing and slippage, which Trader does not model.
+
+- `excess_loss` compares with the planned risk at sizing, for every kind of close
+  (stop loss, take profit, strategy, margin closeout). It does not compare with
+  `risk_at_fill`, so an adverse entry fill shows in it, and it does not follow a
+  tightened or trailing stop: an exit that loses more than a moved stop implied, but no
+  more than first planned, has none.
+- Planned risk can exceed `risk_per_trade` x equity by at most 0.5e-8 (rounding), and
+  is below it when another limit binds.
+- To join an exit to its sizing, within one run directory (named by its RunID): find
+  the `sized` line whose `order` is that of the lines with `id` equal to `open_order`
+  (a `sized` line has no `id` yet). The limits in force are `settings` in `run.json`.
+- Runs made before these fields existed have none: treat an absent field there as
+  unknown, not as zero or "no excess".
+
+```sh
+cd /srv/trading/backtest/results/run_ID        # one run: order ids repeat across runs
+jq -c 'select(.excess_loss)' events.jsonl      # exits that lost more than planned
+```
 
 The summary in `result` keeps its earlier fields and adds [`settings`](#run-settings)
 and, all computed from the
